@@ -1,0 +1,104 @@
+coins:
+  BTC:
+    symbol_okx_swap: "BTC-USDT-SWAP"
+    symbol_okx_spot: "BTC-USDT"
+    symbol_binance: "BTCUSDT"
+    symbol_bbx: "btcswapusdt:binance"
+    inst_family: "BTC-USDT"
+    ccy: "BTC"
+    default: true
+  ETH:
+    symbol_okx_swap: "ETH-USDT-SWAP"
+    symbol_okx_spot: "ETH-USDT"
+    symbol_binance: "ETHUSDT"
+    symbol_bbx: "ethswapusdt:binance"
+    inst_family: "ETH-USDT"
+    ccy: "ETH"
+  SOL:
+    symbol_okx_swap: "SOL-USDT-SWAP"
+    symbol_okx_spot: "SOL-USDT"
+    symbol_binance: "SOLUSDT"
+    symbol_bbx: "solswapusdt:binance"
+    inst_family: "SOL-USDT"
+    ccy: "SOL"
+
+sources:
+  bbx:
+    base_url: "https://bbx.com/api/data"
+    module: "upgrade.kline.predictLiqMap"
+    poll_interval_sec: 30
+    timeout_sec: 10
+    cycles:
+      - "24h"
+      - "7d"
+  okx:
+    rest_base_url: "https://www.okx.com/api/v5"
+    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    timeout_sec: 10
+    poll_intervals:
+      oi: 10
+      funding_rate: 60
+      taker_volume: 60
+      candles: 5
+      mark_price: 10
+    ws_channels:
+      - "trades"
+      - "books5"
+      - "liquidation-orders"
+      - "tickers"
+  binance:
+    rest_base_url: "https://fapi.binance.com"
+    ws_url: "wss://fstream.binance.com/ws"
+    spot_rest_base_url: "https://api.binance.com"
+    timeout_sec: 10
+    enabled: true
+    poll_intervals:
+      oi: 10
+      funding_rate: 60
+      taker_volume: 60
+      force_orders: 10
+
+processors:
+  cvd:
+    source: "okx_taker_volume"
+    period: "5m"
+  percentile:
+    lookback_hours: 168
+  market_temp:
+    weights:
+      funding_rate: 0.25
+      oi_change: 0.25
+      cvd_trend: 0.20
+      basis: 0.15
+      liquidation_ratio: 0.15
+  levels:
+    min_liq_cluster_usd: 10000000
+    atr_multiplier_sl: 1.5
+    volume_profile_bins: 50
+  orderbook:
+    whale_threshold_btc: 10
+    whale_threshold_eth: 100
+    whale_threshold_sol: 1000
+    spoofing_ttl_sec: 3
+
+ai:
+  provider: "openai"
+  model: "gpt-4o"
+  timeout_sec: 15
+  max_retries: 2
+  cooldown_sec: 30
+  max_history: 5
+
+push:
+  ticker_interval_ms: 1000
+  factor_cards_interval_ms: 5000
+  liq_map_interval_ms: 30000
+  cvd_oi_interval_ms: 10000
+  orderbook_interval_ms: 2000
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:3001"

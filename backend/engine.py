@@ -1,0 +1,444 @@
+"""
+主引擎：调度数据源轮询 + 处理 + 缓存 + 推送。
+每个币种运行独立的数据管线，互不干扰。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from collections import deque
+from typing import Any, Optional
+
+from ai.analyzer import AIAnalyzer, create_analyzer
+from ai.snapshot import build_ai_snapshot
+from api.ws import push_to_coin
+from config.settings import CoinConfig, get_settings
+from models.flow import BasisData, CVDData, FundingRateData, OIData, TakerFlowData
+from models.levels import LevelAnalysis
+from models.liquidation import LiquidationMap, LiquidationStats
+from models.market import OrderBookAnalysis, TickerData, VolumeProfileData
+from models.snapshot import (
+    AIAnalysisResult,
+    AISnapshot,
+    MarketTemperature,
+    WaterfallData,
+)
+from processors.cvd import build_cvd, detect_cvd_price_divergence
+from processors.levels import calculate_levels
+from processors.liquidation import process_liquidation_map
+from processors.market_temp import build_waterfall, calc_market_temperature
+from processors.orderbook import analyze_orderbook, parse_okx_orderbook
+from processors.percentile import PercentileTracker
+from processors.volume_profile import calc_atr, calc_volume_profile
+from sources.bbx import create_bbx_source
+from sources.binance_rest import create_binance_rest_source
+from sources.okx_rest import create_okx_rest_source
+from sources.okx_ws import create_okx_ws_source
+
+logger = logging.getLogger(__name__)
+
+
+class CoinState:
+    """单个币种的完整数据状态"""
+
+    def __init__(self, coin: str):
+        self.coin = coin
+        self.ticker: Optional[TickerData] = None
+        self.liq_maps: dict[str, LiquidationMap] = {}
+        self.cvd_contract: Optional[CVDData] = None
+        self.cvd_spot: Optional[CVDData] = None
+        self.oi: Optional[OIData] = None
+        self.funding: Optional[FundingRateData] = None
+        self.basis: Optional[BasisData] = None
+        self.taker_flow: Optional[TakerFlowData] = None
+        self.orderbook: Optional[OrderBookAnalysis] = None
+        self.vp: Optional[VolumeProfileData] = None
+        self.atr: float = 0
+        self.temperature: Optional[MarketTemperature] = None
+        self.waterfall: Optional[WaterfallData] = None
+        self.levels: Optional[LevelAnalysis] = None
+        self.liq_stats: Optional[LiquidationStats] = None
+        self.candle_prices: list[float] = []
+        self.candle_ts: list[int] = []
+        self.oi_history: deque = deque(maxlen=720)  # 2小时 @10s
+        self.ai_history: deque[AIAnalysisResult] = deque(maxlen=5)
+        self.last_ai_ts: float = 0
+
+
+class Engine:
+    """主引擎：管理所有数据源和币种状态"""
+
+    def __init__(self):
+        self._settings = get_settings()
+        self._bbx = create_bbx_source()
+        self._okx = create_okx_rest_source()
+        self._okx_ws = create_okx_ws_source()
+        self._binance = create_binance_rest_source()
+        self._analyzer = create_analyzer()
+        self._percentile = PercentileTracker()
+        self._states: dict[str, CoinState] = {}
+        self._running = False
+
+        for ccy in self._settings.supported_coins:
+            self._states[ccy] = CoinState(ccy)
+
+    @property
+    def ai_available(self) -> bool:
+        return self._analyzer.available
+
+    async def start(self):
+        """启动所有数据管线"""
+        self._running = True
+        logger.info("Engine starting | coins=%s", self._settings.supported_coins)
+
+        coins = [self._settings.get_coin(c) for c in self._settings.supported_coins]
+
+        self._okx_ws.on("books5", self._on_orderbook)
+        self._okx_ws.on("trades", self._on_trade)
+        self._okx_ws.on("liquidation-orders", self._on_liquidation)
+        self._okx_ws.on("tickers", self._on_ticker)
+
+        tasks = [
+            asyncio.create_task(self._okx_ws.start(coins)),
+        ]
+
+        for ccy in self._settings.supported_coins:
+            coin = self._settings.get_coin(ccy)
+            tasks.extend([
+                asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30)),
+                asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10)),
+                asyncio.create_task(self._poll_loop(f"okx_fr_{ccy}", self._poll_funding, coin, 60)),
+                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60)),
+                asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30)),
+                asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10)),
+                asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5)),
+            ])
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def stop(self):
+        self._running = False
+        await self._okx_ws.stop()
+        await self._bbx.close()
+        await self._okx.close()
+        await self._binance.close()
+        logger.info("Engine stopped")
+
+    # ── 轮询循环 ──
+
+    async def _poll_loop(self, name: str, fn, coin: CoinConfig, interval: int):
+        logger.info("Poll loop started | name=%s coin=%s interval=%ds", name, coin.ccy, interval)
+        while self._running:
+            try:
+                await fn(coin)
+            except Exception:
+                logger.error("Poll error | name=%s coin=%s", name, coin.ccy, exc_info=True)
+            await asyncio.sleep(interval)
+
+    # ── 数据拉取 ──
+
+    async def _poll_bbx(self, coin: CoinConfig):
+        result = await self._bbx.fetch_with_retry(coin)
+        if not result:
+            return
+        state = self._states[coin.ccy]
+        price = state.ticker.last if state.ticker else 0
+        for cycle, liq_map in result.items():
+            if price > 0:
+                liq_map = process_liquidation_map(
+                    liq_map, price,
+                    self._settings.processors.levels["min_liq_cluster_usd"],
+                )
+            state.liq_maps[cycle] = liq_map
+        self._recompute(coin.ccy)
+
+    async def _poll_oi(self, coin: CoinConfig):
+        snapshot = await self._okx.fetch_oi(coin)
+        if not snapshot:
+            return
+        state = self._states[coin.ccy]
+        state.oi_history.append(snapshot)
+        self._percentile.push(coin.ccy, "oi", snapshot.oi_usd)
+
+        current_usd = snapshot.oi_usd
+        change_1h = 0.0
+        change_5m = 0.0
+        if len(state.oi_history) >= 2:
+            first = state.oi_history[0]
+            if first.oi_usd > 0:
+                change_1h = (current_usd - first.oi_usd) / first.oi_usd * 100
+            recent_5m = list(state.oi_history)[-30:]
+            if recent_5m and recent_5m[0].oi_usd > 0:
+                change_5m = (current_usd - recent_5m[0].oi_usd) / recent_5m[0].oi_usd * 100
+
+        trend = "stable"
+        if change_1h > 3:
+            trend = "surging"
+        elif change_1h < -3:
+            trend = "declining"
+
+        state.oi = OIData(
+            coin=coin.ccy, ts=snapshot.ts,
+            current_usd=current_usd, change_1h_pct=round(change_1h, 2),
+            change_5m_pct=round(change_5m, 2), trend=trend,
+        )
+
+        bn_oi = await self._binance.fetch_oi(coin)
+        if bn_oi:
+            self._percentile.push(coin.ccy, "oi_bn", bn_oi.oi_usd)
+
+    async def _poll_funding(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        okx_funding = await self._okx.fetch_funding_rate(coin)
+        bn_rate = await self._binance.fetch_funding_rate(coin)
+
+        if okx_funding:
+            okx_funding.binance_rate = bn_rate
+            if bn_rate is not None and okx_funding.okx_rate is not None:
+                okx_funding.avg_rate = (okx_funding.okx_rate + bn_rate) / 2
+            state.funding = okx_funding
+            self._percentile.push(coin.ccy, "funding", okx_funding.avg_rate)
+
+    async def _poll_cvd(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        contract_points = await self._okx.fetch_taker_volume(coin, "CONTRACTS")
+        spot_points = await self._okx.fetch_taker_volume(coin, "SPOT")
+
+        if contract_points:
+            cvd = build_cvd(contract_points, "CONTRACTS", coin.ccy)
+            if state.candle_prices:
+                cvd = detect_cvd_price_divergence(cvd, state.candle_prices, state.candle_ts)
+            state.cvd_contract = cvd
+
+        if spot_points:
+            state.cvd_spot = build_cvd(spot_points, "SPOT", coin.ccy)
+
+        if contract_points and spot_points:
+            c_total_buy = sum(p.buy_vol for p in contract_points[-12:])
+            c_total_sell = sum(p.sell_vol for p in contract_points[-12:])
+            s_total_buy = sum(p.buy_vol for p in spot_points[-12:])
+            s_total_sell = sum(p.sell_vol for p in spot_points[-12:])
+            total = c_total_buy + c_total_sell + s_total_buy + s_total_sell
+            buy_ratio = (c_total_buy + s_total_buy) / total if total > 0 else 0.5
+            state.taker_flow = TakerFlowData(
+                coin=coin.ccy, ts=int(time.time()),
+                buy_ratio=round(buy_ratio, 3),
+                sell_ratio=round(1 - buy_ratio, 3),
+                dominant="buyers" if buy_ratio > 0.55 else "sellers" if buy_ratio < 0.45 else "balanced",
+                contract_buy_vol=c_total_buy, contract_sell_vol=c_total_sell,
+                spot_buy_vol=s_total_buy, spot_sell_vol=s_total_sell,
+                spot_contract_divergence=False,
+            )
+
+    async def _poll_candles(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        candles = await self._okx.fetch_candles(coin, bar="1H", limit=100)
+        if not candles:
+            return
+
+        state.candle_prices = [c.close for c in candles]
+        state.candle_ts = [c.ts for c in candles]
+        state.atr = calc_atr(candles, 14)
+        state.vp = calc_volume_profile(candles, num_bins=50, coin=coin.ccy)
+
+    async def _poll_basis(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        mark = await self._okx.fetch_mark_price(coin)
+        index = await self._okx.fetch_index_price(coin)
+        if mark and index and index > 0:
+            basis_pct = (mark - index) / index * 100
+            interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
+            state.basis = BasisData(
+                coin=coin.ccy, ts=int(time.time()),
+                mark_price=mark, index_price=index,
+                basis_pct=round(basis_pct, 4), interpretation=interp,
+            )
+
+    # ── WebSocket 回调 ──
+
+    async def _on_orderbook(self, channel: str, data: dict):
+        arg = data.get("arg", {})
+        inst_id = arg.get("instId", "")
+        coin = self._inst_to_coin(inst_id)
+        if not coin:
+            return
+        state = self._states[coin]
+        snapshot = parse_okx_orderbook(data, coin)
+        if snapshot and state.ticker:
+            cfg = self._settings.processors.orderbook
+            threshold = cfg.get(f"whale_threshold_{coin.lower()}", 50)
+            state.orderbook = analyze_orderbook(snapshot, state.ticker.last, wall_threshold_size=threshold)
+
+    async def _on_trade(self, channel: str, data: dict):
+        pass
+
+    async def _on_liquidation(self, channel: str, data: dict):
+        pass
+
+    async def _on_ticker(self, channel: str, data: dict):
+        arg = data.get("arg", {})
+        inst_id = arg.get("instId", "")
+        coin = self._inst_to_coin(inst_id)
+        if not coin:
+            return
+        items = data.get("data", [])
+        if not items:
+            return
+        t = items[0]
+        try:
+            last = float(t["last"])
+            open24 = float(t.get("open24h", last))
+            self._states[coin].ticker = TickerData(
+                coin=coin, ts=int(t.get("ts", 0)),
+                last=last,
+                high_24h=float(t.get("high24h", last)),
+                low_24h=float(t.get("low24h", last)),
+                vol_24h=float(t.get("vol24h", 0)),
+                change_24h=round(last - open24, 2),
+                change_pct_24h=round((last - open24) / open24 * 100, 2) if open24 else 0,
+            )
+        except (KeyError, ValueError):
+            pass
+
+    # ── 重新计算 ──
+
+    def _recompute(self, ccy: str):
+        """重新计算温度、价位、瀑布图"""
+        state = self._states[ccy]
+        price = state.ticker.last if state.ticker else 0
+        if price <= 0:
+            return
+
+        liq_map = state.liq_maps.get("24h")
+
+        state.temperature = calc_market_temperature(
+            coin=ccy, funding=state.funding, oi=state.oi,
+            cvd_contract=state.cvd_contract, basis=state.basis,
+            liq_map=liq_map, liq_stats=state.liq_stats,
+            taker_flow=state.taker_flow, atr=state.atr,
+        )
+
+        if state.temperature:
+            state.waterfall = build_waterfall(state.temperature)
+
+        vwap = state.vp.vwap if state.vp else 0
+        state.levels = calculate_levels(
+            coin=ccy, current_price=price, liq_map=liq_map,
+            vp=state.vp, orderbook=state.orderbook,
+            atr=state.atr, vwap=vwap,
+        )
+
+    # ── 推送循环 ──
+
+    async def _push_loop(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        self._recompute(coin.ccy)
+
+        payload: dict[str, Any] = {"coin": coin.ccy, "ts": int(time.time())}
+
+        if state.ticker:
+            payload["ticker"] = state.ticker.model_dump()
+        if state.temperature:
+            payload["temperature"] = state.temperature.model_dump()
+        if state.waterfall:
+            payload["waterfall"] = state.waterfall.model_dump()
+        if state.levels:
+            payload["levels"] = state.levels.model_dump()
+        if state.cvd_contract:
+            payload["cvd_contract"] = {
+                "trend": state.cvd_contract.trend_1h,
+                "delta_1h": state.cvd_contract.delta_1h,
+                "has_divergence": state.cvd_contract.has_divergence,
+                "last_points": [p.model_dump() for p in state.cvd_contract.series[-60:]],
+            }
+        if state.oi:
+            payload["oi"] = state.oi.model_dump()
+        if state.funding:
+            payload["funding"] = state.funding.model_dump()
+        if state.basis:
+            payload["basis"] = state.basis.model_dump()
+        if state.orderbook:
+            payload["orderbook"] = state.orderbook.model_dump()
+
+        await push_to_coin(coin.ccy, "market_update", payload)
+
+    # ── 公开接口 (供 REST API 使用) ──
+
+    def get_snapshot(self, ccy: str) -> Optional[dict]:
+        state = self._states.get(ccy)
+        if not state or not state.ticker:
+            return None
+        self._recompute(ccy)
+        result: dict[str, Any] = {"coin": ccy}
+        if state.ticker:
+            result["ticker"] = state.ticker.model_dump()
+        if state.temperature:
+            result["temperature"] = state.temperature.model_dump()
+        if state.levels:
+            result["levels"] = state.levels.model_dump()
+        liq = state.liq_maps.get("24h")
+        if liq:
+            result["liquidation_24h"] = liq.model_dump()
+        return result
+
+    def get_temperature(self, ccy: str) -> Optional[MarketTemperature]:
+        return self._states.get(ccy, CoinState(ccy)).temperature
+
+    def get_levels(self, ccy: str) -> Optional[LevelAnalysis]:
+        return self._states.get(ccy, CoinState(ccy)).levels
+
+    def get_liquidation_map(self, ccy: str, cycle: str) -> Optional[LiquidationMap]:
+        return self._states.get(ccy, CoinState(ccy)).liq_maps.get(cycle)
+
+    def get_waterfall(self, ccy: str) -> Optional[WaterfallData]:
+        return self._states.get(ccy, CoinState(ccy)).waterfall
+
+    def get_last_ai_ts(self, ccy: str) -> float:
+        return self._states.get(ccy, CoinState(ccy)).last_ai_ts
+
+    def get_ai_history(self, ccy: str) -> list[AIAnalysisResult]:
+        return list(self._states.get(ccy, CoinState(ccy)).ai_history)
+
+    async def run_ai_analysis(self, ccy: str) -> AIAnalysisResult:
+        state = self._states[ccy]
+        if not state.ticker:
+            raise RuntimeError(f"No price data for {ccy}")
+
+        snapshot = build_ai_snapshot(
+            coin=ccy, price=state.ticker.last,
+            high_24h=state.ticker.high_24h, low_24h=state.ticker.low_24h,
+            liq_map=state.liq_maps.get("24h"), cvd_contract=state.cvd_contract,
+            cvd_spot=state.cvd_spot, oi=state.oi, funding=state.funding,
+            basis=state.basis, orderbook=state.orderbook, liq_stats=state.liq_stats,
+            vp=state.vp, atr=state.atr,
+            market_temp_score=state.temperature.score if state.temperature else 50,
+            pin_risk_level=state.temperature.pin_risk_level if state.temperature else "low",
+        )
+
+        result = await self._analyzer.analyze(snapshot)
+        state.ai_history.append(result)
+        state.last_ai_ts = time.time()
+        return result
+
+    def get_source_health(self) -> list[dict]:
+        return [
+            self._bbx.health().model_dump(),
+            self._okx.health().model_dump(),
+            self._binance.health().model_dump(),
+            {
+                "name": "okx_ws",
+                "status": "connected" if self._okx_ws.is_connected else "disconnected",
+                "latency_ms": 0,
+                "last_success_ts": 0,
+                "error_count": 0,
+            },
+        ]
+
+    def _inst_to_coin(self, inst_id: str) -> Optional[str]:
+        for ccy in self._settings.supported_coins:
+            coin_cfg = self._settings.get_coin(ccy)
+            if inst_id == coin_cfg.symbol_okx_swap:
+                return ccy
+        return None

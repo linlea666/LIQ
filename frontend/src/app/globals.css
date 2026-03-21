@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Skeleton animation */
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.animate-pulse {
+  background: linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite;
+}
