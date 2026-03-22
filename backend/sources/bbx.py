@@ -118,6 +118,10 @@ class BBXExtendedSource(DataSource):
     def get_poll_interval(self) -> int:
         return self._poll_interval
 
+    async def fetch(self, coin: CoinConfig) -> Any:
+        """此类不走统一 fetch_with_retry 通道，各方法独立调用并自行标记健康状态"""
+        return None
+
     async def fetch_multi_funding(self, coin: str = "btc") -> Optional[MultiFundingRateData]:
         """多交易所资金费率（BBX 一次返回 6 所 × current/3d/7d/30d）"""
         url = f"{self._cfg.funding_url}?lan=zh-Hans"
