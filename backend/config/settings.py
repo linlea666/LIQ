@@ -38,6 +38,12 @@ class BBXSourceConfig:
     poll_interval_sec: int
     timeout_sec: int
     cycles: list[str]
+    funding_url: str = "https://bbx.com/api/funding-rate/data-table"
+    ls_ratio_url: str = "https://bbx.com/api/pc"
+    etf_flow_url: str = "https://bbx.com/api/etf/flow"
+    market_index_url: str = "https://bbx.com/api/pc"
+    global_liq_url: str = "https://bbx.com/api/data"
+    extended_poll_sec: int = 60
 
 
 @dataclass(frozen=True)

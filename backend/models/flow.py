@@ -80,3 +80,97 @@ class TakerFlowData(BaseModel):
     contract_buy_vol: float = 0
     contract_sell_vol: float = 0
     spot_contract_divergence: bool = False
+
+
+# ─── 新增数据模型（Phase 3） ───
+
+
+class ExchangeFundingRate(BaseModel):
+    """单交易所资金费率"""
+    exchange: str
+    current: Optional[float] = None
+    avg_3d: Optional[float] = None
+    avg_7d: Optional[float] = None
+    avg_30d: Optional[float] = None
+
+
+class MultiFundingRateData(BaseModel):
+    """多交易所资金费率汇总"""
+    coin: str
+    ts: int
+    exchanges: list[ExchangeFundingRate] = []
+    avg_current: float = 0
+    avg_7d: float = 0
+    interpretation: str = ""
+
+
+class LongShortRatioExchange(BaseModel):
+    """单交易所多空比"""
+    exchange: str
+    long_pct: float
+    short_pct: float
+    ratio: float
+
+
+class LongShortRatioData(BaseModel):
+    """多空比汇总"""
+    coin: str
+    ts: int
+    cycle: str = "1h"
+    exchanges: list[LongShortRatioExchange] = []
+    avg_ratio: float = 1.0
+    interpretation: str = ""
+
+
+class ETFFlowDay(BaseModel):
+    """单日 ETF 流入流出"""
+    date: str
+    total_net: float
+    detail: dict = {}
+
+
+class ETFFlowData(BaseModel):
+    """BTC ETF 资金流"""
+    ts: int
+    recent_days: list[ETFFlowDay] = []
+    net_3d: float = 0
+    trend: str = ""  # "inflow" | "outflow" | "mixed"
+
+
+class GlobalLiquidationData(BaseModel):
+    """全网爆仓统计"""
+    ts: int
+    long_1h_usd: float = 0
+    short_1h_usd: float = 0
+    long_24h_usd: float = 0
+    short_24h_usd: float = 0
+    ratio_1h: float = 1.0
+    ratio_24h: float = 1.0
+    largest_single_usd: float = 0
+
+
+class MarketIndexItem(BaseModel):
+    """market/index 单个指标"""
+    key: str
+    name: str
+    value: float
+    change_pct: Optional[float] = None
+
+
+class MarketIndexData(BaseModel):
+    """BBX market/index 精选指标集"""
+    ts: int
+    fear_greed: Optional[float] = None
+    btc_dominance: Optional[float] = None
+    btc_max_pain: Optional[float] = None
+    btc_dvol: Optional[float] = None
+    btc_put_call_oi: Optional[float] = None
+    btc_mvrv: Optional[float] = None
+    dxy: Optional[float] = None
+    nasdaq: Optional[float] = None
+    sp500: Optional[float] = None
+    gold: Optional[float] = None
+    binance_btc_balance: Optional[float] = None
+    okx_ls_ratio_btc: Optional[float] = None
+    binance_ls_ratio_btc: Optional[float] = None
+    raw_items: list[MarketIndexItem] = []

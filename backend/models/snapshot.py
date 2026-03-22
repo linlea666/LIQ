@@ -94,6 +94,8 @@ class AISnapshot(BaseModel):
     funding_rate_okx: Optional[float]
     funding_rate_binance: Optional[float]
     funding_interpretation: str
+    funding_avg_7d: Optional[float] = None
+    funding_exchanges: list[dict] = []
 
     basis_pct: float
 
@@ -111,6 +113,21 @@ class AISnapshot(BaseModel):
     atr_14: float
     market_temperature: float
     pin_risk_level: str
+
+    # Phase 3 新增数据
+    ls_ratio: Optional[float] = None
+    ls_ratio_interpretation: str = ""
+    fear_greed_index: Optional[float] = None
+    etf_net_3d: Optional[float] = None
+    etf_trend: str = ""
+    global_liq_long_24h: float = 0
+    global_liq_short_24h: float = 0
+    btc_max_pain: Optional[float] = None
+    btc_dvol: Optional[float] = None
+    dxy: Optional[float] = None
+    btc_dominance: Optional[float] = None
+    taker_buy_ratio: Optional[float] = None
+    taker_dominant: str = ""
 
     macro_context: Optional[MacroSnapshot] = None
 

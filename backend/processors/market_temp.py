@@ -5,9 +5,16 @@ from __future__ import annotations
 import logging
 import time
 
+from typing import Optional, Tuple
+
 from config.settings import get_settings
-from models.flow import BasisData, CVDData, FundingRateData, OIData, TakerFlowData
+from models.flow import (
+    BasisData, CVDData, ETFFlowData, FundingRateData,
+    GlobalLiquidationData, LongShortRatioData, MarketIndexData,
+    OIData, TakerFlowData,
+)
 from models.liquidation import LiquidationMap, LiquidationStats
+
 from models.snapshot import (
     FactorCard,
     MarketTemperature,
@@ -28,10 +35,13 @@ def calc_market_temperature(
     liq_stats: LiquidationStats | None,
     taker_flow: TakerFlowData | None,
     atr: float = 0,
-) -> MarketTemperature:
+    ls_ratio: Optional[LongShortRatioData] = None,
+    market_index: Optional[MarketIndexData] = None,
+    etf_flow: Optional[ETFFlowData] = None,
+    global_liq: Optional[GlobalLiquidationData] = None,
+) -> Tuple[MarketTemperature, dict[str, float]]:
     """
-    综合所有因子计算市场温度(0-100)和插针风险等级。
-    同时生成 8 张因子卡片数据。
+    综合 12 个因子计算市场温度(0-100)和插针风险等级。
     """
     weights = get_settings().processors.market_temp["weights"]
 
@@ -73,7 +83,7 @@ def calc_market_temperature(
     d3_sub = ""
     d3_summary = "数据不足"
     if oi:
-        d3_score = min(oi.change_1h_pct * 10, 50)
+        d3_score = max(min(oi.change_1h_pct * 10, 50), -50)
         d3_value = f"${oi.current_usd / 1e9:.1f}B"
         d3_sub = f"1h:{oi.change_1h_pct:+.1f}%"
         if oi.change_1h_pct > 3:
@@ -110,7 +120,7 @@ def calc_market_temperature(
     d5_sub = ""
     d5_summary = "数据不足"
     if basis:
-        d5_score = min(basis.basis_pct * 100, 50)
+        d5_score = max(min(basis.basis_pct * 100, 50), -50)
         d5_value = f"{basis.basis_pct:+.3f}%"
         d5_sub = f"标记${basis.mark_price:.0f}"
         d5_summary = basis.interpretation or ("合约偏贵" if basis.basis_pct > 0.1 else "合约折价" if basis.basis_pct < -0.1 else "中性")
@@ -146,14 +156,84 @@ def calc_market_temperature(
         d8_summary = "多头被清洗" if ratio > 2 else "空头被清洗" if ratio < 0.5 else "双向均衡"
     factor_scores["liq_intensity"] = d8_score
 
+    # D9: 多空比
+    d9_score = 0.0
+    d9_value = "N/A"
+    d9_sub = ""
+    d9_summary = "数据不足"
+    if ls_ratio and ls_ratio.exchanges:
+        r = ls_ratio.avg_ratio
+        d9_score = max(min((r - 1) * 30, 50), -50)
+        d9_value = f"{r:.2f}"
+        d9_sub = ls_ratio.interpretation
+        d9_summary = "多头拥挤" if r > 1.3 else "空头拥挤" if r < 0.77 else "多空均衡"
+    factor_scores["ls_ratio"] = d9_score
+
+    # D10: 恐惧贪婪指数
+    d10_score = 0.0
+    d10_value = "N/A"
+    d10_sub = ""
+    d10_summary = "数据不足"
+    if market_index and market_index.fear_greed is not None:
+        fgi = market_index.fear_greed
+        d10_score = max(min((fgi - 50) * 1.0, 50), -50)
+        d10_value = f"{int(fgi)}"
+        if fgi >= 75:
+            d10_summary = "极度贪婪"
+        elif fgi >= 55:
+            d10_summary = "贪婪"
+        elif fgi >= 45:
+            d10_summary = "中性"
+        elif fgi >= 25:
+            d10_summary = "恐惧"
+        else:
+            d10_summary = "极度恐惧"
+        d10_sub = d10_summary
+    factor_scores["fear_greed"] = d10_score
+
+    # D11: ETF 资金流
+    d11_score = 0.0
+    d11_value = "N/A"
+    d11_sub = ""
+    d11_summary = "数据不足"
+    if etf_flow and etf_flow.recent_days:
+        net_3d_m = etf_flow.net_3d / 1e6
+        d11_score = max(min(net_3d_m / 10, 50), -50)
+        d11_value = f"{'+'if net_3d_m > 0 else ''}{net_3d_m:.0f}M"
+        d11_sub = f"3日净{'流入' if net_3d_m > 0 else '流出'}"
+        d11_summary = "机构加仓" if net_3d_m > 100 else "机构撤退" if net_3d_m < -100 else "机构观望"
+    factor_scores["etf_flow"] = d11_score
+
+    # D12: 全网爆仓不对称
+    d12_score = 0.0
+    d12_value = "N/A"
+    d12_sub = ""
+    d12_summary = "数据不足"
+    if global_liq:
+        r24 = global_liq.ratio_24h
+        d12_score = max(min((r24 - 1) * 15, 50), -50)
+        long_m = global_liq.long_24h_usd / 1e6
+        short_m = global_liq.short_24h_usd / 1e6
+        d12_value = f"多${long_m:.0f}M:空${short_m:.0f}M"
+        d12_sub = f"24h多空比{r24:.1f}"
+        d12_summary = "多头被清洗" if r24 > 2 else "空头被清洗" if r24 < 0.5 else "双向清洗"
+    factor_scores["global_liq"] = d12_score
+
     # ── 综合温度 ──
+    # 12 因子加权（D7 无方向不参与）
     w = weights
     temp = 50 + (
-        factor_scores.get("funding", 0) * w.get("funding_rate", 0.25)
-        + factor_scores.get("oi", 0) * w.get("oi_change", 0.25)
-        + factor_scores.get("cvd", 0) * w.get("cvd_trend", 0.20)
-        + factor_scores.get("basis", 0) * w.get("basis", 0.15)
-        + factor_scores.get("liq_intensity", 0) * w.get("liquidation_ratio", 0.15)
+        factor_scores.get("liq_imbalance", 0) * w.get("liq_imbalance", 0.08)
+        + factor_scores.get("cvd", 0) * w.get("cvd_trend", 0.14)
+        + factor_scores.get("oi", 0) * w.get("oi_change", 0.10)
+        + factor_scores.get("funding", 0) * w.get("funding_rate", 0.10)
+        + factor_scores.get("basis", 0) * w.get("basis", 0.07)
+        + factor_scores.get("taker", 0) * w.get("taker_flow", 0.13)
+        + factor_scores.get("liq_intensity", 0) * w.get("liquidation_ratio", 0.08)
+        + factor_scores.get("ls_ratio", 0) * w.get("ls_ratio", 0.08)
+        + factor_scores.get("fear_greed", 0) * w.get("fear_greed", 0.07)
+        + factor_scores.get("etf_flow", 0) * w.get("etf_flow", 0.08)
+        + factor_scores.get("global_liq", 0) * w.get("global_liq", 0.07)
     )
     temp = max(0, min(100, temp))
 
@@ -181,9 +261,13 @@ def calc_market_temperature(
         FactorCard(id="D6", name="买卖力量", value=d6_value, direction=_dir(d6_score), sub_text=d6_sub, percentile=50, summary=d6_summary),
         FactorCard(id="D7", name="波幅范围", value=d7_value, direction="neutral", sub_text=d7_sub, percentile=50, summary=d7_summary),
         FactorCard(id="D8", name="爆仓烈度", value=d8_value, direction=_dir(d8_score), sub_text=d8_sub, percentile=50, summary=d8_summary),
+        FactorCard(id="D9", name="多空比", value=d9_value, direction=_dir(d9_score), sub_text=d9_sub, percentile=50, summary=d9_summary),
+        FactorCard(id="D10", name="恐惧贪婪", value=d10_value, direction=_dir(d10_score), sub_text=d10_sub, percentile=50, summary=d10_summary),
+        FactorCard(id="D11", name="ETF资金", value=d11_value, direction=_dir(d11_score), sub_text=d11_sub, percentile=50, summary=d11_summary),
+        FactorCard(id="D12", name="全网爆仓", value=d12_value, direction=_dir(d12_score), sub_text=d12_sub, percentile=50, summary=d12_summary),
     ]
 
-    return MarketTemperature(
+    result = MarketTemperature(
         coin=coin,
         ts=int(time.time()),
         score=round(temp, 1),
@@ -192,10 +276,33 @@ def calc_market_temperature(
         pin_risk_label=pin_risk[1],
         factors=cards,
     )
+    return result, factor_scores
 
 
-def build_waterfall(temp: MarketTemperature) -> WaterfallData:
-    """从因子卡片构建多空归因瀑布图"""
+def build_waterfall(
+    temp: MarketTemperature,
+    factor_scores: dict[str, float] | None = None,
+) -> WaterfallData:
+    """从因子卡片构建多空归因瀑布图。
+
+    factor_scores 为因子原始分(-50~+50)，乘以权重得到实际贡献。
+    若未传入则从 direction 做粗略估算（兼容旧调用）。
+    """
+    weights = get_settings().processors.market_temp["weights"]
+    factor_id_to_weight_key = {
+        "D1": "liq_imbalance",
+        "D2": "cvd_trend",
+        "D3": "oi_change",
+        "D4": "funding_rate",
+        "D5": "basis",
+        "D6": "taker_flow",
+        "D8": "liquidation_ratio",
+        "D9": "ls_ratio",
+        "D10": "fear_greed",
+        "D11": "etf_flow",
+        "D12": "global_liq",
+    }
+
     items: list[WaterfallItem] = []
     bullish_total = 0.0
     bearish_total = 0.0
@@ -203,7 +310,20 @@ def build_waterfall(temp: MarketTemperature) -> WaterfallData:
     for card in temp.factors:
         if card.id == "D7":
             continue
-        contrib = _estimate_contribution(card)
+        if factor_scores is not None:
+            score_key = {
+                "D1": "liq_imbalance", "D2": "cvd", "D3": "oi",
+                "D4": "funding", "D5": "basis", "D6": "taker",
+                "D8": "liq_intensity", "D9": "ls_ratio",
+                "D10": "fear_greed", "D11": "etf_flow",
+                "D12": "global_liq",
+            }.get(card.id, "")
+            raw = factor_scores.get(score_key, 0)
+            w_key = factor_id_to_weight_key.get(card.id, "")
+            w = weights.get(w_key, 0.1)
+            contrib = raw * w
+        else:
+            contrib = _estimate_contribution(card)
         direction = "bullish" if contrib > 0 else "bearish"
         if contrib > 0:
             bullish_total += contrib

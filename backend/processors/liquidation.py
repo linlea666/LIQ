@@ -59,6 +59,19 @@ def process_liquidation_map(
     return liq_map
 
 
+def _auto_bucket_width(price: float) -> float:
+    """根据当前价格自适应桶宽度，约为价格的 0.15%"""
+    if price >= 10000:
+        return 100.0
+    elif price >= 1000:
+        return 10.0
+    elif price >= 100:
+        return 1.0
+    elif price >= 10:
+        return 0.1
+    return 0.01
+
+
 def _find_clusters(
     bands: list[tuple],
     current_price: float,
@@ -74,17 +87,18 @@ def _find_clusters(
         return []
 
     if side_filter == "above":
-        bands = [b for b in bands if b[0] >= current_price]
+        bands = [b for b in bands if b[1] > current_price]
     else:
-        bands = [b for b in bands if b[1] <= current_price]
+        bands = [b for b in bands if b[0] < current_price]
 
     if not bands:
         return []
 
+    bucket_width = _auto_bucket_width(current_price)
     price_buckets: dict[float, dict] = {}
     for price_from, price_to, usd, leverage in bands:
         mid = round((price_from + price_to) / 2, 1)
-        bucket_key = round(mid / 100) * 100
+        bucket_key = round(mid / bucket_width) * bucket_width
 
         if bucket_key not in price_buckets:
             price_buckets[bucket_key] = {

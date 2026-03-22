@@ -31,6 +31,12 @@ sources:
     cycles:
       - "24h"
       - "7d"
+    funding_url: "https://bbx.com/api/funding-rate/data-table"
+    ls_ratio_url: "https://bbx.com/api/pc"
+    etf_flow_url: "https://bbx.com/api/etf/flow"
+    market_index_url: "https://bbx.com/api/pc"
+    global_liq_url: "https://bbx.com/api/data"
+    extended_poll_sec: 60
   okx:
     rest_base_url: "https://www.okx.com/api/v5"
     ws_url: "wss://ws.okx.com:8443/ws/v5/public"
@@ -43,7 +49,7 @@ sources:
       mark_price: 10
     ws_channels:
       - "trades"
-      - "books5"
+      - "books50-l2-tbt"
       - "liquidation-orders"
       - "tickers"
   binance:
@@ -66,11 +72,17 @@ processors:
     lookback_hours: 168
   market_temp:
     weights:
-      funding_rate: 0.25
-      oi_change: 0.25
-      cvd_trend: 0.20
-      basis: 0.15
-      liquidation_ratio: 0.15
+      liq_imbalance: 0.08
+      cvd_trend: 0.14
+      oi_change: 0.10
+      funding_rate: 0.10
+      basis: 0.07
+      taker_flow: 0.13
+      liquidation_ratio: 0.08
+      ls_ratio: 0.08
+      fear_greed: 0.07
+      etf_flow: 0.08
+      global_liq: 0.07
   levels:
     min_liq_cluster_usd: 10000000
     atr_multiplier_sl: 1.5
@@ -79,6 +91,7 @@ processors:
     whale_threshold_btc: 10
     whale_threshold_eth: 100
     whale_threshold_sol: 1000
+    whale_threshold_usd: 500000
     spoofing_ttl_sec: 3
 
 ai:

@@ -15,7 +15,10 @@ from ai.analyzer import AIAnalyzer, create_analyzer
 from ai.snapshot import build_ai_snapshot
 from api.ws import push_to_coin
 from config.settings import CoinConfig, get_settings
-from models.flow import BasisData, CVDData, FundingRateData, OIData, TakerFlowData
+from models.flow import (
+    BasisData, CVDData, ETFFlowData, FundingRateData, GlobalLiquidationData,
+    LongShortRatioData, MarketIndexData, MultiFundingRateData, OIData, TakerFlowData,
+)
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, TickerData, VolumeProfileData
@@ -32,7 +35,7 @@ from processors.market_temp import build_waterfall, calc_market_temperature
 from processors.orderbook import analyze_orderbook, parse_okx_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_atr, calc_volume_profile
-from sources.bbx import create_bbx_source
+from sources.bbx import create_bbx_source, create_bbx_extended_source
 from sources.binance_rest import create_binance_rest_source
 from sources.okx_rest import create_okx_rest_source
 from sources.okx_ws import create_okx_ws_source
@@ -65,6 +68,11 @@ class CoinState:
         self.oi_history: deque = deque(maxlen=720)  # 2小时 @10s
         self.ai_history: deque[AIAnalysisResult] = deque(maxlen=5)
         self.last_ai_ts: float = 0
+        self.multi_funding: Optional[MultiFundingRateData] = None
+        self.ls_ratio: Optional[LongShortRatioData] = None
+        self.etf_flow: Optional[ETFFlowData] = None
+        self.global_liq: Optional[GlobalLiquidationData] = None
+        self.market_index: Optional[MarketIndexData] = None
 
 
 class Engine:
@@ -73,6 +81,7 @@ class Engine:
     def __init__(self):
         self._settings = get_settings()
         self._bbx = create_bbx_source()
+        self._bbx_ext = create_bbx_extended_source()
         self._okx = create_okx_rest_source()
         self._okx_ws = create_okx_ws_source()
         self._binance = create_binance_rest_source()
@@ -95,7 +104,7 @@ class Engine:
 
         coins = [self._settings.get_coin(c) for c in self._settings.supported_coins]
 
-        self._okx_ws.on("books5", self._on_orderbook)
+        self._okx_ws.on("books50-l2-tbt", self._on_orderbook)
         self._okx_ws.on("trades", self._on_trade)
         self._okx_ws.on("liquidation-orders", self._on_liquidation)
         self._okx_ws.on("tickers", self._on_ticker)
@@ -104,13 +113,22 @@ class Engine:
             asyncio.create_task(self._okx_ws.start(coins)),
         ]
 
+        # BBX 扩展数据（全局，不按币种，用虚拟 coin=BTC 触发）
+        btc_coin = self._settings.get_coin("BTC")
+        tasks.extend([
+            asyncio.create_task(self._poll_loop("bbx_market_idx", self._poll_market_index, btc_coin, 60, 0)),
+            asyncio.create_task(self._poll_loop("bbx_etf_flow", self._poll_etf_flow, btc_coin, 300, 5)),
+            asyncio.create_task(self._poll_loop("bbx_global_liq", self._poll_global_liq, btc_coin, 60, 3)),
+        ])
+
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
             stagger = idx * 2
             tasks.extend([
                 asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
                 asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
-                asyncio.create_task(self._poll_loop(f"okx_fr_{ccy}", self._poll_funding, coin, 60, stagger)),
+                asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, stagger)),
+                asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, stagger + 1)),
                 asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger)),
                 asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30, stagger)),
                 asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, stagger)),
@@ -123,6 +141,7 @@ class Engine:
         self._running = False
         await self._okx_ws.stop()
         await self._bbx.close()
+        await self._bbx_ext.close()
         await self._okx.close()
         await self._binance.close()
         logger.info("Engine stopped")
@@ -192,17 +211,53 @@ class Engine:
         if bn_oi:
             self._percentile.push(coin.ccy, "oi_bn", bn_oi.oi_usd)
 
-    async def _poll_funding(self, coin: CoinConfig):
+    async def _poll_funding_bbx(self, coin: CoinConfig):
+        """用 BBX 多交易所资金费率替代 OKX+Binance 独立调用"""
         state = self._states[coin.ccy]
-        okx_funding = await self._okx.fetch_funding_rate(coin)
-        bn_rate = await self._binance.fetch_funding_rate(coin)
+        multi = await self._bbx_ext.fetch_multi_funding(coin.ccy)
+        if not multi:
+            return
+        state.multi_funding = multi
 
-        if okx_funding:
-            okx_funding.binance_rate = bn_rate
-            if bn_rate is not None and okx_funding.okx_rate is not None:
-                okx_funding.avg_rate = (okx_funding.okx_rate + bn_rate) / 2
-            state.funding = okx_funding
-            self._percentile.push(coin.ccy, "funding", okx_funding.avg_rate)
+        okx_rate = None
+        bn_rate = None
+        for ex in multi.exchanges:
+            if "okx" in ex.exchange.lower() or "okex" in ex.exchange.lower():
+                okx_rate = ex.current
+            elif "binance" in ex.exchange.lower():
+                bn_rate = ex.current
+
+        state.funding = FundingRateData(
+            coin=coin.ccy, ts=multi.ts,
+            okx_rate=okx_rate, binance_rate=bn_rate,
+            avg_rate=multi.avg_current,
+            interpretation=multi.interpretation,
+        )
+        self._percentile.push(coin.ccy, "funding", multi.avg_current)
+
+    async def _poll_ls_ratio(self, coin: CoinConfig):
+        state = self._states[coin.ccy]
+        ls = await self._bbx_ext.fetch_ls_ratio(coin.ccy, "1h")
+        if ls:
+            state.ls_ratio = ls
+
+    async def _poll_etf_flow(self, _coin: CoinConfig):
+        etf = await self._bbx_ext.fetch_etf_flow("us-btc")
+        if etf:
+            for ccy in self._settings.supported_coins:
+                self._states[ccy].etf_flow = etf
+
+    async def _poll_global_liq(self, _coin: CoinConfig):
+        gliq = await self._bbx_ext.fetch_global_liquidation()
+        if gliq:
+            for ccy in self._settings.supported_coins:
+                self._states[ccy].global_liq = gliq
+
+    async def _poll_market_index(self, _coin: CoinConfig):
+        mi = await self._bbx_ext.fetch_market_index()
+        if mi:
+            for ccy in self._settings.supported_coins:
+                self._states[ccy].market_index = mi
 
     async def _poll_cvd(self, coin: CoinConfig):
         state = self._states[coin.ccy]
@@ -272,7 +327,12 @@ class Engine:
         if snapshot and state.ticker:
             cfg = self._settings.processors.orderbook
             threshold = cfg.get(f"whale_threshold_{coin.lower()}", 50)
-            state.orderbook = analyze_orderbook(snapshot, state.ticker.last, wall_threshold_size=threshold)
+            threshold_usd = cfg.get("whale_threshold_usd", 500000)
+            state.orderbook = analyze_orderbook(
+                snapshot, state.ticker.last,
+                wall_threshold_size=threshold,
+                wall_threshold_usd=threshold_usd,
+            )
 
     async def _on_trade(self, channel: str, data: dict):
         pass
@@ -316,15 +376,17 @@ class Engine:
 
         liq_map = state.liq_maps.get("24h")
 
-        state.temperature = calc_market_temperature(
+        state.temperature, _factor_scores = calc_market_temperature(
             coin=ccy, funding=state.funding, oi=state.oi,
             cvd_contract=state.cvd_contract, basis=state.basis,
             liq_map=liq_map, liq_stats=state.liq_stats,
             taker_flow=state.taker_flow, atr=state.atr,
+            ls_ratio=state.ls_ratio, market_index=state.market_index,
+            etf_flow=state.etf_flow, global_liq=state.global_liq,
         )
 
         if state.temperature:
-            state.waterfall = build_waterfall(state.temperature)
+            state.waterfall = build_waterfall(state.temperature, _factor_scores)
 
         vwap = state.vp.vwap if state.vp else 0
         state.levels = calculate_levels(
@@ -364,6 +426,22 @@ class Engine:
             payload["basis"] = state.basis.model_dump()
         if state.orderbook:
             payload["orderbook"] = state.orderbook.model_dump()
+        if state.multi_funding:
+            payload["multi_funding"] = state.multi_funding.model_dump()
+        if state.ls_ratio:
+            payload["ls_ratio"] = state.ls_ratio.model_dump()
+        if state.etf_flow:
+            payload["etf_flow"] = state.etf_flow.model_dump()
+        if state.global_liq:
+            payload["global_liq"] = state.global_liq.model_dump()
+        if state.market_index:
+            payload["market_index"] = {
+                "fear_greed": state.market_index.fear_greed,
+                "btc_dominance": state.market_index.btc_dominance,
+                "btc_max_pain": state.market_index.btc_max_pain,
+                "btc_dvol": state.market_index.btc_dvol,
+                "dxy": state.market_index.dxy,
+            }
 
         await push_to_coin(coin.ccy, "market_update", payload)
 
@@ -418,6 +496,9 @@ class Engine:
             vp=state.vp, atr=state.atr,
             market_temp_score=state.temperature.score if state.temperature else 50,
             pin_risk_level=state.temperature.pin_risk_level if state.temperature else "low",
+            multi_funding=state.multi_funding, ls_ratio=state.ls_ratio,
+            etf_flow=state.etf_flow, global_liq=state.global_liq,
+            market_index=state.market_index, taker_flow=state.taker_flow,
         )
 
         result = await self._analyzer.analyze(snapshot)
@@ -428,6 +509,7 @@ class Engine:
     def get_source_health(self) -> list[dict]:
         return [
             self._bbx.health().model_dump(),
+            self._bbx_ext.health().model_dump(),
             self._okx.health().model_dump(),
             self._binance.health().model_dump(),
             {

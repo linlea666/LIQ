@@ -51,27 +51,40 @@ def calc_volume_profile(
         vwap_denominator += vol
         total_vol += vol
 
+        c_low = min(c.low, c.high)
+        c_high = max(c.low, c.high)
+        c_span = c_high - c_low
         for b in bins:
-            if b["low"] <= typical_price < b["high"]:
-                b["vol"] += vol
-                break
+            overlap_lo = max(b["low"], c_low)
+            overlap_hi = min(b["high"], c_high)
+            if overlap_hi > overlap_lo:
+                fraction = (overlap_hi - overlap_lo) / c_span if c_span > 0 else 1.0
+                b["vol"] += vol * fraction
 
     vwap = vwap_numerator / vwap_denominator if vwap_denominator > 0 else candles[-1].close
 
     poc_bin = max(bins, key=lambda b: b["vol"])
     poc_price = (poc_bin["low"] + poc_bin["high"]) / 2
 
-    sorted_bins = sorted(bins, key=lambda b: b["vol"], reverse=True)
-    cumulative = 0.0
-    va_prices: list[float] = []
-    for b in sorted_bins:
-        cumulative += b["vol"]
-        va_prices.extend([b["low"], b["high"]])
-        if cumulative >= total_vol * 0.68:
+    poc_idx = bins.index(poc_bin)
+    va_cumulative = poc_bin["vol"]
+    va_lo_idx = poc_idx
+    va_hi_idx = poc_idx
+    target_vol = total_vol * 0.68
+    while va_cumulative < target_vol:
+        expand_lo = bins[va_lo_idx - 1]["vol"] if va_lo_idx > 0 else -1
+        expand_hi = bins[va_hi_idx + 1]["vol"] if va_hi_idx < num_bins - 1 else -1
+        if expand_lo < 0 and expand_hi < 0:
             break
+        if expand_lo >= expand_hi:
+            va_lo_idx -= 1
+            va_cumulative += bins[va_lo_idx]["vol"]
+        else:
+            va_hi_idx += 1
+            va_cumulative += bins[va_hi_idx]["vol"]
 
-    va_high = max(va_prices) if va_prices else price_max
-    va_low = min(va_prices) if va_prices else price_min
+    va_low = bins[va_lo_idx]["low"]
+    va_high = bins[va_hi_idx]["high"]
 
     profile_bins = [
         VolumeProfileBin(

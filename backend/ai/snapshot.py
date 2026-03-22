@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Optional
 
-from models.flow import BasisData, CVDData, FundingRateData, OIData
+from models.flow import (
+    BasisData, CVDData, ETFFlowData, FundingRateData,
+    GlobalLiquidationData, LongShortRatioData, MarketIndexData,
+    MultiFundingRateData, OIData, TakerFlowData,
+)
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
@@ -17,18 +21,24 @@ def build_ai_snapshot(
     price: float,
     high_24h: float,
     low_24h: float,
-    liq_map: LiquidationMap | None,
-    cvd_contract: CVDData | None,
-    cvd_spot: CVDData | None,
-    oi: OIData | None,
-    funding: FundingRateData | None,
-    basis: BasisData | None,
-    orderbook: OrderBookAnalysis | None,
-    liq_stats: LiquidationStats | None,
-    vp: VolumeProfileData | None,
+    liq_map: Optional[LiquidationMap],
+    cvd_contract: Optional[CVDData],
+    cvd_spot: Optional[CVDData],
+    oi: Optional[OIData],
+    funding: Optional[FundingRateData],
+    basis: Optional[BasisData],
+    orderbook: Optional[OrderBookAnalysis],
+    liq_stats: Optional[LiquidationStats],
+    vp: Optional[VolumeProfileData],
     atr: float,
     market_temp_score: float,
     pin_risk_level: str,
+    multi_funding: Optional[MultiFundingRateData] = None,
+    ls_ratio: Optional[LongShortRatioData] = None,
+    etf_flow: Optional[ETFFlowData] = None,
+    global_liq: Optional[GlobalLiquidationData] = None,
+    market_index: Optional[MarketIndexData] = None,
+    taker_flow: Optional[TakerFlowData] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -48,6 +58,12 @@ def build_ai_snapshot(
     if orderbook:
         bid_walls = [w.model_dump() for w in orderbook.bid_walls[:5]]
         ask_walls = [w.model_dump() for w in orderbook.ask_walls[:5]]
+
+    funding_exchanges = []
+    funding_avg_7d = None
+    if multi_funding:
+        funding_exchanges = [e.model_dump() for e in multi_funding.exchanges]
+        funding_avg_7d = multi_funding.avg_7d
 
     return AISnapshot(
         coin=coin,
@@ -71,6 +87,8 @@ def build_ai_snapshot(
         funding_rate_okx=funding.okx_rate if funding else None,
         funding_rate_binance=funding.binance_rate if funding else None,
         funding_interpretation=funding.interpretation if funding else "",
+        funding_avg_7d=funding_avg_7d,
+        funding_exchanges=funding_exchanges,
         basis_pct=basis.basis_pct if basis else 0,
         orderbook_bid_walls=bid_walls,
         orderbook_ask_walls=ask_walls,
@@ -83,4 +101,17 @@ def build_ai_snapshot(
         atr_14=atr,
         market_temperature=market_temp_score,
         pin_risk_level=pin_risk_level,
+        ls_ratio=ls_ratio.avg_ratio if ls_ratio else None,
+        ls_ratio_interpretation=ls_ratio.interpretation if ls_ratio else "",
+        fear_greed_index=market_index.fear_greed if market_index else None,
+        etf_net_3d=etf_flow.net_3d if etf_flow else None,
+        etf_trend=etf_flow.trend if etf_flow else "",
+        global_liq_long_24h=global_liq.long_24h_usd if global_liq else 0,
+        global_liq_short_24h=global_liq.short_24h_usd if global_liq else 0,
+        btc_max_pain=market_index.btc_max_pain if market_index else None,
+        btc_dvol=market_index.btc_dvol if market_index else None,
+        dxy=market_index.dxy if market_index else None,
+        btc_dominance=market_index.btc_dominance if market_index else None,
+        taker_buy_ratio=taker_flow.buy_ratio if taker_flow else None,
+        taker_dominant=taker_flow.dominant if taker_flow else "",
     )

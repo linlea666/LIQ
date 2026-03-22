@@ -13,14 +13,17 @@ def analyze_orderbook(
     snapshot: OrderBookSnapshot,
     current_price: float,
     wall_threshold_size: float = 50.0,
+    wall_threshold_usd: float = 0,
     top_n: int = 5,
 ) -> OrderBookAnalysis:
     """
     分析订单簿快照：
-    1. 识别大买墙/卖墙
+    1. 识别大买墙/卖墙（优先使用 USD 阈值）
     2. 计算总深度
     3. 计算价差
     """
+    usd_threshold = wall_threshold_usd if wall_threshold_usd > 0 else wall_threshold_size * current_price
+
     bid_walls: list[WallInfo] = []
     ask_walls: list[WallInfo] = []
     bid_total = 0.0
@@ -29,7 +32,7 @@ def analyze_orderbook(
     for level in snapshot.bids:
         usd_value = level.size * current_price
         bid_total += usd_value
-        if level.size >= wall_threshold_size:
+        if usd_value >= usd_threshold:
             bid_walls.append(WallInfo(
                 price=level.price,
                 size=level.size,
@@ -40,7 +43,7 @@ def analyze_orderbook(
     for level in snapshot.asks:
         usd_value = level.size * current_price
         ask_total += usd_value
-        if level.size >= wall_threshold_size:
+        if usd_value >= usd_threshold:
             ask_walls.append(WallInfo(
                 price=level.price,
                 size=level.size,

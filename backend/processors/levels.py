@@ -80,16 +80,18 @@ def calculate_levels(
     # ── 维度4: 订单簿大单 ──
     if orderbook:
         for wall in orderbook.bid_walls:
+            usd_m = wall.size_usd / 1e6
             support_candidates.append({
                 "price": wall.price,
-                "score": min(wall.size * 2, 25),
-                "source": f"买墙{wall.size:.0f}",
+                "score": min(usd_m * 10, 25),
+                "source": f"买墙${usd_m:.1f}M",
             })
         for wall in orderbook.ask_walls:
+            usd_m = wall.size_usd / 1e6
             resistance_candidates.append({
                 "price": wall.price,
-                "score": min(wall.size * 2, 25),
-                "source": f"卖墙{wall.size:.0f}",
+                "score": min(usd_m * 10, 25),
+                "source": f"卖墙${usd_m:.1f}M",
             })
 
     supports = _merge_and_rank(support_candidates, current_price, "support")
@@ -166,51 +168,114 @@ def _calc_stop_loss_zones(
     liq_map: LiquidationMap | None,
     atr: float,
 ) -> list[StopLossZone]:
-    """止损安全区：放在清算真空带内，且超过1.5倍ATR"""
+    """
+    止损安全区设计原则（防猎杀核心）：
+    1. 止损必须在清算密集区之外（不被连带爆仓）
+    2. 优先放置在清算真空区内（庄家扫完清算池后价格会回弹的地带）
+    3. 避开整数关口（$70000, $69000 等猎杀热门价位）
+    4. ATR 倍数动态调整（波动大时拉远止损）
+    """
     zones: list[StopLossZone] = []
-    multiplier = 1.5
+    if atr <= 0:
+        return zones
 
-    # 做多止损
-    long_sl = current_price - multiplier * atr
-    reasons_long = [f"超出{multiplier}倍ATR(${atr:.0f})"]
+    base_mult = 1.5
+    dynamic_mult = base_mult
+    if current_price > 0:
+        atr_pct = atr / current_price * 100
+        if atr_pct > 3:
+            dynamic_mult = 2.0
+        elif atr_pct > 2:
+            dynamic_mult = 1.8
 
-    if liq_map and liq_map.vacuum_zones:
-        below_vacuums = [v for v in liq_map.vacuum_zones if v.midpoint < current_price]
-        if below_vacuums:
-            best = min(below_vacuums, key=lambda v: abs(v.midpoint - long_sl))
-            long_sl = best.midpoint
-            reasons_long.insert(0, f"清算真空区${best.price_from:.0f}-${best.price_to:.0f}")
-
-    zones.append(StopLossZone(
-        direction="long",
-        price=round(long_sl, 2),
-        zone_from=round(long_sl - atr * 0.2, 2),
-        zone_to=round(long_sl + atr * 0.2, 2),
-        reasons=reasons_long,
-        atr_multiple=round((current_price - long_sl) / atr, 1) if atr > 0 else 0,
+    zones.append(_build_sl(
+        "long", current_price, liq_map, atr, dynamic_mult,
     ))
-
-    # 做空止损
-    short_sl = current_price + multiplier * atr
-    reasons_short = [f"超出{multiplier}倍ATR(${atr:.0f})"]
-
-    if liq_map and liq_map.vacuum_zones:
-        above_vacuums = [v for v in liq_map.vacuum_zones if v.midpoint > current_price]
-        if above_vacuums:
-            best = min(above_vacuums, key=lambda v: abs(v.midpoint - short_sl))
-            short_sl = best.midpoint
-            reasons_short.insert(0, f"清算真空区${best.price_from:.0f}-${best.price_to:.0f}")
-
-    zones.append(StopLossZone(
-        direction="short",
-        price=round(short_sl, 2),
-        zone_from=round(short_sl - atr * 0.2, 2),
-        zone_to=round(short_sl + atr * 0.2, 2),
-        reasons=reasons_short,
-        atr_multiple=round((short_sl - current_price) / atr, 1) if atr > 0 else 0,
+    zones.append(_build_sl(
+        "short", current_price, liq_map, atr, dynamic_mult,
     ))
-
     return zones
+
+
+def _build_sl(
+    direction: str,
+    price: float,
+    liq_map: LiquidationMap | None,
+    atr: float,
+    multiplier: float,
+) -> StopLossZone:
+    is_long = direction == "long"
+    raw_sl = price - multiplier * atr if is_long else price + multiplier * atr
+    reasons: list[str] = [f"ATR×{multiplier:.1f}(${atr:.0f})"]
+
+    if liq_map:
+        clusters = liq_map.clusters_below if is_long else liq_map.clusters_above
+        if clusters:
+            nearest = clusters[0]
+            cluster_edge = nearest.price_from if is_long else nearest.price_to
+            if is_long and raw_sl > cluster_edge:
+                raw_sl = cluster_edge - atr * 0.3
+                reasons.append(f"穿越清算簇下沿${cluster_edge:.0f}")
+            elif not is_long and raw_sl < cluster_edge:
+                raw_sl = cluster_edge + atr * 0.3
+                reasons.append(f"穿越清算簇上沿${cluster_edge:.0f}")
+
+        vacuums = liq_map.vacuum_zones or []
+        if is_long:
+            candidates = [v for v in vacuums if v.price_to < price and v.price_from < raw_sl < v.price_to]
+        else:
+            candidates = [v for v in vacuums if v.price_from > price and v.price_from < raw_sl < v.price_to]
+
+        if not candidates:
+            if is_long:
+                candidates = [v for v in vacuums if v.price_to < price and abs(v.midpoint - raw_sl) < atr]
+            else:
+                candidates = [v for v in vacuums if v.price_from > price and abs(v.midpoint - raw_sl) < atr]
+
+        if candidates:
+            best_v = min(candidates, key=lambda v: abs(v.midpoint - raw_sl))
+            if is_long:
+                raw_sl = best_v.price_from + (best_v.price_to - best_v.price_from) * 0.3
+            else:
+                raw_sl = best_v.price_to - (best_v.price_to - best_v.price_from) * 0.3
+            reasons.insert(0, f"真空区${best_v.price_from:.0f}-${best_v.price_to:.0f}")
+
+    raw_sl = _avoid_round_number(raw_sl, price)
+    reasons.append("避开整数关口")
+
+    atr_mult = abs(price - raw_sl) / atr if atr > 0 else 0
+    zone_pad = atr * 0.15
+    return StopLossZone(
+        direction=direction,
+        price=round(raw_sl, 2),
+        zone_from=round(raw_sl - zone_pad, 2) if is_long else round(raw_sl + zone_pad, 2),
+        zone_to=round(raw_sl + zone_pad, 2) if is_long else round(raw_sl - zone_pad, 2),
+        reasons=reasons,
+        atr_multiple=round(atr_mult, 1),
+    )
+
+
+def _avoid_round_number(sl: float, current_price: float) -> float:
+    """偏移止损价远离整数关口（1000/500/100 的整倍数）"""
+    if current_price >= 10000:
+        steps = [1000, 500]
+    elif current_price >= 1000:
+        steps = [100, 50]
+    elif current_price >= 100:
+        steps = [10, 5]
+    else:
+        return sl
+
+    offset = current_price * 0.001
+    for step in steps:
+        nearest_round = round(sl / step) * step
+        if abs(sl - nearest_round) < offset:
+            if sl < current_price:
+                sl = nearest_round - offset
+            else:
+                sl = nearest_round + offset
+            break
+    return sl
 
 
 def _calc_entry_zones(

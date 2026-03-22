@@ -46,17 +46,28 @@ def detect_cvd_price_divergence(
     if len(cvd.series) < 12 or len(price_series) < 12:
         return cvd
 
-    recent_prices = price_series[-12:]
-    recent_cvd = [p.cvd for p in cvd.series[-12:]]
-    earlier_prices = price_series[-24:-12] if len(price_series) >= 24 else price_series[:12]
-    earlier_cvd = [p.cvd for p in cvd.series[-24:-12]] if len(cvd.series) >= 24 else [p.cvd for p in cvd.series[:12]]
+    n = len(cvd.series)
+    half = n // 2
+    earlier_prices = price_series[:half]
+    recent_prices = price_series[half:]
+    earlier_cvd = [p.cvd for p in cvd.series[:half]]
+    recent_cvd = [p.cvd for p in cvd.series[half:]]
 
     if not earlier_prices or not earlier_cvd:
         return cvd
 
-    price_new_high = max(recent_prices) > max(earlier_prices)
+    earlier_price_max = max(earlier_prices)
+    earlier_price_min = min(earlier_prices)
+    recent_price_max = max(recent_prices)
+    recent_price_min = min(recent_prices)
+
+    min_price_pct = 0.003
+    price_new_high = (recent_price_max > earlier_price_max and
+                      (recent_price_max - earlier_price_max) / earlier_price_max > min_price_pct)
+    price_new_low = (recent_price_min < earlier_price_min and
+                     (earlier_price_min - recent_price_min) / earlier_price_min > min_price_pct)
+
     cvd_new_high = max(recent_cvd) > max(earlier_cvd)
-    price_new_low = min(recent_prices) < min(earlier_prices)
     cvd_new_low = min(recent_cvd) < min(earlier_cvd)
 
     if price_new_high and not cvd_new_high:
@@ -87,7 +98,9 @@ def _calc_trend(points: list[CVDPoint], lookback_points: int = 12) -> tuple[str,
     end_cvd = recent[-1].cvd
     diff = end_cvd - start_cvd
 
-    threshold = abs(delta_sum) * 0.1 if delta_sum != 0 else 1.0
+    abs_values = [abs(p.delta) for p in recent if p.delta != 0]
+    median_abs = sorted(abs_values)[len(abs_values) // 2] if abs_values else 1.0
+    threshold = max(median_abs * 0.5, abs(delta_sum) * 0.05)
     if diff > threshold:
         return "rising", delta_sum
     elif diff < -threshold:
