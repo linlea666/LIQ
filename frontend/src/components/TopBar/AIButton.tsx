@@ -41,7 +41,7 @@ export default function AIButton() {
       let msg = "分析失败";
       if (e instanceof Error) {
         if (e.name === "AbortError") {
-          msg = "AI 分析超时（30s），请稍后重试";
+          msg = "AI 分析超时（90s），请稍后重试";
         } else if (e.message.includes("Failed to fetch")) {
           msg = "无法连接后端服务，请检查网络或后端是否运行";
         } else {

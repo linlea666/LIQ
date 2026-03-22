@@ -101,6 +101,9 @@ class AISnapshot(BaseModel):
 
     orderbook_bid_walls: list[dict]
     orderbook_ask_walls: list[dict]
+    orderbook_bid_total_usd: float = 0
+    orderbook_ask_total_usd: float = 0
+    orderbook_spread_pct: float = 0
 
     recent_liq_30m_long_usd: float
     recent_liq_30m_short_usd: float

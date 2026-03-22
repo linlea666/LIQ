@@ -16,6 +16,29 @@ from models.market import OrderBookAnalysis, VolumeProfileData
 from models.snapshot import AISnapshot
 
 
+def _macro_change_pct(
+    raw_items: list,
+    resolved_value: Optional[float],
+    key_substrings: tuple[str, ...],
+) -> Optional[float]:
+    """在 raw_items 中匹配已解析的数值或 key 子串，取涨跌幅。"""
+    if not raw_items:
+        return None
+    if resolved_value is not None:
+        for item in raw_items:
+            if item.value is None:
+                continue
+            if abs(item.value - resolved_value) <= max(1e-9, abs(resolved_value) * 1e-9):
+                return item.change_pct
+    for item in raw_items:
+        k = (item.key or "").lower()
+        n = item.name or ""
+        for sub in key_substrings:
+            if sub.lower() in k or sub in n:
+                return item.change_pct
+    return None
+
+
 def build_ai_snapshot(
     coin: str,
     price: float,
@@ -66,7 +89,7 @@ def build_ai_snapshot(
         funding_exchanges = [e.model_dump() for e in multi_funding.exchanges]
         funding_avg_7d = multi_funding.avg_7d
 
-    # 宏观数据
+    # 宏观数据（涨跌幅：优先按数值对齐 raw_items，其次 key/name 子串）
     nasdaq_val = None
     nasdaq_chg = None
     gold_val = None
@@ -77,13 +100,18 @@ def build_ai_snapshot(
         nasdaq_val = market_index.nasdaq
         gold_val = market_index.gold
         sp500_val = market_index.sp500
-        for item in market_index.raw_items:
-            if "nasdaq" in item.key.lower() or "纳斯达克" in item.name:
-                nasdaq_chg = item.change_pct
-            elif "gold" in item.key.lower() or "黄金" in item.name:
-                gold_chg = item.change_pct
-            elif "sp500" in item.key.lower() or "标普" in item.name:
-                sp500_chg = item.change_pct
+        items = market_index.raw_items
+        nasdaq_chg = _macro_change_pct(items, nasdaq_val, ("nasdaq", "ndx", "qqq", "纳斯达克"))
+        gold_chg = _macro_change_pct(items, gold_val, ("gold", "xau", "黄金"))
+        sp500_chg = _macro_change_pct(items, sp500_val, ("spx", "sp500", "标普", "s&p"))
+
+    ob_bid_total = 0.0
+    ob_ask_total = 0.0
+    ob_spread = 0.0
+    if orderbook:
+        ob_bid_total = orderbook.bid_total_usd
+        ob_ask_total = orderbook.ask_total_usd
+        ob_spread = orderbook.spread_pct
 
     # 规则引擎预计算结果
     rule_supports = []
@@ -125,6 +153,9 @@ def build_ai_snapshot(
         basis_pct=basis.basis_pct if basis else 0,
         orderbook_bid_walls=bid_walls,
         orderbook_ask_walls=ask_walls,
+        orderbook_bid_total_usd=ob_bid_total,
+        orderbook_ask_total_usd=ob_ask_total,
+        orderbook_spread_pct=ob_spread,
         recent_liq_30m_long_usd=liq_stats.long_total_usd if liq_stats else 0,
         recent_liq_30m_short_usd=liq_stats.short_total_usd if liq_stats else 0,
         volume_profile_poc=vp.poc_price if vp else 0,

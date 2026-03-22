@@ -250,12 +250,28 @@ class BBXExtendedSource(DataSource):
             logger.error("BBX etf-flow fetch failed", exc_info=True)
             return None
 
-        if not self._is_response_ok(data):
-            logger.warning("BBX etf-flow bad response | keys=%s", list(data.keys()))
+        raw_data = data.get("data", {})
+        if isinstance(raw_data, dict):
+            rows = raw_data.get("list", [])
+        elif isinstance(raw_data, list):
+            rows = raw_data
+        else:
+            rows = []
+
+        ok_flag = self._is_response_ok(data)
+        if not rows:
+            logger.warning(
+                "BBX etf-flow empty | ok=%s code=%s msg=%s keys=%s",
+                ok_flag, data.get("code"), data.get("message"), list(data.keys()),
+            )
             return None
 
-        raw_data = data.get("data", {})
-        rows = raw_data.get("list", []) if isinstance(raw_data, dict) else (raw_data if isinstance(raw_data, list) else [])
+        if not ok_flag:
+            logger.warning(
+                "BBX etf-flow degraded: success flag false but rows=%d | code=%s msg=%s",
+                len(rows), data.get("code"), data.get("message"),
+            )
+
         days: list[ETFFlowDay] = []
         for row in rows[:7]:
             total = _safe_float(row.get("totalNetflow"), 0)
@@ -344,7 +360,9 @@ class BBXExtendedSource(DataSource):
                 "i:mvrv:btc": "btc_mvrv",
                 "i:dxy": "dxy",
                 "i:nasdaq": "nasdaq",
+                "i:ndx": "nasdaq",
                 "i:spx": "sp500",
+                "i:sp500": "sp500",
                 "i:gold": "gold",
                 "i:btc_balance:binance": "binance_btc_balance",
                 "lsprbtc:okex": "okx_ls_ratio_btc",
@@ -375,6 +393,7 @@ class BBXExtendedSource(DataSource):
                     setattr(result, attr, val)
 
             result.raw_items = all_items
+            _apply_market_index_fallback(result)
             if all_items:
                 logger.info("BBX market-index OK | items=%d", len(all_items))
             return result
@@ -386,10 +405,45 @@ class BBXExtendedSource(DataSource):
 def _safe_float(v: Any, default: Optional[float] = None) -> Optional[float]:
     if v is None:
         return default
+    if isinstance(v, str):
+        s = v.strip().replace(",", "")
+        if s.endswith("%"):
+            s = s[:-1].strip()
+        v = s
     try:
         return float(v)
     except (ValueError, TypeError):
         return default
+
+
+def _apply_market_index_fallback(result: MarketIndexData) -> None:
+    """
+    BBX 返回约 300+ 条指标，key 命名可能与 key_map 不完全一致。
+    在精确匹配失败后，按 key/name 语义补全常用宏观字段。
+    """
+    targets = [
+        ("fear_greed", lambda k, n: "fgi" in k or "fear" in k or "贪婪" in n or "恐惧" in n, lambda x: 0 <= x <= 100),
+        ("btc_dominance", lambda k, n: "dominance" in k or "市值占比" in n or "btc.d" in k, lambda x: 0 < x < 100),
+        ("dxy", lambda k, n: "dxy" in k or "美元指数" in n, lambda x: 50 < x < 200),
+        ("nasdaq", lambda k, n: "nasdaq" in k or "ndx" in k or "qqq" in k or "纳斯达克" in n or "纳指" in n, lambda x: x > 500),
+        ("sp500", lambda k, n: "spx" in k or "sp500" in k or "s&p" in k or "标普" in n, lambda x: x > 500),
+        ("gold", lambda k, n: "gold" in k or "xau" in k or "黄金" in n, lambda x: x > 10),
+        ("btc_max_pain", lambda k, n: "max_pain" in k or "maxpain" in k or "最大痛点" in n, lambda x: x > 1000),
+        ("btc_dvol", lambda k, n: "dvol" in k and "btc" in k, lambda x: 0 < x < 500),
+    ]
+
+    for attr, pred, rng in targets:
+        if getattr(result, attr, None) is not None:
+            continue
+        for item in result.raw_items:
+            key_l = (item.key or "").lower()
+            name = item.name or ""
+            val = item.value
+            if val is None:
+                continue
+            if pred(key_l, name) and rng(val):
+                setattr(result, attr, val)
+                break
 
 
 def create_bbx_source() -> BBXLiquidationSource:
