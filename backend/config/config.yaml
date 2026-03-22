@@ -90,6 +90,8 @@ processors:
     min_liq_cluster_usd: 10000000
     atr_multiplier_sl: 1.5
     volume_profile_bins: 50
+    # 狙击挂单最小盈亏比（与 AI 提示词、levels._calc_sniper_entries 一致）
+    min_sniper_rr: 2.5
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

@@ -66,6 +66,12 @@ export default function AIAnalysis() {
               </Section>
             )}
 
+            {aiResult.sniper_setup && (
+              <Section title="🎯 狙击挂单计划（高 R:R）">
+                <Markdown text={aiResult.sniper_setup} />
+              </Section>
+            )}
+
             {aiResult.entry_zones.length > 0 && (
               <Section title="🎯 入场观察区">
                 {aiResult.entry_zones.map((z, i) => (

@@ -182,6 +182,8 @@ export interface AIAnalysisResult {
   key_levels: { type: string; price: string; strength: string; reason: string }[];
   stop_loss_suggestion: { raw: string };
   entry_zones: { direction: string; raw: string; details: string[] }[];
+  /** 第四节「狙击挂单计划」解析文本 */
+  sniper_setup?: string;
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];
   raw_text: string;

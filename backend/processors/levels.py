@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from config.settings import get_settings
 from models.levels import (
     EntryZone,
     LevelAnalysis,
@@ -331,14 +332,14 @@ def _calc_sniper_entries(
     """
     狙击挂单计算（小亏大赚哲学）：
     在清算密集区边缘设置极端限价单，止损在真空区内，止盈指向对侧清算磁吸点。
-    只输出 R:R >= 2.5 的计划。
+    只输出 R:R >= min_sniper_rr（配置 processors.levels.min_sniper_rr，默认 2.5）的计划。
     """
     if not liq_map or atr <= 0:
         return []
 
     entries: list[SniperEntry] = []
     vacuums = liq_map.vacuum_zones or []
-    min_rr = 2.5
+    min_rr = float(get_settings().processors.levels.get("min_sniper_rr", 2.5))
 
     for cluster in liq_map.clusters_below[:3]:
         if cluster.distance_pct > 5 or cluster.distance_pct < 0.3:

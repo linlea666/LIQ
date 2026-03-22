@@ -9,7 +9,7 @@ import traceback
 
 from openai import AsyncOpenAI
 
-from ai.prompts import SYSTEM_PROMPT, build_user_prompt
+from ai.prompts import build_system_prompt, build_user_prompt
 from config.settings import get_settings
 from models.snapshot import AIAnalysisResult, AISnapshot
 
@@ -55,11 +55,11 @@ class AIAnalyzer:
                 response = await self._client.chat.completions.create(
                     model=self._model,
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": build_system_prompt()},
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.3,
-                    max_tokens=3000,
+                    max_tokens=4096,
                     timeout=self._timeout,
                 )
                 elapsed = time.time() - t0
@@ -120,6 +120,12 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
                     return val
         return ""
 
+    def _find_sniper_section() -> str:
+        for key, val in sections.items():
+            if "狙击" in key:
+                return val
+        return ""
+
     return AIAnalysisResult(
         coin=snapshot.coin,
         ts=int(time.time()),
@@ -128,6 +134,7 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
         key_levels=_parse_levels_table(_find_section("价位", "图谱", "Level")),
         stop_loss_suggestion={"raw": _find_section("止损", "Stop")},
         entry_zones=_parse_entry_zones(_find_section("入场", "观察区", "Entry")),
+        sniper_setup=_find_sniper_section(),
         risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
         raw_text=raw_text,

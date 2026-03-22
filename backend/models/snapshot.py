@@ -158,6 +158,7 @@ class AIAnalysisResult(BaseModel):
     key_levels: list[dict]
     stop_loss_suggestion: dict
     entry_zones: list[dict]
+    sniper_setup: str = ""
     risk_warnings: list[str]
     scenario_analysis: list[dict]
     raw_text: str
