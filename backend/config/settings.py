@@ -69,8 +69,17 @@ class ProcessorsConfig:
 
 
 @dataclass(frozen=True)
+class AIProviderConfig:
+    """单个 AI 提供商的配置"""
+    name: str
+    model: str
+    api_base: str
+    env_key: str
+
+
+@dataclass(frozen=True)
 class AIConfig:
-    provider: str
+    active: str
     model: str
     timeout_sec: int
     max_retries: int
@@ -78,6 +87,7 @@ class AIConfig:
     max_history: int
     api_key: str = ""
     api_base: str = ""
+    providers: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -152,15 +162,35 @@ def _build_settings(raw: dict) -> Settings:
     processors = ProcessorsConfig(**raw["processors"])
 
     ai_raw = raw["ai"]
+    active_provider = ai_raw.get("active", "openai")
+    providers_raw = ai_raw.get("providers", {})
+    providers: dict[str, AIProviderConfig] = {}
+    for name, p in providers_raw.items():
+        providers[name] = AIProviderConfig(
+            name=name,
+            model=p["model"],
+            api_base=p["api_base"],
+            env_key=p["env_key"],
+        )
+
+    if active_provider not in providers:
+        raise ValueError(
+            f"AI active provider '{active_provider}' not found in providers: {list(providers.keys())}"
+        )
+
+    active = providers[active_provider]
+    api_key = os.getenv(active.env_key, "") or os.getenv("AI_API_KEY", "")
+
     ai = AIConfig(
-        provider=ai_raw["provider"],
-        model=ai_raw["model"],
+        active=active_provider,
+        model=active.model,
         timeout_sec=ai_raw["timeout_sec"],
         max_retries=ai_raw["max_retries"],
         cooldown_sec=ai_raw["cooldown_sec"],
         max_history=ai_raw["max_history"],
-        api_key=os.getenv("AI_API_KEY", ""),
-        api_base=os.getenv("AI_API_BASE", ""),
+        api_key=api_key,
+        api_base=active.api_base,
+        providers=providers,
     )
 
     push = PushConfig(**raw["push"])

@@ -82,12 +82,20 @@ processors:
     spoofing_ttl_sec: 3
 
 ai:
-  provider: "openai"
-  model: "gpt-4o"
+  active: "deepseek"
   timeout_sec: 15
   max_retries: 2
   cooldown_sec: 30
   max_history: 5
+  providers:
+    openai:
+      model: "gpt-4o"
+      api_base: "https://api.openai.com/v1"
+      env_key: "OPENAI_API_KEY"
+    deepseek:
+      model: "deepseek-chat"
+      api_base: "https://api.deepseek.com"
+      env_key: "DEEPSEEK_API_KEY"
 
 push:
   ticker_interval_ms: 1000
