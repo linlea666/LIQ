@@ -122,6 +122,16 @@ class BBXExtendedSource(DataSource):
         """此类不走统一 fetch_with_retry 通道，各方法独立调用并自行标记健康状态"""
         return None
 
+    @staticmethod
+    def _is_response_ok(data: dict) -> bool:
+        """BBX 不同端点使用不同的成功标志（success / code / 无标志仅含 data）"""
+        if "success" in data:
+            return bool(data["success"])
+        code = data.get("code")
+        if code is not None:
+            return code in (0, "0", 200, "200")
+        return "data" in data
+
     async def fetch_multi_funding(self, coin: str = "btc") -> Optional[MultiFundingRateData]:
         """多交易所资金费率（BBX 一次返回 6 所 × current/3d/7d/30d）"""
         url = f"{self._cfg.funding_url}?lan=zh-Hans"
@@ -133,10 +143,12 @@ class BBXExtendedSource(DataSource):
             logger.error("BBX funding-rate fetch failed", exc_info=True)
             return None
 
-        if not data.get("success"):
+        if not self._is_response_ok(data):
+            logger.warning("BBX funding-rate bad response | keys=%s", list(data.keys()))
             return None
 
-        rows = data.get("data", {}).get("dataList", [])
+        raw_data = data.get("data", {})
+        rows = raw_data.get("dataList", []) if isinstance(raw_data, dict) else []
         coin_upper = coin.upper()
         exchanges: list[ExchangeFundingRate] = []
         for row in rows:
@@ -183,14 +195,15 @@ class BBXExtendedSource(DataSource):
             data = await self._get_json(url, method="POST", json_body=body)
             self._mark_success()
         except Exception:
-            self._mark_failure()
-            logger.error("BBX ls-ratio fetch failed | coin=%s", coin, exc_info=True)
+            # SOL 等小币种 BBX 可能不支持，仅降级为 WARNING 且不影响全局健康
+            logger.warning("BBX ls-ratio fetch failed | coin=%s", coin)
             return None
 
-        if not data.get("success"):
+        if not self._is_response_ok(data):
             return None
 
-        rows = data.get("data", {}).get("list", [])
+        raw_data = data.get("data", {})
+        rows = raw_data.get("list", []) if isinstance(raw_data, dict) else []
         exchanges: list[LongShortRatioExchange] = []
         for row in rows:
             long_pct = _safe_float(row.get("longRate"), 50)
@@ -226,10 +239,12 @@ class BBXExtendedSource(DataSource):
             logger.error("BBX etf-flow fetch failed", exc_info=True)
             return None
 
-        if not data.get("success"):
+        if not self._is_response_ok(data):
+            logger.warning("BBX etf-flow bad response | keys=%s", list(data.keys()))
             return None
 
-        rows = data.get("data", {}).get("list", [])
+        raw_data = data.get("data", {})
+        rows = raw_data.get("list", []) if isinstance(raw_data, dict) else (raw_data if isinstance(raw_data, list) else [])
         days: list[ETFFlowDay] = []
         for row in rows[:7]:
             total = _safe_float(row.get("totalNetflow"), 0)
@@ -261,10 +276,13 @@ class BBXExtendedSource(DataSource):
             logger.error("BBX global-liq fetch failed", exc_info=True)
             return None
 
-        if not data.get("success"):
+        if not self._is_response_ok(data):
+            logger.warning("BBX global-liq bad response | keys=%s", list(data.keys()))
             return None
 
         d = data.get("data", {})
+        if not isinstance(d, dict):
+            return None
         long_1h = _safe_float(d.get("longLiqUsd1h"), 0)
         short_1h = _safe_float(d.get("shortLiqUsd1h"), 0)
         long_24h = _safe_float(d.get("longLiqUsd24h"), 0)
@@ -293,52 +311,65 @@ class BBXExtendedSource(DataSource):
             logger.error("BBX market-index fetch failed", exc_info=True)
             return None
 
-        if not data.get("success"):
+        if not self._is_response_ok(data):
+            logger.warning("BBX market-index bad response | keys=%s", list(data.keys()))
             return None
 
-        items = data.get("data", {}).get("list", [])
-        if not items and isinstance(data.get("data"), list):
-            items = data["data"]
+        try:
+            raw_data = data.get("data")
+            if isinstance(raw_data, list):
+                items = raw_data
+            elif isinstance(raw_data, dict):
+                items = raw_data.get("list", [])
+            else:
+                items = []
 
-        key_map = {
-            "i:fgi:alternative": "fear_greed",
-            "i:bitcoin_percentage_of_market_capitalization": "btc_dominance",
-            "max_pain:btc": "btc_max_pain",
-            "i:dvol:btc": "btc_dvol",
-            "i:options_oi_ratio:btc": "btc_put_call_oi",
-            "i:mvrv:btc": "btc_mvrv",
-            "i:dxy": "dxy",
-            "i:nasdaq": "nasdaq",
-            "i:spx": "sp500",
-            "i:gold": "gold",
-            "i:btc_balance:binance": "binance_btc_balance",
-            "lsprbtc:okex": "okx_ls_ratio_btc",
-            "lsprbtc:binance": "binance_ls_ratio_btc",
-        }
+            key_map = {
+                "i:fgi:alternative": "fear_greed",
+                "i:bitcoin_percentage_of_market_capitalization": "btc_dominance",
+                "max_pain:btc": "btc_max_pain",
+                "i:dvol:btc": "btc_dvol",
+                "i:options_oi_ratio:btc": "btc_put_call_oi",
+                "i:mvrv:btc": "btc_mvrv",
+                "i:dxy": "dxy",
+                "i:nasdaq": "nasdaq",
+                "i:spx": "sp500",
+                "i:gold": "gold",
+                "i:btc_balance:binance": "binance_btc_balance",
+                "lsprbtc:okex": "okx_ls_ratio_btc",
+                "lsprbtc:binance": "binance_ls_ratio_btc",
+            }
 
-        result = MarketIndexData(ts=int(time.time()))
-        all_items: list[MarketIndexItem] = []
+            result = MarketIndexData(ts=int(time.time()))
+            all_items: list[MarketIndexItem] = []
 
-        for item in items:
-            key = item.get("key", "") or item.get("id", "")
-            name = item.get("name", "")
-            val = _safe_float(item.get("value") or item.get("last"))
-            if val is None:
-                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                key = item.get("key", "") or item.get("id", "")
+                name = item.get("name", "")
+                val = _safe_float(item.get("value") or item.get("last"))
+                if val is None:
+                    continue
 
-            all_items.append(MarketIndexItem(
-                key=key,
-                name=name,
-                value=val,
-                change_pct=_safe_float(item.get("changeRate") or item.get("change24h")),
-            ))
+                all_items.append(MarketIndexItem(
+                    key=key,
+                    name=name,
+                    value=val,
+                    change_pct=_safe_float(item.get("changeRate") or item.get("change24h")),
+                ))
 
-            attr = key_map.get(key)
-            if attr:
-                setattr(result, attr, val)
+                attr = key_map.get(key)
+                if attr:
+                    setattr(result, attr, val)
 
-        result.raw_items = all_items
-        return result
+            result.raw_items = all_items
+            if all_items:
+                logger.info("BBX market-index OK | items=%d", len(all_items))
+            return result
+        except Exception:
+            logger.error("BBX market-index parse error", exc_info=True)
+            return None
 
 
 def _safe_float(v: Any, default: Optional[float] = None) -> Optional[float]:

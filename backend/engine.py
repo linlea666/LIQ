@@ -21,7 +21,7 @@ from models.flow import (
 )
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationMap, LiquidationStats
-from models.market import OrderBookAnalysis, TickerData, VolumeProfileData
+from models.market import OrderBookAnalysis, OrderBookLevel, OrderBookSnapshot, TickerData, VolumeProfileData
 from models.snapshot import (
     AIAnalysisResult,
     AISnapshot,
@@ -32,7 +32,7 @@ from processors.cvd import build_cvd, detect_cvd_price_divergence
 from processors.levels import calculate_levels
 from processors.liquidation import process_liquidation_map
 from processors.market_temp import build_waterfall, calc_market_temperature
-from processors.orderbook import analyze_orderbook, parse_okx_orderbook
+from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_atr, calc_volume_profile
 from sources.bbx import create_bbx_source, create_bbx_extended_source
@@ -73,6 +73,10 @@ class CoinState:
         self.etf_flow: Optional[ETFFlowData] = None
         self.global_liq: Optional[GlobalLiquidationData] = None
         self.market_index: Optional[MarketIndexData] = None
+        # L2 orderbook 维护（books50-l2-tbt 增量更新）
+        self._raw_ob_asks: dict[float, list] = {}
+        self._raw_ob_bids: dict[float, list] = {}
+        self._last_ob_analysis_ts: float = 0
 
 
 class Engine:
@@ -129,7 +133,7 @@ class Engine:
                 asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
                 asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, stagger)),
                 asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, stagger + 1)),
-                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger + idx * 5)),
                 asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30, stagger)),
                 asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, stagger)),
                 asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, stagger)),
@@ -262,6 +266,7 @@ class Engine:
     async def _poll_cvd(self, coin: CoinConfig):
         state = self._states[coin.ccy]
         contract_points = await self._okx.fetch_taker_volume(coin, "CONTRACTS")
+        await asyncio.sleep(2)
         spot_points = await self._okx.fetch_taker_volume(coin, "SPOT")
 
         if contract_points:
@@ -322,17 +327,73 @@ class Engine:
         coin = self._inst_to_coin(inst_id)
         if not coin:
             return
+
         state = self._states[coin]
-        snapshot = parse_okx_orderbook(data, coin)
-        if snapshot and state.ticker:
+        action = data.get("action", "snapshot")
+        items = data.get("data", [])
+        if not items:
+            return
+        book_data = items[0]
+
+        if action == "snapshot":
+            state._raw_ob_asks = {float(a[0]): a for a in book_data.get("asks", [])}
+            state._raw_ob_bids = {float(b[0]): b for b in book_data.get("bids", [])}
+        else:
+            for a in book_data.get("asks", []):
+                price = float(a[0])
+                if float(a[1]) == 0:
+                    state._raw_ob_asks.pop(price, None)
+                else:
+                    state._raw_ob_asks[price] = a
+            for b in book_data.get("bids", []):
+                price = float(b[0])
+                if float(b[1]) == 0:
+                    state._raw_ob_bids.pop(price, None)
+                else:
+                    state._raw_ob_bids[price] = b
+
+        now = time.time()
+        if now - state._last_ob_analysis_ts < 2.0:
+            return
+        state._last_ob_analysis_ts = now
+
+        if not state.ticker or not state._raw_ob_asks or not state._raw_ob_bids:
+            return
+
+        try:
+            sorted_asks = sorted(state._raw_ob_asks.values(), key=lambda x: float(x[0]))
+            sorted_bids = sorted(state._raw_ob_bids.values(), key=lambda x: float(x[0]), reverse=True)
+
+            snapshot_obj = OrderBookSnapshot(
+                coin=coin,
+                ts=int(book_data.get("ts", 0)),
+                asks=[
+                    OrderBookLevel(
+                        price=float(a[0]), size=float(a[1]),
+                        order_count=int(a[3]) if len(a) > 3 else 0,
+                    )
+                    for a in sorted_asks
+                ],
+                bids=[
+                    OrderBookLevel(
+                        price=float(b[0]), size=float(b[1]),
+                        order_count=int(b[3]) if len(b) > 3 else 0,
+                    )
+                    for b in sorted_bids
+                ],
+                source="okx",
+            )
+
             cfg = self._settings.processors.orderbook
             threshold = cfg.get(f"whale_threshold_{coin.lower()}", 50)
             threshold_usd = cfg.get("whale_threshold_usd", 500000)
             state.orderbook = analyze_orderbook(
-                snapshot, state.ticker.last,
+                snapshot_obj, state.ticker.last,
                 wall_threshold_size=threshold,
                 wall_threshold_usd=threshold_usd,
             )
+        except Exception:
+            logger.error("Orderbook analysis failed | coin=%s", coin, exc_info=True)
 
     async def _on_trade(self, channel: str, data: dict):
         pass

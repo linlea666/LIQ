@@ -46,14 +46,17 @@ def detect_cvd_price_divergence(
     if len(cvd.series) < 12 or len(price_series) < 12:
         return cvd
 
-    n = len(cvd.series)
+    # 取两数组较短者对齐，避免切片越界导致 max([]) ValueError
+    n = min(len(cvd.series), len(price_series))
+    if n < 12:
+        return cvd
     half = n // 2
     earlier_prices = price_series[:half]
-    recent_prices = price_series[half:]
+    recent_prices = price_series[half:n]
     earlier_cvd = [p.cvd for p in cvd.series[:half]]
-    recent_cvd = [p.cvd for p in cvd.series[half:]]
+    recent_cvd = [p.cvd for p in cvd.series[half:n]]
 
-    if not earlier_prices or not earlier_cvd:
+    if not earlier_prices or not recent_prices or not earlier_cvd or not recent_cvd:
         return cvd
 
     earlier_price_max = max(earlier_prices)
