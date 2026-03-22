@@ -104,16 +104,17 @@ class Engine:
             asyncio.create_task(self._okx_ws.start(coins)),
         ]
 
-        for ccy in self._settings.supported_coins:
+        for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
+            stagger = idx * 2
             tasks.extend([
-                asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30)),
-                asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10)),
-                asyncio.create_task(self._poll_loop(f"okx_fr_{ccy}", self._poll_funding, coin, 60)),
-                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60)),
-                asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30)),
-                asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10)),
-                asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5)),
+                asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_fr_{ccy}", self._poll_funding, coin, 60, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30, stagger)),
+                asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, stagger)),
+                asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, stagger)),
             ])
 
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -128,7 +129,9 @@ class Engine:
 
     # ── 轮询循环 ──
 
-    async def _poll_loop(self, name: str, fn, coin: CoinConfig, interval: int):
+    async def _poll_loop(self, name: str, fn, coin: CoinConfig, interval: int, initial_delay: float = 0):
+        if initial_delay > 0:
+            await asyncio.sleep(initial_delay)
         logger.info("Poll loop started | name=%s coin=%s interval=%ds", name, coin.ccy, interval)
         while self._running:
             try:

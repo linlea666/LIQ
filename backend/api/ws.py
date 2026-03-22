@@ -38,9 +38,9 @@ async def subscribe(sid, data):
         return
 
     for c in supported:
-        sio.leave_room(sid, f"coin:{c}")
+        await sio.leave_room(sid, f"coin:{c}")
 
-    sio.enter_room(sid, f"coin:{coin}")
+    await sio.enter_room(sid, f"coin:{coin}")
     logger.info("Client subscribed | sid=%s coin=%s", sid, coin)
     await sio.emit("subscribed", {"coin": coin}, to=sid)
 
