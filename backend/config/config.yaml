@@ -83,7 +83,7 @@ processors:
 
 ai:
   active: "deepseek"
-  timeout_sec: 15
+  timeout_sec: 60
   max_retries: 2
   cooldown_sec: 30
   max_history: 5
