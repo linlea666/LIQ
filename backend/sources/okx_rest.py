@@ -35,7 +35,9 @@ class OKXRestSource(DataSource):
     async def fetch_funding_rate(self, coin: CoinConfig) -> Optional[FundingRateData]:
         url = f"{self._base}/public/funding-rate?instId={coin.symbol_okx_swap}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") != "0" or not data.get("data"):
                 logger.warning("OKX funding-rate empty | coin=%s", coin.ccy)
                 return None
@@ -59,6 +61,7 @@ class OKXRestSource(DataSource):
                 interpretation=interp,
             )
         except Exception:
+            self._mark_failure()
             logger.error("OKX funding-rate failed | coin=%s", coin.ccy, exc_info=True)
             return None
 
@@ -67,7 +70,9 @@ class OKXRestSource(DataSource):
     async def fetch_oi(self, coin: CoinConfig) -> Optional[OISnapshot]:
         url = f"{self._base}/public/open-interest?instType=SWAP&instId={coin.symbol_okx_swap}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") != "0" or not data.get("data"):
                 return None
             item = data["data"][0]
@@ -79,6 +84,7 @@ class OKXRestSource(DataSource):
                 source="okx",
             )
         except Exception:
+            self._mark_failure()
             logger.error("OKX open-interest failed | coin=%s", coin.ccy, exc_info=True)
             return None
 
@@ -90,7 +96,9 @@ class OKXRestSource(DataSource):
             f"?ccy={coin.ccy}&instType={inst_type}&period=5m"
         )
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") != "0" or not data.get("data"):
                 logger.warning("OKX taker-volume empty | coin=%s type=%s", coin.ccy, inst_type)
                 return []
@@ -112,6 +120,7 @@ class OKXRestSource(DataSource):
                 ))
             return result
         except Exception:
+            self._mark_failure()
             logger.error("OKX taker-volume failed | coin=%s type=%s", coin.ccy, inst_type, exc_info=True)
             return []
 
@@ -124,7 +133,9 @@ class OKXRestSource(DataSource):
             f"?instId={coin.symbol_okx_swap}&bar={bar}&limit={limit}"
         )
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") != "0" or not data.get("data"):
                 return []
             candles: list[CandleData] = []
@@ -142,6 +153,7 @@ class OKXRestSource(DataSource):
             candles.sort(key=lambda c: c.ts)
             return candles
         except Exception:
+            self._mark_failure()
             logger.error("OKX candles failed | coin=%s bar=%s", coin.ccy, bar, exc_info=True)
             return []
 
@@ -150,20 +162,26 @@ class OKXRestSource(DataSource):
     async def fetch_mark_price(self, coin: CoinConfig) -> Optional[float]:
         url = f"{self._base}/public/mark-price?instType=SWAP&instId={coin.symbol_okx_swap}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") == "0" and data.get("data"):
                 return float(data["data"][0]["markPx"])
         except Exception:
+            self._mark_failure()
             logger.error("OKX mark-price failed | coin=%s", coin.ccy, exc_info=True)
         return None
 
     async def fetch_index_price(self, coin: CoinConfig) -> Optional[float]:
         url = f"{self._base}/market/index-tickers?instId={coin.symbol_okx_spot}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if data.get("code") == "0" and data.get("data"):
                 return float(data["data"][0]["idxPx"])
         except Exception:
+            self._mark_failure()
             logger.error("OKX index-price failed | coin=%s", coin.ccy, exc_info=True)
         return None
 

@@ -47,6 +47,15 @@ class DataSource(ABC):
     def get_poll_interval(self) -> int:
         ...
 
+    def _mark_success(self, latency_ms: float = 0):
+        self._error_count = 0
+        self._last_success_ts = int(time.time())
+        if latency_ms > 0:
+            self._last_latency_ms = latency_ms
+
+    def _mark_failure(self):
+        self._error_count += 1
+
     def health(self) -> SourceHealth:
         if self._error_count == 0 and self._last_success_ts > 0:
             status = "connected"

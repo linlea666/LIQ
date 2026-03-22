@@ -17,12 +17,37 @@ from api.ws import sio
 from config.settings import get_settings
 from engine import Engine
 
+from collections import deque
+
+LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+log_buffer: deque[dict] = deque(maxlen=500)
+
+
+class MemoryHandler(logging.Handler):
+    """将日志写入内存 deque，供 /api/logs 端点读取"""
+    def emit(self, record: logging.LogRecord):
+        log_buffer.append({
+            "ts": record.created,
+            "time": self.format(record),
+            "level": record.levelname,
+            "name": record.name,
+            "msg": record.getMessage(),
+        })
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format=LOG_FORMAT,
+    datefmt=LOG_DATEFMT,
     stream=sys.stdout,
 )
+
+mem_handler = MemoryHandler()
+mem_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+logging.getLogger().addHandler(mem_handler)
+
 logger = logging.getLogger("liq")
 
 engine = Engine()

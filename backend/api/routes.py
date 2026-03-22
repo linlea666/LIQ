@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -137,4 +138,28 @@ async def health_check():
     return {
         "status": "running",
         "sources": _engine.get_source_health(),
+        "ai_available": _engine.ai_available,
+        "ai_provider": get_settings().ai.active,
     }
+
+
+@router.get("/logs")
+async def get_logs(
+    level: Optional[str] = Query(None, description="Filter by level: INFO, WARNING, ERROR"),
+    limit: int = Query(200, ge=1, le=500),
+    keyword: Optional[str] = Query(None, description="Filter by keyword"),
+):
+    """获取后端运行日志（内存缓存，最近500条）"""
+    from main import log_buffer
+
+    logs = list(log_buffer)
+
+    if level:
+        level_upper = level.upper()
+        logs = [l for l in logs if l["level"] == level_upper]
+
+    if keyword:
+        kw_lower = keyword.lower()
+        logs = [l for l in logs if kw_lower in l["msg"].lower() or kw_lower in l["name"].lower()]
+
+    return {"total": len(logs), "logs": logs[-limit:]}

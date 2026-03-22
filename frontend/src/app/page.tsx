@@ -17,7 +17,9 @@ import { API_BASE } from "@/lib/constants";
 export default function Dashboard() {
   useWebSocket();
 
+  const displayMode = useMarketStore((s) => s.displayMode);
   const setSourceHealth = useMarketStore((s) => s.setSourceHealth);
+  const setAIAvailable = useMarketStore((s) => s.setAIAvailable);
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -26,13 +28,14 @@ export default function Dashboard() {
         if (res.ok) {
           const data = await res.json();
           if (data.sources) setSourceHealth(data.sources);
+          if (data.ai_available !== undefined) setAIAvailable(data.ai_available);
         }
       } catch { /* silent */ }
     };
     fetchHealth();
     const timer = setInterval(fetchHealth, 10000);
     return () => clearInterval(timer);
-  }, [setSourceHealth]);
+  }, [setSourceHealth, setAIAvailable]);
 
   return (
     <div className="h-screen flex flex-col bg-slate-950">
@@ -55,10 +58,12 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Factor Cards Row */}
-      <div className="shrink-0 px-4 py-2 border-b border-slate-800">
-        <CoreFactors />
-      </div>
+      {/* Factor Cards Row (专业模式) */}
+      {displayMode === "pro" && (
+        <div className="shrink-0 px-4 py-2 border-b border-slate-800">
+          <CoreFactors />
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex min-h-0">
@@ -87,7 +92,6 @@ function ModeSelector() {
   const setDisplayMode = useMarketStore((s) => s.setDisplayMode);
   const modes = [
     { key: "beginner" as const, label: "小白" },
-    { key: "advanced" as const, label: "进阶" },
     { key: "pro" as const, label: "专业" },
   ];
 

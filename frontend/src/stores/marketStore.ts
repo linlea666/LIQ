@@ -17,15 +17,17 @@ interface MarketStore {
   aiLoading: boolean;
   aiError: string | null;
   aiHistory: AIAnalysisResult[];
+  aiAvailable: boolean;
   setAIResult: (result: AIAnalysisResult) => void;
   setAILoading: (loading: boolean) => void;
   setAIError: (error: string | null) => void;
+  setAIAvailable: (available: boolean) => void;
 
   sourceHealth: SourceHealth[];
   setSourceHealth: (health: SourceHealth[]) => void;
 
-  displayMode: "beginner" | "advanced" | "pro";
-  setDisplayMode: (mode: "beginner" | "advanced" | "pro") => void;
+  displayMode: "beginner" | "pro";
+  setDisplayMode: (mode: "beginner" | "pro") => void;
 
   aiPanelOpen: boolean;
   setAIPanelOpen: (open: boolean) => void;
@@ -48,6 +50,7 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
   aiLoading: false,
   aiError: null,
   aiHistory: [],
+  aiAvailable: false,
   setAIResult: (result) =>
     set((state) => ({
       aiResult: result,
@@ -57,11 +60,12 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
     })),
   setAILoading: (loading) => set({ aiLoading: loading, aiError: null }),
   setAIError: (error) => set({ aiError: error, aiLoading: false }),
+  setAIAvailable: (available) => set({ aiAvailable: available }),
 
   sourceHealth: [],
   setSourceHealth: (health) => set({ sourceHealth: health }),
 
-  displayMode: "advanced",
+  displayMode: "pro",
   setDisplayMode: (mode) => set({ displayMode: mode }),
 
   aiPanelOpen: false,

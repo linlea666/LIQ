@@ -35,7 +35,9 @@ class BinanceRestSource(DataSource):
             return None
         url = f"{self._base}/fapi/v1/premiumIndex?symbol={coin.symbol_binance}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if isinstance(data, dict) and "lastFundingRate" in data:
                 return float(data["lastFundingRate"])
             if isinstance(data, dict) and data.get("code"):
@@ -45,6 +47,7 @@ class BinanceRestSource(DataSource):
                 )
             return None
         except Exception:
+            self._mark_failure()
             logger.error("Binance funding-rate failed | coin=%s", coin.ccy, exc_info=True)
             return None
 
@@ -53,7 +56,9 @@ class BinanceRestSource(DataSource):
             return None
         url = f"{self._base}/fapi/v1/openInterest?symbol={coin.symbol_binance}"
         try:
+            t0 = time.time()
             data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
             if isinstance(data, dict) and "openInterest" in data:
                 oi = float(data["openInterest"])
                 return OISnapshot(
@@ -65,6 +70,7 @@ class BinanceRestSource(DataSource):
                 )
             return None
         except Exception:
+            self._mark_failure()
             logger.error("Binance OI failed | coin=%s", coin.ccy, exc_info=True)
             return None
 

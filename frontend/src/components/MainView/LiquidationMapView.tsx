@@ -12,18 +12,19 @@ export default function LiquidationMapView() {
   const ticker = useMarketStore((s) => s.data[s.coin]?.ticker);
   const [liqData, setLiqData] = useState<LiquidationMap | null>(null);
   const [activeLeverage, setActiveLeverage] = useState<string>("all");
+  const [activeCycle, setActiveCycle] = useState<string>("24h");
 
   useEffect(() => {
     const fetchLiq = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/liquidation/${coin}?cycle=24h`);
+        const res = await fetch(`${API_BASE}/api/liquidation/${coin}?cycle=${activeCycle}`);
         if (res.ok) setLiqData(await res.json());
       } catch { /* handled by health status */ }
     };
     fetchLiq();
     const timer = setInterval(fetchLiq, 30000);
     return () => clearInterval(timer);
-  }, [coin]);
+  }, [coin, activeCycle]);
 
   if (!liqData || !ticker) {
     return <div className="flex items-center justify-center h-64 text-slate-500">等待清算地图数据...</div>;
@@ -68,6 +69,21 @@ export default function LiquidationMapView() {
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
+        <span className="text-sm text-slate-400">周期:</span>
+        {["24h", "7d"].map((c) => (
+          <button
+            key={c}
+            onClick={() => setActiveCycle(c)}
+            className={`px-2 py-0.5 text-xs rounded ${
+              activeCycle === c
+                ? "bg-blue-600 text-white"
+                : "bg-slate-700 text-slate-400 hover:text-white"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+        <span className="mx-2 border-l border-slate-700 h-4" />
         <span className="text-sm text-slate-400">杠杆筛选:</span>
         {leverages.map((l) => (
           <button
