@@ -102,3 +102,5 @@ server:
   cors_origins:
     - "http://localhost:3000"
     - "http://localhost:3001"
+    - "http://8.217.240.76:8801"
+    - "http://8.217.240.76"
