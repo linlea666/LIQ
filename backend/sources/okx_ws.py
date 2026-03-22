@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Optional
 
 import aiohttp
 
@@ -16,67 +16,41 @@ logger = logging.getLogger(__name__)
 
 Callback = Callable[[str, dict], Coroutine[Any, Any, None]]
 
+HEAVY_CHANNELS = ["books50-l2-tbt"]
+
 
 class OKXWebSocketSource:
-    """OKX 公开 WebSocket 频道管理"""
+    """OKX 公开 WebSocket 频道管理（支持分层订阅）"""
 
     def __init__(self):
         cfg = get_settings().okx
         self._ws_url = cfg.ws_url
         self._channels = cfg.ws_channels
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._session: aiohttp.ClientSession | None = None
+        self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self._session: Optional[aiohttp.ClientSession] = None
         self._running = False
         self._callbacks: dict[str, list[Callback]] = {}
-        self._subscribed_coins: set[str] = set()
         self._reconnect_count = 0
         self._max_reconnect = 50
+        self._all_coins: list[CoinConfig] = []
+        self._active_coins_ws: set[str] = set()
 
     def on(self, channel: str, callback: Callback):
         """注册频道回调"""
         self._callbacks.setdefault(channel, []).append(callback)
 
-    async def subscribe_coin(self, coin: CoinConfig):
-        """为指定币种订阅所有配置频道"""
-        if not self._ws or self._ws.closed:
-            logger.warning("OKX WS not connected, cannot subscribe | coin=%s", coin.ccy)
-            return
-
-        args = []
-        for ch in self._channels:
-            if ch == "liquidation-orders":
-                args.append({"channel": ch, "instType": "SWAP"})
-            else:
-                args.append({"channel": ch, "instId": coin.symbol_okx_swap})
-
-        msg = {"op": "subscribe", "args": args}
-        await self._ws.send_json(msg)
-        self._subscribed_coins.add(coin.ccy)
-        logger.info("OKX WS subscribed | coin=%s channels=%s", coin.ccy, self._channels)
-
-    async def unsubscribe_coin(self, coin: CoinConfig):
-        """取消指定币种的订阅"""
-        if not self._ws or self._ws.closed:
-            return
-
-        args = []
-        for ch in self._channels:
-            if ch == "liquidation-orders":
-                args.append({"channel": ch, "instType": "SWAP"})
-            else:
-                args.append({"channel": ch, "instId": coin.symbol_okx_swap})
-
-        msg = {"op": "unsubscribe", "args": args}
-        await self._ws.send_json(msg)
-        self._subscribed_coins.discard(coin.ccy)
-        logger.info("OKX WS unsubscribed | coin=%s", coin.ccy)
-
-    async def start(self, coins: list[CoinConfig]):
-        """启动 WebSocket 连接并订阅所有币种"""
+    async def start(self, coins: list[CoinConfig], active_coins: Optional[set[str]] = None):
+        """启动 WebSocket 连接并按分层策略订阅"""
         self._running = True
+        self._all_coins = coins
+        if active_coins is not None:
+            self._active_coins_ws = active_coins.copy()
+        else:
+            self._active_coins_ws = {c.ccy for c in coins}
+
         while self._running and self._reconnect_count < self._max_reconnect:
             try:
-                await self._connect_and_listen(coins)
+                await self._connect_and_listen()
             except Exception:
                 self._reconnect_count += 1
                 wait = min(2 ** self._reconnect_count, 60)
@@ -90,15 +64,14 @@ class OKXWebSocketSource:
         if self._reconnect_count >= self._max_reconnect:
             logger.error("OKX WS max reconnect reached, giving up")
 
-    async def _connect_and_listen(self, coins: list[CoinConfig]):
+    async def _connect_and_listen(self):
         self._session = aiohttp.ClientSession()
         try:
             self._ws = await self._session.ws_connect(self._ws_url, heartbeat=25)
             self._reconnect_count = 0
             logger.info("OKX WS connected | url=%s", self._ws_url)
 
-            for coin in coins:
-                await self.subscribe_coin(coin)
+            await self._subscribe_all()
 
             async for msg in self._ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -111,6 +84,42 @@ class OKXWebSocketSource:
                 await self._ws.close()
             if self._session and not self._session.closed:
                 await self._session.close()
+
+    async def _subscribe_all(self):
+        """重连时重新订阅：所有币种 tickers + 活跃币种 heavy channels + liquidation"""
+        for coin in self._all_coins:
+            baseline_args = [{"channel": "tickers", "instId": coin.symbol_okx_swap}]
+            await self._ws.send_json({"op": "subscribe", "args": baseline_args})
+
+            if coin.ccy in self._active_coins_ws:
+                heavy_args = [{"channel": ch, "instId": coin.symbol_okx_swap} for ch in HEAVY_CHANNELS]
+                await self._ws.send_json({"op": "subscribe", "args": heavy_args})
+
+        await self._ws.send_json({"op": "subscribe", "args": [
+            {"channel": "liquidation-orders", "instType": "SWAP"}
+        ]})
+        logger.info(
+            "OKX WS subscribed | coins=%s active_heavy=%s",
+            [c.ccy for c in self._all_coins], self._active_coins_ws,
+        )
+
+    async def subscribe_heavy_channels(self, coin: CoinConfig):
+        """动态订阅重量级频道（books50-l2-tbt）"""
+        self._active_coins_ws.add(coin.ccy)
+        if not self._ws or self._ws.closed:
+            return
+        args = [{"channel": ch, "instId": coin.symbol_okx_swap} for ch in HEAVY_CHANNELS]
+        await self._ws.send_json({"op": "subscribe", "args": args})
+        logger.info("OKX WS heavy subscribe | coin=%s", coin.ccy)
+
+    async def unsubscribe_heavy_channels(self, coin: CoinConfig):
+        """动态退订重量级频道"""
+        self._active_coins_ws.discard(coin.ccy)
+        if not self._ws or self._ws.closed:
+            return
+        args = [{"channel": ch, "instId": coin.symbol_okx_swap} for ch in HEAVY_CHANNELS]
+        await self._ws.send_json({"op": "unsubscribe", "args": args})
+        logger.info("OKX WS heavy unsubscribe | coin=%s", coin.ccy)
 
     async def _handle_message(self, raw: str):
         try:

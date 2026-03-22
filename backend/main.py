@@ -12,8 +12,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import router, set_engine
-from api.ws import sio
+from api.routes import router, set_engine as set_routes_engine
+from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
 
@@ -55,7 +55,8 @@ engine = Engine()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    set_engine(engine)
+    set_routes_engine(engine)
+    set_ws_engine(engine)
     task = asyncio.create_task(engine.start())
     logger.info("LIQ Engine started")
     yield

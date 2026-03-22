@@ -94,6 +94,10 @@ processors:
     whale_threshold_usd: 500000
     spoofing_ttl_sec: 3
 
+engine:
+  inactive_poll_sec: 120
+  grace_period_sec: 60
+
 ai:
   active: "deepseek"
   timeout_sec: 60

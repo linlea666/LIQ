@@ -17,6 +17,16 @@ sio = socketio.AsyncServer(
     engineio_logger=False,
 )
 
+_engine = None
+_sid_coin: dict[str, str] = {}
+_coin_viewer_count: dict[str, int] = {}
+
+
+def set_engine(engine):
+    """由 main.py 在启动时注入 Engine 实例"""
+    global _engine
+    _engine = engine
+
 
 @sio.event
 async def connect(sid, environ):
@@ -25,7 +35,12 @@ async def connect(sid, environ):
 
 @sio.event
 async def disconnect(sid):
-    logger.info("Client disconnected | sid=%s", sid)
+    old_coin = _sid_coin.pop(sid, None)
+    if old_coin:
+        _coin_viewer_count[old_coin] = max(0, _coin_viewer_count.get(old_coin, 0) - 1)
+        if _coin_viewer_count.get(old_coin, 0) == 0 and _engine:
+            _engine.mark_coin_viewer_left(old_coin)
+    logger.info("Client disconnected | sid=%s coin=%s", sid, old_coin)
 
 
 @sio.event
@@ -37,11 +52,23 @@ async def subscribe(sid, data):
         await sio.emit("error", {"msg": f"Unsupported coin: {coin}"}, to=sid)
         return
 
+    old_coin = _sid_coin.get(sid)
+    if old_coin and old_coin != coin:
+        _coin_viewer_count[old_coin] = max(0, _coin_viewer_count.get(old_coin, 0) - 1)
+        if _coin_viewer_count.get(old_coin, 0) == 0 and _engine:
+            _engine.mark_coin_viewer_left(old_coin)
+
+    _sid_coin[sid] = coin
+    _coin_viewer_count[coin] = _coin_viewer_count.get(coin, 0) + 1
+
     for c in supported:
         await sio.leave_room(sid, f"coin:{c}")
-
     await sio.enter_room(sid, f"coin:{coin}")
-    logger.info("Client subscribed | sid=%s coin=%s", sid, coin)
+
+    if _engine:
+        await _engine.activate_coin(coin)
+
+    logger.info("Client subscribed | sid=%s coin=%s viewers=%d", sid, coin, _coin_viewer_count.get(coin, 0))
     await sio.emit("subscribed", {"coin": coin}, to=sid)
 
 

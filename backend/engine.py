@@ -80,7 +80,7 @@ class CoinState:
 
 
 class Engine:
-    """主引擎：管理所有数据源和币种状态"""
+    """主引擎：分层轮询架构，默认币全速，非默认币按需激活"""
 
     def __init__(self):
         self._settings = get_settings()
@@ -94,6 +94,13 @@ class Engine:
         self._states: dict[str, CoinState] = {}
         self._running = False
 
+        self._default_coin = self._settings.default_coin
+        self._active_coins: set[str] = {self._default_coin}
+        self._coin_last_active: dict[str, float] = {}
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}
+        self._inactive_poll_sec = self._settings.engine.inactive_poll_sec
+        self._grace_period_sec = self._settings.engine.grace_period_sec
+
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy)
 
@@ -102,9 +109,13 @@ class Engine:
         return self._analyzer.available
 
     async def start(self):
-        """启动所有数据管线"""
+        """启动分层数据管线"""
         self._running = True
-        logger.info("Engine starting | coins=%s", self._settings.supported_coins)
+        logger.info(
+            "Engine starting | coins=%s default=%s inactive_poll=%ds grace=%ds",
+            self._settings.supported_coins, self._default_coin,
+            self._inactive_poll_sec, self._grace_period_sec,
+        )
 
         coins = [self._settings.get_coin(c) for c in self._settings.supported_coins]
 
@@ -114,10 +125,13 @@ class Engine:
         self._okx_ws.on("tickers", self._on_ticker)
 
         tasks = [
-            asyncio.create_task(self._okx_ws.start(coins)),
+            asyncio.create_task(
+                self._okx_ws.start(coins, active_coins={self._default_coin})
+            ),
+            asyncio.create_task(self._grace_check_loop()),
         ]
 
-        # BBX 扩展数据（全局，不按币种，用虚拟 coin=BTC 触发）
+        # 全局层（不分币种）
         btc_coin = self._settings.get_coin("BTC")
         tasks.extend([
             asyncio.create_task(self._poll_loop("bbx_market_idx", self._poll_market_index, btc_coin, 60, 0)),
@@ -128,27 +142,100 @@ class Engine:
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
             stagger = idx * 2
-            tasks.extend([
-                asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
-                asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
-                asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, stagger)),
-                asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, stagger + 1)),
-                asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger + idx * 5)),
-                asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30, stagger)),
-                asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, stagger)),
-                asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, stagger)),
-            ])
+
+            if ccy == self._default_coin:
+                # 默认币种：全速轮询
+                tasks.extend([
+                    asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
+                    asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
+                    asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, stagger)),
+                    asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, stagger + 1)),
+                    asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger + idx * 5)),
+                    asyncio.create_task(self._poll_loop(f"okx_candles_{ccy}", self._poll_candles, coin, 30, stagger)),
+                    asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, stagger)),
+                    asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, stagger)),
+                ])
+            else:
+                # 非默认币种：仅保底层（清算地图 + K 线）
+                tasks.extend([
+                    asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
+                    asyncio.create_task(self._poll_loop(
+                        f"okx_candles_{ccy}", self._poll_candles, coin, self._inactive_poll_sec, stagger,
+                    )),
+                ])
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def stop(self):
         self._running = False
+        for ccy, tasks in self._active_tasks.items():
+            for t in tasks:
+                t.cancel()
+        self._active_tasks.clear()
         await self._okx_ws.stop()
         await self._bbx.close()
         await self._bbx_ext.close()
         await self._okx.close()
         await self._binance.close()
         logger.info("Engine stopped")
+
+    # ── 活跃币种管理 ──
+
+    async def activate_coin(self, ccy: str):
+        """激活币种：启动活跃层轮询 + WS 深度订阅（幂等）"""
+        ccy = ccy.upper()
+        if ccy not in self._states:
+            return
+        self._coin_last_active.pop(ccy, None)
+        if ccy == self._default_coin or ccy in self._active_coins:
+            return
+
+        self._active_coins.add(ccy)
+        coin = self._settings.get_coin(ccy)
+        logger.info("Coin activated | ccy=%s", ccy)
+
+        self._active_tasks[ccy] = [
+            asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, 0)),
+            asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, 1)),
+            asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, 2)),
+            asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, 3)),
+            asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, 4)),
+            asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, 5)),
+        ]
+
+        await self._okx_ws.subscribe_heavy_channels(coin)
+
+    def mark_coin_viewer_left(self, ccy: str):
+        """标记某币种最后一个观察者离开，启动宽限期"""
+        ccy = ccy.upper()
+        if ccy == self._default_coin or ccy not in self._active_coins:
+            return
+        self._coin_last_active[ccy] = time.time()
+        logger.info("Coin grace period started | ccy=%s period=%ds", ccy, self._grace_period_sec)
+
+    async def _deactivate_coin(self, ccy: str):
+        """停用币种：取消活跃层任务 + WS 退订"""
+        if ccy == self._default_coin or ccy not in self._active_coins:
+            return
+        self._active_coins.discard(ccy)
+        self._coin_last_active.pop(ccy, None)
+
+        tasks = self._active_tasks.pop(ccy, [])
+        for t in tasks:
+            t.cancel()
+        logger.info("Coin deactivated | ccy=%s cancelled_tasks=%d", ccy, len(tasks))
+
+        coin = self._settings.get_coin(ccy)
+        await self._okx_ws.unsubscribe_heavy_channels(coin)
+
+    async def _grace_check_loop(self):
+        """定期检查宽限期，自动停用无观察者的币种"""
+        while self._running:
+            now = time.time()
+            for ccy in list(self._coin_last_active):
+                if now - self._coin_last_active[ccy] > self._grace_period_sec:
+                    await self._deactivate_coin(ccy)
+            await asyncio.sleep(10)
 
     # ── 轮询循环 ──
 

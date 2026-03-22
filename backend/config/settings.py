@@ -97,6 +97,12 @@ class AIConfig:
 
 
 @dataclass(frozen=True)
+class EngineConfig:
+    inactive_poll_sec: int = 120
+    grace_period_sec: int = 60
+
+
+@dataclass(frozen=True)
 class PushConfig:
     ticker_interval_ms: int
     factor_cards_interval_ms: int
@@ -122,6 +128,7 @@ class Settings:
     ai: AIConfig
     push: PushConfig
     server: ServerConfig
+    engine: EngineConfig = field(default_factory=EngineConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -202,6 +209,12 @@ def _build_settings(raw: dict) -> Settings:
     push = PushConfig(**raw["push"])
     server = ServerConfig(**raw["server"])
 
+    eng_raw = raw.get("engine", {})
+    engine_cfg = EngineConfig(
+        inactive_poll_sec=eng_raw.get("inactive_poll_sec", 120),
+        grace_period_sec=eng_raw.get("grace_period_sec", 60),
+    )
+
     return Settings(
         coins=coins,
         bbx=bbx,
@@ -211,6 +224,7 @@ def _build_settings(raw: dict) -> Settings:
         ai=ai,
         push=push,
         server=server,
+        engine=engine_cfg,
         default_coin=default_coin,
     )
 
