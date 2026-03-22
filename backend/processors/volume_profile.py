@@ -108,7 +108,7 @@ def calc_volume_profile(
 
 
 def calc_atr(candles: list[CandleData], period: int = 14) -> float:
-    """Average True Range"""
+    """Wilder's Smoothed ATR (exponential)"""
     if len(candles) < period + 1:
         return 0.0
 
@@ -121,4 +121,7 @@ def calc_atr(candles: list[CandleData], period: int = 14) -> float:
     if len(trs) < period:
         return sum(trs) / len(trs) if trs else 0.0
 
-    return sum(trs[-period:]) / period
+    atr = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        atr = (atr * (period - 1) + tr) / period
+    return atr

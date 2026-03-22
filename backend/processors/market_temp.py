@@ -14,6 +14,7 @@ from models.flow import (
     OIData, TakerFlowData,
 )
 from models.liquidation import LiquidationMap, LiquidationStats
+from models.market import OrderBookAnalysis
 
 from models.snapshot import (
     FactorCard,
@@ -21,24 +22,27 @@ from models.snapshot import (
     WaterfallData,
     WaterfallItem,
 )
+from processors.percentile import PercentileTracker
 
 logger = logging.getLogger(__name__)
 
 
 def calc_market_temperature(
     coin: str,
-    funding: FundingRateData | None,
-    oi: OIData | None,
-    cvd_contract: CVDData | None,
-    basis: BasisData | None,
-    liq_map: LiquidationMap | None,
-    liq_stats: LiquidationStats | None,
-    taker_flow: TakerFlowData | None,
+    funding: Optional[FundingRateData],
+    oi: Optional[OIData],
+    cvd_contract: Optional[CVDData],
+    basis: Optional[BasisData],
+    liq_map: Optional[LiquidationMap],
+    liq_stats: Optional[LiquidationStats],
+    taker_flow: Optional[TakerFlowData],
     atr: float = 0,
     ls_ratio: Optional[LongShortRatioData] = None,
     market_index: Optional[MarketIndexData] = None,
     etf_flow: Optional[ETFFlowData] = None,
     global_liq: Optional[GlobalLiquidationData] = None,
+    orderbook: Optional[OrderBookAnalysis] = None,
+    percentile_tracker: Optional[PercentileTracker] = None,
 ) -> Tuple[MarketTemperature, dict[str, float]]:
     """
     综合 12 个因子计算市场温度(0-100)和插针风险等级。
@@ -62,14 +66,20 @@ def calc_market_temperature(
         d1_summary = "上扫空头" if ratio > 1.2 else "下扫多头" if ratio < 0.8 else "多空均衡"
     factor_scores["liq_imbalance"] = d1_score
 
-    # D2: CVD动向
+    # D2: CVD动向（趋势归一化：用 trend + 背离来驱动，避免绝对值对小币不敏感）
     d2_score = 0.0
     d2_value = "N/A"
     d2_sub = ""
     d2_summary = "数据不足"
     if cvd_contract:
-        d2_score = min(cvd_contract.delta_1h / 1e5, 50) if cvd_contract.delta_1h > 0 else max(cvd_contract.delta_1h / 1e5, -50)
+        trend_map = {"rising": 25, "declining": -25, "flat": 0}
+        d2_score = float(trend_map.get(cvd_contract.trend_1h, 0))
         delta_m = cvd_contract.delta_1h / 1e6
+        if abs(delta_m) > 1:
+            d2_score += max(min(delta_m * 5, 25), -25)
+        if cvd_contract.has_divergence:
+            d2_score = -abs(d2_score) * 0.6 if "顶背离" in (cvd_contract.divergence_note or "") else abs(d2_score) * 0.6
+        d2_score = max(-50, min(50, d2_score))
         d2_value = f"{delta_m:+.1f}M" if abs(delta_m) > 0.1 else "~0"
         d2_sub = f"合约:{cvd_contract.trend_1h}"
         d2_summary = "买方主导" if cvd_contract.trend_1h == "rising" else "卖方主导" if cvd_contract.trend_1h == "declining" else "多空拉锯"
@@ -126,13 +136,14 @@ def calc_market_temperature(
         d5_summary = basis.interpretation or ("合约偏贵" if basis.basis_pct > 0.1 else "合约折价" if basis.basis_pct < -0.1 else "中性")
     factor_scores["basis"] = d5_score
 
-    # D6: 买卖力量
+    # D6: 买卖力量（灵敏度提升：±5%偏差即得满分的1/3）
     d6_score = 0.0
     d6_value = "N/A"
     d6_sub = ""
     d6_summary = "数据不足"
     if taker_flow:
-        d6_score = (taker_flow.buy_ratio - 0.5) * 100
+        deviation = taker_flow.buy_ratio - 0.5
+        d6_score = max(-50, min(50, deviation * 333))
         d6_value = f"{'买' if taker_flow.buy_ratio > 0.5 else '卖'}>{('买' if taker_flow.buy_ratio <= 0.5 else '卖')}"
         d6_sub = f"买{taker_flow.buy_ratio:.0%} 卖{taker_flow.sell_ratio:.0%}"
         d6_summary = "买方强势" if taker_flow.dominant == "buyers" else "卖方强势" if taker_flow.dominant == "sellers" else "势均力敌"
@@ -248,23 +259,36 @@ def calc_market_temperature(
     else:
         temp_label = "极冷"
 
+    active_cnt = sum(1 for v in factor_scores.values() if abs(v) > 10)
+    if active_cnt >= 4:
+        if temp > 55:
+            temp_label += "(多因子共振看多)"
+        elif temp < 45:
+            temp_label += "(多因子共振看空)"
+
     # ── 插针风险 ──
-    pin_risk = _calc_pin_risk_level(liq_map, oi, cvd_contract)
+    pin_risk = _calc_pin_risk_level(liq_map, oi, cvd_contract, funding, orderbook)
+
+    # ── 百分位计算 ──
+    def _pctl(metric: str, val: float) -> float:
+        if percentile_tracker:
+            return percentile_tracker.percentile(coin, metric, val)
+        return 50.0
 
     # ── 组装因子卡片 ──
     cards = [
-        FactorCard(id="D1", name="清算失衡", value=d1_value, direction=_dir(d1_score), sub_text=d1_sub, percentile=50, summary=d1_summary),
-        FactorCard(id="D2", name="CVD动向", value=d2_value, direction=_dir(d2_score), sub_text=d2_sub, percentile=50, summary=d2_summary),
-        FactorCard(id="D3", name="OI杠杆", value=d3_value, direction=_dir(d3_score), sub_text=d3_sub, percentile=50, summary=d3_summary),
-        FactorCard(id="D4", name="费率拥挤", value=d4_value, direction=_dir(d4_score), sub_text=d4_sub, percentile=50, summary=d4_summary),
-        FactorCard(id="D5", name="期现溢价", value=d5_value, direction=_dir(d5_score), sub_text=d5_sub, percentile=50, summary=d5_summary),
-        FactorCard(id="D6", name="买卖力量", value=d6_value, direction=_dir(d6_score), sub_text=d6_sub, percentile=50, summary=d6_summary),
-        FactorCard(id="D7", name="波幅范围", value=d7_value, direction="neutral", sub_text=d7_sub, percentile=50, summary=d7_summary),
-        FactorCard(id="D8", name="爆仓烈度", value=d8_value, direction=_dir(d8_score), sub_text=d8_sub, percentile=50, summary=d8_summary),
-        FactorCard(id="D9", name="多空比", value=d9_value, direction=_dir(d9_score), sub_text=d9_sub, percentile=50, summary=d9_summary),
-        FactorCard(id="D10", name="恐惧贪婪", value=d10_value, direction=_dir(d10_score), sub_text=d10_sub, percentile=50, summary=d10_summary),
-        FactorCard(id="D11", name="ETF资金", value=d11_value, direction=_dir(d11_score), sub_text=d11_sub, percentile=50, summary=d11_summary),
-        FactorCard(id="D12", name="全网爆仓", value=d12_value, direction=_dir(d12_score), sub_text=d12_sub, percentile=50, summary=d12_summary),
+        FactorCard(id="D1", name="清算失衡", value=d1_value, direction=_dir(d1_score), sub_text=d1_sub, percentile=_pctl("liq_imb", d1_score), summary=d1_summary),
+        FactorCard(id="D2", name="CVD动向", value=d2_value, direction=_dir(d2_score), sub_text=d2_sub, percentile=_pctl("cvd", d2_score), summary=d2_summary),
+        FactorCard(id="D3", name="OI杠杆", value=d3_value, direction=_dir(d3_score), sub_text=d3_sub, percentile=_pctl("oi", oi.change_1h_pct if oi else 0), summary=d3_summary),
+        FactorCard(id="D4", name="费率拥挤", value=d4_value, direction=_dir(d4_score), sub_text=d4_sub, percentile=_pctl("funding", funding.avg_rate if funding else 0), summary=d4_summary),
+        FactorCard(id="D5", name="期现溢价", value=d5_value, direction=_dir(d5_score), sub_text=d5_sub, percentile=_pctl("basis", basis.basis_pct if basis else 0), summary=d5_summary),
+        FactorCard(id="D6", name="买卖力量", value=d6_value, direction=_dir(d6_score), sub_text=d6_sub, percentile=_pctl("taker", taker_flow.buy_ratio if taker_flow else 0.5), summary=d6_summary),
+        FactorCard(id="D7", name="波幅范围", value=d7_value, direction="neutral", sub_text=d7_sub, percentile=_pctl("atr", atr), summary=d7_summary),
+        FactorCard(id="D8", name="爆仓烈度", value=d8_value, direction=_dir(d8_score), sub_text=d8_sub, percentile=_pctl("liq_int", d8_score), summary=d8_summary),
+        FactorCard(id="D9", name="多空比", value=d9_value, direction=_dir(d9_score), sub_text=d9_sub, percentile=_pctl("ls", ls_ratio.avg_ratio if ls_ratio else 1.0), summary=d9_summary),
+        FactorCard(id="D10", name="恐惧贪婪", value=d10_value, direction=_dir(d10_score), sub_text=d10_sub, percentile=_pctl("fgi", market_index.fear_greed if market_index and market_index.fear_greed else 50), summary=d10_summary),
+        FactorCard(id="D11", name="ETF资金", value=d11_value, direction=_dir(d11_score), sub_text=d11_sub, percentile=_pctl("etf", etf_flow.net_3d if etf_flow else 0), summary=d11_summary),
+        FactorCard(id="D12", name="全网爆仓", value=d12_value, direction=_dir(d12_score), sub_text=d12_sub, percentile=_pctl("gliq", d12_score), summary=d12_summary),
     ]
 
     result = MarketTemperature(
@@ -365,16 +389,19 @@ def _estimate_contribution(card: FactorCard) -> float:
 
 
 def _calc_pin_risk_level(
-    liq_map: LiquidationMap | None,
-    oi: OIData | None,
-    cvd: CVDData | None,
+    liq_map: Optional[LiquidationMap],
+    oi: Optional[OIData],
+    cvd: Optional[CVDData],
+    funding: Optional[FundingRateData] = None,
+    orderbook: Optional[OrderBookAnalysis] = None,
 ) -> tuple[str, str]:
     """
-    插针风险等级:
-    - low: 清算池远, OI正常
-    - attention: 清算池<2%, OI在堆积
-    - high: 清算池<1%, OI极端+CVD背离迹象
-    - extreme: 即将触碰清算池
+    插针风险等级（5维综合）:
+    1. 清算池距离
+    2. OI 变化
+    3. CVD 背离
+    4. 资金费率极端（高费率 = 拥挤方向被猎杀概率高）
+    5. 订单簿薄弱（深度不足 = 滑点大、插针容易穿透）
     """
     risk_score = 0
 
@@ -400,11 +427,23 @@ def _calc_pin_risk_level(
     if cvd and cvd.has_divergence:
         risk_score += 2
 
-    if risk_score >= 6:
+    if funding and abs(funding.avg_rate) > 0.0005:
+        risk_score += 2
+    elif funding and abs(funding.avg_rate) > 0.0003:
+        risk_score += 1
+
+    if orderbook:
+        total_depth = orderbook.bid_total_usd + orderbook.ask_total_usd
+        if total_depth < 2_000_000:
+            risk_score += 2
+        elif total_depth < 5_000_000:
+            risk_score += 1
+
+    if risk_score >= 8:
         return "extreme", "🔴 极高"
-    elif risk_score >= 4:
+    elif risk_score >= 5:
         return "high", "🟠 中高"
-    elif risk_score >= 2:
+    elif risk_score >= 3:
         return "attention", "🟡 关注"
     else:
         return "low", "🟢 低风险"

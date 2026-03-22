@@ -28,6 +28,7 @@ class CoinConfig:
     symbol_binance: str
     symbol_bbx: str
     inst_family: str
+    ct_val: float = 1.0
     default: bool = False
 
 
@@ -161,6 +162,7 @@ def _build_settings(raw: dict) -> Settings:
             symbol_binance=coin_raw["symbol_binance"],
             symbol_bbx=coin_raw["symbol_bbx"],
             inst_family=coin_raw["inst_family"],
+            ct_val=float(coin_raw.get("ct_val", 1.0)),
             default=coin_raw.get("default", False),
         )
         coins[ccy] = cc

@@ -1,58 +1,81 @@
 """AI Prompt 模板管理"""
 
-SYSTEM_PROMPT = """你是一位华尔街级别的加密货币衍生品市场分析师，精通订单流分析、流动性微观结构和反止损猎杀策略。
-你的核心使命是通过多维实时数据，帮助交易员识别庄家猎杀意图，计算安全止损位和最优入场区。
+SYSTEM_PROMPT = """你是一位管理$5亿级加密货币基金的量化策略分析师，精通：
+- 订单流微观结构（清算地图、CVD、Taker Flow）
+- 流动性猎杀机制（止损猎杀、假突破、插针反转）
+- 宏观-微观联动框架（美元指数、纳斯达克、黄金 → 加密市场传导）
+- 极端盈亏比挂单策略（小亏大赚哲学）
+
+### 角色定位
+你是决策支持系统，不发交易指令。输出「如果做多/做空，最安全的止损和最佳入场在哪里」。
+
+### 分析框架（宏观→微观→策略）
+
+**第一层：宏观风向判断**
+- 美元指数(DXY)↑ → 风险资产承压 → 加密偏空
+- 纳斯达克/标普强势 → risk-on → 加密偏多
+- 黄金上涨 → 避险情绪 → 需结合DXY判断是否利多BTC
+- 若宏观数据缺失，明确标注「宏观数据暂缺，以下分析仅基于链上/衍生品数据」
+
+**第二层：微观数据交叉验证**
+每个价位判断必须≥2维度交叉验证。关键组合：
+- 清算簇 + 订单簿买/卖墙 → 支撑/阻力强度
+- CVD趋势 + OI变化 → 辨别真突破 vs 假突破
+- 资金费率极端 + 清算池方向 → 猎杀概率
+- Taker Flow + 期现溢价 → 主力方向
+
+**第三层：策略输出**
+- 止损必须在清算密集区之外、真空区内、避开整数关口、≥1.5x ATR
+- 入场观察区需列明确认信号（CVD转向/OI变化/订单簿变化）
+- 狙击挂单审核：对规则引擎预算的极端R:R入场点进行合理性判断
 
 ### 核心规则
-1. 你是决策支持工具，不发交易指令（不说"建议做多/做空"）
-2. 不输出"胜率"数字
-3. 所有价位必须有≥2个数据维度交叉验证
-4. 止损位必须满足：(a)在清算密集区之外 (b)避开整数关口 (c)位于真空区内
-5. 用简洁专业的中文输出
-6. 每段数据标注时效性（如"资金费率7d均值"vs"实时"）
+1. 不说"建议做多/做空"，只说"如果做多，观察区在X，止损在Y"
+2. 不输出胜率数字
+3. 所有价位标注数据来源
+4. 用简洁专业的中文输出
+5. 数据标注时效性（实时/1h/24h/7d）
 
-### 止损安全区专项指引（防猎杀核心）
-- 做多止损：必须放在下方清算密集区的下沿之下，优先选择真空区内
-- 做空止损：必须放在上方清算密集区的上沿之上，优先选择真空区内
-- 绝对禁止：将止损放在清算密集区内部（会被连带爆仓）
-- 避开陷阱：$X000, $X500 等整数价位是猎杀热区，偏移至少 0.1%
-- ATR 缓冲：止损距离不低于 1.5x ATR，高波动时提高到 2x
-
-### 输出格式（严格遵循）
+### 输出格式（严格遵循Markdown）
 
 ## 一、市场格局总览
-（3-4句总结：多空倾向、杠杆水平、资金流方向、情绪指数、宏观环境）
+（3-5句：宏观风向→杠杆水平→资金流方向→情绪→当前格局定性）
 
 ## 二、关键价位图谱
-| 类型 | 价位 | 强度(1-5) | 依据(≥2维度) |
+| 类型 | 价位区间 | 依据(≥2维数据源+时效) |
+（支撑区、阻力区、价值中枢各至少1行）
 
 ## 三、止损安全区建议
-做多方向：
+**做多方向：**
 - 建议止损区间：$xxx - $xxx
-- 防猎杀原理：（说明为何安全：清算真空区/避开整数/ATR倍数）
+- 防猎杀原理：（清算真空区/避开整数/ATR倍数，逐条列出）
 - 风险提示：哪些情况下此止损可能失效
 
-做空方向：
+**做空方向：**
 - 建议止损区间：$xxx - $xxx
 - 防猎杀原理：
 - 风险提示：
 
-## 四、入场观察区
-多单观察区：$xxx - $xxx
-- 共振因素：（列出支撑依据）
-- 确认信号：（CVD转正/OI企稳/订单簿买墙出现等）
+## 四、狙击挂单审核
+（审核规则引擎给出的极端R:R入场点，逐条评估合理性，补充宏观/微观确认条件）
+对每个方案：接受/调整/拒绝，并说明理由。
 
-空单观察区：$xxx - $xxx
+## 五、入场观察区
+**多单观察区：$xxx - $xxx**
+- 共振因素：
+- 确认信号：（CVD/OI/订单簿的具体变化条件）
+
+**空单观察区：$xxx - $xxx**
 - 共振因素：
 - 确认信号：
 
-## 五、当前风险提示
-（3-5条，按紧急程度排序，每条标注[高/中/低]）
+## 六、当前风险提示
+（3-5条，标注[高/中/低]，按紧急程度排序）
 
-## 六、场景推演
-场景A [概率定性：最可能]：（走势+触发条件+目标位）
-场景B [概率定性：次可能]：
-场景C [概率定性：极端]：（黑天鹅/突发事件情景）
+## 七、场景推演
+场景A [最可能]：走势+触发条件+目标位
+场景B [次可能]：
+场景C [极端]：黑天鹅情景
 """
 
 
@@ -68,7 +91,7 @@ def build_user_prompt(snapshot: dict) -> str:
         f"24h最低: ${snapshot.get('low_24h', 0):,.2f}",
         "",
         "### 1. 清算地图数据 [实时]",
-        f"多空失衡比: {snapshot.get('liq_imbalance_ratio', 0):.2f} (>1=空头清算多/看多倾向, <1=多头清算多/看空倾向)",
+        f"多空失衡比: {snapshot.get('liq_imbalance_ratio', 0):.2f} (>1=空头清算多/看多磁吸, <1=多头清算多/看空磁吸)",
     ]
 
     lines.append("\n上方清算密集区(空头清算):")
@@ -121,9 +144,14 @@ def build_user_prompt(snapshot: dict) -> str:
             avg7_str = f"{avg7*100:.4f}%" if avg7 is not None else "-"
             lines.append(f"  {fe.get('exchange','')}: 当前{curr_str} | 7d均{avg7_str}")
     else:
-        lines.append(f"  OKX: {snapshot.get('funding_rate_okx', 'N/A')}")
-        lines.append(f"  Binance: {snapshot.get('funding_rate_binance', 'N/A')}")
+        okx_r = snapshot.get("funding_rate_okx")
+        bn_r = snapshot.get("funding_rate_binance")
+        lines.append(f"  OKX: {okx_r * 100:.4f}%" if okx_r is not None else "  OKX: N/A")
+        lines.append(f"  Binance: {bn_r * 100:.4f}%" if bn_r is not None else "  Binance: N/A")
     lines.append(f"费率解读: {snapshot.get('funding_interpretation', 'N/A')}")
+    avg7d = snapshot.get("funding_avg_7d")
+    if avg7d is not None:
+        lines.append(f"7d均值: {avg7d*100:.4f}%")
 
     lines.extend([
         f"期现溢价: {snapshot.get('basis_pct', 0):+.4f}%",
@@ -158,24 +186,43 @@ def build_user_prompt(snapshot: dict) -> str:
     if g_long > 0 or g_short > 0:
         lines.append(f"全网24h多头爆仓: ${g_long / 1e6:.0f}M")
         lines.append(f"全网24h空头爆仓: ${g_short / 1e6:.0f}M")
-        lines.append(f"全网多空爆仓比: {g_long / g_short:.1f}" if g_short > 0 else "")
+        if g_short > 0:
+            lines.append(f"全网多空爆仓比: {g_long / g_short:.1f}")
 
     lines.extend([
         "",
-        "### 8. 成交分布 [1H K线]",
+        "### 8. 成交分布与波动率 [1H K线]",
         f"Volume Profile POC: ${snapshot.get('volume_profile_poc', 0):,.2f}",
         f"Value Area: ${snapshot.get('value_area_low', 0):,.2f} - ${snapshot.get('value_area_high', 0):,.2f}",
-        f"VWAP: ${snapshot.get('vwap', 0):,.2f}",
-        f"ATR(14): ${snapshot.get('atr_14', 0):,.2f}",
+        f"VWAP(多日成交加权): ${snapshot.get('vwap', 0):,.2f}",
+        f"ATR(14, Wilder): ${snapshot.get('atr_14', 0):,.2f}",
     ])
 
     lines.extend([
         "",
-        "### 9. 情绪与宏观",
+        "### 9. 宏观与情绪指标",
     ])
     fgi = snapshot.get("fear_greed_index")
     if fgi is not None:
         lines.append(f"恐惧贪婪指数: {int(fgi)} (0=极度恐惧, 100=极度贪婪)")
+    dxy = snapshot.get("dxy")
+    if dxy:
+        lines.append(f"美元指数(DXY): {dxy:.1f}")
+    nasdaq = snapshot.get("nasdaq")
+    if nasdaq:
+        nasdaq_chg = snapshot.get("nasdaq_change_pct")
+        chg_str = f" ({nasdaq_chg:+.1f}%)" if nasdaq_chg is not None else ""
+        lines.append(f"纳斯达克100: {nasdaq:,.1f}{chg_str}")
+    sp500 = snapshot.get("sp500")
+    if sp500:
+        sp_chg = snapshot.get("sp500_change_pct")
+        chg_str = f" ({sp_chg:+.1f}%)" if sp_chg is not None else ""
+        lines.append(f"标普500: {sp500:,.1f}{chg_str}")
+    gold = snapshot.get("gold")
+    if gold:
+        gold_chg = snapshot.get("gold_change_pct")
+        chg_str = f" ({gold_chg:+.1f}%)" if gold_chg is not None else ""
+        lines.append(f"黄金: ${gold:,.1f}{chg_str}")
     etf_3d = snapshot.get("etf_net_3d")
     if etf_3d is not None:
         lines.append(f"BTC ETF 3日净流: ${etf_3d / 1e6:.0f}M ({snapshot.get('etf_trend', '')})")
@@ -188,16 +235,49 @@ def build_user_prompt(snapshot: dict) -> str:
     dom = snapshot.get("btc_dominance")
     if dom:
         lines.append(f"BTC Dominance: {dom:.1f}%")
-    dxy = snapshot.get("dxy")
-    if dxy:
-        lines.append(f"美元指数(DXY): {dxy:.1f}")
 
+    # 规则引擎预计算的关键价位
     lines.extend([
         "",
-        "### 10. 综合评估",
+        "### 10. 规则引擎预计算 [供参考]",
         f"市场温度: {snapshot.get('market_temperature', 50):.0f}/100 (>80极热 <20极冷)",
         f"插针风险等级: {snapshot.get('pin_risk_level', 'N/A')}",
     ])
 
-    lines.append("\n请基于以上 10 组数据进行分析，严格按照指定格式输出。重点关注止损安全区的防猎杀设计。")
+    rule_supports = snapshot.get("rule_supports", [])
+    if rule_supports:
+        lines.append("支撑位(规则引擎):")
+        for s in rule_supports[:3]:
+            lines.append(f"  - ${s.get('price', 0):,.1f} [{','.join(s.get('sources', []))}]")
+
+    rule_resistances = snapshot.get("rule_resistances", [])
+    if rule_resistances:
+        lines.append("阻力位(规则引擎):")
+        for r in rule_resistances[:3]:
+            lines.append(f"  - ${r.get('price', 0):,.1f} [{','.join(r.get('sources', []))}]")
+
+    rule_sl = snapshot.get("rule_stop_loss", [])
+    if rule_sl:
+        lines.append("止损建议(规则引擎):")
+        for sl in rule_sl:
+            lines.append(f"  - {sl.get('direction','')}: ${sl.get('zone_from', 0):,.1f}-${sl.get('zone_to', 0):,.1f} "
+                         f"[{', '.join(sl.get('reasons', []))}]")
+
+    sniper = snapshot.get("sniper_entries", [])
+    if sniper:
+        lines.append("\n### 11. 狙击挂单方案（规则引擎预算，请审核）")
+        for i, se in enumerate(sniper):
+            d = se.get("direction", "")
+            lines.append(f"方案{i+1} [{d}]: "
+                         f"入场${se.get('entry_price', 0):,.1f} "
+                         f"止损${se.get('stop_loss', 0):,.1f} "
+                         f"TP1=${se.get('take_profit_1', 0):,.1f}(R:R {se.get('rr_ratio_1', 0):.1f}) "
+                         f"TP2=${se.get('take_profit_2', 0):,.1f}(R:R {se.get('rr_ratio_2', 0):.1f})")
+            for logic_line in se.get("logic", []):
+                lines.append(f"    - {logic_line}")
+
+    lines.append("\n请基于以上数据进行分析，严格按照指定格式输出。重点：")
+    lines.append("1. 止损安全区的防猎杀设计")
+    lines.append("2. 宏观→微观联动判断")
+    lines.append("3. 审核狙击挂单方案的合理性（接受/调整/拒绝）")
     return "\n".join(lines)

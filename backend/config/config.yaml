@@ -6,6 +6,7 @@ coins:
     symbol_bbx: "btcswapusdt:binance"
     inst_family: "BTC-USDT"
     ccy: "BTC"
+    ct_val: 0.01
     default: true
   ETH:
     symbol_okx_swap: "ETH-USDT-SWAP"
@@ -14,6 +15,7 @@ coins:
     symbol_bbx: "ethswapusdt:binance"
     inst_family: "ETH-USDT"
     ccy: "ETH"
+    ct_val: 0.1
   SOL:
     symbol_okx_swap: "SOL-USDT-SWAP"
     symbol_okx_spot: "SOL-USDT"
@@ -21,6 +23,7 @@ coins:
     symbol_bbx: "solswapusdt:binance"
     inst_family: "SOL-USDT"
     ccy: "SOL"
+    ct_val: 1
 
 sources:
   bbx:

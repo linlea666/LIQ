@@ -216,7 +216,18 @@ class BBXExtendedSource(DataSource):
                 ratio=round(ratio, 3),
             ))
 
-        avg_ratio = sum(e.ratio for e in exchanges) / len(exchanges) if exchanges else 1.0
+        _EXCHANGE_WEIGHT = {
+            "binance": 0.40, "okx": 0.25, "okex": 0.25,
+            "bybit": 0.15, "bitget": 0.08, "gate": 0.06,
+            "huobi": 0.06, "htx": 0.06,
+        }
+        total_w = 0.0
+        weighted_sum = 0.0
+        for e in exchanges:
+            w = _EXCHANGE_WEIGHT.get(e.exchange.lower(), 0.05)
+            weighted_sum += e.ratio * w
+            total_w += w
+        avg_ratio = weighted_sum / total_w if total_w > 0 else 1.0
         interp = "多头主导" if avg_ratio > 1.3 else "空头主导" if avg_ratio < 0.77 else "多空均衡"
 
         return LongShortRatioData(

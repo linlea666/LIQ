@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 def analyze_orderbook(
     snapshot: OrderBookSnapshot,
     current_price: float,
+    ct_val: float = 1.0,
     wall_threshold_size: float = 50.0,
     wall_threshold_usd: float = 0,
     top_n: int = 5,
@@ -21,6 +22,9 @@ def analyze_orderbook(
     1. 识别大买墙/卖墙（优先使用 USD 阈值）
     2. 计算总深度
     3. 计算价差
+
+    ct_val: 合约面值（BTC-USDT-SWAP=0.01 BTC/张, ETH=0.1, SOL=1）
+    OKX SWAP 订单簿的 size 单位是「张」，需乘以 ct_val 转为币本位。
     """
     usd_threshold = wall_threshold_usd if wall_threshold_usd > 0 else wall_threshold_size * current_price
 
@@ -30,23 +34,25 @@ def analyze_orderbook(
     ask_total = 0.0
 
     for level in snapshot.bids:
-        usd_value = level.size * current_price
+        base_size = level.size * ct_val
+        usd_value = base_size * current_price
         bid_total += usd_value
         if usd_value >= usd_threshold:
             bid_walls.append(WallInfo(
                 price=level.price,
-                size=level.size,
+                size=base_size,
                 size_usd=usd_value,
                 order_count=level.order_count,
             ))
 
     for level in snapshot.asks:
-        usd_value = level.size * current_price
+        base_size = level.size * ct_val
+        usd_value = base_size * current_price
         ask_total += usd_value
         if usd_value >= usd_threshold:
             ask_walls.append(WallInfo(
                 price=level.price,
-                size=level.size,
+                size=base_size,
                 size_usd=usd_value,
                 order_count=level.order_count,
             ))

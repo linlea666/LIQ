@@ -129,6 +129,20 @@ class AISnapshot(BaseModel):
     taker_buy_ratio: Optional[float] = None
     taker_dominant: str = ""
 
+    # Phase 4: 宏观市场数据
+    nasdaq: Optional[float] = None
+    nasdaq_change_pct: Optional[float] = None
+    gold: Optional[float] = None
+    gold_change_pct: Optional[float] = None
+    sp500: Optional[float] = None
+    sp500_change_pct: Optional[float] = None
+
+    # Phase 4: 规则引擎预计算结果
+    rule_supports: list[dict] = []
+    rule_resistances: list[dict] = []
+    rule_stop_loss: list[dict] = []
+    sniper_entries: list[dict] = []
+
     macro_context: Optional[MacroSnapshot] = None
 
 

@@ -94,16 +94,18 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
     """
     解析 AI 输出文本为结构化结果。
     即使解析部分失败，也保留 raw_text 作为降级展示。
+    使用模糊匹配 section headers，兼容 AI 输出的细微格式差异。
     """
     sections: dict[str, str] = {}
     current_section = ""
     current_lines: list[str] = []
 
     for line in raw_text.split("\n"):
-        if line.startswith("## "):
+        stripped = line.strip()
+        if stripped.startswith("##") and not stripped.startswith("###"):
             if current_section:
                 sections[current_section] = "\n".join(current_lines).strip()
-            current_section = line.strip("# ").strip()
+            current_section = stripped.lstrip("#").strip()
             current_lines = []
         else:
             current_lines.append(line)
@@ -111,16 +113,23 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
     if current_section:
         sections[current_section] = "\n".join(current_lines).strip()
 
+    def _find_section(*keywords: str) -> str:
+        for key, val in sections.items():
+            for kw in keywords:
+                if kw in key:
+                    return val
+        return ""
+
     return AIAnalysisResult(
         coin=snapshot.coin,
         ts=int(time.time()),
         price_at_analysis=snapshot.price,
-        market_overview=sections.get("一、市场格局总览", ""),
-        key_levels=_parse_levels_table(sections.get("二、关键价位图谱", "")),
-        stop_loss_suggestion={"raw": sections.get("三、止损安全区建议", "")},
-        entry_zones=_parse_entry_zones(sections.get("四、入场观察区", "")),
-        risk_warnings=_parse_list(sections.get("五、当前风险提示", "")),
-        scenario_analysis=_parse_scenarios(sections.get("六、场景推演", "")),
+        market_overview=_find_section("格局", "总览", "Overview"),
+        key_levels=_parse_levels_table(_find_section("价位", "图谱", "Level")),
+        stop_loss_suggestion={"raw": _find_section("止损", "Stop")},
+        entry_zones=_parse_entry_zones(_find_section("入场", "观察区", "Entry")),
+        risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
+        scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
         raw_text=raw_text,
     )
 

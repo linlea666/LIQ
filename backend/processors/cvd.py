@@ -39,32 +39,47 @@ def detect_cvd_price_divergence(
     price_ts: list[int],
 ) -> CVDData:
     """
-    检测 CVD 与价格的背离：
-    - 价格创新高但 CVD 未创新高 → 顶背离 (bearish)
-    - 价格创新低但 CVD 未创新低 → 底背离 (bullish)
+    检测 CVD 与价格的背离（基于时间戳对齐）：
+    CVD 为 5 分钟级别, price_series 为 1H K 线。
+    用 CVD 时间窗口去匹配同期 K 线价格, 避免因时间粒度不同导致错位。
     """
-    if len(cvd.series) < 12 or len(price_series) < 12:
+    if len(cvd.series) < 12:
+        return cvd
+    if len(price_series) < 2 or len(price_ts) != len(price_series):
         return cvd
 
-    # 取两数组较短者对齐，避免切片越界导致 max([]) ValueError
-    n = min(len(cvd.series), len(price_series))
-    if n < 12:
+    cvd_start_ts = cvd.series[0].ts
+    cvd_end_ts = cvd.series[-1].ts
+    cvd_mid_ts = cvd.series[len(cvd.series) // 2].ts
+
+    one_hour_ms = 3_600_000
+    aligned = [(p, t) for p, t in zip(price_series, price_ts)
+               if cvd_start_ts - one_hour_ms <= t <= cvd_end_ts + one_hour_ms]
+
+    if len(aligned) < 2:
         return cvd
-    half = n // 2
-    earlier_prices = price_series[:half]
-    recent_prices = price_series[half:n]
+
+    earlier_prices = [p for p, t in aligned if t <= cvd_mid_ts]
+    recent_prices = [p for p, t in aligned if t > cvd_mid_ts]
+
+    if not earlier_prices or not recent_prices:
+        mid = len(aligned) // 2
+        earlier_prices = [p for p, _ in aligned[:mid]]
+        recent_prices = [p for p, _ in aligned[mid:]]
+
+    if not earlier_prices or not recent_prices:
+        return cvd
+
+    half = len(cvd.series) // 2
     earlier_cvd = [p.cvd for p in cvd.series[:half]]
-    recent_cvd = [p.cvd for p in cvd.series[half:n]]
+    recent_cvd = [p.cvd for p in cvd.series[half:]]
 
-    if not earlier_prices or not recent_prices or not earlier_cvd or not recent_cvd:
-        return cvd
-
+    min_price_pct = 0.003
     earlier_price_max = max(earlier_prices)
     earlier_price_min = min(earlier_prices)
     recent_price_max = max(recent_prices)
     recent_price_min = min(recent_prices)
 
-    min_price_pct = 0.003
     price_new_high = (recent_price_max > earlier_price_max and
                       (recent_price_max - earlier_price_max) / earlier_price_max > min_price_pct)
     price_new_low = (recent_price_min < earlier_price_min and

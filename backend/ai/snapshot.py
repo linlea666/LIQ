@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from models.flow import (
     BasisData, CVDData, ETFFlowData, FundingRateData,
@@ -39,6 +39,7 @@ def build_ai_snapshot(
     global_liq: Optional[GlobalLiquidationData] = None,
     market_index: Optional[MarketIndexData] = None,
     taker_flow: Optional[TakerFlowData] = None,
+    levels: Optional[LevelAnalysis] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -64,6 +65,38 @@ def build_ai_snapshot(
     if multi_funding:
         funding_exchanges = [e.model_dump() for e in multi_funding.exchanges]
         funding_avg_7d = multi_funding.avg_7d
+
+    # 宏观数据
+    nasdaq_val = None
+    nasdaq_chg = None
+    gold_val = None
+    gold_chg = None
+    sp500_val = None
+    sp500_chg = None
+    if market_index:
+        nasdaq_val = market_index.nasdaq
+        gold_val = market_index.gold
+        sp500_val = market_index.sp500
+        for item in market_index.raw_items:
+            if "nasdaq" in item.key.lower() or "纳斯达克" in item.name:
+                nasdaq_chg = item.change_pct
+            elif "gold" in item.key.lower() or "黄金" in item.name:
+                gold_chg = item.change_pct
+            elif "sp500" in item.key.lower() or "标普" in item.name:
+                sp500_chg = item.change_pct
+
+    # 规则引擎预计算结果
+    rule_supports = []
+    rule_resistances = []
+    rule_stop_loss = []
+    sniper_entries = []
+    if levels:
+        rule_supports = [{"price": s.price, "sources": s.sources, "strength": s.strength}
+                         for s in levels.supports[:3]]
+        rule_resistances = [{"price": r.price, "sources": r.sources, "strength": r.strength}
+                            for r in levels.resistances[:3]]
+        rule_stop_loss = [sl.model_dump() for sl in levels.stop_loss_zones]
+        sniper_entries = [se.model_dump() for se in levels.sniper_entries[:4]]
 
     return AISnapshot(
         coin=coin,
@@ -114,4 +147,14 @@ def build_ai_snapshot(
         btc_dominance=market_index.btc_dominance if market_index else None,
         taker_buy_ratio=taker_flow.buy_ratio if taker_flow else None,
         taker_dominant=taker_flow.dominant if taker_flow else "",
+        nasdaq=nasdaq_val,
+        nasdaq_change_pct=nasdaq_chg,
+        gold=gold_val,
+        gold_change_pct=gold_chg,
+        sp500=sp500_val,
+        sp500_change_pct=sp500_chg,
+        rule_supports=rule_supports,
+        rule_resistances=rule_resistances,
+        rule_stop_loss=rule_stop_loss,
+        sniper_entries=sniper_entries,
     )

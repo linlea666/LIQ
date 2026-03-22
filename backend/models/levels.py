@@ -42,6 +42,20 @@ class PinRiskZone(BaseModel):
     note: str = ""
 
 
+class SniperEntry(BaseModel):
+    """狙击挂单：极端R:R入场点（小亏大赚哲学）"""
+    direction: str          # "long" | "short"
+    entry_price: float
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: float
+    rr_ratio_1: float
+    rr_ratio_2: float
+    risk_usd_per_unit: float
+    cluster_usd: float
+    logic: list[str]
+
+
 class LevelAnalysis(BaseModel):
     """完整价位分析结果"""
     coin: str
@@ -52,3 +66,4 @@ class LevelAnalysis(BaseModel):
     stop_loss_zones: list[StopLossZone]
     entry_zones: list[EntryZone]
     pin_risk_zones: list[PinRiskZone]
+    sniper_entries: list[SniperEntry] = []

@@ -20,7 +20,7 @@ from models.flow import (
     LongShortRatioData, MarketIndexData, MultiFundingRateData, OIData, TakerFlowData,
 )
 from models.levels import LevelAnalysis
-from models.liquidation import LiquidationMap, LiquidationStats
+from models.liquidation import LiquidationEvent, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, OrderBookLevel, OrderBookSnapshot, TickerData, VolumeProfileData
 from models.snapshot import (
     AIAnalysisResult,
@@ -68,6 +68,7 @@ class CoinState:
         self.oi_history: deque = deque(maxlen=720)  # 2小时 @10s
         self.ai_history: deque[AIAnalysisResult] = deque(maxlen=5)
         self.last_ai_ts: float = 0
+        self.liq_events: deque[LiquidationEvent] = deque(maxlen=200)
         self.multi_funding: Optional[MultiFundingRateData] = None
         self.ls_ratio: Optional[LongShortRatioData] = None
         self.etf_flow: Optional[ETFFlowData] = None
@@ -474,8 +475,10 @@ class Engine:
             cfg = self._settings.processors.orderbook
             threshold = cfg.get(f"whale_threshold_{coin.lower()}", 50)
             threshold_usd = cfg.get("whale_threshold_usd", 500000)
+            coin_cfg = self._settings.get_coin(coin)
             state.orderbook = analyze_orderbook(
                 snapshot_obj, state.ticker.last,
+                ct_val=coin_cfg.ct_val,
                 wall_threshold_size=threshold,
                 wall_threshold_usd=threshold_usd,
             )
@@ -486,7 +489,59 @@ class Engine:
         pass
 
     async def _on_liquidation(self, channel: str, data: dict):
-        pass
+        items = data.get("data", [])
+        for item in items:
+            inst_id = item.get("instId", "")
+            coin = self._inst_to_coin(inst_id)
+            if not coin:
+                continue
+            state = self._states[coin]
+            coin_cfg = self._settings.get_coin(coin)
+            ct_val = coin_cfg.ct_val
+
+            for detail in item.get("details", []):
+                pos_side = detail.get("posSide", "")
+                side_str = detail.get("side", "")
+                if pos_side == "long" or (not pos_side and side_str == "sell"):
+                    liq_side = "long"
+                else:
+                    liq_side = "short"
+
+                bk_px = float(detail.get("bkPx", 0))
+                sz = float(detail.get("sz", 0))
+                sz_usd = sz * ct_val * bk_px
+                ts_val = int(detail.get("ts", 0))
+
+                state.liq_events.append(LiquidationEvent(
+                    coin=coin, ts=ts_val, side=liq_side,
+                    price=bk_px, size=sz * ct_val, size_usd=sz_usd,
+                    source="okx",
+                ))
+
+            self._rebuild_liq_stats(coin)
+
+    def _rebuild_liq_stats(self, ccy: str):
+        """从最近30分钟的爆仓事件重建统计"""
+        state = self._states[ccy]
+        cutoff = int(time.time() * 1000) - 30 * 60 * 1000
+        recent = [e for e in state.liq_events if e.ts > cutoff]
+
+        long_usd = sum(e.size_usd for e in recent if e.side == "long")
+        short_usd = sum(e.size_usd for e in recent if e.side == "short")
+        long_count = sum(1 for e in recent if e.side == "long")
+        short_count = sum(1 for e in recent if e.side == "short")
+
+        ratio = long_usd / short_usd if short_usd > 0 else (10.0 if long_usd > 0 else 1.0)
+
+        state.liq_stats = LiquidationStats(
+            coin=ccy, ts=int(time.time()),
+            period_min=30,
+            long_total_usd=long_usd,
+            short_total_usd=short_usd,
+            long_count=long_count,
+            short_count=short_count,
+            ratio=round(ratio, 2),
+        )
 
     async def _on_ticker(self, channel: str, data: dict):
         arg = data.get("arg", {})
@@ -531,6 +586,8 @@ class Engine:
             taker_flow=state.taker_flow, atr=state.atr,
             ls_ratio=state.ls_ratio, market_index=state.market_index,
             etf_flow=state.etf_flow, global_liq=state.global_liq,
+            orderbook=state.orderbook,
+            percentile_tracker=self._percentile,
         )
 
         if state.temperature:
@@ -589,7 +646,12 @@ class Engine:
                 "btc_max_pain": state.market_index.btc_max_pain,
                 "btc_dvol": state.market_index.btc_dvol,
                 "dxy": state.market_index.dxy,
+                "nasdaq": state.market_index.nasdaq,
+                "sp500": state.market_index.sp500,
+                "gold": state.market_index.gold,
             }
+        if state.levels and state.levels.sniper_entries:
+            payload["sniper_entries"] = [se.model_dump() for se in state.levels.sniper_entries[:4]]
 
         await push_to_coin(coin.ccy, "market_update", payload)
 
@@ -647,6 +709,7 @@ class Engine:
             multi_funding=state.multi_funding, ls_ratio=state.ls_ratio,
             etf_flow=state.etf_flow, global_liq=state.global_liq,
             market_index=state.market_index, taker_flow=state.taker_flow,
+            levels=state.levels,
         )
 
         result = await self._analyzer.analyze(snapshot)
