@@ -41,6 +41,14 @@ def build_system_prompt() -> str:
 - 每个方向**最多 2 套**挂单叙述；每套须含：**挂单价区间或代表价、止损、止盈1/止盈2、R:R（至少给到 TP1 对应 R:R）**
 - **失效条件**：至少写 1 条（例：价格有效跌破/突破某清算簇外沿则计划作废；或 1H 收盘越过某关键位则失效）——以**级别+条件**表述即可
 
+### 阶梯埋伏计划（Scaled-In Limit Order Strategy）原则
+- 这是一种「不预测底部/顶部，用多层网去捕捉」的策略
+- 在远离当前价的多个清算密集区底部/顶部分层挂限价单，每层独立止损
+- 越深层仓位越大（倒金字塔）：接近真底/真顶的层如果命中，利润最丰厚
+- 核心期望：全部被扫损亏 N%，任一层命中赚 M 倍（M >> N），数学期望为正
+- **必须评估**：清算瀑布连锁风险、极端行情滑点风险、资金效率
+- 与狙击挂单互补：狙击=近距精准(≤5%)，阶梯=远距广覆盖(5%-50%)
+
 ### 输出格式（严格按以下 Markdown 章节标题输出，便于系统解析）
 
 ## 一、市场格局总览
@@ -61,13 +69,21 @@ def build_system_prompt() -> str:
 - 若引擎方案需调整：写明**调整后的完整数值**与理由；拒绝时说明拒绝原因
 - **禁止**输出 R:R 低于 1:{min_rr:.1f} 的「优质」挂单（除非明确标注为观察/不执行）
 
-## 五、入场观察区
-**多单观察区** / **空单观察区**：共振因素 + 确认信号（可与第四节区分：第四节偏限价埋伏，本节偏顺势确认）
+## 五、阶梯埋伏计划（远距多层网捕捉）
+**本节为必答。** 须基于用户提示「### 12. 规则引擎阶梯埋伏方案」逐条处理：
+- 逐层展开：**层级/挂单价/止损/止盈/R:R/仓位权重/风险占比**
+- 综合评估：总风险预算是否合理、清算瀑布连锁风险、极端行情滑点预估
+- **调整建议**：若某层挂单位置不佳（如正好在整数关口、或清算真空区太薄），须提出调整
+- **失效场景**：整体计划在什么条件下应废弃（如基本面重大变化、交易所黑天鹅等）
+- 若引擎无方案：说明原因（如远距无足够清算簇），**不得**编造
 
-## 六、当前风险提示
+## 六、入场观察区
+**多单观察区** / **空单观察区**：共振因素 + 确认信号（可与第四/五节区分：第四节偏近距限价埋伏，第五节偏远距阶梯，本节偏顺势确认）
+
+## 七、当前风险提示
 （3-5条，[高/中/低]，按紧急程度）
 
-## 七、场景推演
+## 八、场景推演
 场景A/B/C：触发条件 + 目标位 + 时间窗口（可用「未来数小时/数日」等模糊窗）
 """
 
@@ -292,7 +308,35 @@ def build_user_prompt(snapshot: dict) -> str:
     else:
         lines.append("（当前无引擎输出的狙击方案：可能因清算簇距离/ATR/数据不足；第四节须说明原因，禁止编造价位。）")
 
+    ladder_plans = snapshot.get("ladder_plans", [])
     lines.append("")
-    lines.append("请基于以上数据输出，**必须包含七个章节**，且第四节「狙击挂单计划」为必答。")
-    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}）".format(min_rr))
+    lines.append("### 12. 规则引擎阶梯埋伏方案（必须在「五、阶梯埋伏计划」中完整展开，不可省略）")
+    if ladder_plans:
+        for lp in ladder_plans:
+            d = lp.get("direction", "")
+            lines.append(f"\n**{'做多' if d == 'long' else '做空'}阶梯计划** "
+                         f"({lp.get('tier_count', 0)}层, 覆盖{lp.get('coverage_range', '')}, "
+                         f"总风险{lp.get('total_risk_pct', 0):.1f}%):")
+            lines.append(f"  概要: {lp.get('plan_summary', '')}")
+            lines.append(f"  期望优势: {lp.get('expected_edge', '')}")
+            lines.append(f"  最佳R:R: {lp.get('best_case_rr', 0):.1f}:1")
+            lines.append(f"  最差全损: {lp.get('worst_case_loss_pct', 0):.1f}%")
+            for entry in lp.get("entries", []):
+                lines.append(f"  第{entry.get('tier', 0)}层: "
+                             f"入场${entry.get('entry_price', 0):,.1f} "
+                             f"止损${entry.get('stop_loss', 0):,.1f} "
+                             f"止盈${entry.get('take_profit', 0):,.1f} "
+                             f"R:R={entry.get('rr_ratio', 0):.1f} "
+                             f"仓位{entry.get('position_weight', 0):.1%} "
+                             f"风险{entry.get('risk_pct', 0):.1f}%")
+                lines.append(f"    区域: {entry.get('zone_label', '')}")
+                lines.append(f"    失效: {entry.get('invalidation', '')}")
+                for logic_line in entry.get("entry_logic", []):
+                    lines.append(f"      - {logic_line}")
+    else:
+        lines.append("（当前无引擎输出的阶梯方案：可能因远距无足够清算簇/数据不足；第五节须说明原因，禁止编造。）")
+
+    lines.append("")
+    lines.append("请基于以上数据输出，**必须包含八个章节**，且第四节「狙击挂单计划」和第五节「阶梯埋伏计划」均为必答。")
+    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率".format(min_rr))
     return "\n".join(lines)

@@ -92,6 +92,12 @@ processors:
     volume_profile_bins: 50
     # 狙击挂单最小盈亏比（与 AI 提示词、levels._calc_sniper_entries 一致）
     min_sniper_rr: 2.5
+    # 阶梯埋伏计划参数
+    ladder_max_tiers: 5         # 最多分几层
+    ladder_min_rr: 3.0          # 单层最小盈亏比
+    ladder_max_distance_pct: 50 # 最远覆盖距当前价百分比
+    ladder_min_distance_pct: 5  # 最近覆盖距当前价百分比（<5%由狙击挂单覆盖）
+    ladder_total_risk_pct: 10   # 全部层止损总风险占账户百分比上限
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

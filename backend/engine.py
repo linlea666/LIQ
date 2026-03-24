@@ -652,6 +652,8 @@ class Engine:
             }
         if state.levels and state.levels.sniper_entries:
             payload["sniper_entries"] = [se.model_dump() for se in state.levels.sniper_entries[:4]]
+        if state.levels and state.levels.ladder_plans:
+            payload["ladder_plans"] = [lp.model_dump() for lp in state.levels.ladder_plans]
 
         await push_to_coin(coin.ccy, "market_update", payload)
 

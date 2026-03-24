@@ -126,6 +126,12 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
                 return val
         return ""
 
+    def _find_ladder_section() -> str:
+        for key, val in sections.items():
+            if "阶梯" in key or "多层" in key:
+                return val
+        return ""
+
     return AIAnalysisResult(
         coin=snapshot.coin,
         ts=int(time.time()),
@@ -135,6 +141,7 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
         stop_loss_suggestion={"raw": _find_section("止损", "Stop")},
         entry_zones=_parse_entry_zones(_find_section("入场", "观察区", "Entry")),
         sniper_setup=_find_sniper_section(),
+        ladder_plan_text=_find_ladder_section(),
         risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
         raw_text=raw_text,

@@ -72,6 +72,31 @@ export interface EntryZone {
   confirmation_note: string;
 }
 
+export interface LadderEntry {
+  tier: number;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  rr_ratio: number;
+  position_weight: number;
+  risk_pct: number;
+  zone_label: string;
+  entry_logic: string[];
+  invalidation: string;
+}
+
+export interface LadderPlan {
+  direction: string;
+  tier_count: number;
+  entries: LadderEntry[];
+  total_risk_pct: number;
+  best_case_rr: number;
+  worst_case_loss_pct: number;
+  expected_edge: string;
+  plan_summary: string;
+  coverage_range: string;
+}
+
 export interface LevelAnalysis {
   coin: string;
   ts: number;
@@ -81,6 +106,7 @@ export interface LevelAnalysis {
   stop_loss_zones: StopLossZone[];
   entry_zones: EntryZone[];
   pin_risk_zones: { price: number; side: string; liq_amount_usd: number; note: string }[];
+  ladder_plans?: LadderPlan[];
 }
 
 export interface LiqBand {
@@ -184,6 +210,8 @@ export interface AIAnalysisResult {
   entry_zones: { direction: string; raw: string; details: string[] }[];
   /** 第四节「狙击挂单计划」解析文本 */
   sniper_setup?: string;
+  /** 第五节「阶梯埋伏计划」解析文本 */
+  ladder_plan_text?: string;
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];
   raw_text: string;
@@ -206,4 +234,5 @@ export interface MarketUpdate {
   funding?: FundingRateData;
   basis?: BasisData;
   orderbook?: OrderBookAnalysis;
+  ladder_plans?: LadderPlan[];
 }

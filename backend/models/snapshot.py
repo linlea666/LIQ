@@ -145,6 +145,7 @@ class AISnapshot(BaseModel):
     rule_resistances: list[dict] = []
     rule_stop_loss: list[dict] = []
     sniper_entries: list[dict] = []
+    ladder_plans: list[dict] = []
 
     macro_context: Optional[MacroSnapshot] = None
 
@@ -159,6 +160,7 @@ class AIAnalysisResult(BaseModel):
     stop_loss_suggestion: dict
     entry_zones: list[dict]
     sniper_setup: str = ""
+    ladder_plan_text: str = ""
     risk_warnings: list[str]
     scenario_analysis: list[dict]
     raw_text: str
