@@ -118,6 +118,7 @@ def build_ai_snapshot(
     rule_resistances = []
     rule_stop_loss = []
     sniper_entries = []
+    ladder_plans = []
     if levels:
         rule_supports = [{"price": s.price, "sources": s.sources, "strength": s.strength}
                          for s in levels.supports[:3]]
@@ -125,6 +126,7 @@ def build_ai_snapshot(
                             for r in levels.resistances[:3]]
         rule_stop_loss = [sl.model_dump() for sl in levels.stop_loss_zones]
         sniper_entries = [se.model_dump() for se in levels.sniper_entries[:4]]
+        ladder_plans = [lp.model_dump() for lp in levels.ladder_plans]
 
     return AISnapshot(
         coin=coin,
@@ -188,4 +190,5 @@ def build_ai_snapshot(
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
         sniper_entries=sniper_entries,
+        ladder_plans=ladder_plans,
     )

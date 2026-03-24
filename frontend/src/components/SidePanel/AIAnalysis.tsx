@@ -72,8 +72,14 @@ export default function AIAnalysis() {
               </Section>
             )}
 
+            {aiResult.ladder_plan_text && (
+              <Section title="🪜 阶梯埋伏计划（远距多层网）">
+                <Markdown text={aiResult.ladder_plan_text} />
+              </Section>
+            )}
+
             {aiResult.entry_zones.length > 0 && (
-              <Section title="🎯 入场观察区">
+              <Section title="📌 入场观察区">
                 {aiResult.entry_zones.map((z, i) => (
                   <div key={i} className="mb-2">
                     <div className="text-xs font-medium text-blue-400">{z.raw}</div>

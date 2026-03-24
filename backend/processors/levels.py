@@ -1,4 +1,4 @@
-"""关键价位计算引擎：支撑/阻力/止损安全区/入场区/插针风险区/狙击挂单"""
+"""关键价位计算引擎：支撑/阻力/止损安全区/入场区/插针风险区/狙击挂单/阶梯埋伏"""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import Optional
 from config.settings import get_settings
 from models.levels import (
     EntryZone,
+    LadderEntry,
+    LadderPlan,
     LevelAnalysis,
     PinRiskZone,
     PriceLevel,
@@ -112,6 +114,10 @@ def calculate_levels(
         current_price, liq_map, atr, supports, resistances, vp,
     )
 
+    ladder_plans = _calc_ladder_plans(
+        current_price, liq_map, atr, supports, resistances, vp,
+    )
+
     return LevelAnalysis(
         coin=coin,
         ts=0,
@@ -122,6 +128,7 @@ def calculate_levels(
         entry_zones=entry_zones,
         pin_risk_zones=pin_risk_zones,
         sniper_entries=sniper_entries,
+        ladder_plans=ladder_plans,
     )
 
 
@@ -451,6 +458,362 @@ def _calc_sniper_entries(
 
     entries.sort(key=lambda e: e.rr_ratio_1, reverse=True)
     return entries[:4]
+
+
+def _calc_ladder_plans(
+    current_price: float,
+    liq_map: Optional[LiquidationMap],
+    atr: float,
+    supports: list[PriceLevel],
+    resistances: list[PriceLevel],
+    vp: Optional[VolumeProfileData],
+) -> list[LadderPlan]:
+    """
+    阶梯式多空双向埋伏计划（Scaled-In Limit Order Strategy）。
+
+    核心哲学：「基于当前价位，向上/向下多层网捕捉区域性顶底」
+    - 基于当前实时价格动态计算，非固定底部
+    - 同时输出做多（向下埋伏）和做空（向上埋伏）两个方向
+    - 在各清算密集区的"区域性底/顶"分层挂单
+    - 每层独立止损，止损在真空区内或按百分比保底（防连带爆仓）
+    - 越深层仓位权重越大（倒金字塔加仓）
+    - 止盈指向对侧清算磁吸点或回归当前价位区域
+    - 总风险预算控制：全部层止损总额 ≤ 配置上限
+    """
+    if not liq_map or atr <= 0 or current_price <= 0:
+        return []
+
+    cfg = get_settings().processors.levels
+    max_tiers = int(cfg.get("ladder_max_tiers", 5))
+    min_rr = float(cfg.get("ladder_min_rr", 3.0))
+    max_distance_pct = float(cfg.get("ladder_max_distance_pct", 20.0))
+    min_distance_pct = float(cfg.get("ladder_min_distance_pct", 1.0))
+    total_risk_budget = float(cfg.get("ladder_total_risk_pct", 10.0))
+    sl_min_pct = float(cfg.get("ladder_sl_min_pct", 2.0))
+
+    plans: list[LadderPlan] = []
+
+    long_plan = _build_ladder_long(
+        current_price, liq_map, atr, supports, resistances, vp,
+        max_tiers, min_rr, min_distance_pct, max_distance_pct,
+        total_risk_budget, sl_min_pct,
+    )
+    if long_plan:
+        plans.append(long_plan)
+
+    short_plan = _build_ladder_short(
+        current_price, liq_map, atr, supports, resistances, vp,
+        max_tiers, min_rr, min_distance_pct, max_distance_pct,
+        total_risk_budget, sl_min_pct,
+    )
+    if short_plan:
+        plans.append(short_plan)
+
+    return plans
+
+
+def _distance_scaled_atr(atr: float, distance_pct: float) -> float:
+    """远距入场的 ATR 缓冲需要按距离缩放——离当前价越远，市场结构差异越大，缓冲越宽。"""
+    scale = 1.0 + distance_pct / 20.0
+    return atr * scale
+
+
+def _build_ladder_long(
+    current_price: float,
+    liq_map: LiquidationMap,
+    atr: float,
+    supports: list[PriceLevel],
+    resistances: list[PriceLevel],
+    vp: Optional[VolumeProfileData],
+    max_tiers: int,
+    min_rr: float,
+    min_dist_pct: float,
+    max_dist_pct: float,
+    total_risk_pct: float,
+    sl_min_pct: float,
+) -> Optional[LadderPlan]:
+    """构建做多方向的阶梯埋伏计划（向下多层网接多单）"""
+    vacuums = liq_map.vacuum_zones or []
+
+    eligible_clusters = [
+        c for c in liq_map.clusters_below
+        if min_dist_pct <= c.distance_pct <= max_dist_pct
+    ]
+    if not eligible_clusters:
+        return None
+
+    eligible_clusters.sort(key=lambda c: c.total_usd, reverse=True)
+    selected = eligible_clusters[:max_tiers]
+    selected.sort(key=lambda c: c.price_from, reverse=True)
+
+    tp_target = current_price
+    if vp and vp.poc_price > current_price * 0.95:
+        tp_target = max(tp_target, vp.poc_price)
+    if resistances:
+        tp_target = max(tp_target, resistances[0].price)
+    if liq_map.clusters_above:
+        tp_target = max(tp_target, liq_map.clusters_above[0].price_center)
+
+    entries: list[LadderEntry] = []
+    raw_weights: list[float] = []
+
+    for cluster in selected:
+        scaled_atr = _distance_scaled_atr(atr, cluster.distance_pct)
+        entry = cluster.price_from + scaled_atr * 0.05
+        entry = _avoid_round_number(entry, current_price)
+
+        sl_candidates = [
+            v for v in vacuums
+            if v.price_to <= cluster.price_from
+        ]
+        if sl_candidates:
+            best_v = max(sl_candidates, key=lambda v: v.price_to)
+            sl = best_v.price_from + (best_v.price_to - best_v.price_from) * 0.2
+        else:
+            sl = entry - scaled_atr * 2.0
+
+        sl_pct_floor = entry * (1 - sl_min_pct / 100)
+        if sl > sl_pct_floor:
+            sl = sl_pct_floor
+
+        sl = _avoid_round_number(sl, current_price)
+
+        risk = abs(entry - sl)
+        if risk <= 0:
+            continue
+
+        reward = tp_target - entry
+        if reward <= 0:
+            continue
+
+        rr = reward / risk
+        if rr < min_rr:
+            continue
+
+        depth_ratio = (current_price - entry) / current_price
+        weight = 1.0 + depth_ratio * 3.0
+        raw_weights.append(weight)
+
+        zone_label = (
+            f"${cluster.price_from:,.0f}-${cluster.price_to:,.0f} "
+            f"清算簇({cluster.dominant_leverage}x, ${cluster.total_usd / 1e6:.0f}M)"
+        )
+
+        logic = [
+            f"多头清算簇${cluster.total_usd / 1e6:.0f}M，距当前价${current_price:,.0f}约{cluster.distance_pct:.1f}%",
+            f"入场于清算簇下沿(庄家扫完该区域清算池后的反弹起点)",
+            f"止损在{'清算真空区内' if sl_candidates else '入场价下方' + f'{sl_min_pct:.0f}%保底'}",
+            f"止盈回归${tp_target:,.0f}(回到当前价区域/对侧磁吸点)",
+        ]
+
+        inv_parts = [f"价格1H收盘有效跌破${sl:,.0f}"]
+        if sl_candidates:
+            inv_parts.append(f"真空区${sl_candidates[-1].price_from:,.0f}-${sl_candidates[-1].price_to:,.0f}被突破")
+
+        entries.append(LadderEntry(
+            tier=0,
+            entry_price=round(entry, 2),
+            stop_loss=round(sl, 2),
+            take_profit=round(tp_target, 2),
+            rr_ratio=round(rr, 1),
+            position_weight=0,
+            risk_pct=0,
+            zone_label=zone_label,
+            entry_logic=logic,
+            invalidation=" 或 ".join(inv_parts),
+        ))
+
+    if not entries:
+        return None
+
+    for i, e in enumerate(entries):
+        e.tier = i + 1
+
+    total_raw = sum(raw_weights) if raw_weights else 1
+    for i, e in enumerate(entries):
+        w = raw_weights[i] / total_raw if i < len(raw_weights) else 0
+        e.position_weight = round(w, 3)
+        e.risk_pct = round(total_risk_pct * w, 2)
+
+    best_rr = max(e.rr_ratio for e in entries)
+    worst_loss = total_risk_pct
+
+    price_high = entries[0].entry_price
+    price_low = entries[-1].entry_price
+    coverage = f"${price_low:,.0f} - ${price_high:,.0f}"
+
+    summary = (
+        f"基于当前价${current_price:,.0f}，向下在${price_low:,.0f}-${price_high:,.0f}区间"
+        f"分{len(entries)}层阶梯埋伏多单, "
+        f"总风险{total_risk_pct:.1f}%, "
+        f"任一层吃到区域底部反弹至${tp_target:,.0f}即可获利, "
+        f"最佳R:R={best_rr:.1f}:1"
+    )
+
+    return LadderPlan(
+        direction="long",
+        tier_count=len(entries),
+        entries=entries,
+        total_risk_pct=round(total_risk_pct, 2),
+        best_case_rr=round(best_rr, 1),
+        worst_case_loss_pct=round(worst_loss, 2),
+        expected_edge=(
+            f"小亏大赚: 全部{len(entries)}层扫损总亏{worst_loss:.1f}%, "
+            f"任一层命中可赚{best_rr:.0f}倍止损距离. "
+            f"覆盖{len(entries)}个清算密集区底部"
+        ),
+        plan_summary=summary,
+        coverage_range=coverage,
+    )
+
+
+def _build_ladder_short(
+    current_price: float,
+    liq_map: LiquidationMap,
+    atr: float,
+    supports: list[PriceLevel],
+    resistances: list[PriceLevel],
+    vp: Optional[VolumeProfileData],
+    max_tiers: int,
+    min_rr: float,
+    min_dist_pct: float,
+    max_dist_pct: float,
+    total_risk_pct: float,
+    sl_min_pct: float,
+) -> Optional[LadderPlan]:
+    """构建做空方向的阶梯埋伏计划（向上多层网接空单）"""
+    vacuums = liq_map.vacuum_zones or []
+
+    eligible_clusters = [
+        c for c in liq_map.clusters_above
+        if min_dist_pct <= c.distance_pct <= max_dist_pct
+    ]
+    if not eligible_clusters:
+        return None
+
+    eligible_clusters.sort(key=lambda c: c.total_usd, reverse=True)
+    selected = eligible_clusters[:max_tiers]
+    selected.sort(key=lambda c: c.price_to)
+
+    tp_target = current_price
+    if vp and vp.poc_price < current_price * 1.05:
+        tp_target = min(tp_target, vp.poc_price)
+    if supports:
+        tp_target = min(tp_target, supports[0].price)
+    if liq_map.clusters_below:
+        tp_target = min(tp_target, liq_map.clusters_below[0].price_center)
+
+    entries: list[LadderEntry] = []
+    raw_weights: list[float] = []
+
+    for cluster in selected:
+        scaled_atr = _distance_scaled_atr(atr, cluster.distance_pct)
+        entry = cluster.price_to - scaled_atr * 0.05
+        entry = _avoid_round_number(entry, current_price)
+
+        sl_candidates = [
+            v for v in vacuums
+            if v.price_from >= cluster.price_to
+        ]
+        if sl_candidates:
+            best_v = min(sl_candidates, key=lambda v: v.price_from)
+            sl = best_v.price_to - (best_v.price_to - best_v.price_from) * 0.2
+        else:
+            sl = entry + scaled_atr * 2.0
+
+        sl_pct_ceil = entry * (1 + sl_min_pct / 100)
+        if sl < sl_pct_ceil:
+            sl = sl_pct_ceil
+
+        sl = _avoid_round_number(sl, current_price)
+
+        risk = abs(sl - entry)
+        if risk <= 0:
+            continue
+
+        reward = entry - tp_target
+        if reward <= 0:
+            continue
+
+        rr = reward / risk
+        if rr < min_rr:
+            continue
+
+        height_ratio = (entry - current_price) / current_price
+        weight = 1.0 + height_ratio * 3.0
+        raw_weights.append(weight)
+
+        zone_label = (
+            f"${cluster.price_from:,.0f}-${cluster.price_to:,.0f} "
+            f"清算簇({cluster.dominant_leverage}x, ${cluster.total_usd / 1e6:.0f}M)"
+        )
+
+        logic = [
+            f"空头清算簇${cluster.total_usd / 1e6:.0f}M，距当前价${current_price:,.0f}约{cluster.distance_pct:.1f}%",
+            f"入场于清算簇上沿(庄家拉盘扫完该区域空头后的回落起点)",
+            f"止损在{'清算真空区内' if sl_candidates else '入场价上方' + f'{sl_min_pct:.0f}%保底'}",
+            f"止盈回归${tp_target:,.0f}(回到当前价区域/对侧磁吸点)",
+        ]
+
+        inv_parts = [f"价格1H收盘有效突破${sl:,.0f}"]
+        if sl_candidates:
+            inv_parts.append(f"真空区${sl_candidates[0].price_from:,.0f}-${sl_candidates[0].price_to:,.0f}被突破")
+
+        entries.append(LadderEntry(
+            tier=0,
+            entry_price=round(entry, 2),
+            stop_loss=round(sl, 2),
+            take_profit=round(tp_target, 2),
+            rr_ratio=round(rr, 1),
+            position_weight=0,
+            risk_pct=0,
+            zone_label=zone_label,
+            entry_logic=logic,
+            invalidation=" 或 ".join(inv_parts),
+        ))
+
+    if not entries:
+        return None
+
+    for i, e in enumerate(entries):
+        e.tier = i + 1
+
+    total_raw = sum(raw_weights) if raw_weights else 1
+    for i, e in enumerate(entries):
+        w = raw_weights[i] / total_raw if i < len(raw_weights) else 0
+        e.position_weight = round(w, 3)
+        e.risk_pct = round(total_risk_pct * w, 2)
+
+    best_rr = max(e.rr_ratio for e in entries)
+    worst_loss = total_risk_pct
+
+    price_low = entries[0].entry_price
+    price_high = entries[-1].entry_price
+    coverage = f"${price_low:,.0f} - ${price_high:,.0f}"
+
+    summary = (
+        f"基于当前价${current_price:,.0f}，向上在${price_low:,.0f}-${price_high:,.0f}区间"
+        f"分{len(entries)}层阶梯埋伏空单, "
+        f"总风险{total_risk_pct:.1f}%, "
+        f"任一层吃到区域顶部回落至${tp_target:,.0f}即可获利, "
+        f"最佳R:R={best_rr:.1f}:1"
+    )
+
+    return LadderPlan(
+        direction="short",
+        tier_count=len(entries),
+        entries=entries,
+        total_risk_pct=round(total_risk_pct, 2),
+        best_case_rr=round(best_rr, 1),
+        worst_case_loss_pct=round(worst_loss, 2),
+        expected_edge=(
+            f"小亏大赚: 全部{len(entries)}层扫损总亏{worst_loss:.1f}%, "
+            f"任一层命中可赚{best_rr:.0f}倍止损距离. "
+            f"覆盖{len(entries)}个清算密集区顶部"
+        ),
+        plan_summary=summary,
+        coverage_range=coverage,
+    )
 
 
 def _calc_pin_risk(
