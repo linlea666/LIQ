@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from config.settings import CoinConfig, get_settings
@@ -129,11 +130,11 @@ class BBXExtendedSource(DataSource):
             return bool(data["success"])
         code = data.get("code")
         if code is not None:
-            return code in (0, "0", 200, "200")
+            return code in (0, "0", 200, "200", 20000, "20000")
         return "data" in data
 
     async def fetch_multi_funding(self, coin: str = "btc") -> Optional[MultiFundingRateData]:
-        """多交易所资金费率（BBX 一次返回 6 所 × current/3d/7d/30d）"""
+        """多交易所资金费率（BBX 按 data.{coin}.u.{exchange} 结构返回）"""
         url = f"{self._cfg.funding_url}?lan=zh-Hans"
         try:
             data = await self._get_json(url)
@@ -148,19 +149,19 @@ class BBXExtendedSource(DataSource):
             return None
 
         raw_data = data.get("data", {})
-        rows = raw_data.get("dataList", []) if isinstance(raw_data, dict) else []
-        coin_upper = coin.upper()
+        coin_data = raw_data.get(coin.lower(), {}) if isinstance(raw_data, dict) else {}
+        u_rates = coin_data.get("u", {}) if isinstance(coin_data, dict) else {}
+
         exchanges: list[ExchangeFundingRate] = []
-        for row in rows:
-            symbol = (row.get("symbolName") or "").upper()
-            if coin_upper not in symbol:
+        for exchange_name, rates in u_rates.items():
+            if not isinstance(rates, dict):
                 continue
             exchanges.append(ExchangeFundingRate(
-                exchange=row.get("exchangeName", ""),
-                current=_safe_float(row.get("currentRate")),
-                avg_3d=_safe_float(row.get("rate3dAvg")),
-                avg_7d=_safe_float(row.get("rate7dAvg")),
-                avg_30d=_safe_float(row.get("rate30dAvg")),
+                exchange=exchange_name,
+                current=_safe_float(rates.get("current")),
+                avg_3d=_safe_float(rates.get("threeDays")),
+                avg_7d=_safe_float(rates.get("sevenDays")),
+                avg_30d=_safe_float(rates.get("thirtyDays")),
             ))
 
         valid = [e for e in exchanges if e.current is not None]
@@ -179,7 +180,7 @@ class BBXExtendedSource(DataSource):
             interp = "空头拥挤"
 
         return MultiFundingRateData(
-            coin=coin_upper,
+            coin=coin.upper(),
             ts=int(time.time()),
             exchanges=exchanges,
             avg_current=avg_current,
@@ -188,14 +189,13 @@ class BBXExtendedSource(DataSource):
         )
 
     async def fetch_ls_ratio(self, coin: str = "btc", cycle: str = "1h") -> Optional[LongShortRatioData]:
-        """各交易所多空比"""
+        """各交易所多空比（API 返回 data.data[].exchange + ratio）"""
         url = f"{self._cfg.ls_ratio_url}?module=upgrade.long-short-ratio.exchanges"
         body = {"symbol": coin.lower(), "cycle": cycle, "lan": "cn"}
         try:
             data = await self._get_json(url, method="POST", json_body=body)
             self._mark_success()
         except Exception:
-            # SOL 等小币种 BBX 可能不支持，仅降级为 WARNING 且不影响全局健康
             logger.warning("BBX ls-ratio fetch failed | coin=%s", coin)
             return None
 
@@ -203,14 +203,22 @@ class BBXExtendedSource(DataSource):
             return None
 
         raw_data = data.get("data", {})
-        rows = raw_data.get("list", []) if isinstance(raw_data, dict) else []
+        rows = raw_data.get("data", []) if isinstance(raw_data, dict) else []
+
+        seen_exchanges: set[str] = set()
         exchanges: list[LongShortRatioExchange] = []
         for row in rows:
-            long_pct = _safe_float(row.get("longRate"), 50)
-            short_pct = _safe_float(row.get("shortRate"), 50)
-            ratio = long_pct / short_pct if short_pct > 0 else 1.0
+            if not isinstance(row, dict):
+                continue
+            exchange_name = row.get("exchange", "")
+            if exchange_name == "usdt_aggregate" or exchange_name in seen_exchanges:
+                continue
+            seen_exchanges.add(exchange_name)
+            ratio = _safe_float(row.get("ratio"), 1.0)
+            long_pct = round(ratio / (1 + ratio) * 100, 2) if ratio > 0 else 50.0
+            short_pct = round(100 - long_pct, 2)
             exchanges.append(LongShortRatioExchange(
-                exchange=row.get("exchangeName", ""),
+                exchange=exchange_name,
                 long_pct=long_pct,
                 short_pct=short_pct,
                 ratio=round(ratio, 3),
@@ -274,11 +282,19 @@ class BBXExtendedSource(DataSource):
 
         days: list[ETFFlowDay] = []
         for row in rows[:7]:
-            total = _safe_float(row.get("totalNetflow"), 0)
+            total = _safe_float(row.get("total") or row.get("totalNetflow"), 0)
+            date_str = row.get("date", "")
+            if not date_str:
+                ts_ms = row.get("timestamp")
+                if ts_ms:
+                    date_str = datetime.fromtimestamp(
+                        int(ts_ms) / 1000, tz=timezone.utc,
+                    ).strftime("%Y-%m-%d")
             days.append(ETFFlowDay(
-                date=row.get("date", ""),
+                date=date_str,
                 total_net=total,
-                detail={k: v for k, v in row.items() if k not in ("date", "totalNetflow")},
+                detail={k: v for k, v in row.items()
+                        if k not in ("date", "total", "totalNetflow", "timestamp")},
             ))
 
         net_3d = sum(d.total_net for d in days[:3])
@@ -292,7 +308,7 @@ class BBXExtendedSource(DataSource):
         )
 
     async def fetch_global_liquidation(self) -> Optional[GlobalLiquidationData]:
-        """全网爆仓统计"""
+        """全网爆仓统计（API 返回 data.title_grid[] 嵌套结构）"""
         url = f"{self._cfg.global_liq_url}?module=v7.market.futures-liquidation"
         body = {"currency": "usd", "lan": "cn"}
         try:
@@ -310,10 +326,25 @@ class BBXExtendedSource(DataSource):
         d = data.get("data", {})
         if not isinstance(d, dict):
             return None
-        long_1h = _safe_float(d.get("longLiqUsd1h"), 0)
-        short_1h = _safe_float(d.get("shortLiqUsd1h"), 0)
-        long_24h = _safe_float(d.get("longLiqUsd24h"), 0)
-        short_24h = _safe_float(d.get("shortLiqUsd24h"), 0)
+
+        grid = d.get("title_grid", [])
+        grid_map: dict[str, dict] = {}
+        for item in grid:
+            if isinstance(item, dict) and "id" in item:
+                grid_map[item["id"]] = item
+
+        liq_1h_total = _safe_float(grid_map.get("1h_liq", {}).get("fund_usd"), 0)
+        long_24h = _safe_float(grid_map.get("long_liq", {}).get("fund_usd"), 0)
+        short_24h = _safe_float(grid_map.get("short_liq", {}).get("fund_usd"), 0)
+        largest = _safe_float(grid_map.get("max_liq", {}).get("fund_usd"), 0)
+
+        total_24h = long_24h + short_24h
+        if total_24h > 0 and liq_1h_total > 0:
+            long_1h = liq_1h_total * (long_24h / total_24h)
+            short_1h = liq_1h_total * (short_24h / total_24h)
+        else:
+            long_1h = liq_1h_total / 2
+            short_1h = liq_1h_total / 2
 
         return GlobalLiquidationData(
             ts=int(time.time()),
@@ -323,7 +354,7 @@ class BBXExtendedSource(DataSource):
             short_24h_usd=short_24h,
             ratio_1h=long_1h / short_1h if short_1h > 0 else 1.0,
             ratio_24h=long_24h / short_24h if short_24h > 0 else 1.0,
-            largest_single_usd=_safe_float(d.get("largestLiqUsd"), 0),
+            largest_single_usd=largest,
         )
 
     async def fetch_market_index(self) -> Optional[MarketIndexData]:

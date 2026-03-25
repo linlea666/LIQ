@@ -6,6 +6,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from typing import Any, Callable
 
 import socketio
 import uvicorn
@@ -18,6 +19,61 @@ from config.settings import get_settings
 from engine import Engine
 
 from collections import deque
+
+
+class CORSASGIWrapper:
+    """外层 ASGI 中间件：确保 HTTP CORS 头对所有请求生效。
+
+    socketio.ASGIApp 包裹在 FastAPI 外层时，POST 预检 OPTIONS 可能
+    未被转发至 FastAPI CORSMiddleware。此中间件在最外层拦截 OPTIONS
+    并为普通响应注入 CORS 头，作为兜底保障。
+    """
+
+    def __init__(self, app: Any, allowed_origins: list[str]):
+        self.app = app
+        self.allowed_origins = set(allowed_origins)
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        origin = ""
+        for key, value in scope.get("headers", []):
+            if key == b"origin":
+                origin = value.decode()
+                break
+
+        if origin not in self.allowed_origins:
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            headers = [
+                (b"access-control-allow-origin", origin.encode()),
+                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
+                (b"access-control-allow-headers", b"*"),
+                (b"access-control-allow-credentials", b"true"),
+                (b"access-control-max-age", b"86400"),
+                (b"content-length", b"0"),
+            ]
+            await send({"type": "http.response.start", "status": 204, "headers": headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        cors_headers = [
+            (b"access-control-allow-origin", origin.encode()),
+            (b"access-control-allow-credentials", b"true"),
+        ]
+
+        async def send_with_cors(message: dict):
+            if message["type"] == "http.response.start":
+                existing = list(message.get("headers", []))
+                existing.extend(cors_headers)
+                message = {**message, "headers": existing}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
 
 LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -84,7 +140,8 @@ app.add_middleware(
 
 app.include_router(router)
 
-socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+_socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)
 
 
 if __name__ == "__main__":
