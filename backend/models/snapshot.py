@@ -140,6 +140,20 @@ class AISnapshot(BaseModel):
     sp500: Optional[float] = None
     sp500_change_pct: Optional[float] = None
 
+    # Phase 5: 链上 + 波动率 + 宏观补充（供 AI 决策 + 阶梯策略）
+    btc_mvrv: Optional[float] = None
+    btc_hist_vol: Optional[float] = None
+    btc_implied_vol: Optional[float] = None
+    btc_iv_skew_1m: Optional[float] = None
+    exchange_btc_total: Optional[float] = None
+    exchange_btc_change_pct: Optional[float] = None
+    ahr999: Optional[float] = None
+    stablecoin_dominance: Optional[float] = None
+    coinbase_btc_premium: Optional[float] = None
+    usdt_otc_premium: Optional[float] = None
+    us_10y_yield: Optional[float] = None
+    fed_rate: Optional[float] = None
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

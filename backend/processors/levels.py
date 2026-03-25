@@ -30,6 +30,8 @@ def calculate_levels(
     orderbook: Optional[OrderBookAnalysis],
     atr: float,
     vwap: float,
+    liq_map_7d: Optional[LiquidationMap] = None,
+    btc_hist_vol: Optional[float] = None,
 ) -> LevelAnalysis:
     """
     综合多维数据计算全部关键价位。
@@ -116,6 +118,7 @@ def calculate_levels(
 
     ladder_plans = _calc_ladder_plans(
         current_price, liq_map, atr, supports, resistances, vp,
+        liq_map_7d=liq_map_7d, btc_hist_vol=btc_hist_vol,
     )
 
     return LevelAnalysis(
@@ -460,6 +463,47 @@ def _calc_sniper_entries(
     return entries[:4]
 
 
+def _merge_clusters_7d(
+    clusters_24h: list[LiqCluster],
+    clusters_7d: list[LiqCluster],
+    near_far_threshold_pct: float,
+) -> list[LiqCluster]:
+    """
+    近距（≤threshold）优先用 24h 簇（数据更新、粒度更细）；
+    远距（>threshold）合并 7d 簇（7d 覆盖更广，远距清算分布更完整）。
+    同价位去重：7d 簇与 24h 已有簇中心价距 <1% 时跳过。
+    """
+    near = [c for c in clusters_24h if c.distance_pct <= near_far_threshold_pct]
+    far_24h = [c for c in clusters_24h if c.distance_pct > near_far_threshold_pct]
+    far_7d = [c for c in clusters_7d if c.distance_pct > near_far_threshold_pct]
+
+    existing_centers = {c.price_center for c in far_24h}
+    deduped_7d = []
+    for c7 in far_7d:
+        if any(abs(c7.price_center - ec) / max(ec, 1) < 0.01 for ec in existing_centers):
+            continue
+        existing_centers.add(c7.price_center)
+        deduped_7d.append(c7)
+
+    return near + far_24h + deduped_7d
+
+
+def _vol_adjusted_max_distance(base_max_pct: float, btc_hist_vol: Optional[float]) -> float:
+    """
+    根据历史波动率动态调整阶梯最远距离：
+    - 基准 HV ≈ 0.50（年化 50%），此时保持 base_max_pct
+    - HV > 0.70 时放大到 base * 1.25（极端波动期覆盖更宽）
+    - HV < 0.30 时缩小到 base * 0.75（低波时阶梯更窄避资金闲置）
+    """
+    if btc_hist_vol is None or btc_hist_vol <= 0:
+        return base_max_pct
+    hv = btc_hist_vol
+    baseline = 0.50
+    scale = 1.0 + (hv - baseline) * 0.5
+    scale = max(0.75, min(1.25, scale))
+    return round(base_max_pct * scale, 1)
+
+
 def _calc_ladder_plans(
     current_price: float,
     liq_map: Optional[LiquidationMap],
@@ -467,6 +511,8 @@ def _calc_ladder_plans(
     supports: list[PriceLevel],
     resistances: list[PriceLevel],
     vp: Optional[VolumeProfileData],
+    liq_map_7d: Optional[LiquidationMap] = None,
+    btc_hist_vol: Optional[float] = None,
 ) -> list[LadderPlan]:
     """
     阶梯式多空双向埋伏计划（Scaled-In Limit Order Strategy）。
@@ -474,7 +520,8 @@ def _calc_ladder_plans(
     核心哲学：「基于当前价位，向上/向下多层网捕捉区域性顶底」
     - 基于当前实时价格动态计算，非固定底部
     - 同时输出做多（向下埋伏）和做空（向上埋伏）两个方向
-    - 在各清算密集区的"区域性底/顶"分层挂单
+    - 近距层用 24h 清算簇，远距层合并 7d 清算簇（覆盖更广）
+    - 历史波动率自适应调整最远覆盖距离
     - 每层独立止损，止损在真空区内或按百分比保底（防连带爆仓）
     - 越深层仓位权重越大（倒金字塔加仓）
     - 止盈指向对侧清算磁吸点或回归当前价位区域
@@ -486,15 +533,55 @@ def _calc_ladder_plans(
     cfg = get_settings().processors.levels
     max_tiers = int(cfg.get("ladder_max_tiers", 5))
     min_rr = float(cfg.get("ladder_min_rr", 3.0))
-    max_distance_pct = float(cfg.get("ladder_max_distance_pct", 20.0))
+    base_max_distance_pct = float(cfg.get("ladder_max_distance_pct", 20.0))
     min_distance_pct = float(cfg.get("ladder_min_distance_pct", 1.0))
     total_risk_budget = float(cfg.get("ladder_total_risk_pct", 10.0))
     sl_min_pct = float(cfg.get("ladder_sl_min_pct", 2.0))
 
+    max_distance_pct = _vol_adjusted_max_distance(base_max_distance_pct, btc_hist_vol)
+
+    near_far_threshold = 5.0
+
+    merged_below = _merge_clusters_7d(
+        liq_map.clusters_below,
+        liq_map_7d.clusters_below if liq_map_7d else [],
+        near_far_threshold,
+    )
+    merged_above = _merge_clusters_7d(
+        liq_map.clusters_above,
+        liq_map_7d.clusters_above if liq_map_7d else [],
+        near_far_threshold,
+    )
+
+    merged_vacuums = list(liq_map.vacuum_zones or [])
+    if liq_map_7d:
+        existing_vac = {(v.price_from, v.price_to) for v in merged_vacuums}
+        for v in (liq_map_7d.vacuum_zones or []):
+            if (v.price_from, v.price_to) not in existing_vac:
+                merged_vacuums.append(v)
+
+    from models.liquidation import LiquidationMap as _LM
+    merged_liq_map_long = _LM(
+        coin=liq_map.coin, ts=liq_map.ts, cycle=liq_map.cycle,
+        leverage_groups=liq_map.leverage_groups,
+        clusters_above=liq_map.clusters_above,
+        clusters_below=merged_below,
+        vacuum_zones=merged_vacuums,
+        imbalance_ratio=liq_map.imbalance_ratio,
+    )
+    merged_liq_map_short = _LM(
+        coin=liq_map.coin, ts=liq_map.ts, cycle=liq_map.cycle,
+        leverage_groups=liq_map.leverage_groups,
+        clusters_above=merged_above,
+        clusters_below=liq_map.clusters_below,
+        vacuum_zones=merged_vacuums,
+        imbalance_ratio=liq_map.imbalance_ratio,
+    )
+
     plans: list[LadderPlan] = []
 
     long_plan = _build_ladder_long(
-        current_price, liq_map, atr, supports, resistances, vp,
+        current_price, merged_liq_map_long, atr, supports, resistances, vp,
         max_tiers, min_rr, min_distance_pct, max_distance_pct,
         total_risk_budget, sl_min_pct,
     )
@@ -502,7 +589,7 @@ def _calc_ladder_plans(
         plans.append(long_plan)
 
     short_plan = _build_ladder_short(
-        current_price, liq_map, atr, supports, resistances, vp,
+        current_price, merged_liq_map_short, atr, supports, resistances, vp,
         max_tiers, min_rr, min_distance_pct, max_distance_pct,
         total_risk_budget, sl_min_pct,
     )

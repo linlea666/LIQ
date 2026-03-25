@@ -594,10 +594,13 @@ class Engine:
             state.waterfall = build_waterfall(state.temperature, _factor_scores)
 
         vwap = state.vp.vwap if state.vp else 0
+        liq_map_7d = state.liq_maps.get("7d")
+        hist_vol = state.market_index.btc_hist_vol if state.market_index else None
         state.levels = calculate_levels(
             coin=ccy, current_price=price, liq_map=liq_map,
             vp=state.vp, orderbook=state.orderbook,
             atr=state.atr, vwap=vwap,
+            liq_map_7d=liq_map_7d, btc_hist_vol=hist_vol,
         )
 
     # ── 推送循环 ──

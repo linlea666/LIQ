@@ -264,6 +264,70 @@ def build_user_prompt(snapshot: dict) -> str:
     if dom:
         lines.append(f"BTC Dominance: {dom:.1f}%")
 
+    # ── 波动率与链上指标（Phase 5） ──
+    hist_vol = snapshot.get("btc_hist_vol")
+    imp_vol = snapshot.get("btc_implied_vol")
+    iv_skew = snapshot.get("btc_iv_skew_1m")
+    if hist_vol is not None or imp_vol is not None:
+        lines.append("")
+        lines.append("### 9b. 波动率结构")
+        if hist_vol is not None:
+            lines.append(f"BTC 历史波动率(年化): {hist_vol:.2%}")
+        if imp_vol is not None:
+            lines.append(f"BTC 隐含波动率(OKX期权): {imp_vol:.2%}")
+        if hist_vol and imp_vol:
+            spread = imp_vol - hist_vol
+            label = "期权市场预期波动放大" if spread > 0.02 else ("期权市场预期平静" if spread < -0.02 else "隐含≈历史，无方向性偏差")
+            lines.append(f"IV-HV 价差: {spread:+.2%} → {label}")
+        if iv_skew is not None:
+            skew_label = "看跌需求>看涨(偏恐慌)" if iv_skew < -0.01 else ("看涨需求>看跌(偏乐观)" if iv_skew > 0.01 else "中性")
+            lines.append(f"1M IV Skew: {iv_skew:+.4f} → {skew_label}")
+
+    mvrv = snapshot.get("btc_mvrv")
+    ahr = snapshot.get("ahr999")
+    ex_btc = snapshot.get("exchange_btc_total")
+    ex_chg = snapshot.get("exchange_btc_change_pct")
+    sc_dom = snapshot.get("stablecoin_dominance")
+    cb_prem = snapshot.get("coinbase_btc_premium")
+    usdt_prem = snapshot.get("usdt_otc_premium")
+    if any(v is not None for v in (mvrv, ahr, ex_btc, sc_dom)):
+        lines.append("")
+        lines.append("### 9c. 链上与资金面")
+        if mvrv is not None:
+            mvrv_label = "全网浮亏(底部区域)" if mvrv < 1 else ("估值中性" if mvrv < 2.5 else "估值过热")
+            lines.append(f"MVRV 比率: {mvrv:.3f} → {mvrv_label}")
+        if ahr is not None:
+            ahr_label = "适合抄底" if ahr < 0.45 else ("适合定投" if ahr < 1.2 else "估值偏高")
+            lines.append(f"ahr999 囤币指数: {ahr:.4f} → {ahr_label}")
+        if ex_btc is not None:
+            chg_str = f" ({ex_chg:+.2f}%)" if ex_chg is not None else ""
+            lines.append(f"主要交易所 BTC 余额合计: {ex_btc:,.0f} BTC{chg_str}")
+            if ex_chg is not None and ex_chg < -0.5:
+                lines.append("  → 余额下降=BTC 被提走屯币，看涨信号")
+            elif ex_chg is not None and ex_chg > 0.5:
+                lines.append("  → 余额上升=BTC 充入准备卖出，看跌信号")
+        if sc_dom is not None:
+            lines.append(f"稳定币市占率: {sc_dom:.2f}% (高=干火药多/观望资金多)")
+        if cb_prem is not None:
+            lines.append(f"Coinbase BTC 溢价: {cb_prem:.4%} ({'正溢价=美国买盘活跃' if cb_prem > 0 else '负溢价=美国买盘弱'})")
+        if usdt_prem is not None:
+            lines.append(f"USDT 场外溢价: {usdt_prem:.3f} ({'>1=场外买盘活跃' if usdt_prem > 1 else '<1=场外卖盘'})")
+
+    us_10y = snapshot.get("us_10y_yield")
+    fed_r = snapshot.get("fed_rate")
+    if us_10y is not None or fed_r is not None:
+        lines.append("")
+        lines.append("### 9d. 利率环境")
+        if us_10y is not None:
+            lines.append(f"美国10年期国债收益率: {us_10y:.3f}%")
+        if fed_r is not None:
+            lines.append(f"美联储联邦基金利率: {fed_r:.2f}%")
+        if us_10y is not None:
+            if us_10y > 4.5:
+                lines.append("  → 高利率压制风险资产，BTC 承压")
+            elif us_10y < 3.5:
+                lines.append("  → 低利率利好风险资产，BTC 受益")
+
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([

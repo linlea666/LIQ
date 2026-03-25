@@ -96,6 +96,20 @@ def build_ai_snapshot(
     gold_chg = None
     sp500_val = None
     sp500_chg = None
+    # Phase 5 新增
+    mi_btc_mvrv = None
+    mi_btc_hist_vol = None
+    mi_btc_implied_vol = None
+    mi_btc_iv_skew_1m = None
+    mi_exchange_btc_total = None
+    mi_exchange_btc_change_pct = None
+    mi_ahr999 = None
+    mi_stablecoin_dominance = None
+    mi_coinbase_btc_premium = None
+    mi_usdt_otc_premium = None
+    mi_us_10y_yield = None
+    mi_fed_rate = None
+
     if market_index:
         nasdaq_val = market_index.nasdaq
         gold_val = market_index.gold
@@ -104,6 +118,37 @@ def build_ai_snapshot(
         nasdaq_chg = _macro_change_pct(items, nasdaq_val, ("nasdaq", "ndx", "qqq", "纳斯达克"))
         gold_chg = _macro_change_pct(items, gold_val, ("gold", "xau", "黄金"))
         sp500_chg = _macro_change_pct(items, sp500_val, ("spx", "sp500", "标普", "s&p"))
+
+        mi_btc_mvrv = market_index.btc_mvrv
+        mi_btc_hist_vol = market_index.btc_hist_vol
+        mi_btc_implied_vol = market_index.btc_implied_vol
+        mi_btc_iv_skew_1m = market_index.btc_iv_skew_1m
+        mi_ahr999 = market_index.ahr999
+        mi_stablecoin_dominance = market_index.stablecoin_dominance
+        mi_coinbase_btc_premium = market_index.coinbase_btc_premium
+        mi_usdt_otc_premium = market_index.usdt_otc_premium
+        mi_us_10y_yield = market_index.us_10y_yield
+        mi_fed_rate = market_index.fed_rate
+
+        bnb_bal = market_index.binance_btc_balance
+        okx_bal = market_index.okx_btc_balance
+        bf_bal = market_index.bitfinex_btc_balance
+        cb_bal = market_index.coinbase_btc_balance
+        bal_parts = [b for b in (bnb_bal, okx_bal, bf_bal, cb_bal) if b is not None]
+        if bal_parts:
+            mi_exchange_btc_total = sum(bal_parts)
+            chg_parts = []
+            for bal_val, subs in (
+                (bnb_bal, ("binancebtcbalance",)),
+                (okx_bal, ("okexbtcbalance",)),
+                (bf_bal, ("bitfinexbtcbalance",)),
+                (cb_bal, ("coinbtchold",)),
+            ):
+                c = _macro_change_pct(items, bal_val, subs)
+                if c is not None:
+                    chg_parts.append(c)
+            if chg_parts:
+                mi_exchange_btc_change_pct = sum(chg_parts) / len(chg_parts)
 
     ob_bid_total = 0.0
     ob_ask_total = 0.0
@@ -186,6 +231,18 @@ def build_ai_snapshot(
         gold_change_pct=gold_chg,
         sp500=sp500_val,
         sp500_change_pct=sp500_chg,
+        btc_mvrv=mi_btc_mvrv,
+        btc_hist_vol=mi_btc_hist_vol,
+        btc_implied_vol=mi_btc_implied_vol,
+        btc_iv_skew_1m=mi_btc_iv_skew_1m,
+        exchange_btc_total=mi_exchange_btc_total,
+        exchange_btc_change_pct=mi_exchange_btc_change_pct,
+        ahr999=mi_ahr999,
+        stablecoin_dominance=mi_stablecoin_dominance,
+        coinbase_btc_premium=mi_coinbase_btc_premium,
+        usdt_otc_premium=mi_usdt_otc_premium,
+        us_10y_yield=mi_us_10y_yield,
+        fed_rate=mi_fed_rate,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,

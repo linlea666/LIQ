@@ -352,21 +352,36 @@ class BBXExtendedSource(DataSource):
                 items = []
 
             key_map = {
+                # ── 修正：对齐实际 API 返回的 key ──
                 "i:fgi:alternative": "fear_greed",
-                "i:bitcoin_percentage_of_market_capitalization": "btc_dominance",
-                "max_pain:btc": "btc_max_pain",
-                "i:dvol:btc": "btc_dvol",
-                "i:options_oi_ratio:btc": "btc_put_call_oi",
-                "i:mvrv:btc": "btc_mvrv",
-                "i:dxy": "dxy",
-                "i:nasdaq": "nasdaq",
-                "i:ndx": "nasdaq",
-                "i:spx": "sp500",
-                "i:sp500": "sp500",
-                "i:gold": "gold",
-                "i:btc_balance:binance": "binance_btc_balance",
-                "lsprbtc:okex": "okx_ls_ratio_btc",
-                "lsprbtc:binance": "binance_ls_ratio_btc",
+                "i:bitcoinsuprp:aicoin": "btc_dominance",
+                "i:btcmaxpainprice:greeks": "btc_max_pain",
+                "i:btcusdvolatility:deribit": "btc_dvol",
+                "i:btcoptposlsratio:okex": "btc_put_call_oi",
+                "i:mvrv:bitcoin": "btc_mvrv",
+                "i:diniw:ice": "dxy",
+                "i:ixic:nasdaq": "nasdaq",
+                "i:ndx:nasdaq": "nasdaq",
+                "i:inx:sp": "sp500",
+                "i:xauusd:liffe": "gold",
+                "i:binancebtcbalance:aicoin": "binance_btc_balance",
+                "i:lsprbtc:okex": "okx_ls_ratio_btc",
+                "i:lsprbtcswapusdt:binance": "binance_ls_ratio_btc",
+                # ── 新增 A 级指标 ──
+                "i:btcposhistvol:okex": "btc_hist_vol",
+                "i:btcposimpvol:okex": "btc_implied_vol",
+                "i:btcopt1mimpvolskew:okex": "btc_iv_skew_1m",
+                "i:okexbtcbalance:aicoin": "okx_btc_balance",
+                "i:bitfinexbtcbalance:aicoin": "bitfinex_btc_balance",
+                "i:coinbtchold:arkm": "coinbase_btc_balance",
+                "i:btcinvest:ahr999": "ahr999",
+                "i:tetherusdmcapusd:aicoin": "usdt_market_cap",
+                "i:stablesuprp:aicoin": "stablecoin_dominance",
+                "i:btcdpi:aicoin": "coinbase_btc_premium",
+                "i:premiumrateusdt:okex": "usdt_otc_premium",
+                "i:ehashrate:bitcoin": "btc_hashrate",
+                "i:usty10y:nybot": "us_10y_yield",
+                "i:fedeffr:fed": "fed_rate",
             }
 
             result = MarketIndexData(ts=int(time.time()))
@@ -423,13 +438,18 @@ def _apply_market_index_fallback(result: MarketIndexData) -> None:
     """
     targets = [
         ("fear_greed", lambda k, n: "fgi" in k or "fear" in k or "贪婪" in n or "恐惧" in n, lambda x: 0 <= x <= 100),
-        ("btc_dominance", lambda k, n: "dominance" in k or "市值占比" in n or "btc.d" in k, lambda x: 0 < x < 100),
-        ("dxy", lambda k, n: "dxy" in k or "美元指数" in n, lambda x: 50 < x < 200),
-        ("nasdaq", lambda k, n: "nasdaq" in k or "ndx" in k or "qqq" in k or "纳斯达克" in n or "纳指" in n, lambda x: x > 500),
-        ("sp500", lambda k, n: "spx" in k or "sp500" in k or "s&p" in k or "标普" in n, lambda x: x > 500),
-        ("gold", lambda k, n: "gold" in k or "xau" in k or "黄金" in n, lambda x: x > 10),
+        ("btc_dominance", lambda k, n: ("dominance" in k or "市值占比" in n or "btc.d" in k or "bitcoinsuprp" in k) and "eth" not in k, lambda x: 0 < x < 100),
+        ("dxy", lambda k, n: ("dxy" in k or "diniw" in k or "美元指数" in n) and "usdt" not in k, lambda x: 50 < x < 200),
+        ("nasdaq", lambda k, n: ("nasdaq" in k or "ndx" in k or "qqq" in k or "纳斯达克" in n or "纳指" in n) and "coin" not in k, lambda x: x > 500),
+        ("sp500", lambda k, n: "spx" in k or "sp500" in k or "s&p" in k or "inx:sp" in k or "标普" in n, lambda x: x > 500),
+        ("gold", lambda k, n: ("gold" in k or "xau" in k or "黄金" in n) and "digital" not in k, lambda x: x > 10),
         ("btc_max_pain", lambda k, n: "max_pain" in k or "maxpain" in k or "最大痛点" in n, lambda x: x > 1000),
-        ("btc_dvol", lambda k, n: "dvol" in k and "btc" in k, lambda x: 0 < x < 500),
+        ("btc_dvol", lambda k, n: ("dvol" in k or "volatility" in k) and "btc" in k and "hist" not in k, lambda x: 0 < x < 500),
+        ("btc_mvrv", lambda k, n: "mvrv" in k, lambda x: 0 < x < 10),
+        ("btc_put_call_oi", lambda k, n: "optposlsratio" in k and "btc" in k, lambda x: 0 < x < 10),
+        ("btc_hist_vol", lambda k, n: "histv" in k and "btc" in k, lambda x: 0 < x < 5),
+        ("btc_implied_vol", lambda k, n: "impvol" in k and "btc" in k and "skew" not in k and "atm" not in k, lambda x: 0 < x < 5),
+        ("ahr999", lambda k, n: "ahr999" in k, lambda x: 0 < x < 50),
     ]
 
     for attr, pred, rng in targets:

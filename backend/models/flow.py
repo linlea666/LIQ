@@ -173,4 +173,19 @@ class MarketIndexData(BaseModel):
     binance_btc_balance: Optional[float] = None
     okx_ls_ratio_btc: Optional[float] = None
     binance_ls_ratio_btc: Optional[float] = None
+    # A 级新增指标
+    btc_hist_vol: Optional[float] = None
+    btc_implied_vol: Optional[float] = None
+    btc_iv_skew_1m: Optional[float] = None
+    okx_btc_balance: Optional[float] = None
+    bitfinex_btc_balance: Optional[float] = None
+    coinbase_btc_balance: Optional[float] = None
+    ahr999: Optional[float] = None
+    usdt_market_cap: Optional[float] = None
+    stablecoin_dominance: Optional[float] = None
+    coinbase_btc_premium: Optional[float] = None
+    usdt_otc_premium: Optional[float] = None
+    btc_hashrate: Optional[float] = None
+    us_10y_yield: Optional[float] = None
+    fed_rate: Optional[float] = None
     raw_items: list[MarketIndexItem] = []
