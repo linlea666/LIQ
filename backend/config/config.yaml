@@ -112,7 +112,7 @@ engine:
 
 ai:
   active: "deepseek"
-  timeout_sec: 60
+  timeout_sec: 120
   max_retries: 2
   cooldown_sec: 30
   max_history: 5
