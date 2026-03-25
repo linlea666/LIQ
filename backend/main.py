@@ -69,8 +69,10 @@ class CORSASGIWrapper:
         async def send_with_cors(message: dict):
             if message["type"] == "http.response.start":
                 existing = list(message.get("headers", []))
-                existing.extend(cors_headers)
-                message = {**message, "headers": existing}
+                has_cors = any(k == b"access-control-allow-origin" for k, _ in existing)
+                if not has_cors:
+                    existing.extend(cors_headers)
+                    message = {**message, "headers": existing}
             await send(message)
 
         await self.app(scope, receive, send_with_cors)
