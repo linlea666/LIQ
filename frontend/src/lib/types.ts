@@ -215,6 +215,8 @@ export interface AIAnalysisResult {
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];
   raw_text: string;
+  /** 发送给 AI 的完整 user prompt，用于验证数据是否传入 */
+  user_prompt?: string;
 }
 
 export interface MarketUpdate {

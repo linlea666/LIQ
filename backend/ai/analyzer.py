@@ -74,7 +74,6 @@ class AIAnalyzer:
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.3,
-                    max_tokens=4096,
                     timeout=self._timeout,
                 )
                 elapsed = time.time() - t0
@@ -107,11 +106,11 @@ class AIAnalyzer:
                     )
                     raise
 
-        result = _parse_ai_output(raw_text, snapshot)
+        result = _parse_ai_output(raw_text, snapshot, user_prompt)
         return result
 
 
-def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
+def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "") -> AIAnalysisResult:
     """
     解析 AI 输出文本为结构化结果。
     即使解析部分失败，也保留 raw_text 作为降级展示。
@@ -166,6 +165,7 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot) -> AIAnalysisResult:
         risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
         raw_text=raw_text,
+        user_prompt=user_prompt,
     )
 
 

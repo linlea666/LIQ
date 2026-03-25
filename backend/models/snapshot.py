@@ -178,3 +178,4 @@ class AIAnalysisResult(BaseModel):
     risk_warnings: list[str]
     scenario_analysis: list[dict]
     raw_text: str
+    user_prompt: str = ""
