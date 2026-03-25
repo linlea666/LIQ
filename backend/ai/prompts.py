@@ -59,6 +59,7 @@ def build_system_prompt() -> str:
 - 核心数学期望：全部被扫损总亏 N%，任一层命中可赚 M 倍（M >> N）
 - **必须评估**：清算瀑布连锁风险、极端行情止损滑点、保证金占用效率
 - 与狙击挂单**严格分工**：狙击=近距精准(≤5%)单层猎杀，阶梯=远距(≥5%)多层网捕，两者覆盖区间不重叠
+- **7天清算地图交叉验证**：§1b 提供 7 天维度清算簇，阶梯远距入场点须与 §1b 簇位置对照——若引擎入场价附近 §1b 无对应簇，应降低该层可信度或建议跳过
 
 ### 输出格式（严格按以下 Markdown 章节标题输出，便于系统解析）
 
@@ -151,6 +152,30 @@ def build_user_prompt(snapshot: dict) -> str:
     for v in snapshot.get("vacuum_zones", []):
         lines.append(f"  - ${v.get('price_from', 0):,.0f}-${v.get('price_to', 0):,.0f} {v.get('note', '')}")
 
+    clusters_above_7d = snapshot.get("liq_clusters_above_7d", [])
+    clusters_below_7d = snapshot.get("liq_clusters_below_7d", [])
+    vacuums_7d = snapshot.get("vacuum_zones_7d", [])
+    imb_7d = snapshot.get("liq_imbalance_ratio_7d", 0)
+    if clusters_above_7d or clusters_below_7d:
+        lines.extend(["", "### 1b. 清算地图数据 [7天·阶梯策略核心]"])
+        lines.append(f"7天多空失衡比: {imb_7d:.2f}")
+        if clusters_above_7d:
+            lines.append("\n7天上方清算密集区(空头清算):")
+            for c in clusters_above_7d:
+                lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
+                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"距当前{c.get('distance_pct', 0):.1f}%")
+        if clusters_below_7d:
+            lines.append("\n7天下方清算密集区(多头清算):")
+            for c in clusters_below_7d:
+                lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
+                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"距当前{c.get('distance_pct', 0):.1f}%")
+        if vacuums_7d:
+            lines.append("\n7天清算真空区:")
+            for v in vacuums_7d:
+                lines.append(f"  - ${v.get('price_from', 0):,.0f}-${v.get('price_to', 0):,.0f} {v.get('note', '')}")
+
     lines.extend([
         "",
         "### 2. 资金流数据 [实时]",
@@ -236,13 +261,20 @@ def build_user_prompt(snapshot: dict) -> str:
         f"近30m多头爆仓(OKX): ${snapshot.get('recent_liq_30m_long_usd', 0) / 1e6:.1f}M",
         f"近30m空头爆仓(OKX): ${snapshot.get('recent_liq_30m_short_usd', 0) / 1e6:.1f}M",
     ])
+    gl1h_long = snapshot.get("global_liq_long_1h", 0)
+    gl1h_short = snapshot.get("global_liq_short_1h", 0)
+    if gl1h_long > 0 or gl1h_short > 0:
+        lines.append(f"全网1h多头爆仓: ${gl1h_long / 1e6:.1f}M / 空头: ${gl1h_short / 1e6:.1f}M")
     g_long = snapshot.get("global_liq_long_24h", 0)
     g_short = snapshot.get("global_liq_short_24h", 0)
     if g_long > 0 or g_short > 0:
         lines.append(f"全网24h多头爆仓: ${g_long / 1e6:.0f}M")
         lines.append(f"全网24h空头爆仓: ${g_short / 1e6:.0f}M")
-        if g_short > 0:
-            lines.append(f"全网多空爆仓比: {g_long / g_short:.1f}")
+        ratio_24h = snapshot.get("global_liq_ratio_24h", 1.0)
+        lines.append(f"全网多空爆仓比: {ratio_24h:.1f}")
+    largest = snapshot.get("global_liq_largest_single", 0)
+    if largest > 0:
+        lines.append(f"最大单笔爆仓: ${largest / 1e6:.1f}M")
 
     lines.extend([
         "",
@@ -281,6 +313,10 @@ def build_user_prompt(snapshot: dict) -> str:
     etf_3d = snapshot.get("etf_net_3d")
     if etf_3d is not None:
         lines.append(f"BTC ETF 3日净流: ${etf_3d / 1e6:.0f}M ({snapshot.get('etf_trend', '')})")
+    etf_days = snapshot.get("etf_recent_days", [])
+    if etf_days:
+        day_strs = [f"{d.get('date', '?')}: ${d.get('total_net', 0) / 1e6:+.0f}M" for d in etf_days[:5]]
+        lines.append(f"ETF 每日明细: {' | '.join(day_strs)}")
     max_pain = snapshot.get("btc_max_pain")
     if max_pain:
         lines.append(f"BTC 期权 Max Pain: ${max_pain:,.0f}")

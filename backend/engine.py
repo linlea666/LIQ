@@ -784,6 +784,7 @@ class Engine:
             etf_flow=state.etf_flow, global_liq=state.global_liq,
             market_index=state.market_index, taker_flow=state.taker_flow,
             levels=state.levels,
+            liq_map_7d=state.liq_maps.get("7d"),
         )
 
         result = await self._analyzer.analyze(snapshot)

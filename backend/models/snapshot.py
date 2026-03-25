@@ -80,6 +80,12 @@ class AISnapshot(BaseModel):
     vacuum_zones: list[dict]
     liq_imbalance_ratio: float
 
+    # 7d 清算地图（远距阶梯策略核心依据）
+    liq_clusters_above_7d: list[dict] = []
+    liq_clusters_below_7d: list[dict] = []
+    vacuum_zones_7d: list[dict] = []
+    liq_imbalance_ratio_7d: float = 0
+
     cvd_contract_trend: str
     cvd_contract_delta_1h: float
     cvd_spot_trend: str
@@ -123,8 +129,13 @@ class AISnapshot(BaseModel):
     fear_greed_index: Optional[float] = None
     etf_net_3d: Optional[float] = None
     etf_trend: str = ""
+    etf_recent_days: list[dict] = []
     global_liq_long_24h: float = 0
     global_liq_short_24h: float = 0
+    global_liq_long_1h: float = 0
+    global_liq_short_1h: float = 0
+    global_liq_ratio_24h: float = 1.0
+    global_liq_largest_single: float = 0
     btc_max_pain: Optional[float] = None
     btc_dvol: Optional[float] = None
     dxy: Optional[float] = None

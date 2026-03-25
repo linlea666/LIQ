@@ -63,6 +63,7 @@ def build_ai_snapshot(
     market_index: Optional[MarketIndexData] = None,
     taker_flow: Optional[TakerFlowData] = None,
     levels: Optional[LevelAnalysis] = None,
+    liq_map_7d: Optional[LiquidationMap] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -76,6 +77,16 @@ def build_ai_snapshot(
         clusters_below = [c.model_dump() for c in liq_map.clusters_below[:5]]
         vacuum_zones = [v.model_dump() for v in liq_map.vacuum_zones[:5]]
         imbalance = liq_map.imbalance_ratio
+
+    clusters_above_7d: list[dict] = []
+    clusters_below_7d: list[dict] = []
+    vacuum_zones_7d: list[dict] = []
+    imbalance_7d = 0.0
+    if liq_map_7d:
+        clusters_above_7d = [c.model_dump() for c in liq_map_7d.clusters_above[:8]]
+        clusters_below_7d = [c.model_dump() for c in liq_map_7d.clusters_below[:8]]
+        vacuum_zones_7d = [v.model_dump() for v in liq_map_7d.vacuum_zones[:5]]
+        imbalance_7d = liq_map_7d.imbalance_ratio
 
     bid_walls = []
     ask_walls = []
@@ -193,6 +204,10 @@ def build_ai_snapshot(
         liq_clusters_below=clusters_below,
         vacuum_zones=vacuum_zones,
         liq_imbalance_ratio=imbalance,
+        liq_clusters_above_7d=clusters_above_7d,
+        liq_clusters_below_7d=clusters_below_7d,
+        vacuum_zones_7d=vacuum_zones_7d,
+        liq_imbalance_ratio_7d=imbalance_7d,
         cvd_contract_trend=cvd_contract.trend_1h if cvd_contract else "",
         cvd_contract_delta_1h=cvd_contract.delta_1h if cvd_contract else 0,
         cvd_spot_trend=cvd_spot.trend_1h if cvd_spot else "",
@@ -227,8 +242,13 @@ def build_ai_snapshot(
         fear_greed_index=market_index.fear_greed if market_index else None,
         etf_net_3d=etf_flow.net_3d if etf_flow else None,
         etf_trend=etf_flow.trend if etf_flow else "",
+        etf_recent_days=[d.model_dump() for d in etf_flow.recent_days[:5]] if etf_flow else [],
         global_liq_long_24h=global_liq.long_24h_usd if global_liq else 0,
         global_liq_short_24h=global_liq.short_24h_usd if global_liq else 0,
+        global_liq_long_1h=global_liq.long_1h_usd if global_liq else 0,
+        global_liq_short_1h=global_liq.short_1h_usd if global_liq else 0,
+        global_liq_ratio_24h=global_liq.ratio_24h if global_liq else 1.0,
+        global_liq_largest_single=global_liq.largest_single_usd if global_liq else 0,
         btc_max_pain=market_index.btc_max_pain if market_index else None,
         btc_dvol=market_index.btc_dvol if market_index else None,
         dxy=market_index.dxy if market_index else None,
