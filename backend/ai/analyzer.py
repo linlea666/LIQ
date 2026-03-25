@@ -30,6 +30,14 @@ class AIAnalyzer:
                 kwargs["base_url"] = cfg.api_base
             self._client = AsyncOpenAI(**kwargs)
 
+        logger.info(
+            "AIAnalyzer init | provider=%s model=%s base=%s timeout=%ds "
+            "retries=%d key_set=%s client_ok=%s",
+            cfg.active, cfg.model, cfg.api_base or "(default)",
+            cfg.timeout_sec, cfg.max_retries,
+            bool(cfg.api_key), self._client is not None,
+        )
+
     @property
     def available(self) -> bool:
         return self._client is not None
@@ -42,20 +50,27 @@ class AIAnalyzer:
         snapshot_dict = snapshot.model_dump()
         user_prompt = build_user_prompt(snapshot_dict)
 
+        system_prompt = build_system_prompt()
         logger.info(
-            "AI analysis started | coin=%s price=%.2f",
+            "AI analysis started | coin=%s price=%.2f | "
+            "system_prompt=%d chars | user_prompt=%d chars | model=%s timeout=%ds",
             snapshot.coin, snapshot.price,
+            len(system_prompt), len(user_prompt),
+            self._model, self._timeout,
         )
-        logger.debug("AI prompt length: %d chars", len(user_prompt))
 
         raw_text = ""
         for attempt in range(1, self._max_retries + 1):
             try:
+                logger.info(
+                    "AI API call attempt %d/%d | coin=%s model=%s",
+                    attempt, self._max_retries, snapshot.coin, self._model,
+                )
                 t0 = time.time()
                 response = await self._client.chat.completions.create(
                     model=self._model,
                     messages=[
-                        {"role": "system", "content": build_system_prompt()},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.3,
@@ -69,20 +84,26 @@ class AIAnalyzer:
                 tokens_out = response.usage.completion_tokens if response.usage else 0
 
                 logger.info(
-                    "AI analysis done | coin=%s | %.1fs | tokens_in=%d out=%d",
-                    snapshot.coin, elapsed, tokens_in, tokens_out,
+                    "AI API call success | coin=%s | %.1fs | "
+                    "tokens_in=%d out=%d | response_len=%d chars",
+                    snapshot.coin, elapsed, tokens_in, tokens_out, len(raw_text),
                 )
                 break
 
             except Exception as e:
+                elapsed = time.time() - t0
+                err_type = type(e).__name__
                 logger.warning(
-                    "AI analysis attempt %d/%d failed | coin=%s | err=%s",
-                    attempt, self._max_retries, snapshot.coin, str(e),
+                    "AI API call attempt %d/%d failed | coin=%s | %.1fs | "
+                    "err_type=%s err=%s",
+                    attempt, self._max_retries, snapshot.coin, elapsed,
+                    err_type, str(e),
                 )
                 if attempt == self._max_retries:
                     logger.error(
-                        "AI analysis exhausted | coin=%s\n%s",
-                        snapshot.coin, traceback.format_exc(),
+                        "AI analysis exhausted all retries | coin=%s | "
+                        "err_type=%s\n%s",
+                        snapshot.coin, err_type, traceback.format_exc(),
                     )
                     raise
 

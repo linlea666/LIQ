@@ -99,24 +99,41 @@ async def get_waterfall(coin: str):
 @router.post("/ai/analyze/{coin}")
 async def trigger_ai_analysis(coin: str):
     """手动触发 AI 分析"""
+    t_start = time.time()
+    coin_raw = coin
+    logger.info("AI endpoint request received | coin=%s", coin_raw)
+
     if not _engine:
+        logger.warning("AI endpoint rejected: engine not ready | coin=%s", coin_raw)
         raise HTTPException(503, "Engine not ready")
     coin = coin.upper()
 
     if not _engine.ai_available:
+        logger.warning("AI endpoint rejected: AI not configured (no API key?) | coin=%s", coin)
         raise HTTPException(503, "AI service not configured")
 
     cooldown = get_settings().ai.cooldown_sec
     last_ts = _engine.get_last_ai_ts(coin)
     if last_ts and time.time() - last_ts < cooldown:
         remaining = int(cooldown - (time.time() - last_ts))
+        logger.info("AI endpoint rejected: cooldown | coin=%s remaining=%ds", coin, remaining)
         raise HTTPException(429, f"AI cooldown: {remaining}s remaining")
 
     try:
+        logger.info("AI endpoint dispatching to engine | coin=%s", coin)
         result = await _engine.run_ai_analysis(coin)
+        elapsed = time.time() - t_start
+        logger.info(
+            "AI endpoint success | coin=%s | total=%.1fs | result_len=%d",
+            coin, elapsed, len(result.raw_text) if result.raw_text else 0,
+        )
         return result.model_dump()
     except Exception as e:
-        logger.error("AI analysis endpoint error | coin=%s", coin, exc_info=True)
+        elapsed = time.time() - t_start
+        logger.error(
+            "AI endpoint error | coin=%s | total=%.1fs | err_type=%s err=%s",
+            coin, elapsed, type(e).__name__, str(e), exc_info=True,
+        )
         raise HTTPException(500, f"AI analysis failed: {str(e)}")
 
 
