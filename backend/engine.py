@@ -94,6 +94,7 @@ class Engine:
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
         self._running = False
+        self._ai_running: set[str] = set()
 
         self._default_coin = self._settings.default_coin
         self._active_coins: set[str] = {self._default_coin}
@@ -696,6 +697,35 @@ class Engine:
 
     def get_ai_history(self, ccy: str) -> list[AIAnalysisResult]:
         return list(self._states.get(ccy, CoinState(ccy)).ai_history)
+
+    def is_ai_running(self, ccy: str) -> bool:
+        return ccy in self._ai_running
+
+    async def fire_ai_analysis(self, ccy: str) -> None:
+        """Fire-and-forget: 创建后台任务执行 AI 分析，结果通过 WebSocket 推送。"""
+        if ccy in self._ai_running:
+            raise RuntimeError(f"AI analysis already running for {ccy}")
+        state = self._states[ccy]
+        state.last_ai_ts = time.time()
+        self._ai_running.add(ccy)
+        asyncio.create_task(self._ai_analysis_task(ccy))
+
+    async def _ai_analysis_task(self, ccy: str) -> None:
+        """后台执行 AI 分析并通过 WebSocket 推送结果。"""
+        try:
+            result = await self.run_ai_analysis(ccy)
+            await push_to_coin(ccy, "ai_result", result.model_dump())
+            logger.info("AI result pushed via WebSocket | coin=%s | len=%d",
+                        ccy, len(result.raw_text) if result.raw_text else 0)
+        except Exception as e:
+            logger.error("AI background task failed | coin=%s | %s: %s",
+                         ccy, type(e).__name__, e, exc_info=True)
+            await push_to_coin(ccy, "ai_error", {
+                "coin": ccy,
+                "message": str(e),
+            })
+        finally:
+            self._ai_running.discard(ccy)
 
     async def run_ai_analysis(self, ccy: str) -> AIAnalysisResult:
         state = self._states[ccy]

@@ -38,7 +38,7 @@ interface MarketStore {
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
   coin: "BTC",
-  setCoin: (coin) => set({ coin, aiResult: null, aiError: null }),
+  setCoin: (coin) => set({ coin, aiResult: null, aiError: null, aiLoading: false }),
 
   data: {},
   updateMarketData: (update) =>

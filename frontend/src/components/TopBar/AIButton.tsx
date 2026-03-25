@@ -8,7 +8,6 @@ export default function AIButton() {
   const aiLoading = useMarketStore((s) => s.aiLoading);
   const aiAvailable = useMarketStore((s) => s.aiAvailable);
   const setAILoading = useMarketStore((s) => s.setAILoading);
-  const setAIResult = useMarketStore((s) => s.setAIResult);
   const setAIError = useMarketStore((s) => s.setAIError);
   const setAIPanelOpen = useMarketStore((s) => s.setAIPanelOpen);
 
@@ -22,28 +21,19 @@ export default function AIButton() {
 
     setAILoading(true);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 180_000);
-
       const res = await fetch(`${API_BASE}/api/ai/analyze/${coin}`, {
         method: "POST",
-        signal: controller.signal,
       });
-      clearTimeout(timeout);
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
-      const data = await res.json();
-      setAIResult(data);
+      // POST 立即返回 {status:"processing"}，结果通过 WebSocket 推送
     } catch (e: unknown) {
-      let msg = "分析失败";
+      let msg = "分析请求失败";
       if (e instanceof Error) {
-        if (e.name === "AbortError") {
-          msg = "AI 分析超时（180s），请稍后重试";
-        } else if (e.message.includes("Failed to fetch")) {
-          msg = "无法连接后端服务（可能是网络超时或 CORS），请检查后端日志";
+        if (e.message.includes("Failed to fetch")) {
+          msg = "无法连接后端服务，请检查网络或后端是否运行";
         } else {
           msg = e.message;
         }
