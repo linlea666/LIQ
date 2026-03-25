@@ -225,8 +225,8 @@ def _parse_scenarios(text: str) -> list[dict]:
                 scenarios.append(current)
             sep = "：" if "：" in clean else ":"
             parts = clean.split(sep, 1)
-            label = parts[0].rstrip("*").strip()
-            desc = parts[1].lstrip("*").strip() if len(parts) > 1 else ""
+            label = parts[0].replace("**", "").strip()
+            desc = parts[1].replace("**", "").strip() if len(parts) > 1 else ""
             current = {"label": label, "description": desc}
         elif clean.startswith("当前数据偏向"):
             if current:

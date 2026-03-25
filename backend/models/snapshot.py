@@ -154,6 +154,13 @@ class AISnapshot(BaseModel):
     us_10y_yield: Optional[float] = None
     fed_rate: Optional[float] = None
 
+    # Phase 6: 补充指标（BBX已解析，补通至AI管线）
+    btc_put_call_oi: Optional[float] = None
+    usdt_market_cap: Optional[float] = None
+    btc_hashrate: Optional[float] = None
+    okx_ls_ratio_btc: Optional[float] = None
+    binance_ls_ratio_btc: Optional[float] = None
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

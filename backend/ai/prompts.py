@@ -39,7 +39,7 @@ def build_system_prompt() -> str:
 ### 深度推理要求（分析 > 翻译，铁律）
 - **禁止纯转述**：每个章节至少 1 处跨维度推理——将 ≥2 个数据源组合得出新结论，而非逐条复述数字
 - **矛盾识别**：当数据维度给出相反信号时（如恐惧指数极低但多空比偏多），必须明确指出矛盾、分析哪个维度更可信并说明理由（考虑：熊市恐惧贪婪长期低位是基线，多空比/CVD/订单簿是实盘资金行为，后者权重更高）
-- **新增数据强制引用**：§一 或 §七 中须至少引用 9b（波动率结构）1 项数值 + 9c（链上资金面）1 项数值；9d 有数据时至少引用 1 项
+- **新增数据强制引用**：§一 或 §七 中须至少引用 9b（波动率结构）1 项数值 + 9c（链上资金面）1 项数值；9d 有数据时，§一 须用一句话说明利率环境对风险资产的影响方向（如"高利率压制风险偏好"或"利率下行利好 BTC"），不可忽略
 - **规则引擎审查**：§四 对每个狙击方案至少质疑 1 个维度（止损距离是否合理 / 入场是否卡在整数关口 / TP 与链上指标一致性 / 清算簇厚度是否足够支撑逻辑）
 - **场景偏向**：§八 末尾须基于当前数据组合指明最偏向的场景（"当前数据偏向场景X"，无需概率数字）
 
@@ -202,6 +202,15 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"综合多空比: {ls:.2f} ({snapshot.get('ls_ratio_interpretation', '')})")
     else:
         lines.append("数据暂缺")
+    okx_ls = snapshot.get("okx_ls_ratio_btc")
+    bn_ls = snapshot.get("binance_ls_ratio_btc")
+    if okx_ls is not None or bn_ls is not None:
+        parts = []
+        if okx_ls is not None:
+            parts.append(f"OKX {okx_ls:.2f}")
+        if bn_ls is not None:
+            parts.append(f"Binance {bn_ls:.2f}")
+        lines.append(f"各所多空比: {' / '.join(parts)}")
 
     bid_tot = float(snapshot.get("orderbook_bid_total_usd") or 0)
     ask_tot = float(snapshot.get("orderbook_ask_total_usd") or 0)
@@ -298,6 +307,10 @@ def build_user_prompt(snapshot: dict) -> str:
         if iv_skew is not None:
             skew_label = "看跌需求>看涨(偏恐慌)" if iv_skew < -0.01 else ("看涨需求>看跌(偏乐观)" if iv_skew > 0.01 else "中性")
             lines.append(f"1M IV Skew: {iv_skew:+.4f} → {skew_label}")
+        pc_oi = snapshot.get("btc_put_call_oi")
+        if pc_oi is not None:
+            pc_label = "看跌保护需求高" if pc_oi > 0.7 else ("看涨情绪主导" if pc_oi < 0.4 else "多空均衡")
+            lines.append(f"BTC Put/Call OI 比: {pc_oi:.3f} → {pc_label}")
 
     mvrv = snapshot.get("btc_mvrv")
     ahr = snapshot.get("ahr999")
@@ -328,6 +341,12 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"Coinbase BTC 溢价: {cb_prem:.4%} ({'正溢价=美国买盘活跃' if cb_prem > 0 else '负溢价=美国买盘弱'})")
         if usdt_prem is not None:
             lines.append(f"USDT 场外溢价: {usdt_prem:.3f} ({'>1=场外买盘活跃' if usdt_prem > 1 else '<1=场外卖盘'})")
+        usdt_mcap = snapshot.get("usdt_market_cap")
+        if usdt_mcap is not None:
+            lines.append(f"USDT 市值: ${usdt_mcap / 1e9:.1f}B")
+        hashrate = snapshot.get("btc_hashrate")
+        if hashrate is not None:
+            lines.append(f"BTC 全网算力: {hashrate:.1f} EH/s")
 
     us_10y = snapshot.get("us_10y_yield")
     fed_r = snapshot.get("fed_rate")

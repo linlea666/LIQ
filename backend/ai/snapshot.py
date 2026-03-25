@@ -109,6 +109,11 @@ def build_ai_snapshot(
     mi_usdt_otc_premium = None
     mi_us_10y_yield = None
     mi_fed_rate = None
+    mi_btc_put_call_oi = None
+    mi_usdt_market_cap = None
+    mi_btc_hashrate = None
+    mi_okx_ls_ratio = None
+    mi_binance_ls_ratio = None
 
     if market_index:
         nasdaq_val = market_index.nasdaq
@@ -129,6 +134,11 @@ def build_ai_snapshot(
         mi_usdt_otc_premium = market_index.usdt_otc_premium
         mi_us_10y_yield = market_index.us_10y_yield
         mi_fed_rate = market_index.fed_rate
+        mi_btc_put_call_oi = market_index.btc_put_call_oi
+        mi_usdt_market_cap = market_index.usdt_market_cap
+        mi_btc_hashrate = market_index.btc_hashrate
+        mi_okx_ls_ratio = market_index.okx_ls_ratio_btc
+        mi_binance_ls_ratio = market_index.binance_ls_ratio_btc
 
         bnb_bal = market_index.binance_btc_balance
         okx_bal = market_index.okx_btc_balance
@@ -243,6 +253,11 @@ def build_ai_snapshot(
         usdt_otc_premium=mi_usdt_otc_premium,
         us_10y_yield=mi_us_10y_yield,
         fed_rate=mi_fed_rate,
+        btc_put_call_oi=mi_btc_put_call_oi,
+        usdt_market_cap=mi_usdt_market_cap,
+        btc_hashrate=mi_btc_hashrate,
+        okx_ls_ratio_btc=mi_okx_ls_ratio,
+        binance_ls_ratio_btc=mi_binance_ls_ratio,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
