@@ -174,7 +174,7 @@ def _parse_levels_table(text: str) -> list[dict]:
     levels: list[dict] = []
     for line in text.split("\n"):
         line = line.strip()
-        if not line or line.startswith("|--") or line.startswith("| 类型"):
+        if not line or line.startswith("|--") or line.startswith("| 类型") or ":---" in line or "---" == line.replace("|", "").replace(" ", "").replace("-", ""):
             continue
         if line.startswith("|"):
             parts = [p.strip() for p in line.strip("|").split("|")]
@@ -219,11 +219,19 @@ def _parse_scenarios(text: str) -> list[dict]:
     current: dict = {}
     for line in text.split("\n"):
         line = line.strip()
-        if line.startswith("场景"):
+        clean = line.lstrip("*#").strip()
+        if clean.startswith("场景"):
             if current:
                 scenarios.append(current)
-            current = {"label": line.split("：")[0] if "：" in line else line.split(":")[0],
-                        "description": line.split("：", 1)[-1] if "：" in line else line.split(":", 1)[-1]}
+            sep = "：" if "：" in clean else ":"
+            parts = clean.split(sep, 1)
+            label = parts[0].rstrip("*").strip()
+            desc = parts[1].lstrip("*").strip() if len(parts) > 1 else ""
+            current = {"label": label, "description": desc}
+        elif clean.startswith("当前数据偏向"):
+            if current:
+                scenarios.append(current)
+                current = {}
         elif line and current:
             current["description"] = current.get("description", "") + " " + line
     if current:

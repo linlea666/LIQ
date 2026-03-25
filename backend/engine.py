@@ -732,6 +732,22 @@ class Engine:
         if not state.ticker:
             raise RuntimeError(f"No price data for {ccy}")
 
+        ob = state.orderbook
+        logger.info(
+            "AI orderbook diag | coin=%s | ob_none=%s | "
+            "raw_asks=%d raw_bids=%d | "
+            "bid_total=$%.2f ask_total=$%.2f spread=%.4f%% | "
+            "bid_walls=%d ask_walls=%d",
+            ccy, ob is None,
+            len(getattr(state, '_raw_ob_asks', {})),
+            len(getattr(state, '_raw_ob_bids', {})),
+            ob.bid_total_usd if ob else 0,
+            ob.ask_total_usd if ob else 0,
+            ob.spread_pct if ob else 0,
+            len(ob.bid_walls) if ob else 0,
+            len(ob.ask_walls) if ob else 0,
+        )
+
         snapshot = build_ai_snapshot(
             coin=ccy, price=state.ticker.last,
             high_24h=state.ticker.high_24h, low_24h=state.ticker.low_24h,
