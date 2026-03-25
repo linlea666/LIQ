@@ -23,7 +23,7 @@ export default function AIButton() {
     setAILoading(true);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90000);
+      const timeout = setTimeout(() => controller.abort(), 180_000);
 
       const res = await fetch(`${API_BASE}/api/ai/analyze/${coin}`, {
         method: "POST",
@@ -41,9 +41,9 @@ export default function AIButton() {
       let msg = "分析失败";
       if (e instanceof Error) {
         if (e.name === "AbortError") {
-          msg = "AI 分析超时（90s），请稍后重试";
+          msg = "AI 分析超时（180s），请稍后重试";
         } else if (e.message.includes("Failed to fetch")) {
-          msg = "无法连接后端服务，请检查网络或后端是否运行";
+          msg = "无法连接后端服务（可能是网络超时或 CORS），请检查后端日志";
         } else {
           msg = e.message;
         }

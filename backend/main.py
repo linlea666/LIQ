@@ -29,6 +29,8 @@ class CORSASGIWrapper:
     并为普通响应注入 CORS 头，作为兜底保障。
     """
 
+    _log = logging.getLogger("cors_wrapper")
+
     def __init__(self, app: Any, allowed_origins: list[str]):
         self.app = app
         self.allowed_origins = set(allowed_origins)
@@ -44,11 +46,20 @@ class CORSASGIWrapper:
                 origin = value.decode()
                 break
 
+        method = scope.get("method", "")
+        path = scope.get("path", "")
+
         if origin not in self.allowed_origins:
+            if origin and method == "POST":
+                self._log.warning(
+                    "CORS reject: origin=%s not in allowed | %s %s",
+                    origin, method, path,
+                )
             await self.app(scope, receive, send)
             return
 
-        if scope["method"] == "OPTIONS":
+        if method == "OPTIONS":
+            self._log.info("CORS preflight OK | %s | origin=%s", path, origin)
             headers = [
                 (b"access-control-allow-origin", origin.encode()),
                 (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
@@ -68,6 +79,7 @@ class CORSASGIWrapper:
 
         async def send_with_cors(message: dict):
             if message["type"] == "http.response.start":
+                status = message.get("status", 0)
                 headers = [
                     (k, v) for k, v in message.get("headers", [])
                     if k not in (b"access-control-allow-origin",
@@ -75,6 +87,11 @@ class CORSASGIWrapper:
                 ]
                 headers.extend(cors_headers)
                 message = {**message, "headers": headers}
+                if method == "POST":
+                    self._log.info(
+                        "CORS headers injected | %s %s | status=%d | origin=%s",
+                        method, path, status, origin,
+                    )
             await send(message)
 
         await self.app(scope, receive, send_with_cors)
