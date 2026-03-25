@@ -150,6 +150,7 @@ class Engine:
                 tasks.extend([
                     asyncio.create_task(self._poll_loop(f"bbx_{ccy}", self._poll_bbx, coin, 30, stagger)),
                     asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, stagger)),
+                    asyncio.create_task(self._poll_loop(f"okx_ob_{ccy}", self._poll_orderbook, coin, 10, stagger)),
                     asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, stagger)),
                     asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, stagger + 1)),
                     asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, stagger + idx * 5)),
@@ -199,10 +200,11 @@ class Engine:
         self._active_tasks[ccy] = [
             asyncio.create_task(self._poll_loop(f"push_{ccy}", self._push_loop, coin, 5, 0)),
             asyncio.create_task(self._poll_loop(f"okx_oi_{ccy}", self._poll_oi, coin, 10, 1)),
-            asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, 2)),
-            asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, 3)),
-            asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, 4)),
-            asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, 5)),
+            asyncio.create_task(self._poll_loop(f"okx_ob_{ccy}", self._poll_orderbook, coin, 10, 2)),
+            asyncio.create_task(self._poll_loop(f"okx_basis_{ccy}", self._poll_basis, coin, 10, 3)),
+            asyncio.create_task(self._poll_loop(f"bbx_fr_{ccy}", self._poll_funding_bbx, coin, 60, 4)),
+            asyncio.create_task(self._poll_loop(f"bbx_ls_{ccy}", self._poll_ls_ratio, coin, 60, 5)),
+            asyncio.create_task(self._poll_loop(f"okx_cvd_{ccy}", self._poll_cvd, coin, 60, 6)),
         ]
 
         await self._okx_ws.subscribe_heavy_channels(coin)
@@ -303,6 +305,27 @@ class Engine:
         bn_oi = await self._binance.fetch_oi(coin)
         if bn_oi:
             self._percentile.push(coin.ccy, "oi_bn", bn_oi.oi_usd)
+
+    async def _poll_orderbook(self, coin: CoinConfig):
+        """REST 轮询订单簿（替代 WS books50-l2-tbt）"""
+        snapshot = await self._okx.fetch_orderbook(coin)
+        if not snapshot:
+            return
+        state = self._states[coin.ccy]
+        if not state.ticker:
+            return
+        try:
+            cfg = self._settings.processors.orderbook
+            threshold = cfg.get(f"whale_threshold_{coin.ccy.lower()}", 50)
+            threshold_usd = cfg.get("whale_threshold_usd", 500000)
+            state.orderbook = analyze_orderbook(
+                snapshot, state.ticker.last,
+                ct_val=coin.ct_val,
+                wall_threshold_size=threshold,
+                wall_threshold_usd=threshold_usd,
+            )
+        except Exception:
+            logger.error("Orderbook analysis failed (REST) | coin=%s", coin.ccy, exc_info=True)
 
     async def _poll_funding_bbx(self, coin: CoinConfig):
         """用 BBX 多交易所资金费率替代 OKX+Binance 独立调用"""

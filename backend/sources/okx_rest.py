@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from config.settings import CoinConfig, get_settings
 from models.flow import CVDPoint, FundingRateData, OISnapshot
-from models.market import CandleData
+from models.market import CandleData, OrderBookLevel, OrderBookSnapshot
 from sources.base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,45 @@ class OKXRestSource(DataSource):
     async def fetch(self, coin: CoinConfig) -> dict[str, Any]:
         """拉取全部 REST 数据，返回按类型分键的 dict"""
         return {}
+
+    # ── 订单簿 (REST 替代 WS books50-l2-tbt) ─────────────────
+
+    async def fetch_orderbook(self, coin: CoinConfig, size: int = 50) -> Optional[OrderBookSnapshot]:
+        """获取订单簿快照，格式与 WS books50-l2-tbt 一致"""
+        url = f"{self._base}/market/books?instId={coin.symbol_okx_swap}&sz={size}"
+        try:
+            t0 = time.time()
+            data = await self._get_json(url)
+            self._mark_success((time.time() - t0) * 1000)
+            if data.get("code") != "0" or not data.get("data"):
+                logger.warning("OKX orderbook empty | coin=%s", coin.ccy)
+                return None
+            book = data["data"][0]
+            asks = [
+                OrderBookLevel(
+                    price=float(a[0]), size=float(a[1]),
+                    order_count=int(a[3]) if len(a) > 3 else 0,
+                )
+                for a in book.get("asks", [])
+            ]
+            bids = [
+                OrderBookLevel(
+                    price=float(b[0]), size=float(b[1]),
+                    order_count=int(b[3]) if len(b) > 3 else 0,
+                )
+                for b in book.get("bids", [])
+            ]
+            return OrderBookSnapshot(
+                coin=coin.ccy,
+                ts=int(book.get("ts", 0)),
+                asks=asks,
+                bids=bids,
+                source="okx",
+            )
+        except Exception:
+            self._mark_failure()
+            logger.error("OKX orderbook failed | coin=%s", coin.ccy, exc_info=True)
+            return None
 
     # ── 资金费率 ────────────────────────────────────────────
 

@@ -128,7 +128,11 @@ class OKXWebSocketSource:
             return
 
         if "event" in data:
-            logger.debug("OKX WS event: %s", data.get("event"))
+            event = data.get("event")
+            if event == "error":
+                logger.warning("OKX WS error | code=%s msg=%s", data.get("code"), data.get("msg"))
+            else:
+                logger.info("OKX WS event | type=%s channel=%s", event, data.get("arg", {}).get("channel", ""))
             return
 
         arg = data.get("arg", {})
