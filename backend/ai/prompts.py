@@ -174,10 +174,14 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"\n24h流动性视角:")
         lines.append(f"  上方流动性(BSL): ${bsl_24h / 1e6:.0f}M (空头清算=强制买入 → 扫取后为做空提供对手盘)")
         lines.append(f"  下方流动性(SSL): ${ssl_24h / 1e6:.0f}M (多头清算=强制卖出 → 扫取后为做多提供对手盘)")
-        if bsl_24h > ssl_24h * 1.5:
+        if ssl_24h > 0 and bsl_24h > ssl_24h * 1.5:
             lines.append(f"  偏向: 上方流动性远多于下方({bsl_24h/ssl_24h:.1f}x) → 价格倾向先上扫BSL再反转")
-        elif ssl_24h > bsl_24h * 1.5:
+        elif bsl_24h > 0 and ssl_24h > bsl_24h * 1.5:
             lines.append(f"  偏向: 下方流动性远多于上方({ssl_24h/bsl_24h:.1f}x) → 价格倾向先下扫SSL再反转")
+        elif ssl_24h == 0:
+            lines.append(f"  偏向: 仅上方有流动性(${bsl_24h/1e6:.0f}M) → 上方为唯一磁吸目标")
+        elif bsl_24h == 0:
+            lines.append(f"  偏向: 仅下方有流动性(${ssl_24h/1e6:.0f}M) → 下方为唯一磁吸目标")
         else:
             lines.append(f"  偏向: 上下流动性相对均衡 → 双向扫取概率接近，关注CVD/OI确认方向")
 
@@ -189,9 +193,11 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"  上方已扫取: ${sweep_above / 1e6:.1f}M BSL — 上方流动性被消耗，上行推动力减弱")
         if sweep_below > 0:
             lines.append(f"  下方已扫取: ${sweep_below / 1e6:.1f}M SSL — 下方流动性被消耗，下行推动力减弱")
-        if sweep_above > 0 and sweep_below == 0:
+        if sweep_above > 0 and sweep_below > 0:
+            lines.append(f"  解读: 上下流动性均被扫取 → 市场剧烈波动，双侧动能消耗，关注新流动性积累方向")
+        elif sweep_above > 0:
             lines.append(f"  解读: 价格已扫取上方流动性 → 关注下方SSL是否成为下一个目标（需CVD/OI确认）")
-        elif sweep_below > 0 and sweep_above == 0:
+        elif sweep_below > 0:
             lines.append(f"  解读: 价格已扫取下方流动性 → 关注上方BSL是否成为下一个目标（需CVD/OI确认）")
 
     clusters_above_7d = snapshot.get("liq_clusters_above_7d", [])
