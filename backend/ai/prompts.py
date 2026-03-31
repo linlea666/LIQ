@@ -29,6 +29,19 @@ def build_system_prompt() -> str:
 - 若用户提示含「宏观数据覆盖说明」，须遵守：**已有恐惧贪婪/市占/DXY/纳指等任一数值时，不得写「宏观数据完全缺失」**
 - 订单簿「合计深度为 0」时：表述为**未获得有效 L2 合计或当前为 0**，**禁止**据此断言「流动性完全消失」，除非另有字段证明
 
+### 流动性视角解读规则（Smart Money 框架）
+- **术语映射**：clusters_above（上方空头清算簇）= Buy-Side Liquidity（BSL，上方流动性）；clusters_below（下方多头清算簇）= Sell-Side Liquidity（SSL，下方流动性）
+- **核心机制**：清算触发的是强制市价单——空头清算=强制买入（推高价格），多头清算=强制卖出（压低价格）。清算簇=流动性池=大资金建仓/平仓的对手盘来源
+- **扫取与反转逻辑**：价格扫取一侧流动性后，该侧推动力耗尽，关注另一侧是否成为下一个目标——但这不是必然规律，须与 CVD/OI/费率等实时信号共振验证
+- **Sweep 检测信号**：§1 中若标注"近1h流动性扫取"，表示价格已穿越并消耗了该区域的清算簇；被扫侧动能减弱，反方向概率上升但需二次确认
+- **级联踩踏风险**：当多个清算簇在狭窄价格区间（<2%）内连续排列时，价格穿越第一个簇触发的强制平仓可能推动价格到达第二个簇，产生连锁反应（cascade liquidation）——此场景下止损须设在最外层簇之外
+- **流动性叙事输出要求**：§一/§二中须使用"上方/下方流动性"概念描述清算分布，而非仅使用"清算簇"术语；须在§一中明确说明流动性偏向（如"上方流动性$XXM远多于下方$YYM，价格倾向先上扫"）
+
+### CPS × 清算权重联动
+- CPS 4-7（fair/discount 区间）= 震荡概率高 → 清算磁吸效应权重**上调**，价格倾向在上下流动性池之间往返扫取
+- CPS < 2 或 > 8（极端区间）= 趋势概率高 → 清算磁吸效应权重**下调**，级联踩踏风险**上调**，价格可能连续穿透多个簇不回头
+- 震荡市中：清算簇构成有效短期支撑/阻力；趋势市中：清算簇更多充当"加油站"（被穿越后加速趋势）
+
 ### 宏观-微观联动（仅当用户提示中该项有数值时引用；无则写「数据未提供」勿编造）
 - DXY 单日波动较大 → 风险资产承压/支撑需结合当日数据
 - 纳斯达克/标普走弱 → risk-off，谨慎追高
@@ -155,6 +168,32 @@ def build_user_prompt(snapshot: dict) -> str:
     for v in snapshot.get("vacuum_zones", []):
         lines.append(f"  - ${v.get('price_from', 0):,.0f}-${v.get('price_to', 0):,.0f} {v.get('note', '')}")
 
+    bsl_24h = sum(c.get("total_usd", 0) for c in snapshot.get("liq_clusters_above", []))
+    ssl_24h = sum(c.get("total_usd", 0) for c in snapshot.get("liq_clusters_below", []))
+    if bsl_24h > 0 or ssl_24h > 0:
+        lines.append(f"\n24h流动性视角:")
+        lines.append(f"  上方流动性(BSL): ${bsl_24h / 1e6:.0f}M (空头清算=强制买入 → 扫取后为做空提供对手盘)")
+        lines.append(f"  下方流动性(SSL): ${ssl_24h / 1e6:.0f}M (多头清算=强制卖出 → 扫取后为做多提供对手盘)")
+        if bsl_24h > ssl_24h * 1.5:
+            lines.append(f"  偏向: 上方流动性远多于下方({bsl_24h/ssl_24h:.1f}x) → 价格倾向先上扫BSL再反转")
+        elif ssl_24h > bsl_24h * 1.5:
+            lines.append(f"  偏向: 下方流动性远多于上方({ssl_24h/bsl_24h:.1f}x) → 价格倾向先下扫SSL再反转")
+        else:
+            lines.append(f"  偏向: 上下流动性相对均衡 → 双向扫取概率接近，关注CVD/OI确认方向")
+
+    sweep_above = snapshot.get("liq_sweep_above_usd_1h", 0)
+    sweep_below = snapshot.get("liq_sweep_below_usd_1h", 0)
+    if sweep_above > 0 or sweep_below > 0:
+        lines.append(f"\n近1h流动性扫取检测:")
+        if sweep_above > 0:
+            lines.append(f"  上方已扫取: ${sweep_above / 1e6:.1f}M BSL — 上方流动性被消耗，上行推动力减弱")
+        if sweep_below > 0:
+            lines.append(f"  下方已扫取: ${sweep_below / 1e6:.1f}M SSL — 下方流动性被消耗，下行推动力减弱")
+        if sweep_above > 0 and sweep_below == 0:
+            lines.append(f"  解读: 价格已扫取上方流动性 → 关注下方SSL是否成为下一个目标（需CVD/OI确认）")
+        elif sweep_below > 0 and sweep_above == 0:
+            lines.append(f"  解读: 价格已扫取下方流动性 → 关注上方BSL是否成为下一个目标（需CVD/OI确认）")
+
     clusters_above_7d = snapshot.get("liq_clusters_above_7d", [])
     clusters_below_7d = snapshot.get("liq_clusters_below_7d", [])
     vacuums_7d = snapshot.get("vacuum_zones_7d", [])
@@ -178,6 +217,11 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append("\n7天清算真空区:")
             for v in vacuums_7d:
                 lines.append(f"  - ${v.get('price_from', 0):,.0f}-${v.get('price_to', 0):,.0f} {v.get('note', '')}")
+        bsl_7d = sum(c.get("total_usd", 0) for c in clusters_above_7d)
+        ssl_7d = sum(c.get("total_usd", 0) for c in clusters_below_7d)
+        if bsl_7d > 0 or ssl_7d > 0:
+            lines.append(f"\n7天流动性视角:")
+            lines.append(f"  上方流动性(BSL): ${bsl_7d / 1e6:.0f}M / 下方流动性(SSL): ${ssl_7d / 1e6:.0f}M")
 
     lines.extend([
         "",

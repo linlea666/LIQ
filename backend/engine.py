@@ -31,7 +31,7 @@ from models.snapshot import (
 )
 from processors.cvd import build_cvd, detect_cvd_price_divergence
 from processors.levels import calculate_levels
-from processors.liquidation import process_liquidation_map
+from processors.liquidation import detect_liq_sweep, process_liquidation_map
 from processors.market_temp import build_waterfall, calc_market_temperature
 from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
@@ -78,6 +78,10 @@ class CoinState:
         self.global_liq: Optional[GlobalLiquidationData] = None
         self.market_index: Optional[MarketIndexData] = None
         self.cycle_position: Optional[CyclePositionData] = None
+        # Sweep detection: 前次快照 + 近 1h 扫取事件
+        self._prev_liq_map_24h: Optional[LiquidationMap] = None
+        self._prev_price_at_liq_poll: float = 0
+        self.liq_sweep_events: deque = deque(maxlen=120)
         # L2 orderbook 维护（books50-l2-tbt 增量更新）
         self._raw_ob_asks: dict[float, list] = {}
         self._raw_ob_bids: dict[float, list] = {}
@@ -276,8 +280,27 @@ class Engine:
                     liq_map, price,
                     self._settings.processors.levels["min_liq_cluster_usd"],
                 )
+                if cycle == "24h":
+                    self._detect_and_store_sweep(state, liq_map, price)
             state.liq_maps[cycle] = liq_map
         self._recompute(coin.ccy)
+
+    def _detect_and_store_sweep(
+        self, state: CoinState, new_map: LiquidationMap, price: float,
+    ):
+        """对比前后 24h 清算地图，检测并存储 sweep 事件。"""
+        prev = state._prev_liq_map_24h
+        prev_price = state._prev_price_at_liq_poll
+        state._prev_liq_map_24h = new_map
+        state._prev_price_at_liq_poll = price
+        if not prev or prev_price <= 0:
+            return
+        events = detect_liq_sweep(prev, new_map, prev_price, price)
+        if events:
+            now = int(time.time())
+            for evt in events:
+                evt["ts"] = now
+                state.liq_sweep_events.append(evt)
 
     async def _poll_oi(self, coin: CoinConfig):
         snapshot = await self._okx.fetch_oi(coin)
@@ -791,6 +814,9 @@ class Engine:
             len(ob.ask_walls) if ob else 0,
         )
 
+        cutoff = int(time.time()) - 3600
+        recent_sweeps = [e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff]
+
         snapshot = build_ai_snapshot(
             coin=ccy, price=state.ticker.last,
             high_24h=state.ticker.high_24h, low_24h=state.ticker.low_24h,
@@ -806,6 +832,7 @@ class Engine:
             levels=state.levels,
             liq_map_7d=state.liq_maps.get("7d"),
             cycle_position=state.cycle_position,
+            liq_sweep_events=recent_sweeps,
         )
 
         result = await self._analyzer.analyze(snapshot)

@@ -164,3 +164,60 @@ def _find_vacuum_zones(
             ))
 
     return vacuums
+
+
+def detect_liq_sweep(
+    prev_map: LiquidationMap,
+    curr_map: LiquidationMap,
+    prev_price: float,
+    curr_price: float,
+) -> list[dict]:
+    """
+    对比前后两次 24h 清算地图，检测被价格穿越并消耗的流动性簇。
+
+    检测条件：
+    1. 价格已移入或穿过该簇的价格范围
+    2. 该簇在新地图中已消失或大幅缩减（< 50%）
+    """
+    if prev_price <= 0 or curr_price <= 0 or abs(curr_price - prev_price) < 1:
+        return []
+
+    events: list[dict] = []
+
+    if curr_price > prev_price:
+        for pc in prev_map.clusters_above:
+            if curr_price >= pc.price_from and prev_price < pc.price_to:
+                remaining = _cluster_remaining_fraction(pc, curr_map.clusters_above)
+                if remaining < 0.5:
+                    events.append({
+                        "side": "above",
+                        "usd": pc.total_usd,
+                        "price_from": pc.price_from,
+                        "price_to": pc.price_to,
+                    })
+    else:
+        for pc in prev_map.clusters_below:
+            if curr_price <= pc.price_to and prev_price > pc.price_from:
+                remaining = _cluster_remaining_fraction(pc, curr_map.clusters_below)
+                if remaining < 0.5:
+                    events.append({
+                        "side": "below",
+                        "usd": pc.total_usd,
+                        "price_from": pc.price_from,
+                        "price_to": pc.price_to,
+                    })
+
+    return events
+
+
+def _cluster_remaining_fraction(
+    target: LiqCluster,
+    candidates: list[LiqCluster],
+) -> float:
+    """在 candidates 中找到与 target 重叠的簇，返回剩余比例（0~1）。0 = 完全消失。"""
+    for c in candidates:
+        overlap = min(c.price_to, target.price_to) - max(c.price_from, target.price_from)
+        span = target.price_to - target.price_from
+        if span > 0 and overlap / span > 0.5:
+            return c.total_usd / target.total_usd if target.total_usd > 0 else 1.0
+    return 0.0

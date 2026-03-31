@@ -175,6 +175,11 @@ class AISnapshot(BaseModel):
     # Phase 7: 链上周期评分 (CPS) — BTC 全局状态机
     cycle_position: Optional[dict] = None
 
+    # Phase 8: 流动性扫取检测 (Sweep Detection)
+    liq_sweep_above_usd_1h: float = 0
+    liq_sweep_below_usd_1h: float = 0
+    liq_sweep_events: list[dict] = []
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

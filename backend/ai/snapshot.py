@@ -65,6 +65,7 @@ def build_ai_snapshot(
     levels: Optional[LevelAnalysis] = None,
     liq_map_7d: Optional[LiquidationMap] = None,
     cycle_position: Optional[CyclePositionData] = None,
+    liq_sweep_events: list[dict] | None = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -280,6 +281,13 @@ def build_ai_snapshot(
         okx_ls_ratio_btc=mi_okx_ls_ratio,
         binance_ls_ratio_btc=mi_binance_ls_ratio,
         cycle_position=cycle_position.model_dump() if cycle_position else None,
+        liq_sweep_above_usd_1h=sum(
+            e.get("usd", 0) for e in (liq_sweep_events or []) if e.get("side") == "above"
+        ),
+        liq_sweep_below_usd_1h=sum(
+            e.get("usd", 0) for e in (liq_sweep_events or []) if e.get("side") == "below"
+        ),
+        liq_sweep_events=liq_sweep_events or [],
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
