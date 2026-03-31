@@ -40,6 +40,13 @@ sources:
     market_index_url: "https://bbx.com/api/pc"
     global_liq_url: "https://bbx.com/api/data"
     extended_poll_sec: 60
+  looknode:
+    base_url: "https://www.looknode.com/api"
+    poll_interval_sec: 1800
+    timeout_sec: 15
+    request_gap_sec: 3.0
+    cache_dir: "cache/onchain"
+    cache_ttl_sec: 1800
   okx:
     rest_base_url: "https://www.okx.com/api/v5"
     ws_url: "wss://ws.okx.com:8443/ws/v5/public"

@@ -6,7 +6,7 @@ import time
 from typing import Optional
 
 from models.flow import (
-    BasisData, CVDData, ETFFlowData, FundingRateData,
+    BasisData, CVDData, CyclePositionData, ETFFlowData, FundingRateData,
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
     MultiFundingRateData, OIData, TakerFlowData,
 )
@@ -64,6 +64,7 @@ def build_ai_snapshot(
     taker_flow: Optional[TakerFlowData] = None,
     levels: Optional[LevelAnalysis] = None,
     liq_map_7d: Optional[LiquidationMap] = None,
+    cycle_position: Optional[CyclePositionData] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -278,6 +279,7 @@ def build_ai_snapshot(
         btc_hashrate=mi_btc_hashrate,
         okx_ls_ratio_btc=mi_okx_ls_ratio,
         binance_ls_ratio_btc=mi_binance_ls_ratio,
+        cycle_position=cycle_position.model_dump() if cycle_position else None,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,

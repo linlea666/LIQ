@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from config.settings import get_settings
+from models.flow import CyclePositionData
 from models.levels import (
     EntryZone,
     LadderEntry,
@@ -32,6 +33,7 @@ def calculate_levels(
     vwap: float,
     liq_map_7d: Optional[LiquidationMap] = None,
     btc_hist_vol: Optional[float] = None,
+    cycle_position: Optional[CyclePositionData] = None,
 ) -> LevelAnalysis:
     """
     综合多维数据计算全部关键价位。
@@ -101,6 +103,10 @@ def calculate_levels(
                 "source": f"卖墙${usd_m:.1f}M",
             })
 
+    # ── 维度5: 链上周期价位 ──
+    if cycle_position:
+        _add_onchain_levels(support_candidates, resistance_candidates, cycle_position, current_price)
+
     supports = _merge_and_rank(support_candidates, current_price, "support")
     resistances = _merge_and_rank(resistance_candidates, current_price, "resistance")
 
@@ -133,6 +139,32 @@ def calculate_levels(
         sniper_entries=sniper_entries,
         ladder_plans=ladder_plans,
     )
+
+
+def _add_onchain_levels(
+    support_candidates: list[dict],
+    resistance_candidates: list[dict],
+    cp: CyclePositionData,
+    current_price: float,
+) -> None:
+    """将链上周期价位注入支撑/阻力候选（与清算簇/VP/订单簿共振合并）"""
+    levels = [
+        (cp.sma_200w, 40, "200周均线(周期支撑)"),
+        (cp.sth_cost_1d, 25, "STH成本v1(短期盈亏线)"),
+        (cp.sth_cost_1w, 20, "STH成本v2(1周持有者)"),
+        (cp.sth_cost_1m, 18, "STH成本v3(1-3月持有者)"),
+        (cp.sth_cost_3m, 15, "STH成本v4(3-6月持有者)"),
+        (cp.pi_350dma, 22, "Pi周期350DMA"),
+        (cp.cvdd, 35, "CVDD(已销毁币天价值)"),
+    ]
+    for price_val, score, source in levels:
+        if not price_val or price_val <= 0:
+            continue
+        dist_pct = abs(price_val - current_price) / current_price * 100
+        if dist_pct > 25:
+            continue
+        target = support_candidates if price_val < current_price else resistance_candidates
+        target.append({"price": price_val, "score": score, "source": source})
 
 
 def _merge_and_rank(

@@ -172,6 +172,9 @@ class AISnapshot(BaseModel):
     okx_ls_ratio_btc: Optional[float] = None
     binance_ls_ratio_btc: Optional[float] = None
 
+    # Phase 7: 链上周期评分 (CPS) — BTC 全局状态机
+    cycle_position: Optional[dict] = None
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

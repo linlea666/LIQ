@@ -67,6 +67,16 @@ class BinanceSourceConfig:
 
 
 @dataclass(frozen=True)
+class LookNodeConfig:
+    base_url: str = "https://www.looknode.com/api"
+    poll_interval_sec: int = 1800
+    timeout_sec: int = 15
+    request_gap_sec: float = 3.0
+    cache_dir: str = "cache/onchain"
+    cache_ttl_sec: int = 1800
+
+
+@dataclass(frozen=True)
 class ProcessorsConfig:
     cvd: dict[str, Any]
     percentile: dict[str, Any]
@@ -129,6 +139,7 @@ class Settings:
     ai: AIConfig
     push: PushConfig
     server: ServerConfig
+    looknode: LookNodeConfig = field(default_factory=LookNodeConfig)
     engine: EngineConfig = field(default_factory=EngineConfig)
     default_coin: str = "BTC"
 
@@ -211,6 +222,8 @@ def _build_settings(raw: dict) -> Settings:
     push = PushConfig(**raw["push"])
     server = ServerConfig(**raw["server"])
 
+    looknode = LookNodeConfig(**src.get("looknode", {}))
+
     eng_raw = raw.get("engine", {})
     engine_cfg = EngineConfig(
         inactive_poll_sec=eng_raw.get("inactive_poll_sec", 120),
@@ -226,6 +239,7 @@ def _build_settings(raw: dict) -> Settings:
         ai=ai,
         push=push,
         server=server,
+        looknode=looknode,
         engine=engine_cfg,
         default_coin=default_coin,
     )

@@ -189,3 +189,53 @@ class MarketIndexData(BaseModel):
     us_10y_yield: Optional[float] = None
     fed_rate: Optional[float] = None
     raw_items: list[MarketIndexItem] = []
+
+
+# ─── 链上周期数据模型（Phase 7: LookNode） ───
+
+
+class OnchainCycleData(BaseModel):
+    """LookNode 原始链上周期指标（仅 BTC，日频）"""
+    ts: int
+    sma_200w: Optional[float] = None
+    mvrv_z: Optional[float] = None
+    mvrv_market_cap: Optional[float] = None
+    mvrv_realized_cap: Optional[float] = None
+    sth_cost_1d: Optional[float] = None
+    sth_cost_1w: Optional[float] = None
+    sth_cost_1m: Optional[float] = None
+    sth_cost_3m: Optional[float] = None
+    ahr999: Optional[float] = None
+    pi_111dma_x2: Optional[float] = None
+    pi_350dma: Optional[float] = None
+    cvdd: Optional[float] = None
+    btc_daily_prices: list[float] = []
+
+
+class CyclePositionData(BaseModel):
+    """BTC 周期位置评分 (CPS 0~10) + 链上关键价位"""
+    ts: int
+    cps: float
+    cps_label: str
+    # 各分项得分
+    mvrv_z_score: Optional[float] = None
+    mvrv_z_contribution: float = 0
+    ahr999_value: Optional[float] = None
+    ahr999_contribution: float = 0
+    price_vs_200w_ratio: Optional[float] = None
+    price_vs_200w_contribution: float = 0
+    price_vs_sth_label: str = ""
+    price_vs_sth_contribution: float = 0
+    pi_cycle_ratio: Optional[float] = None
+    pi_cycle_contribution: float = 0
+    rplr_proxy: Optional[float] = None
+    btc_rsi_daily: Optional[float] = None
+    # 链上关键价位（供 levels 引擎 + AI prompt 使用）
+    sma_200w: Optional[float] = None
+    sth_cost_1d: Optional[float] = None
+    sth_cost_1w: Optional[float] = None
+    sth_cost_1m: Optional[float] = None
+    sth_cost_3m: Optional[float] = None
+    pi_350dma: Optional[float] = None
+    pi_111dma_x2: Optional[float] = None
+    cvdd: Optional[float] = None

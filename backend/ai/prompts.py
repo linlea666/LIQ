@@ -35,11 +35,14 @@ def build_system_prompt() -> str:
 - 黄金与 BTC 背离 → 留意避险资金轮动（需有数据）
 - 恐惧贪婪极值 + 资金费率极端 → 过热/过冷，与清算磁吸结合评估
 - **恐惧贪婪指数使用规范**：熊市/震荡市中该指数长期低位属基线状态，单独不构成方向判断依据——必须与多空比、订单簿深度、成交量/CVD、资金费率等实盘指标交叉验证后方可引用；单独引用时标注"参考权重低"
+- **周期评分(CPS)使用规范**：CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期 5 个链上日级维度综合评分(0~10)。CPS ≥ 6 做多阶梯信心增强(远层可标准配仓)；CPS ≤ 2 做多阶梯须降权，做空阶梯优先。CPS 为日线级别指标，不可单独用于实时方向判断——必须与清算地图/CVD/OI/费率等实时维度交叉验证
+- **链上价位引用规则**：§9e 中距当前价 ≤15% 的链上价位须纳入 §二(关键价位)表格；§五(阶梯)远距层入场点须与链上价位交叉验证（入场价附近有链上支撑/阻力则增信，无则降权）
+- **RPLR代理解读**：RPLR<0 表示短期持有者整体浮亏，历史上是中期底部前兆；RPLR>0.5 利润获取旺盛，回调风险升高；单独不构成方向判断，须与 CPS 及实时数据结合
 
 ### 深度推理要求（分析 > 翻译，铁律）
 - **禁止纯转述**：每个章节至少 1 处跨维度推理——将 ≥2 个数据源组合得出新结论，而非逐条复述数字
 - **矛盾识别**：当数据维度给出相反信号时（如恐惧指数极低但多空比偏多），必须明确指出矛盾、分析哪个维度更可信并说明理由（考虑：熊市恐惧贪婪长期低位是基线，多空比/CVD/订单簿是实盘资金行为，后者权重更高）
-- **新增数据强制引用**：§一 或 §七 中须至少引用 9b（波动率结构）1 项数值 + 9c（链上资金面）1 项数值；9d 有数据时，§一 须用一句话说明利率环境对风险资产的影响方向（如"高利率压制风险偏好"或"利率下行利好 BTC"），不可忽略
+- **新增数据强制引用**：§一 或 §七 中须至少引用 9b（波动率结构）1 项数值 + 9c（链上资金面）1 项数值 + 9e（链上周期）CPS 评分；9d 有数据时，§一 须用一句话说明利率环境对风险资产的影响方向（如"高利率压制风险偏好"或"利率下行利好 BTC"），不可忽略；9e 有数据时，§一须说明当前周期位置对方向偏向的影响，§五须评估 CPS 与阶梯策略方向的一致性
 - **规则引擎审查**：§四 对每个狙击方案至少质疑 1 个维度（止损距离是否合理 / 入场是否卡在整数关口 / TP 与链上指标一致性 / 清算簇厚度是否足够支撑逻辑）
 - **场景偏向**：§八 末尾须基于当前数据组合指明最偏向的场景（"当前数据偏向场景X"，无需概率数字）
 
@@ -401,6 +404,79 @@ def build_user_prompt(snapshot: dict) -> str:
             elif us_10y < 3.5:
                 lines.append("  → 低利率利好风险资产，BTC 受益")
 
+    # ── §9e 链上周期画像 (CPS) ──
+    cp = snapshot.get("cycle_position")
+    has_cps = cp is not None and cp.get("cps") is not None
+    if has_cps:
+        lines.append("")
+        lines.append("### 9e. 链上周期画像 [日级·BTC全局状态机]")
+        lines.append(f"周期评分(CPS): {cp['cps']:.1f}/10 → {cp.get('cps_label', '')}")
+
+        mvrv_z = cp.get("mvrv_z_score")
+        if mvrv_z is not None:
+            mvrv_l = "全网浮亏" if mvrv_z < 0 else ("估值中性偏低" if mvrv_z < 2 else ("估值中性" if mvrv_z < 4 else "估值过热"))
+            lines.append(f"  MVRV Z-Score: {mvrv_z:.2f} → {mvrv_l} (贡献{cp.get('mvrv_z_contribution', 0):+.0f})")
+
+        cp_ahr = cp.get("ahr999_value")
+        if cp_ahr is not None:
+            ahr_l = "适合抄底" if cp_ahr < 0.45 else ("适合定投" if cp_ahr < 1.2 else "估值偏高")
+            lines.append(f"  Ahr999: {cp_ahr:.4f} → {ahr_l} (贡献{cp.get('ahr999_contribution', 0):+.0f})")
+
+        sma = cp.get("sma_200w")
+        sma_ratio = cp.get("price_vs_200w_ratio")
+        if sma and sma_ratio:
+            pct_200w = (sma_ratio - 1) * 100
+            lines.append(f"  200周均线: ${sma:,.0f} → 当前价{'高出' if pct_200w >= 0 else '低于'}{abs(pct_200w):.1f}% (贡献{cp.get('price_vs_200w_contribution', 0):+.0f})")
+
+        sth_l = cp.get("price_vs_sth_label", "")
+        if sth_l:
+            sth_parts = []
+            for k, label in [("sth_cost_1d", "v1"), ("sth_cost_1w", "v2"), ("sth_cost_1m", "v3"), ("sth_cost_3m", "v4")]:
+                v = cp.get(k)
+                if v:
+                    sth_parts.append(f"{label}=${v:,.0f}")
+            lines.append(f"  STH成本: {' / '.join(sth_parts)} → {sth_l} (贡献{cp.get('price_vs_sth_contribution', 0):+.0f})")
+
+        pi_350 = cp.get("pi_350dma")
+        pi_111 = cp.get("pi_111dma_x2")
+        pi_ratio = cp.get("pi_cycle_ratio")
+        if pi_ratio is not None and pi_350 and pi_111:
+            pi_l = "距顶部极远" if pi_ratio < 0.6 else ("趋近中性" if pi_ratio < 0.85 else "接近顶部交叉")
+            lines.append(f"  Pi周期: 350DMA=${pi_350:,.0f} / 111DMA×2=${pi_111:,.0f} → 比值{pi_ratio:.3f}, {pi_l} (贡献{cp.get('pi_cycle_contribution', 0):+.0f})")
+
+        rplr = cp.get("rplr_proxy")
+        if rplr is not None:
+            rplr_l = "短期持有者整体浮亏(底部区域信号)" if rplr < 0 else ("中性" if rplr < 0.2 else "获利丰厚(顶部压力)")
+            lines.append(f"  RPLR代理: {rplr:+.4f} → {rplr_l}")
+
+        rsi = cp.get("btc_rsi_daily")
+        if rsi is not None:
+            rsi_l = "超卖" if rsi < 30 else ("偏弱" if rsi < 45 else ("中性" if rsi < 55 else ("偏强" if rsi < 70 else "超买")))
+            lines.append(f"  BTC日线RSI(14): {rsi:.1f} → {rsi_l}")
+
+        onchain_levels = []
+        for val, src, nature in [
+            (cp.get("cvdd"), "CVDD", "极底支撑"),
+            (cp.get("sma_200w"), "200周均线", "周期极强支撑"),
+            (cp.get("sth_cost_1d"), "STH成本v1", "短期盈亏线"),
+            (cp.get("sth_cost_1w"), "STH成本v2", "1周持有者成本"),
+            (cp.get("sth_cost_1m"), "STH成本v3", "1-3月持有者成本"),
+            (cp.get("sth_cost_3m"), "STH成本v4", "3-6月持有者成本"),
+            (cp.get("pi_350dma"), "Pi 350DMA", "中期目标/阻力"),
+        ]:
+            if val and val > 0:
+                dist = (val - price) / price * 100
+                side = "支撑" if val < price else "阻力"
+                onchain_levels.append((val, src, f"{side} | {nature}", dist))
+
+        if onchain_levels:
+            onchain_levels.sort(key=lambda x: x[0])
+            lines.append("\n链上关键价位（规则引擎已融合，阶梯策略参考）:")
+            lines.append("| 价位 | 来源 | 性质 | 距当前 |")
+            lines.append("|---|---|---|---|")
+            for val, src, nature, dist in onchain_levels:
+                lines.append(f"| ${val:,.0f} | {src} | {nature} | {dist:+.1f}% |")
+
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([
@@ -408,6 +484,7 @@ def build_user_prompt(snapshot: dict) -> str:
         "【宏观数据覆盖说明】（请严格按此表述，避免与上文矛盾）",
         f"- 加密侧情绪/结构: {'已提供（恐惧贪婪/市占等）' if has_crypto_sent else '未提供'}",
         f"- 传统外盘(DXY/纳指/标普/黄金): {'已提供部分或全部数值' if has_trad else '本条目中未解析到有效数值（若恐惧贪婪已提供，不得写宏观完全缺失）'}",
+        "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
     ])
 
     lines.extend([
@@ -482,5 +559,6 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.append("")
     lines.append("请基于以上数据输出，**必须包含八个章节**，且第四节「狙击挂单计划」和第五节「阶梯埋伏计划」均为必答。")
-    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率".format(min_rr))
+    cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§五须评估CPS与阶梯方向一致性" if has_cps else ""
+    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}".format(min_rr, cps_note))
     return "\n".join(lines)

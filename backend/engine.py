@@ -16,8 +16,9 @@ from ai.snapshot import build_ai_snapshot
 from api.ws import push_to_coin
 from config.settings import CoinConfig, get_settings
 from models.flow import (
-    BasisData, CVDData, ETFFlowData, FundingRateData, GlobalLiquidationData,
-    LongShortRatioData, MarketIndexData, MultiFundingRateData, OIData, TakerFlowData,
+    BasisData, CVDData, CyclePositionData, ETFFlowData, FundingRateData,
+    GlobalLiquidationData, LongShortRatioData, MarketIndexData,
+    MultiFundingRateData, OIData, TakerFlowData,
 )
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationEvent, LiquidationMap, LiquidationStats
@@ -35,8 +36,10 @@ from processors.market_temp import build_waterfall, calc_market_temperature
 from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_atr, calc_volume_profile
+from processors.cycle import calculate_cycle_position
 from sources.bbx import create_bbx_source, create_bbx_extended_source
 from sources.binance_rest import create_binance_rest_source
+from sources.looknode import create_looknode_source
 from sources.okx_rest import create_okx_rest_source
 from sources.okx_ws import create_okx_ws_source
 
@@ -74,6 +77,7 @@ class CoinState:
         self.etf_flow: Optional[ETFFlowData] = None
         self.global_liq: Optional[GlobalLiquidationData] = None
         self.market_index: Optional[MarketIndexData] = None
+        self.cycle_position: Optional[CyclePositionData] = None
         # L2 orderbook 维护（books50-l2-tbt 增量更新）
         self._raw_ob_asks: dict[float, list] = {}
         self._raw_ob_bids: dict[float, list] = {}
@@ -90,6 +94,7 @@ class Engine:
         self._okx = create_okx_rest_source()
         self._okx_ws = create_okx_ws_source()
         self._binance = create_binance_rest_source()
+        self._looknode = create_looknode_source()
         self._analyzer = create_analyzer()
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
@@ -135,10 +140,12 @@ class Engine:
 
         # 全局层（不分币种）
         btc_coin = self._settings.get_coin("BTC")
+        looknode_interval = self._settings.looknode.poll_interval_sec
         tasks.extend([
             asyncio.create_task(self._poll_loop("bbx_market_idx", self._poll_market_index, btc_coin, 60, 0)),
             asyncio.create_task(self._poll_loop("bbx_etf_flow", self._poll_etf_flow, btc_coin, 300, 5)),
             asyncio.create_task(self._poll_loop("bbx_global_liq", self._poll_global_liq, btc_coin, 60, 3)),
+            asyncio.create_task(self._poll_loop("looknode_cycle", self._poll_onchain_cycle, btc_coin, looknode_interval, 10)),
         ])
 
         for idx, ccy in enumerate(self._settings.supported_coins):
@@ -180,6 +187,7 @@ class Engine:
         await self._bbx_ext.close()
         await self._okx.close()
         await self._binance.close()
+        await self._looknode.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──
@@ -374,6 +382,17 @@ class Engine:
         if mi:
             for ccy in self._settings.supported_coins:
                 self._states[ccy].market_index = mi
+
+    async def _poll_onchain_cycle(self, _coin: CoinConfig):
+        """拉取 LookNode 链上周期数据 → 计算 CPS → 广播到所有币种（BTC 全局状态机）"""
+        raw = await self._looknode.fetch_all()
+        if not raw:
+            return
+        btc_state = self._states.get("BTC")
+        btc_price = btc_state.ticker.last if btc_state and btc_state.ticker else 0
+        cycle_pos = calculate_cycle_position(raw, btc_price) if btc_price > 0 else None
+        for ccy in self._settings.supported_coins:
+            self._states[ccy].cycle_position = cycle_pos
 
     async def _poll_cvd(self, coin: CoinConfig):
         state = self._states[coin.ccy]
@@ -625,6 +644,7 @@ class Engine:
             vp=state.vp, orderbook=state.orderbook,
             atr=state.atr, vwap=vwap,
             liq_map_7d=liq_map_7d, btc_hist_vol=hist_vol,
+            cycle_position=state.cycle_position,
         )
 
     # ── 推送循环 ──
@@ -785,6 +805,7 @@ class Engine:
             market_index=state.market_index, taker_flow=state.taker_flow,
             levels=state.levels,
             liq_map_7d=state.liq_maps.get("7d"),
+            cycle_position=state.cycle_position,
         )
 
         result = await self._analyzer.analyze(snapshot)
@@ -798,6 +819,7 @@ class Engine:
             self._bbx_ext.health().model_dump(),
             self._okx.health().model_dump(),
             self._binance.health().model_dump(),
+            self._looknode.health().model_dump(),
             {
                 "name": "okx_ws",
                 "status": "connected" if self._okx_ws.is_connected else "disconnected",
