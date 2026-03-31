@@ -467,7 +467,7 @@ def build_user_prompt(snapshot: dict) -> str:
             if val and val > 0:
                 dist = (val - price) / price * 100
                 side = "支撑" if val < price else "阻力"
-                onchain_levels.append((val, src, f"{side} | {nature}", dist))
+                onchain_levels.append((val, src, f"{side}({nature})", dist))
 
         if onchain_levels:
             onchain_levels.sort(key=lambda x: x[0])
