@@ -83,6 +83,7 @@ class ProcessorsConfig:
     market_temp: dict[str, Any]
     levels: dict[str, Any]
     orderbook: dict[str, Any]
+    range_signal: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

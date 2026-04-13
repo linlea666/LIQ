@@ -18,7 +18,7 @@ from config.settings import CoinConfig, get_settings
 from models.flow import (
     BasisData, CVDData, CyclePositionData, ETFFlowData, FundingRateData,
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
-    MultiFundingRateData, OIData, TakerFlowData,
+    MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
 )
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationEvent, LiquidationMap, LiquidationStats
@@ -37,6 +37,7 @@ from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_atr, calc_volume_profile
 from processors.cycle import calculate_cycle_position
+from processors.range_signal import calculate_range_signal
 from sources.bbx import create_bbx_source, create_bbx_extended_source
 from sources.binance_rest import create_binance_rest_source
 from sources.looknode import create_looknode_source
@@ -78,6 +79,10 @@ class CoinState:
         self.global_liq: Optional[GlobalLiquidationData] = None
         self.market_index: Optional[MarketIndexData] = None
         self.cycle_position: Optional[CyclePositionData] = None
+        # Phase 9: 多时间框架 K 线 + 均线箱体信号
+        self.candles_daily: list = []
+        self.candles_weekly: list = []
+        self.range_signal: Optional[RangeSignalData] = None
         # Sweep detection: 前次快照 + 近 1h 扫取事件
         self._prev_liq_map_24h: Optional[LiquidationMap] = None
         self._prev_price_at_liq_poll: float = 0
@@ -152,9 +157,23 @@ class Engine:
             asyncio.create_task(self._poll_loop("looknode_cycle", self._poll_onchain_cycle, btc_coin, looknode_interval, 10)),
         ])
 
+        rs_cfg = self._settings.processors.range_signal
+        daily_poll = rs_cfg.get("candles_daily_poll_sec", 300)
+        weekly_poll = rs_cfg.get("candles_weekly_poll_sec", 900)
+
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
             stagger = idx * 2
+
+            # 日线/周线 K 线轮询（所有币种共享，频率较低）
+            tasks.extend([
+                asyncio.create_task(self._poll_loop(
+                    f"okx_candles_1d_{ccy}", self._poll_candles_daily, coin, daily_poll, stagger + 15,
+                )),
+                asyncio.create_task(self._poll_loop(
+                    f"okx_candles_1w_{ccy}", self._poll_candles_weekly, coin, weekly_poll, stagger + 20,
+                )),
+            ])
 
             if ccy == self._default_coin:
                 # 默认币种：全速轮询
@@ -459,6 +478,58 @@ class Engine:
         state.candle_ts = [c.ts for c in candles]
         state.atr = calc_atr(candles, 14)
         state.vp = calc_volume_profile(candles, num_bins=50, coin=coin.ccy)
+
+    async def _poll_candles_daily(self, coin: CoinConfig):
+        candles = await self._okx.fetch_candles(coin, bar="1D", limit=150)
+        if not candles:
+            return
+        state = self._states[coin.ccy]
+        state.candles_daily = candles
+        self._recompute_range_signal(coin.ccy)
+
+    async def _poll_candles_weekly(self, coin: CoinConfig):
+        candles = await self._okx.fetch_candles(coin, bar="1W", limit=100)
+        if not candles:
+            return
+        state = self._states[coin.ccy]
+        state.candles_weekly = candles
+        self._recompute_range_signal(coin.ccy)
+
+    def _recompute_range_signal(self, ccy: str):
+        """重新计算均线箱体信号。"""
+        state = self._states[ccy]
+        if not state.candles_daily or not state.ticker:
+            return
+        price = state.ticker.last
+        if price <= 0:
+            return
+
+        sweep_above = sum(
+            e.get("usd", 0) for e in state.liq_sweep_events
+            if e.get("side") == "above" and e.get("ts", 0) > int(time.time()) - 3600
+        )
+        sweep_below = sum(
+            e.get("usd", 0) for e in state.liq_sweep_events
+            if e.get("side") == "below" and e.get("ts", 0) > int(time.time()) - 3600
+        )
+
+        cps = None
+        if state.cycle_position and state.cycle_position.cps is not None:
+            cps = state.cycle_position.cps
+
+        rs_cfg = self._settings.processors.range_signal
+
+        state.range_signal = calculate_range_signal(
+            candles_1h=[],
+            candles_1d=state.candles_daily,
+            candles_1w=state.candles_weekly,
+            current_price=price,
+            atr=state.atr,
+            sweep_above_1h=sweep_above,
+            sweep_below_1h=sweep_below,
+            cps=cps,
+            cfg=rs_cfg,
+        )
 
     async def _poll_basis(self, coin: CoinConfig):
         state = self._states[coin.ccy]
@@ -833,6 +904,7 @@ class Engine:
             liq_map_7d=state.liq_maps.get("7d"),
             cycle_position=state.cycle_position,
             liq_sweep_events=recent_sweeps,
+            range_signal=state.range_signal,
         )
 
         result = await self._analyzer.analyze(snapshot)

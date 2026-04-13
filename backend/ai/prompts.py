@@ -42,6 +42,15 @@ def build_system_prompt() -> str:
 - CPS < 2 或 > 8（极端区间）= 趋势概率高 → 清算磁吸效应权重**下调**，级联踩踏风险**上调**，价格可能连续穿透多个簇不回头
 - 震荡市中：清算簇构成有效短期支撑/阻力；趋势市中：清算簇更多充当"加油站"（被穿越后加速趋势）
 
+### 均线箱体信号（§9f 有数据时启用）
+- **核心逻辑**：日线 MA120（≈2日线MA60）构成箱体上沿阻力，未回补影线低点/周线MA60 构成箱体下沿支撑；价格在箱体中间时无信号，仅在接近边界时产生A/B级信号
+- **A级做空**：价格接近箱体上沿 + 日线 MACD 在0轴下方 → §四狙击空单优先采纳此信号；0轴上方时降级为B级
+- **A级做多**：价格接近箱体下沿 + 下方流动性被扫取（sweep确认）→ §四狙击多单优先采纳此信号；无sweep时降级为B级
+- **MACD 0轴规则**：MACD 在0轴下方 = 反弹空间有限（均线压制），反弹至MA做空成功率高；MACD 在0轴上方 = 多头趋势，做空需额外谨慎
+- **中间禁区**：price_position = "middle" 时，§一须提示"当前价处于箱体中间，无明确方向信号"，§四/§六不得基于箱体理由开单
+- **与CPS联动**：CPS 4-7（震荡区）时箱体策略权重上调；CPS极端值时箱体可能被突破，须降权
+- **引用规则**：§一须引用箱体位置（上沿/下沿/中间）；§二须将MA60/MA120纳入关键价位表；有A级信号时§四须评估是否与引擎方案共振
+
 ### 宏观-微观联动（仅当用户提示中该项有数值时引用；无则写「数据未提供」勿编造）
 - DXY 单日波动较大 → 风险资产承压/支撑需结合当日数据
 - 纳斯达克/标普走弱 → risk-off，谨慎追高
@@ -536,6 +545,50 @@ def build_user_prompt(snapshot: dict) -> str:
             for val, src, nature, dist in onchain_levels:
                 lines.append(f"| ${val:,.0f} | {src} | {nature} | {dist:+.1f}% |")
 
+    # ── §9f 均线箱体信号 ──
+    rs = snapshot.get("range_signal")
+    has_range = rs is not None and rs.get("ma60_daily") is not None
+    if has_range:
+        lines.append("")
+        lines.append("### 9f. 均线箱体信号 [日级·多时间框架MA+MACD]")
+        if rs.get("ma60_daily"):
+            lines.append(f"  日线MA60: ${rs['ma60_daily']:,.0f}")
+        if rs.get("ma120_daily"):
+            lines.append(f"  日线MA120(≈2日MA60): ${rs['ma120_daily']:,.0f}")
+        if rs.get("ma60_weekly"):
+            lines.append(f"  周线MA60: ${rs['ma60_weekly']:,.0f}")
+
+        macd_pos = "0轴上方(多头)" if rs.get("macd_daily_above_zero") else "0轴下方(空头)"
+        hist_dir = ""
+        if rs.get("macd_daily_hist_rising") is True:
+            hist_dir = "，柱状图上升"
+        elif rs.get("macd_daily_hist_rising") is False:
+            hist_dir = "，柱状图下降"
+        lines.append(f"  日线MACD: {macd_pos}{hist_dir}")
+
+        if rs.get("range_upper") and rs.get("range_lower"):
+            lines.append(f"  箱体范围: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')})")
+            lines.append(f"  价格位置: {rs.get('price_position', 'middle')} ({rs.get('price_position_pct', 50):.0f}%)")
+        elif rs.get("range_upper"):
+            lines.append(f"  箱体上沿: ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')}), 下沿未确定")
+        elif rs.get("range_lower"):
+            lines.append(f"  箱体下沿: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}), 上沿未确定")
+
+        if rs.get("unfilled_wick_low"):
+            lines.append(f"  未回补下影线: ${rs['unfilled_wick_low']:,.0f} (价格磁吸目标)")
+        if rs.get("unfilled_wick_high"):
+            lines.append(f"  未回补上影线: ${rs['unfilled_wick_high']:,.0f} (价格磁吸目标)")
+
+        if rs.get("signal_grade"):
+            grade_emoji = "🔴" if rs["signal_grade"] == "A" else "🟡"
+            lines.append(f"  {grade_emoji} 信号: {rs['signal_grade']}级 {rs.get('signal_direction', '')} — {rs.get('signal_reason', '')}")
+            if rs.get("sweep_confirmed"):
+                lines.append(f"  ✅ Sweep确认: 流动性扫取与信号方向一致")
+            if rs.get("cps_aligned"):
+                lines.append(f"  ✅ CPS一致: 周期评分支持当前信号方向")
+        else:
+            lines.append(f"  信号: 无（价格在箱体中间，不适合基于箱体逻辑开单）")
+
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([
@@ -544,6 +597,7 @@ def build_user_prompt(snapshot: dict) -> str:
         f"- 加密侧情绪/结构: {'已提供（恐惧贪婪/市占等）' if has_crypto_sent else '未提供'}",
         f"- 传统外盘(DXY/纳指/标普/黄金): {'已提供部分或全部数值' if has_trad else '本条目中未解析到有效数值（若恐惧贪婪已提供，不得写宏观完全缺失）'}",
         "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
+        f"- 均线箱体: " + (f"已提供(信号={rs.get('signal_grade', '无')}级)" if has_range else "未提供"),
     ])
 
     lines.extend([
@@ -619,5 +673,6 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.append("")
     lines.append("请基于以上数据输出，**必须包含八个章节**，且第四节「狙击挂单计划」和第五节「阶梯埋伏计划」均为必答。")
     cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§五须评估CPS与阶梯方向一致性" if has_cps else ""
-    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}".format(min_rr, cps_note))
+    range_note = " 6) §9f有数据时，§一须引用箱体位置，§二须纳入MA关键价位，有A级信号时§四须评估共振" if has_range else ""
+    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}{}".format(min_rr, cps_note, range_note))
     return "\n".join(lines)

@@ -106,6 +106,12 @@ processors:
     ladder_min_distance_pct: 5  # 最近5%起步，与狙击(≤5%)严格分工：狙击=近距猎杀，阶梯=远距网捕
     ladder_total_risk_pct: 10   # 全部层止损总风险占账户百分比上限
     ladder_sl_min_pct: 2.0      # 单层止损最小距离百分比（远距场景 ATR 不够时的保底）
+  range_signal:
+    near_boundary_pct: 1.5       # 距箱体边界 ≤1.5% 视为 "near"
+    wick_body_ratio: 0.30        # 影线占K线实体比 ≤30% = 大实体K线(有效影线)
+    wick_min_atr_mult: 1.2       # 影线长度 ≥ ATR*1.2 才标记为 unfilled wick
+    candles_daily_poll_sec: 300  # 日线K线轮询间隔(秒)
+    candles_weekly_poll_sec: 900 # 周线K线轮询间隔(秒)
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

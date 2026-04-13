@@ -239,3 +239,42 @@ class CyclePositionData(BaseModel):
     pi_350dma: Optional[float] = None
     pi_111dma_x2: Optional[float] = None
     cvdd: Optional[float] = None
+
+
+# ─── 均线箱体信号模型（Phase 9: Range Signal） ───
+
+
+class RangeSignalData(BaseModel):
+    """多时间框架均线箱体 + MACD 位置 + 信号分级"""
+    ts: int
+
+    # MA values
+    ma60_daily: Optional[float] = None
+    ma120_daily: Optional[float] = None
+    ma60_weekly: Optional[float] = None
+
+    # MACD state (日线级别)
+    macd_daily_above_zero: Optional[bool] = None
+    macd_daily_histogram: Optional[float] = None
+    macd_daily_hist_rising: Optional[bool] = None
+
+    # Range / Box
+    range_upper: Optional[float] = None
+    range_upper_source: str = ""
+    range_lower: Optional[float] = None
+    range_lower_source: str = ""
+    price_position: str = "middle"  # "near_upper" / "near_lower" / "middle"
+    price_position_pct: float = 50.0  # 0=下沿, 100=上沿
+
+    # Wick gap tracking
+    unfilled_wick_low: Optional[float] = None
+    unfilled_wick_high: Optional[float] = None
+
+    # Signal
+    signal_grade: Optional[str] = None   # "A" / "B" / None
+    signal_direction: Optional[str] = None  # "long" / "short" / None
+    signal_reason: str = ""
+
+    # Confluence
+    sweep_confirmed: bool = False
+    cps_aligned: bool = False
