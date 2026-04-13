@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_range_signal(
-    candles_1h: list[CandleData],
     candles_1d: list[CandleData],
     candles_1w: list[CandleData],
     current_price: float,
@@ -35,13 +34,12 @@ def calculate_range_signal(
     """从多时间框架K线计算箱体信号。
 
     Args:
-        candles_1h: 1H K线（用于 wick gap 检测）
-        candles_1d: 日线K线（MA60/MA120/MACD）
+        candles_1d: 日线K线（MA60/MA120/MACD + wick gap 检测）
         candles_1w: 周线K线（MA60）
         current_price: 当前价格
         atr: 1H ATR(14)
         sweep_above_1h/sweep_below_1h: 近1h 扫取的 BSL/SSL 金额
-        cps: CPS 周期评分（可选）
+        cps: CPS 周期评分（可选，BTC 周期作全局状态机）
         cfg: range_signal 配置参数
 
     Returns:
@@ -88,6 +86,11 @@ def calculate_range_signal(
         unfilled_low, ma60_weekly, ma60_daily, current_price,
     )
 
+    # ── 上下沿合法性校验（防止 fallback 导致 upper <= lower）──
+    if range_upper is not None and range_lower is not None and range_upper <= range_lower:
+        range_upper = None
+        upper_src = ""
+
     # ── 价格在箱体中的位置 ──
     price_pos, pos_pct = _calc_price_position(
         current_price, range_upper, range_lower, near_pct,
@@ -101,12 +104,10 @@ def calculate_range_signal(
         range_upper, range_lower, current_price,
     )
 
-    # ── CPS 一致性 ──
+    # ── CPS 一致性（箱体策略适用于震荡区 CPS 3-7，极端趋势区箱体易被单边突破）──
     cps_aligned = False
     if cps is not None and direction:
-        if direction == "long" and cps >= 4:
-            cps_aligned = True
-        elif direction == "short" and cps <= 6:
+        if 3 <= cps <= 7:
             cps_aligned = True
 
     sweep_confirmed = (
@@ -174,19 +175,19 @@ def _detect_unfilled_wicks(
 
         body_pct = body / total
 
-        # 下影线检测
+        # 下影线检测（小实体 + 大下影线 = pin bar）
         if (unfilled_low is None
                 and lower_wick >= min_atr_len
-                and body_pct >= (1 - body_ratio_threshold)):
+                and body_pct <= body_ratio_threshold):
             wick_low = c.low
             filled = any(candles[j].low <= wick_low * 1.002 for j in range(i + 1, len(candles)))
             if not filled:
                 unfilled_low = wick_low
 
-        # 上影线检测
+        # 上影线检测（小实体 + 大上影线 = shooting star）
         if (unfilled_high is None
                 and upper_wick >= min_atr_len
-                and body_pct >= (1 - body_ratio_threshold)):
+                and body_pct <= body_ratio_threshold):
             wick_high = c.high
             filled = any(candles[j].high >= wick_high * 0.998 for j in range(i + 1, len(candles)))
             if not filled:
@@ -245,10 +246,9 @@ def _calc_price_position(
     pct = (price - lower) / span * 100
     pct = max(0.0, min(100.0, pct))
 
-    if pct >= (100 - near_pct / (span / price * 100) * 100):
-        dist_to_upper = abs(price - upper) / price * 100
-        if dist_to_upper <= near_pct:
-            return "near_upper", pct
+    dist_to_upper = abs(price - upper) / price * 100
+    if dist_to_upper <= near_pct:
+        return "near_upper", pct
 
     dist_to_lower = abs(price - lower) / price * 100
     if dist_to_lower <= near_pct:

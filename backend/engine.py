@@ -513,14 +513,15 @@ class Engine:
             if e.get("side") == "below" and e.get("ts", 0) > int(time.time()) - 3600
         )
 
+        # BTC 周期作为全局状态机：所有币种使用 BTC 的 CPS
+        btc_state = self._states.get("BTC")
         cps = None
-        if state.cycle_position and state.cycle_position.cps is not None:
-            cps = state.cycle_position.cps
+        if btc_state and btc_state.cycle_position and btc_state.cycle_position.cps is not None:
+            cps = btc_state.cycle_position.cps
 
         rs_cfg = self._settings.processors.range_signal
 
         state.range_signal = calculate_range_signal(
-            candles_1h=[],
             candles_1d=state.candles_daily,
             candles_1w=state.candles_weekly,
             current_price=price,
@@ -740,6 +741,10 @@ class Engine:
             liq_map_7d=liq_map_7d, btc_hist_vol=hist_vol,
             cycle_position=state.cycle_position,
         )
+
+        # 箱体信号随价格/sweep 实时刷新（MA/MACD 使用缓存日K，计算极轻量）
+        if state.candles_daily:
+            self._recompute_range_signal(ccy)
 
     # ── 推送循环 ──
 

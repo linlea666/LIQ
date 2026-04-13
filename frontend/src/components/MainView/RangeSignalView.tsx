@@ -16,12 +16,18 @@ export default function RangeSignalView() {
     );
   }
 
-  const hasBox = rs.range_upper != null && rs.range_lower != null;
+  const hasBox =
+    rs.range_upper != null &&
+    rs.range_lower != null &&
+    rs.range_upper > rs.range_lower;
   const boxWidth = hasBox ? rs.range_upper! - rs.range_lower! : 0;
   const price = data?.ticker?.last ?? 0;
 
   return (
     <div className="space-y-4 max-w-4xl">
+      {/* Plain Language Summary — 小白一眼看懂 */}
+      <PlainSummary rs={rs} price={price} coin={coin} hasBox={hasBox} />
+
       {/* Signal Grade Hero */}
       {rs.signal_grade ? (
         <SignalHero
@@ -71,9 +77,9 @@ export default function RangeSignalView() {
             <span className="text-base">📈</span>均线状态
           </h3>
           <div className="space-y-2">
-            <MARow label="MA60 (日线)" value={rs.ma60_daily} coin={coin} />
-            <MARow label="MA120 (日线)" value={rs.ma120_daily} coin={coin} />
-            <MARow label="MA60 (周线)" value={rs.ma60_weekly} coin={coin} />
+            <MARow label="MA60 (日线)" value={rs.ma60_daily} coin={coin} price={price} />
+            <MARow label="MA120 (日线)" value={rs.ma120_daily} coin={coin} price={price} />
+            <MARow label="MA60 (周线)" value={rs.ma60_weekly} coin={coin} price={price} />
           </div>
           {hasBox && (
             <div className="mt-3 pt-3 border-t border-slate-700/50 text-xs text-slate-500">
@@ -211,6 +217,89 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
+import type { RangeSignalData } from "@/lib/types";
+
+function PlainSummary({
+  rs, price, coin, hasBox,
+}: {
+  rs: RangeSignalData;
+  price: number;
+  coin: string;
+  hasBox: boolean;
+}) {
+  const lines: string[] = [];
+  let emoji = "🔍";
+  let headlineColor = "text-slate-300";
+
+  if (!hasBox) {
+    emoji = "⏳";
+    lines.push("箱体还没形成，暂时没有可操作的信号，先观望。");
+  } else if (rs.signal_grade === "A" && rs.signal_direction === "long") {
+    emoji = "🟢";
+    headlineColor = "text-green-400";
+    lines.push(`价格已经跌到箱体底部附近（${formatPrice(rs.range_lower!, coin)}），而且下方的杠杆仓位已经被扫掉了——说明"最后一拨止损"已经触发，空头弹药耗尽。`);
+    lines.push("这是高质量的做多机会（A级），适合在这附近挂单接货。");
+    if (rs.cps_aligned) lines.push("大周期也处于震荡区，箱体策略此时最有效。");
+  } else if (rs.signal_grade === "A" && rs.signal_direction === "short") {
+    emoji = "🔴";
+    headlineColor = "text-red-400";
+    lines.push(`价格反弹到了箱体顶部附近（${formatPrice(rs.range_upper!, coin)}），但日线MACD在零轴下方——说明整体趋势偏弱，反弹到均线压力位就是做空的好时机。`);
+    lines.push("这是高质量的做空机会（A级），适合在阻力位挂空单。");
+    if (rs.cps_aligned) lines.push("大周期也处于震荡区，箱体策略此时最有效。");
+  } else if (rs.signal_grade === "B" && rs.signal_direction === "long") {
+    emoji = "🟡";
+    headlineColor = "text-yellow-400";
+    lines.push(`价格在箱体底部附近（${formatPrice(rs.range_lower!, coin)}），有支撑的迹象。`);
+    lines.push("但还没看到下方流动性被清扫的确认信号——建议等一等，等「扫完再接」会更安全。现在做多风险偏高。");
+  } else if (rs.signal_grade === "B" && rs.signal_direction === "short") {
+    emoji = "🟡";
+    headlineColor = "text-yellow-400";
+    lines.push(`价格在箱体顶部附近（${formatPrice(rs.range_upper!, coin)}），有阻力的迹象。`);
+    lines.push("但MACD还在零轴上方（多头趋势中），逆势做空风险大——建议轻仓或等MACD翻到零轴下方再加仓。");
+  } else {
+    lines.push(`价格在箱体中间区域（上沿 ${hasBox ? formatPrice(rs.range_upper!, coin) : "?"} / 下沿 ${hasBox ? formatPrice(rs.range_lower!, coin) : "?"}），既不靠近顶也不靠近底。`);
+    lines.push("中间地带没有明确方向，最好的策略是：什么都不做，耐心等价格走到边界再出手。");
+    emoji = "⏸️";
+  }
+
+  // Wick gap plain language
+  if (rs.unfilled_wick_low != null) {
+    const dist = price > 0 ? ((rs.unfilled_wick_low - price) / price * 100).toFixed(1) : "?";
+    lines.push(`下方 ${formatPrice(rs.unfilled_wick_low, coin)}（距当前${dist}%）有一根没被填补的下影线——价格像磁铁一样容易被吸引回去。`);
+  }
+  if (rs.unfilled_wick_high != null) {
+    const dist = price > 0 ? ((rs.unfilled_wick_high - price) / price * 100).toFixed(1) : "?";
+    lines.push(`上方 ${formatPrice(rs.unfilled_wick_high, coin)}（距当前+${dist}%）有一根没被填补的上影线——价格可能会被吸引上去。`);
+  }
+
+  const headline =
+    rs.signal_grade === "A"
+      ? `${rs.signal_direction === "long" ? "做多" : "做空"}好时机！(A级高确信)`
+      : rs.signal_grade === "B"
+      ? `${rs.signal_direction === "long" ? "做多" : "做空"}机会初现，但需确认 (B级)`
+      : hasBox
+      ? "观望中 — 等价格到箱体边界再动手"
+      : "数据积累中 — 暂无操作建议";
+
+  return (
+    <Card>
+      <div className="flex gap-3">
+        <span className="text-3xl shrink-0">{emoji}</span>
+        <div className="min-w-0">
+          <h3 className={`text-base font-bold mb-2 ${headlineColor}`}>
+            {headline}
+          </h3>
+          <div className="space-y-1.5">
+            {lines.map((line, i) => (
+              <p key={i} className="text-sm text-slate-400 leading-relaxed">{line}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function SignalHero({
   grade, direction, reason, sweepConfirmed, cpsAligned,
 }: {
@@ -301,7 +390,6 @@ function BoxVisualization({
       {/* Progress bar */}
       <div className="relative">
         <div className="h-8 bg-slate-800 rounded-lg overflow-hidden border border-slate-700/50">
-          {/* Gradient fill: green at bottom, red at top */}
           <div className="absolute inset-0 rounded-lg opacity-20"
             style={{
               background: "linear-gradient(to right, #22c55e, #eab308, #ef4444)",
@@ -346,9 +434,8 @@ function BoxVisualization({
   );
 }
 
-function MARow({ label, value, coin }: { label: string; value: number | null; coin: string }) {
-  const price = useMarketStore((s) => s.data[s.coin]?.ticker?.last);
-  const isAbove = price != null && value != null && price > value;
+function MARow({ label, value, coin, price }: { label: string; value: number | null; coin: string; price: number }) {
+  const isAbove = price > 0 && value != null && price > value;
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-slate-800 last:border-0">
       <span className="text-xs text-slate-400">{label}</span>
