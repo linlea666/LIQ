@@ -5,16 +5,19 @@ import LiquidationMapView from "./LiquidationMapView";
 import CVDOIChart from "./CVDOIChart";
 import WaterfallChart from "./WaterfallChart";
 import MarketSummary from "./MarketSummary";
+import RangeSignalView from "./RangeSignalView";
 
 const PRO_TABS = [
   { id: "liquidation", label: "清算地图" },
   { id: "cvd_oi", label: "CVD + OI" },
   { id: "waterfall", label: "数据总览" },
   { id: "summary", label: "市场总结" },
+  { id: "range_signal", label: "箱体信号" },
 ] as const;
 
 const BEGINNER_TABS = [
   { id: "summary", label: "市场总结" },
+  { id: "range_signal", label: "箱体信号" },
   { id: "liquidation", label: "清算地图" },
 ] as const;
 
@@ -49,6 +52,7 @@ export default function TabContainer() {
         {validTab === "cvd_oi" && <CVDOIChart />}
         {validTab === "waterfall" && <WaterfallChart />}
         {validTab === "summary" && <MarketSummary />}
+        {validTab === "range_signal" && <RangeSignalView />}
       </div>
     </div>
   );

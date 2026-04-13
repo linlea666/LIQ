@@ -219,6 +219,29 @@ export interface AIAnalysisResult {
   user_prompt?: string;
 }
 
+export interface RangeSignalData {
+  ts: number;
+  ma60_daily: number | null;
+  ma120_daily: number | null;
+  ma60_weekly: number | null;
+  macd_daily_above_zero: boolean | null;
+  macd_daily_histogram: number | null;
+  macd_daily_hist_rising: boolean | null;
+  range_upper: number | null;
+  range_upper_source: string;
+  range_lower: number | null;
+  range_lower_source: string;
+  price_position: string;
+  price_position_pct: number;
+  unfilled_wick_low: number | null;
+  unfilled_wick_high: number | null;
+  signal_grade: string | null;
+  signal_direction: string | null;
+  signal_reason: string;
+  sweep_confirmed: boolean;
+  cps_aligned: boolean;
+}
+
 export interface MarketUpdate {
   coin: string;
   ts: number;
@@ -237,4 +260,5 @@ export interface MarketUpdate {
   basis?: BasisData;
   orderbook?: OrderBookAnalysis;
   ladder_plans?: LadderPlan[];
+  range_signal?: RangeSignalData;
 }
