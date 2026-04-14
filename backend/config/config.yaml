@@ -1,82 +1,54 @@
 coins:
   BTC:
-    symbol_okx_swap: "BTC-USDT-SWAP"
-    symbol_okx_spot: "BTC-USDT"
-    symbol_binance: "BTCUSDT"
-    symbol_bbx: "btcswapusdt:binance"
-    inst_family: "BTC-USDT"
     ccy: "BTC"
+    symbol_cg: "BTC"
+    symbol_cg_pair: "BTCUSDT"
+    exchange_primary: "Binance"
     ct_val: 0.01
     default: true
   ETH:
-    symbol_okx_swap: "ETH-USDT-SWAP"
-    symbol_okx_spot: "ETH-USDT"
-    symbol_binance: "ETHUSDT"
-    symbol_bbx: "ethswapusdt:binance"
-    inst_family: "ETH-USDT"
     ccy: "ETH"
+    symbol_cg: "ETH"
+    symbol_cg_pair: "ETHUSDT"
+    exchange_primary: "Binance"
     ct_val: 0.1
   SOL:
-    symbol_okx_swap: "SOL-USDT-SWAP"
-    symbol_okx_spot: "SOL-USDT"
-    symbol_binance: "SOLUSDT"
-    symbol_bbx: "solswapusdt:binance"
-    inst_family: "SOL-USDT"
     ccy: "SOL"
+    symbol_cg: "SOL"
+    symbol_cg_pair: "SOLUSDT"
+    exchange_primary: "Binance"
     ct_val: 1
 
 sources:
-  bbx:
-    base_url: "https://bbx.com/api/data"
-    module: "upgrade.kline.predictLiqMap"
-    poll_interval_sec: 30
-    timeout_sec: 10
-    cycles:
-      - "24h"
-      - "7d"
-    funding_url: "https://bbx.com/api/funding-rate/data-table"
-    ls_ratio_url: "https://bbx.com/api/pc"
-    etf_flow_url: "https://bbx.com/api/etf/flow"
-    market_index_url: "https://bbx.com/api/pc"
-    global_liq_url: "https://bbx.com/api/data"
-    extended_poll_sec: 60
-  looknode:
-    base_url: "https://www.looknode.com/api"
-    poll_interval_sec: 1800
+  coinglass:
+    base_url: "https://open-api-v3.coinglass.com"
+    api_key_env: "COINGLASS_API_KEY"
+    api_key_default: ""
     timeout_sec: 15
-    request_gap_sec: 3.0
-    cache_dir: "cache/onchain"
-    cache_ttl_sec: 1800
-  okx:
-    rest_base_url: "https://www.okx.com/api/v5"
-    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    timeout_sec: 10
+    rate_limit_per_min: 10
+    daily_limit: 50000
     poll_intervals:
-      oi: 10
+      ticker: 10
+      oi: 30
+      indicators: 300
       funding_rate: 60
+      liquidation_map: 60
+      liquidation_heatmap: 300
+      orderbook: 30
+      large_orders: 60
+      long_short: 60
       taker_volume: 60
-      candles: 5
-      mark_price: 10
-    ws_channels:
-      - "trades"
-      - "books50-l2-tbt"
-      - "liquidation-orders"
-      - "tickers"
-  binance:
-    rest_base_url: "https://fapi.binance.com"
-    ws_url: "wss://fstream.binance.com/ws"
-    spot_rest_base_url: "https://api.binance.com"
-    timeout_sec: 10
-    enabled: true
-    poll_intervals:
-      oi: 10
-      funding_rate: 60
-      taker_volume: 60
-      force_orders: 10
+      cvd: 60
+      options: 300
+      etf: 600
+      onchain: 1800
+      macro_index: 600
+      whale: 300
+      news: 600
 
 processors:
   cvd:
-    source: "okx_taker_volume"
+    source: "coinglass"
     period: "5m"
   percentile:
     lookback_hours: 168
@@ -97,33 +69,31 @@ processors:
     min_liq_cluster_usd: 10000000
     atr_multiplier_sl: 1.5
     volume_profile_bins: 50
-    # 狙击挂单最小盈亏比（与 AI 提示词、levels._calc_sniper_entries 一致）
     min_sniper_rr: 2.5
-    # 阶梯埋伏计划参数（基于当前价格动态生成，非固定底部）
-    ladder_max_tiers: 5         # 最多分几层
-    ladder_min_rr: 3.0          # 单层最小盈亏比
-    ladder_max_distance_pct: 20 # 最远覆盖距当前价百分比（BTC 7万时=5.6万, 实际可达）
-    ladder_min_distance_pct: 5  # 最近5%起步，与狙击(≤5%)严格分工：狙击=近距猎杀，阶梯=远距网捕
-    ladder_total_risk_pct: 10   # 全部层止损总风险占账户百分比上限
-    ladder_sl_min_pct: 2.0      # 单层止损最小距离百分比（远距场景 ATR 不够时的保底）
+    ladder_max_tiers: 5
+    ladder_min_rr: 3.0
+    ladder_max_distance_pct: 20
+    ladder_min_distance_pct: 5
+    ladder_total_risk_pct: 10
+    ladder_sl_min_pct: 2.0
   range_signal:
-    near_boundary_pct: 1.5       # 距箱体边界 ≤1.5% 视为 "near"
-    wick_body_ratio: 0.30        # 影线占K线实体比 ≤30% = 大实体K线(有效影线)
-    wick_min_atr_mult: 1.2       # 影线长度 ≥ ATR*1.2 才标记为 unfilled wick
-    candles_daily_poll_sec: 300  # 日线K线轮询间隔(秒)
-    candles_weekly_poll_sec: 900 # 周线K线轮询间隔(秒)
+    near_boundary_pct: 1.5
+    wick_body_ratio: 0.30
+    wick_min_atr_mult: 1.2
+    candles_daily_poll_sec: 300
+    candles_weekly_poll_sec: 900
   key_level_tracker:
-    approach_pct: 2.0         # 距关键位 <2% → APPROACHING
-    test_pct: 0.5             # 距关键位 <0.5% → TESTING
-    bounce_pct: 1.0           # 价格远离 >1% → BOUNCED 确认
-    break_confirm_sec: 300    # 突破后持续 5min → BROKEN 确认
-    break_depth_pct: 0.3      # 突破深度 >0.3% 才算真突破
-    flip_zone_pct: 0.5        # 回踩到被破位 ±0.5% → 翻转区
-    max_tracked_levels: 8     # 每币种最多追踪 8 个关键位
-    level_expire_sec: 86400   # 24h 无活动的 IDLE 位自动清除
-    sweep_proximity_pct: 2.0  # sweep 事件需在关键位 ±2% 内才计入
-    cascade_weight_cap_m: 20  # 单簇权重上限（百万USD），防巨簇垄断
-    cascade_norm: 50          # 级联风险归一化分母（越大 → 越难达到100%）
+    approach_pct: 2.0
+    test_pct: 0.5
+    bounce_pct: 1.0
+    break_confirm_sec: 300
+    break_depth_pct: 0.3
+    flip_zone_pct: 0.5
+    max_tracked_levels: 8
+    level_expire_sec: 86400
+    sweep_proximity_pct: 2.0
+    cascade_weight_cap_m: 20
+    cascade_norm: 50
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

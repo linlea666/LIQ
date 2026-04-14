@@ -21,59 +21,25 @@ _CONFIG_FILE = _CONFIG_DIR / "config.yaml"
 
 @dataclass(frozen=True)
 class CoinConfig:
-    """单个币种的跨交易所 symbol 映射"""
+    """单个币种的 Coinglass symbol 映射"""
     ccy: str
-    symbol_okx_swap: str
-    symbol_okx_spot: str
-    symbol_binance: str
-    symbol_bbx: str
-    inst_family: str
+    symbol_cg: str
+    symbol_cg_pair: str
+    exchange_primary: str
     ct_val: float = 1.0
     default: bool = False
 
 
 @dataclass(frozen=True)
-class BBXSourceConfig:
+class CoinglassSourceConfig:
+    """Coinglass 统一数据源配置"""
     base_url: str
-    module: str
-    poll_interval_sec: int
+    api_key_env: str
+    api_key_default: str
     timeout_sec: int
-    cycles: list[str]
-    funding_url: str = "https://bbx.com/api/funding-rate/data-table"
-    ls_ratio_url: str = "https://bbx.com/api/pc"
-    etf_flow_url: str = "https://bbx.com/api/etf/flow"
-    market_index_url: str = "https://bbx.com/api/pc"
-    global_liq_url: str = "https://bbx.com/api/data"
-    extended_poll_sec: int = 60
-
-
-@dataclass(frozen=True)
-class OKXSourceConfig:
-    rest_base_url: str
-    ws_url: str
-    timeout_sec: int
+    rate_limit_per_min: int
+    daily_limit: int
     poll_intervals: dict[str, int]
-    ws_channels: list[str]
-
-
-@dataclass(frozen=True)
-class BinanceSourceConfig:
-    rest_base_url: str
-    ws_url: str
-    spot_rest_base_url: str
-    timeout_sec: int
-    enabled: bool
-    poll_intervals: dict[str, int]
-
-
-@dataclass(frozen=True)
-class LookNodeConfig:
-    base_url: str = "https://www.looknode.com/api"
-    poll_interval_sec: int = 1800
-    timeout_sec: int = 15
-    request_gap_sec: float = 3.0
-    cache_dir: str = "cache/onchain"
-    cache_ttl_sec: int = 1800
 
 
 @dataclass(frozen=True)
@@ -134,14 +100,11 @@ class ServerConfig:
 @dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
-    bbx: BBXSourceConfig
-    okx: OKXSourceConfig
-    binance: BinanceSourceConfig
+    coinglass: CoinglassSourceConfig
     processors: ProcessorsConfig
     ai: AIConfig
     push: PushConfig
     server: ServerConfig
-    looknode: LookNodeConfig = field(default_factory=LookNodeConfig)
     engine: EngineConfig = field(default_factory=EngineConfig)
     default_coin: str = "BTC"
 
@@ -170,11 +133,9 @@ def _build_settings(raw: dict) -> Settings:
     for ccy, coin_raw in raw["coins"].items():
         cc = CoinConfig(
             ccy=coin_raw["ccy"],
-            symbol_okx_swap=coin_raw["symbol_okx_swap"],
-            symbol_okx_spot=coin_raw["symbol_okx_spot"],
-            symbol_binance=coin_raw["symbol_binance"],
-            symbol_bbx=coin_raw["symbol_bbx"],
-            inst_family=coin_raw["inst_family"],
+            symbol_cg=coin_raw["symbol_cg"],
+            symbol_cg_pair=coin_raw["symbol_cg_pair"],
+            exchange_primary=coin_raw["exchange_primary"],
             ct_val=float(coin_raw.get("ct_val", 1.0)),
             default=coin_raw.get("default", False),
         )
@@ -183,9 +144,7 @@ def _build_settings(raw: dict) -> Settings:
             default_coin = ccy
 
     src = raw["sources"]
-    bbx = BBXSourceConfig(**src["bbx"])
-    okx = OKXSourceConfig(**src["okx"])
-    bn = BinanceSourceConfig(**src["binance"])
+    coinglass = CoinglassSourceConfig(**src["coinglass"])
 
     processors = ProcessorsConfig(**raw["processors"])
 
@@ -224,8 +183,6 @@ def _build_settings(raw: dict) -> Settings:
     push = PushConfig(**raw["push"])
     server = ServerConfig(**raw["server"])
 
-    looknode = LookNodeConfig(**src.get("looknode", {}))
-
     eng_raw = raw.get("engine", {})
     engine_cfg = EngineConfig(
         inactive_poll_sec=eng_raw.get("inactive_poll_sec", 120),
@@ -234,14 +191,11 @@ def _build_settings(raw: dict) -> Settings:
 
     return Settings(
         coins=coins,
-        bbx=bbx,
-        okx=okx,
-        binance=bn,
+        coinglass=coinglass,
         processors=processors,
         ai=ai,
         push=push,
         server=server,
-        looknode=looknode,
         engine=engine_cfg,
         default_coin=default_coin,
     )

@@ -91,7 +91,7 @@ export default function LiquidationMapView() {
   const ticker = useMarketStore((s) => s.data[s.coin]?.ticker);
   const [liqData, setLiqData] = useState<LiquidationMap | null>(null);
   const [activeLeverage, setActiveLeverage] = useState<string>("all");
-  const [activeCycle, setActiveCycle] = useState<string>("24h");
+  const [activeCycle, setActiveCycle] = useState<string>("1d");
   const [liqTooltip, setLiqTooltip] = useState<{
     left: number;
     anchorTop: number;
@@ -189,7 +189,7 @@ export default function LiquidationMapView() {
     <div>
       <div className="flex items-center gap-2 mb-4">
         <span className="text-sm text-slate-400">周期:</span>
-        {["24h", "7d"].map((c) => (
+        {["1d", "3d", "7d", "30d"].map((c) => (
           <button
             key={c}
             onClick={() => {

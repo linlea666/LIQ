@@ -9,7 +9,7 @@ import type { LiquidationMap } from "@/lib/types";
 export default function MarketSummary() {
   const coin = useMarketStore((s) => s.coin);
   const data = useMarketStore((s) => s.data[s.coin]);
-  const [liq24h, setLiq24h] = useState<LiquidationMap | null>(null);
+  const [liq24h, setLiq24h] = useState<LiquidationMap | null>(null); // "1d" cycle
   const [liq7d, setLiq7d] = useState<LiquidationMap | null>(null);
 
   const ticker = data?.ticker;
@@ -25,7 +25,7 @@ export default function MarketSummary() {
     const fetchBoth = async () => {
       try {
         const [r24, r7] = await Promise.all([
-          fetch(`${API_BASE}/api/liquidation/${coin}?cycle=24h`),
+          fetch(`${API_BASE}/api/liquidation/${coin}?cycle=1d`),
           fetch(`${API_BASE}/api/liquidation/${coin}?cycle=7d`),
         ]);
         if (r24.ok) setLiq24h(await r24.json());

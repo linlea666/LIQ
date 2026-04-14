@@ -1,4 +1,4 @@
-"""资金流数据模型：CVD、OI、资金费率、期现溢价"""
+"""资金流数据模型：CVD、OI、资金费率、期现溢价、多空比、ETF、宏观指标等"""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ class CVDPoint(BaseModel):
     ts: int
     buy_vol: float
     sell_vol: float
-    delta: float  # buy - sell
-    cvd: float    # 累计 delta
+    delta: float
+    cvd: float
 
 
 class CVDData(BaseModel):
@@ -21,7 +21,7 @@ class CVDData(BaseModel):
     coin: str
     inst_type: str  # "CONTRACTS" | "SPOT"
     series: list[CVDPoint]
-    trend_1h: str = ""  # "rising" | "declining" | "flat"
+    trend_1h: str = ""
     delta_1h: float = 0
     has_divergence: bool = False
     divergence_note: str = ""
@@ -31,9 +31,9 @@ class OISnapshot(BaseModel):
     """OI 快照"""
     coin: str
     ts: int
-    oi: float           # 张数
-    oi_usd: float       # USD 计价
-    source: str = "okx"
+    oi: float
+    oi_usd: float
+    source: str = "coinglass"
 
 
 class OIData(BaseModel):
@@ -43,7 +43,7 @@ class OIData(BaseModel):
     current_usd: float
     change_1h_pct: float = 0
     change_5m_pct: float = 0
-    trend: str = ""     # "surging" | "declining" | "stable"
+    trend: str = ""
     history: list[OISnapshot] = []
 
 
@@ -54,8 +54,9 @@ class FundingRateData(BaseModel):
     okx_rate: Optional[float] = None
     binance_rate: Optional[float] = None
     avg_rate: float = 0
+    oi_weighted_rate: float = 0
     next_funding_ts: int = 0
-    interpretation: str = ""  # "多头拥挤" / "空头拥挤" / "中性"
+    interpretation: str = ""
 
 
 class BasisData(BaseModel):
@@ -64,7 +65,7 @@ class BasisData(BaseModel):
     ts: int
     mark_price: float
     index_price: float
-    basis_pct: float  # (mark - index) / index * 100
+    basis_pct: float
     interpretation: str = ""
 
 
@@ -72,17 +73,14 @@ class TakerFlowData(BaseModel):
     """Taker 买卖力量"""
     coin: str
     ts: int
-    buy_ratio: float   # 买入占比
-    sell_ratio: float   # 卖出占比
-    dominant: str = ""  # "buyers" | "sellers" | "balanced"
+    buy_ratio: float
+    sell_ratio: float
+    dominant: str = ""
     spot_buy_vol: float = 0
     spot_sell_vol: float = 0
     contract_buy_vol: float = 0
     contract_sell_vol: float = 0
     spot_contract_divergence: bool = False
-
-
-# ─── 新增数据模型（Phase 3） ───
 
 
 class ExchangeFundingRate(BaseModel):
@@ -101,6 +99,7 @@ class MultiFundingRateData(BaseModel):
     exchanges: list[ExchangeFundingRate] = []
     avg_current: float = 0
     avg_7d: float = 0
+    oi_weighted: float = 0
     interpretation: str = ""
 
 
@@ -113,10 +112,11 @@ class LongShortRatioExchange(BaseModel):
 
 
 class LongShortRatioData(BaseModel):
-    """多空比汇总"""
+    """多空比汇总（支持三维度）"""
     coin: str
     ts: int
     cycle: str = "1h"
+    dimension: str = "global"  # "global" | "top_account" | "top_position"
     exchanges: list[LongShortRatioExchange] = []
     avg_ratio: float = 1.0
     interpretation: str = ""
@@ -130,11 +130,12 @@ class ETFFlowDay(BaseModel):
 
 
 class ETFFlowData(BaseModel):
-    """BTC ETF 资金流"""
+    """ETF 资金流（支持 BTC/ETH/SOL/XRP）"""
     ts: int
+    asset: str = "BTC"
     recent_days: list[ETFFlowDay] = []
     net_3d: float = 0
-    trend: str = ""  # "inflow" | "outflow" | "mixed"
+    trend: str = ""
 
 
 class GlobalLiquidationData(BaseModel):
@@ -150,7 +151,7 @@ class GlobalLiquidationData(BaseModel):
 
 
 class MarketIndexItem(BaseModel):
-    """market/index 单个指标"""
+    """市场指标单项"""
     key: str
     name: str
     value: float
@@ -158,7 +159,7 @@ class MarketIndexItem(BaseModel):
 
 
 class MarketIndexData(BaseModel):
-    """BBX market/index 精选指标集"""
+    """市场指标集"""
     ts: int
     fear_greed: Optional[float] = None
     btc_dominance: Optional[float] = None
@@ -173,7 +174,6 @@ class MarketIndexData(BaseModel):
     binance_btc_balance: Optional[float] = None
     okx_ls_ratio_btc: Optional[float] = None
     binance_ls_ratio_btc: Optional[float] = None
-    # A 级新增指标
     btc_hist_vol: Optional[float] = None
     btc_implied_vol: Optional[float] = None
     btc_iv_skew_1m: Optional[float] = None
@@ -191,11 +191,8 @@ class MarketIndexData(BaseModel):
     raw_items: list[MarketIndexItem] = []
 
 
-# ─── 链上周期数据模型（Phase 7: LookNode） ───
-
-
 class OnchainCycleData(BaseModel):
-    """LookNode 原始链上周期指标（仅 BTC，日频）"""
+    """链上周期指标（Coinglass 直取）"""
     ts: int
     sma_200w: Optional[float] = None
     mvrv_z: Optional[float] = None
@@ -210,6 +207,13 @@ class OnchainCycleData(BaseModel):
     pi_350dma: Optional[float] = None
     cvdd: Optional[float] = None
     btc_daily_prices: list[float] = []
+    # Coinglass 新增
+    puell_multiple: Optional[float] = None
+    nupl: Optional[float] = None
+    rhodl_ratio: Optional[float] = None
+    reserve_risk: Optional[float] = None
+    sth_sopr: Optional[float] = None
+    lth_sopr: Optional[float] = None
 
 
 class CyclePositionData(BaseModel):
@@ -217,7 +221,6 @@ class CyclePositionData(BaseModel):
     ts: int
     cps: float
     cps_label: str
-    # 各分项得分
     mvrv_z_score: Optional[float] = None
     mvrv_z_contribution: float = 0
     ahr999_value: Optional[float] = None
@@ -230,7 +233,6 @@ class CyclePositionData(BaseModel):
     pi_cycle_contribution: float = 0
     rplr_proxy: Optional[float] = None
     btc_rsi_daily: Optional[float] = None
-    # 链上关键价位（供 levels 引擎 + AI prompt 使用）
     sma_200w: Optional[float] = None
     sth_cost_1d: Optional[float] = None
     sth_cost_1w: Optional[float] = None
@@ -241,40 +243,70 @@ class CyclePositionData(BaseModel):
     cvdd: Optional[float] = None
 
 
-# ─── 均线箱体信号模型（Phase 9: Range Signal） ───
-
-
 class RangeSignalData(BaseModel):
     """多时间框架均线箱体 + MACD 位置 + 信号分级"""
     ts: int
-
-    # MA values
     ma60_daily: Optional[float] = None
     ma120_daily: Optional[float] = None
     ma60_weekly: Optional[float] = None
-
-    # MACD state (日线级别)
     macd_daily_above_zero: Optional[bool] = None
     macd_daily_histogram: Optional[float] = None
     macd_daily_hist_rising: Optional[bool] = None
-
-    # Range / Box
     range_upper: Optional[float] = None
     range_upper_source: str = ""
     range_lower: Optional[float] = None
     range_lower_source: str = ""
-    price_position: str = "middle"  # "near_upper" / "near_lower" / "middle"
-    price_position_pct: float = 50.0  # 0=下沿, 100=上沿
-
-    # Wick gap tracking
+    price_position: str = "middle"
+    price_position_pct: float = 50.0
     unfilled_wick_low: Optional[float] = None
     unfilled_wick_high: Optional[float] = None
-
-    # Signal
-    signal_grade: Optional[str] = None   # "A" / "B" / None
-    signal_direction: Optional[str] = None  # "long" / "short" / None
+    signal_grade: Optional[str] = None
+    signal_direction: Optional[str] = None
     signal_reason: str = ""
-
-    # Confluence
     sweep_confirmed: bool = False
     cps_aligned: bool = False
+
+
+# ── 新增数据模型 ──
+
+class NetPositionPoint(BaseModel):
+    """净多空头寸单点"""
+    ts: int
+    net_position: float = 0
+
+
+class NetPositionData(BaseModel):
+    """净多空头寸"""
+    coin: str
+    exchange: str
+    data: list[NetPositionPoint] = []
+
+
+class BasisHistoryPoint(BaseModel):
+    ts: int
+    basis: float = 0
+    basis_pct: float = 0
+
+
+class BasisHistoryData(BaseModel):
+    coin: str
+    exchange: str
+    data: list[BasisHistoryPoint] = []
+
+
+class SpotCVDData(BaseModel):
+    """现货 CVD"""
+    coin: str
+    series: list[CVDPoint] = []
+    trend_1h: str = ""
+    delta_1h: float = 0
+
+
+class FuturesSpotVolRatioPoint(BaseModel):
+    ts: int
+    ratio: float = 0
+
+
+class FuturesSpotVolRatioData(BaseModel):
+    symbol: str
+    data: list[FuturesSpotVolRatioPoint] = []

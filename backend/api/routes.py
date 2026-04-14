@@ -73,8 +73,8 @@ async def get_levels(coin: str):
 
 
 @router.get("/liquidation/{coin}")
-async def get_liquidation_map(coin: str, cycle: str = Query("24h")):
-    """获取清算地图数据"""
+async def get_liquidation_map(coin: str, cycle: str = Query("1d")):
+    """获取清算地图数据（周期: 1d/3d/7d/30d）"""
     if not _engine:
         raise HTTPException(503, "Engine not ready")
     coin = coin.upper()
