@@ -186,6 +186,33 @@ class AISnapshot(BaseModel):
     # Phase 10: 关键位状态机 (Key Level State Machine)
     key_levels: Optional[dict] = None
 
+    # 30d 清算地图（超远距阶梯参考）
+    liq_clusters_above_30d: list[dict] = []
+    liq_clusters_below_30d: list[dict] = []
+    liq_imbalance_ratio_30d: float = 0
+
+    # Coinglass 技术指标
+    rsi_14: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    macd_above_zero: Optional[bool] = None
+    boll_upper: Optional[float] = None
+    boll_middle: Optional[float] = None
+    boll_lower: Optional[float] = None
+    ema20: Optional[float] = None
+    ma60_daily: Optional[float] = None
+    ma120_daily: Optional[float] = None
+
+    # 期权数据
+    option_max_pain_price: Optional[float] = None
+    option_nearest_expiry: str = ""
+    option_call_oi: Optional[float] = None
+    option_put_oi: Optional[float] = None
+
+    # 大单追踪
+    large_orders_buy_count: int = 0
+    large_orders_sell_count: int = 0
+    large_orders_net_usd: float = 0
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

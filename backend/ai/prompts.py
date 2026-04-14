@@ -258,6 +258,25 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"\n7天流动性视角:")
             lines.append(f"  上方流动性(BSL): ${bsl_7d / 1e6:.0f}M / 下方流动性(SSL): ${ssl_7d / 1e6:.0f}M")
 
+    clusters_above_30d = snapshot.get("liq_clusters_above_30d", [])
+    clusters_below_30d = snapshot.get("liq_clusters_below_30d", [])
+    imb_30d = snapshot.get("liq_imbalance_ratio_30d", 0)
+    if clusters_above_30d or clusters_below_30d:
+        lines.extend(["", "### 1c. 清算地图数据 [30天·超远距阶梯参考]"])
+        lines.append(f"30天多空失衡比: {imb_30d:.2f}")
+        if clusters_above_30d:
+            lines.append("\n30天上方清算密集区:")
+            for c in clusters_above_30d[:8]:
+                lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
+                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"距当前{c.get('distance_pct', 0):.1f}%")
+        if clusters_below_30d:
+            lines.append("\n30天下方清算密集区:")
+            for c in clusters_below_30d[:8]:
+                lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
+                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"距当前{c.get('distance_pct', 0):.1f}%")
+
     lines.extend([
         "",
         "### 2. 资金流数据 [实时]",
@@ -366,6 +385,62 @@ def build_user_prompt(snapshot: dict) -> str:
         f"VWAP(多日成交加权): ${snapshot.get('vwap', 0):,.2f}",
         f"ATR(14, Wilder): ${snapshot.get('atr_14', 0):,.2f}",
     ])
+
+    rsi = snapshot.get("rsi_14")
+    macd_hist = snapshot.get("macd_histogram")
+    macd_az = snapshot.get("macd_above_zero")
+    boll_u = snapshot.get("boll_upper")
+    boll_m = snapshot.get("boll_middle")
+    boll_l = snapshot.get("boll_lower")
+    ema20_v = snapshot.get("ema20")
+    ma60_v = snapshot.get("ma60_daily")
+    ma120_v = snapshot.get("ma120_daily")
+    if any(v is not None for v in (rsi, macd_hist, boll_u, ema20_v, ma60_v)):
+        lines.extend(["", "### 8b. 技术指标 [Coinglass·日线级]"])
+        if rsi is not None:
+            rsi_label = "超卖" if rsi < 30 else ("偏弱" if rsi < 45 else ("中性" if rsi < 55 else ("偏强" if rsi < 70 else "超买")))
+            lines.append(f"RSI(14): {rsi:.1f} → {rsi_label}")
+        if macd_hist is not None:
+            macd_pos = "0轴上方(多头)" if macd_az else "0轴下方(空头)"
+            hist_dir = "正值(动能增强)" if macd_hist > 0 else "负值(动能减弱)"
+            lines.append(f"MACD: {macd_pos} | 柱状图={macd_hist:+.2f} {hist_dir}")
+        if boll_u and boll_m and boll_l:
+            lines.append(f"布林带: 上轨${boll_u:,.0f} / 中轨${boll_m:,.0f} / 下轨${boll_l:,.0f}")
+            if price > 0:
+                boll_pos = "超买区" if price > boll_u else ("超卖区" if price < boll_l else "中轨附近" if abs(price - boll_m) / boll_m < 0.01 else "中轨上方" if price > boll_m else "中轨下方")
+                lines.append(f"  当前价位置: {boll_pos}")
+        if ema20_v is not None:
+            lines.append(f"EMA(20): ${ema20_v:,.0f}")
+        if ma60_v is not None:
+            lines.append(f"MA(60): ${ma60_v:,.0f}")
+        if ma120_v is not None:
+            lines.append(f"MA(120): ${ma120_v:,.0f}")
+
+    opt_mp = snapshot.get("option_max_pain_price")
+    opt_expiry = snapshot.get("option_nearest_expiry", "")
+    opt_call = snapshot.get("option_call_oi")
+    opt_put = snapshot.get("option_put_oi")
+    if opt_mp is not None:
+        lines.extend(["", "### 8c. 期权数据 [Coinglass]"])
+        lines.append(f"最近到期 Max Pain: ${opt_mp:,.0f} ({opt_expiry})")
+        if opt_call is not None and opt_put is not None:
+            total_oi = opt_call + opt_put
+            pc_ratio = opt_put / opt_call if opt_call > 0 else 0
+            lines.append(f"看涨OI: ${opt_call / 1e6:.0f}M / 看跌OI: ${opt_put / 1e6:.0f}M | P/C比: {pc_ratio:.3f}")
+            if opt_mp > 0 and price > 0:
+                dist = (opt_mp - price) / price * 100
+                lines.append(f"当前价距Max Pain: {dist:+.1f}% (价格倾向向Max Pain靠拢)")
+
+    lo_buy = snapshot.get("large_orders_buy_count", 0)
+    lo_sell = snapshot.get("large_orders_sell_count", 0)
+    lo_net = snapshot.get("large_orders_net_usd", 0)
+    if lo_buy > 0 or lo_sell > 0:
+        lines.extend(["", "### 8d. 大单追踪 [实时]"])
+        lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: ${lo_net / 1e6:+.1f}M")
+        if lo_net > 0:
+            lines.append(f"  大资金偏向: 买入为主(净流入)")
+        elif lo_net < 0:
+            lines.append(f"  大资金偏向: 卖出为主(净流出)")
 
     lines.extend([
         "",

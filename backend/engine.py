@@ -282,6 +282,18 @@ class Engine:
                 self._poll_cfg.get("liquidation_map", 60), stagger + 9,
             )),
             asyncio.create_task(self._poll_loop(
+                f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
+                30, stagger + 10,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
+                self._poll_cfg.get("indicators", 300), stagger + 11,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
+                900, stagger + 12,
+            )),
+            asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, stagger,
             )),
         ]
@@ -955,6 +967,96 @@ class Engine:
             )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # K 线数据（VP / ATR / range_signal 依赖）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def _parse_candles(self, raw: list) -> list[dict]:
+        """将 Coinglass K 线数据统一为 {ts, o, h, l, c, vol} 格式。"""
+        candles = []
+        for item in raw:
+            try:
+                candles.append({
+                    "ts": int(item.get("t", item.get("ts", 0))),
+                    "o": float(item.get("o", item.get("open", 0))),
+                    "h": float(item.get("h", item.get("high", 0))),
+                    "l": float(item.get("l", item.get("low", 0))),
+                    "c": float(item.get("c", item.get("close", 0))),
+                    "vol": float(item.get("v", item.get("vol", item.get("volume", 0)))),
+                })
+            except (ValueError, TypeError):
+                continue
+        return candles
+
+    async def _poll_candles_1h(self, coin: CoinConfig):
+        """获取 1H K线用于 Volume Profile / ATR 计算。"""
+        from models.market import CandleData
+        data = await self._cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1h", limit=200,
+        )
+        if not data:
+            return
+        state = self._states[coin.ccy]
+        raw = self._parse_candles(data)
+        if not raw:
+            return
+
+        state.candle_prices = [c["c"] for c in raw]
+        state.candle_ts = [c["ts"] for c in raw]
+
+        candle_models = [
+            CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                       l=c["l"], c=c["c"], vol=c["vol"])
+            for c in raw
+        ]
+        vp = calc_volume_profile(candle_models, coin=coin.ccy)
+        if vp:
+            state.vp = vp
+
+        if len(candle_models) >= 15 and state.atr_cg is None:
+            from processors.volume_profile import calc_atr
+            atr_val = calc_atr(candle_models)
+            if atr_val > 0:
+                state.atr = atr_val
+
+    async def _poll_candles_daily(self, coin: CoinConfig):
+        """获取日线 K线用于 range_signal 箱体检测。"""
+        from models.market import CandleData
+        data = await self._cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1d", limit=150,
+        )
+        if not data:
+            return
+        state = self._states[coin.ccy]
+        raw = self._parse_candles(data)
+        if raw:
+            state.candles_daily = [
+                CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                           l=c["l"], c=c["c"], vol=c["vol"])
+                for c in raw
+            ]
+            self._recompute_range_signal(coin.ccy)
+
+    async def _poll_candles_weekly(self, coin: CoinConfig):
+        """获取周线 K线用于 range_signal 周线 MA60。"""
+        from models.market import CandleData
+        data = await self._cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1w", limit=70,
+        )
+        if not data:
+            return
+        state = self._states[coin.ccy]
+        raw = self._parse_candles(data)
+        if raw:
+            state.candles_weekly = [
+                CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                           l=c["l"], c=c["c"], vol=c["vol"])
+                for c in raw
+            ]
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Phase 4: 新维度
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1435,6 +1537,8 @@ class Engine:
         cutoff = int(time.time()) - 3600
         recent_sweeps = [e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff]
 
+        opt = state.option_max_pain
+        lo = state.large_orders
         snapshot = build_ai_snapshot(
             coin=ccy, price=state.ticker.last,
             high_24h=state.ticker.high_24h, low_24h=state.ticker.low_24h,
@@ -1454,6 +1558,22 @@ class Engine:
             liq_sweep_events=recent_sweeps,
             range_signal=state.range_signal,
             key_level_snapshot=state.key_level_snapshot,
+            liq_map_30d=state.liq_maps.get("30d"),
+            rsi_14=state.rsi_14,
+            macd_data=state.macd_data,
+            boll_data=state.boll_data,
+            ema20=state.ema20_cg,
+            ma60_daily=state.ma60_daily_cg,
+            ma120_daily=state.ma120_daily_cg,
+            option_max_pain_price=opt.nearest_max_pain if opt else None,
+            option_nearest_expiry=opt.nearest_expiry if opt else "",
+            option_call_oi=opt.expiries[0].call_oi if opt and opt.expiries else None,
+            option_put_oi=opt.expiries[0].put_oi if opt and opt.expiries else None,
+            large_orders_buy_count=len([o for o in lo.orders if o.side == "bid"]) if lo else 0,
+            large_orders_sell_count=len([o for o in lo.orders if o.side == "ask"]) if lo else 0,
+            large_orders_net_usd=sum(
+                o.size_usd * (1 if o.side == "bid" else -1) for o in lo.orders
+            ) if lo else 0,
         )
 
         result = await self._analyzer.analyze(snapshot)

@@ -69,6 +69,20 @@ def build_ai_snapshot(
     liq_sweep_events: list[dict] | None = None,
     range_signal: Optional[RangeSignalData] = None,
     key_level_snapshot: Optional[KeyLevelSnapshot] = None,
+    liq_map_30d: Optional[LiquidationMap] = None,
+    rsi_14: Optional[float] = None,
+    macd_data: Optional[dict] = None,
+    boll_data: Optional[dict] = None,
+    ema20: Optional[float] = None,
+    ma60_daily: Optional[float] = None,
+    ma120_daily: Optional[float] = None,
+    option_max_pain_price: Optional[float] = None,
+    option_nearest_expiry: str = "",
+    option_call_oi: Optional[float] = None,
+    option_put_oi: Optional[float] = None,
+    large_orders_buy_count: int = 0,
+    large_orders_sell_count: int = 0,
+    large_orders_net_usd: float = 0,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -92,6 +106,14 @@ def build_ai_snapshot(
         clusters_below_7d = [c.model_dump() for c in liq_map_7d.clusters_below[:8]]
         vacuum_zones_7d = [v.model_dump() for v in liq_map_7d.vacuum_zones[:5]]
         imbalance_7d = liq_map_7d.imbalance_ratio
+
+    clusters_above_30d: list[dict] = []
+    clusters_below_30d: list[dict] = []
+    imbalance_30d = 0.0
+    if liq_map_30d:
+        clusters_above_30d = [c.model_dump() for c in liq_map_30d.clusters_above[:10]]
+        clusters_below_30d = [c.model_dump() for c in liq_map_30d.clusters_below[:10]]
+        imbalance_30d = liq_map_30d.imbalance_ratio
 
     bid_walls = []
     ask_walls = []
@@ -293,6 +315,25 @@ def build_ai_snapshot(
         liq_sweep_events=liq_sweep_events or [],
         range_signal=range_signal.model_dump() if range_signal else None,
         key_levels=key_level_snapshot.model_dump() if key_level_snapshot else None,
+        liq_clusters_above_30d=clusters_above_30d,
+        liq_clusters_below_30d=clusters_below_30d,
+        liq_imbalance_ratio_30d=imbalance_30d,
+        rsi_14=rsi_14,
+        macd_histogram=macd_data.get("histogram") if macd_data else None,
+        macd_above_zero=macd_data.get("above_zero") if macd_data else None,
+        boll_upper=boll_data.get("upper") if boll_data else None,
+        boll_middle=boll_data.get("middle") if boll_data else None,
+        boll_lower=boll_data.get("lower") if boll_data else None,
+        ema20=ema20,
+        ma60_daily=ma60_daily,
+        ma120_daily=ma120_daily,
+        option_max_pain_price=option_max_pain_price,
+        option_nearest_expiry=option_nearest_expiry,
+        option_call_oi=option_call_oi,
+        option_put_oi=option_put_oi,
+        large_orders_buy_count=large_orders_buy_count,
+        large_orders_sell_count=large_orders_sell_count,
+        large_orders_net_usd=large_orders_net_usd,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
