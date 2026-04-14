@@ -125,6 +125,7 @@ class CoinState:
         self.altcoin_season: Optional[AltcoinSeasonData] = None
         self.coinbase_premium: Optional[CoinbasePremiumData] = None
         self.stablecoin_mcap: Optional[StablecoinMcapData] = None
+        self.oi_exchange_rank: Optional[dict] = None
         self.bubble_index: Optional[BubbleIndexData] = None
         self.bull_peak: Optional[BullMarketPeakData] = None
         self.economic_calendar: Optional[EconomicCalendarData] = None
@@ -217,6 +218,14 @@ class Engine:
                 "cg_news", self._poll_news, btc_coin,
                 self._poll_cfg.get("news", 1800), 120,
             )),
+            asyncio.create_task(self._poll_loop(
+                "cg_cb_premium", self._poll_coinbase_premium, btc_coin,
+                120, 55,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_stablecoin", self._poll_stablecoin_mcap, btc_coin,
+                3600, 100,
+            )),
         ])
 
         for idx, ccy in enumerate(self._settings.supported_coins):
@@ -291,12 +300,16 @@ class Engine:
                 self._poll_cfg.get("orderbook", 60), stagger + 55,
             )),
             asyncio.create_task(self._poll_loop(
+                f"cg_oi_rank_{ccy}", self._poll_oi_exchange_rank, coin,
+                120, stagger + 60,
+            )),
+            asyncio.create_task(self._poll_loop(
                 f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                600, stagger + 60,
+                600, stagger + 65,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                3600, stagger + 65,
+                3600, stagger + 70,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, stagger,
@@ -1337,9 +1350,30 @@ class Engine:
                 except (ValueError, KeyError):
                     continue
 
+        from models.whale import HyperliquidWhalePosition
+        hl_positions = []
+        positions_data = await self._cg.fetch_hyperliquid_whale_position()
+        if positions_data and isinstance(positions_data, list):
+            for item in positions_data:
+                try:
+                    pos_size = float(item.get("position_size", 0))
+                    side = "short" if pos_size < 0 else "long"
+                    hl_positions.append(HyperliquidWhalePosition(
+                        address=item.get("user", ""),
+                        symbol=item.get("symbol", ""),
+                        side=side,
+                        size_usd=float(item.get("position_value_usd", 0)),
+                        entry_price=float(item.get("entry_price", 0)),
+                        unrealized_pnl=float(item.get("unrealized_pnl", 0)),
+                        leverage=float(item.get("leverage", 0)),
+                    ))
+                except (ValueError, KeyError):
+                    continue
+
         whale = WhaleData(
             ts=int(time.time()),
             hl_alerts=alerts,
+            hl_positions=hl_positions,
             transfers=transfers,
         )
 
@@ -1383,6 +1417,90 @@ class Engine:
                         self._states[ccy].etf_flow = etf
             except Exception:
                 logger.debug("etf: %s flow failed", asset, exc_info=True)
+
+    async def _poll_coinbase_premium(self, _coin: CoinConfig):
+        """获取 Coinbase 溢价指数（机构买盘方向信号）"""
+        from models.macro import CoinbasePremiumData, CoinbasePremiumPoint
+        data = await self._cg.fetch_coinbase_premium(symbol="BTC", interval="5m", limit=12)
+        if not data or not isinstance(data, list):
+            return
+        try:
+            history = []
+            for item in data:
+                history.append(CoinbasePremiumPoint(
+                    ts=int(item.get("time", 0)),
+                    premium=float(item.get("premium_rate", item.get("premium", 0))),
+                    price=float(item.get("coinbase_price", 0)),
+                ))
+            latest = data[-1]
+            cb_data = CoinbasePremiumData(
+                ts=int(latest.get("time", 0)),
+                current_premium=float(latest.get("premium_rate", latest.get("premium", 0))),
+                history=history,
+            )
+            for ccy in self._settings.supported_coins:
+                self._states[ccy].coinbase_premium = cb_data
+        except (ValueError, KeyError, IndexError):
+            logger.debug("coinbase_premium parse failed", exc_info=True)
+
+    async def _poll_stablecoin_mcap(self, _coin: CoinConfig):
+        """获取稳定币市值变化（场外资金入/出场领先指标）"""
+        from models.macro import StablecoinMcapData, StablecoinMcapPoint
+        data = await self._cg.fetch_stablecoin_mcap(limit=7)
+        if not data or not isinstance(data, dict):
+            return
+        try:
+            data_list = data.get("data_list", [])
+            time_list = data.get("time_list", [])
+            if not data_list or not time_list:
+                return
+            history = []
+            for i, item in enumerate(data_list):
+                ts = int(time_list[i]) if i < len(time_list) else 0
+                usdt = float(item.get("USDT", 0))
+                usdc = float(item.get("USDC", 0))
+                total = sum(float(v) for v in item.values() if isinstance(v, (int, float)))
+                history.append(StablecoinMcapPoint(ts=ts, total_mcap=total, usdt_mcap=usdt, usdc_mcap=usdc))
+            latest = history[-1] if history else None
+            if latest:
+                sc_data = StablecoinMcapData(
+                    ts=latest.ts,
+                    current_total=latest.total_mcap,
+                    history=history,
+                )
+                for ccy in self._settings.supported_coins:
+                    self._states[ccy].stablecoin_mcap = sc_data
+        except (ValueError, KeyError, IndexError):
+            logger.debug("stablecoin_mcap parse failed", exc_info=True)
+
+    async def _poll_oi_exchange_rank(self, coin: CoinConfig):
+        """获取交易所 OI 持仓占比排名"""
+        data = await self._cg.fetch_oi_exchange_list(symbol=coin.symbol_cg)
+        if not data or not isinstance(data, list):
+            return
+        state = self._states[coin.ccy]
+        try:
+            exchanges = []
+            total_oi = 0.0
+            for item in data:
+                ex = item.get("exchange", "")
+                if ex == "All":
+                    total_oi = float(item.get("open_interest_usd", 0))
+                    continue
+                exchanges.append({
+                    "exchange": ex,
+                    "oi_usd": float(item.get("open_interest_usd", 0)),
+                    "change_1h": float(item.get("open_interest_change_percent_1h", 0)),
+                    "change_24h": float(item.get("open_interest_change_percent_24h", 0)),
+                })
+            exchanges.sort(key=lambda x: x["oi_usd"], reverse=True)
+            state.oi_exchange_rank = {
+                "ts": int(time.time()),
+                "total_oi_usd": total_oi,
+                "exchanges": exchanges[:8],
+            }
+        except (ValueError, KeyError):
+            logger.debug("oi_exchange_rank parse failed", exc_info=True)
 
     async def _poll_global_liq(self, _coin: CoinConfig):
         """获取全网爆仓统计"""
@@ -1757,6 +1875,12 @@ class Engine:
             whale_hl_alerts_count=len(state.whale_data.hl_alerts) if state.whale_data else 0,
             whale_transfers_count=len(state.whale_data.transfers) if state.whale_data else 0,
             whale_net_direction=self._calc_whale_direction(state.whale_data) if state.whale_data else "",
+            whale_hl_positions=self._build_hl_positions(state.whale_data, ccy),
+            coinbase_premium=state.coinbase_premium.current_premium if state.coinbase_premium else 0,
+            coinbase_premium_trend=self._calc_cb_premium_trend(state.coinbase_premium),
+            stablecoin_total_mcap=state.stablecoin_mcap.current_total if state.stablecoin_mcap else 0,
+            stablecoin_7d_change_pct=self._calc_stablecoin_change(state.stablecoin_mcap),
+            oi_exchange_rank=state.oi_exchange_rank.get("exchanges", []) if state.oi_exchange_rank else [],
         )
 
         result = await self._analyzer.analyze(snapshot)
@@ -1775,6 +1899,40 @@ class Engine:
         elif out_count > in_count + 1:
             return "提出交易所(看涨)"
         return "中性"
+
+    @staticmethod
+    def _build_hl_positions(wd, ccy: str) -> list[dict]:
+        if not wd or not wd.hl_positions:
+            return []
+        relevant = [p for p in wd.hl_positions if p.symbol.upper() == ccy]
+        relevant.sort(key=lambda x: x.size_usd, reverse=True)
+        return [
+            {"side": p.side, "size_usd": p.size_usd,
+             "entry": p.entry_price, "pnl": p.unrealized_pnl, "leverage": p.leverage}
+            for p in relevant[:10]
+        ]
+
+    @staticmethod
+    def _calc_cb_premium_trend(cb) -> str:
+        if not cb or not cb.history or len(cb.history) < 2:
+            return ""
+        recent = [p.premium for p in cb.history[-6:]]
+        avg = sum(recent) / len(recent)
+        if avg > 0.05:
+            return "机构买入偏强"
+        elif avg < -0.05:
+            return "机构卖出偏强"
+        return "中性"
+
+    @staticmethod
+    def _calc_stablecoin_change(sc) -> float:
+        if not sc or not sc.history or len(sc.history) < 2:
+            return 0
+        latest = sc.history[-1].total_mcap
+        earliest = sc.history[0].total_mcap
+        if earliest > 0:
+            return round((latest - earliest) / earliest * 100, 2)
+        return 0
 
     def get_source_health(self) -> list[dict]:
         daily = self._cg.daily_request_count

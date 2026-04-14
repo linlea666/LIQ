@@ -221,6 +221,14 @@ class AISnapshot(BaseModel):
     whale_hl_alerts_count: int = 0
     whale_transfers_count: int = 0
     whale_net_direction: str = ""
+    whale_hl_positions: list[dict] = []
+
+    # Coinbase 溢价 + 稳定币 + 交易所OI排名
+    coinbase_premium: float = 0
+    coinbase_premium_trend: str = ""
+    stablecoin_total_mcap: float = 0
+    stablecoin_7d_change_pct: float = 0
+    oi_exchange_rank: list[dict] = []
 
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []

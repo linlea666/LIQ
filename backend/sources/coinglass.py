@@ -808,8 +808,9 @@ class CoinglassSource(DataSource):
     async def fetch_fear_greed(self) -> Optional[list]:
         return await self._request("/api/index/fear-greed-history", cache_ttl=600)
 
-    async def fetch_stablecoin_mcap(self) -> Optional[list]:
-        return await self._request("/api/index/stableCoin-marketCap-history")
+    async def fetch_stablecoin_mcap(self, limit: int = 7) -> Optional[list]:
+        return await self._request("/api/index/stableCoin-marketCap-history",
+                                   {"limit": str(limit)}, cache_ttl=3600)
 
     async def fetch_altcoin_season(self) -> Optional[list]:
         return await self._request("/api/index/altcoin-season")
@@ -834,11 +835,12 @@ class CoinglassSource(DataSource):
     # Indicators > Spot
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    async def fetch_coinbase_premium(self, interval: str = "1h",
-                                     limit: int = 200) -> Optional[list]:
+    async def fetch_coinbase_premium(self, symbol: str = "BTC",
+                                     interval: str = "5m",
+                                     limit: int = 3) -> Optional[list]:
         return await self._request("/api/coinbase-premium-index", {
-            "interval": interval, "limit": str(limit),
-        })
+            "symbol": symbol, "interval": interval, "limit": str(limit),
+        }, cache_ttl=120)
 
     async def fetch_bitfinex_margin_ls(self, symbol: str = "BTC",
                                        interval: str = "1h",

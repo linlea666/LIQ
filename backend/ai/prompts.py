@@ -78,11 +78,16 @@ def build_system_prompt() -> str:
 - **资金流叙事推演**：每次分析必须构建一条"资金流叙事链"——例如："ETF连续3日净流出$300M → OI却在增加 → 说明期货投机多头在接盘 → 一旦价格下跌这些多头会被清算 → 下方$68K有$500M清算簇 → 价格磁吸下行概率高"。这种因果链才是真正的分析
 - **订单簿与清算地图联动**：买盘深度 > 卖盘深度但上方清算簇更密集 = 庄家可能先拉升触发清算获取流动性后反转；卖盘更重但下方清算稀薄 = 做空缺乏目标，跌幅可能有限
 - **大单追踪信号**：大额限价买单堆积在某价位 = 机构/庄家布局防线；大额卖单出现在阻力位 = 确认抛压真实；大单突然撤单 = 可能是诱骗
-- **多维交叉验证表**：§一 结尾须用简表列出 ≥5 个维度的方向信号（看多/看空/中性）并给出"共振强度"判断。示例：CVD(看多) + OI增(看多) + 费率正(看空警示) + ETF流出(看空) + 清算失衡1.5(看多) → 3:2偏多，但有分歧
+- **Coinbase 溢价解读**（§8f 有数据时）：正溢价 = 美国机构/散户净买入 → 与 ETF 流入共振时做多信心上升；负溢价 = 美国端抛售 → 亚洲时段拉升可能是假突破。Coinbase溢价 + ETF + 稳定币三维共振 = 最强资金面信号
+- **稳定币市值变化**（§8g 有数据时）：稳定币增长 = 新资金入场，即使价格下跌也说明"弹药在积累"；缩减 = 资金撤离加密市场，反弹可能被抛售
+- **交易所 OI 异动**（§8h 有数据时）：某交易所 1h OI 变化 > 3% = 该所用户在极端加杠杆 → 一旦反向波动，该所将是爆仓主力来源 → 结合清算地图判断哪个方向先被猎杀
+- **Hyperliquid 巨鲸仓位**（§8e 有仓位数据时）：聪明钱多空比是最直接的机构方向信号，巨鲸入场价 = 潜在支撑/阻力位，巨鲸清算价 = 级联踩踏触发点
+- **完整决策推理链**：§一须按此链路推理——资金面（ETF+稳定币+Coinbase溢价）→ 杠杆水位（OI+费率+交易所异动）→ 庄家意图（清算地图+订单簿+大单）→ 微观触发（CVD+爆仓+巨鲸）→ 结论（方向偏向+关键触发价位）
+- **多维交叉验证表**：§一 结尾须用简表列出 ≥7 个维度的方向信号（看多/看空/中性）并给出"共振强度"。必须包含：CVD、OI、费率、清算失衡、Coinbase溢价、ETF、巨鲸仓位
 - **禁止纯转述**：每个章节至少 1 处跨维度推理——将 ≥2 个数据源组合得出新结论
 - **矛盾识别**：数据给出相反信号时，必须指出矛盾、分析哪个更可信（实盘资金行为权重 > 情绪指标）
 - **矛盾升级与置信度标注**：CVD/OI 等资金流与方案方向矛盾时，标注置信度（高/中/低），低确信须附加具体确认条件
-- **新增数据强制引用**：§一 或 §七 中须引用波动率、链上资金面、CPS；有利率数据时说明对风险资产影响；有CPS时评估周期位置对方向的影响
+- **新增数据强制引用**：§一 或 §七 中须引用波动率、链上资金面、CPS；有利率数据时说明影响；有Coinbase溢价时必须纳入资金面叙事
 - **规则引擎审查**：§四 对每个方案至少质疑 1 个维度
 - **场景偏向**：§八 末尾须选定唯一最偏向场景（禁止骑墙）
 
@@ -463,7 +468,8 @@ def build_user_prompt(snapshot: dict) -> str:
     w_alerts = snapshot.get("whale_hl_alerts_count", 0)
     w_transfers = snapshot.get("whale_transfers_count", 0)
     w_dir = snapshot.get("whale_net_direction", "")
-    if w_alerts > 0 or w_transfers > 0:
+    hl_positions = snapshot.get("whale_hl_positions", [])
+    if w_alerts > 0 or w_transfers > 0 or hl_positions:
         lines.extend(["", "### 8e. 巨鲸追踪 [链上+Hyperliquid]"])
         if w_alerts > 0:
             lines.append(f"Hyperliquid 巨鲸警报: {w_alerts}条")
@@ -471,6 +477,53 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"链上巨鲸转账: {w_transfers}笔")
         if w_dir:
             lines.append(f"巨鲸方向: {w_dir}")
+        if hl_positions:
+            long_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "long")
+            short_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "short")
+            lines.append(f"Hyperliquid 巨鲸{coin}仓位: 多${long_usd / 1e6:.0f}M / 空${short_usd / 1e6:.0f}M")
+            for p in hl_positions[:5]:
+                pnl_str = f"{'盈利' if p.get('pnl', 0) > 0 else '亏损'}${abs(p.get('pnl', 0)) / 1e6:.1f}M"
+                lines.append(f"  - {p.get('side','?')} ${p.get('size_usd',0)/1e6:.1f}M 入场${p.get('entry',0):,.0f} {p.get('leverage',0)}x | {pnl_str}")
+            if long_usd > short_usd * 1.5:
+                lines.append("  聪明钱倾向: 多头主导 → 大资金看涨")
+            elif short_usd > long_usd * 1.5:
+                lines.append("  聪明钱倾向: 空头主导 → 大资金看跌")
+
+    cb_premium = snapshot.get("coinbase_premium", 0)
+    cb_trend = snapshot.get("coinbase_premium_trend", "")
+    if cb_premium != 0 or cb_trend:
+        lines.extend(["", "### 8f. Coinbase 溢价 [机构买盘信号·实时]"])
+        prem_pct = cb_premium * 100 if abs(cb_premium) < 1 else cb_premium
+        lines.append(f"溢价率: {prem_pct:+.3f}%")
+        if prem_pct > 0.05:
+            lines.append("  正溢价=美股时段机构/散户净买入, 价格上行压力")
+        elif prem_pct < -0.05:
+            lines.append("  负溢价=Coinbase端卖出偏重, 机构可能在减仓")
+        if cb_trend:
+            lines.append(f"  近1h趋势: {cb_trend}")
+
+    sc_mcap = snapshot.get("stablecoin_total_mcap", 0)
+    sc_chg = snapshot.get("stablecoin_7d_change_pct", 0)
+    if sc_mcap > 0:
+        lines.extend(["", "### 8g. 稳定币市值 [场外资金·日级]"])
+        lines.append(f"稳定币总市值: ${sc_mcap / 1e9:.1f}B | 7日变化: {sc_chg:+.2f}%")
+        if sc_chg > 0.5:
+            lines.append("  市值增长=场外新资金入场, 买盘弹药增加")
+        elif sc_chg < -0.5:
+            lines.append("  市值缩减=资金流出加密市场, 需警惕")
+
+    oi_rank = snapshot.get("oi_exchange_rank", [])
+    if oi_rank:
+        lines.extend(["", "### 8h. 交易所持仓占比 [杠杆分布·实时]"])
+        for ex_info in oi_rank[:5]:
+            ex_name = ex_info.get("exchange", "")
+            ex_oi = ex_info.get("oi_usd", 0)
+            ex_chg_1h = ex_info.get("change_1h", 0)
+            ex_chg_24h = ex_info.get("change_24h", 0)
+            lines.append(f"  {ex_name}: ${ex_oi/1e9:.2f}B | 1h:{ex_chg_1h:+.1f}% 24h:{ex_chg_24h:+.1f}%")
+        anomalies = [e for e in oi_rank[:5] if abs(e.get("change_1h", 0)) > 3]
+        if anomalies:
+            lines.append(f"  ⚠ {', '.join(e['exchange'] for e in anomalies)} 1h持仓异动 > 3%, 关注该所爆仓风险")
 
     lines.extend([
         "",

@@ -88,6 +88,12 @@ def build_ai_snapshot(
     whale_hl_alerts_count: int = 0,
     whale_transfers_count: int = 0,
     whale_net_direction: str = "",
+    whale_hl_positions: list[dict] | None = None,
+    coinbase_premium: float = 0,
+    coinbase_premium_trend: str = "",
+    stablecoin_total_mcap: float = 0,
+    stablecoin_7d_change_pct: float = 0,
+    oi_exchange_rank: list[dict] | None = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -344,6 +350,12 @@ def build_ai_snapshot(
         whale_hl_alerts_count=whale_hl_alerts_count,
         whale_transfers_count=whale_transfers_count,
         whale_net_direction=whale_net_direction,
+        whale_hl_positions=whale_hl_positions or [],
+        coinbase_premium=coinbase_premium,
+        coinbase_premium_trend=coinbase_premium_trend,
+        stablecoin_total_mcap=stablecoin_total_mcap,
+        stablecoin_7d_change_pct=stablecoin_7d_change_pct,
+        oi_exchange_rank=oi_exchange_rank or [],
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
