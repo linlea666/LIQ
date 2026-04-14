@@ -145,6 +145,18 @@ async def get_ai_history(coin: str, limit: int = Query(5, ge=1, le=50)):
     return {"coin": coin, "analyses": [h.model_dump() for h in history[:limit]]}
 
 
+@router.get("/ai/detail/{coin}/{ts}")
+async def get_ai_detail(coin: str, ts: int):
+    """按时间戳精确查询单条 AI 分析结果"""
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    for h in _engine.get_ai_history(coin):
+        if h.ts == ts:
+            return h.model_dump()
+    raise HTTPException(404, f"Analysis not found: {coin}/{ts}")
+
+
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""

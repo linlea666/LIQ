@@ -11,6 +11,10 @@ body {
   overflow: hidden;
 }
 
+body:has(.ai-detail-page) {
+  overflow: auto;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 5px;

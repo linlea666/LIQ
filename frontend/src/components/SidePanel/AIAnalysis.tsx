@@ -32,7 +32,6 @@ export default function AIAnalysis() {
   const aiError = useMarketStore((s) => s.aiError);
   const aiHistory = useMarketStore((s) => s.aiHistory);
   const coin = useMarketStore((s) => s.coin);
-  const setAIResult = useMarketStore((s) => s.setAIResult);
   const loadAIHistory = useMarketStore((s) => s.loadAIHistory);
 
   const [copyLabel, setCopyLabel] = useState("📋 复制分析文本");
@@ -163,7 +162,6 @@ export default function AIAnalysis() {
           <div className="mt-6 border-t border-slate-700 pt-3">
             <div className="text-xs text-slate-500 mb-2">历史分析 ({aiHistory.length})</div>
             {aiHistory.map((h, i) => {
-              const isActive = aiResult?.ts === h.ts;
               const sig = h.signal_summary;
               const dirLabel =
                 sig?.direction === "bullish" ? "看多" :
@@ -174,19 +172,17 @@ export default function AIAnalysis() {
                 sig?.confidence === "medium" ? "中" :
                 sig?.confidence === "low" ? "低" : "";
               return (
-                <button
+                <a
                   key={h.ts + "-" + i}
-                  onClick={() => setAIResult(h)}
-                  className={`w-full text-left px-2 py-1.5 rounded text-xs mb-1 transition ${
-                    isActive
-                      ? "bg-blue-900/40 border border-blue-700 text-white"
-                      : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
-                  }`}
+                  href={`/ai/${h.coin}/${h.ts}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs mb-1 transition text-slate-500 hover:bg-slate-800 hover:text-slate-300"
                 >
                   <span className="font-medium">{formatTime(h.ts)}</span>
-                  <span className="ml-2">${h.price_at_analysis.toLocaleString()}</span>
+                  <span>${h.price_at_analysis.toLocaleString()}</span>
                   {dirLabel && (
-                    <span className={`ml-2 ${
+                    <span className={`${
                       sig?.direction === "bullish" ? "text-green-400" :
                       sig?.direction === "bearish" ? "text-red-400" :
                       "text-yellow-400"
@@ -194,7 +190,8 @@ export default function AIAnalysis() {
                       {dirLabel}{confLabel ? `(${confLabel})` : ""}
                     </span>
                   )}
-                </button>
+                  <span className="ml-auto text-slate-600">↗</span>
+                </a>
               );
             })}
           </div>
