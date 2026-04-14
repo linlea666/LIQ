@@ -153,6 +153,9 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         return ""
 
     signal = _parse_signal_summary(_find_section("一句话结论", "结论", "Summary"))
+    if signal is None:
+        overview_text = _find_section("格局", "总览", "Overview")
+        signal = _parse_signal_summary_from_overview(overview_text)
 
     return AIAnalysisResult(
         coin=snapshot.coin,
@@ -215,6 +218,23 @@ def _parse_signal_summary(text: str) -> SignalSummary | None:
         reason=reason[:100],
         raw_line=raw[:200],
     )
+
+
+def _parse_signal_summary_from_overview(text: str) -> SignalSummary | None:
+    """从市场格局总览的开头几行提取白话总结（fallback）。
+
+    预期格式: 📝 **看多（置信度：高）**——理由...
+    或第一行包含"看多/看空/震荡"关键词。
+    """
+    if not text:
+        return None
+    for line in text.strip().split("\n")[:3]:
+        line = line.strip().lstrip("> ")
+        if "📝" in line or ("看多" in line or "看空" in line or "震荡" in line):
+            result = _parse_signal_summary(line)
+            if result:
+                return result
+    return None
 
 
 def _parse_levels_table(text: str) -> list[dict]:
