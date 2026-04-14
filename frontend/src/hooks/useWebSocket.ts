@@ -8,10 +8,13 @@ import type { AIAnalysisResult, MarketUpdate } from "@/lib/types";
 
 export function useWebSocket() {
   const socketRef = useRef<Socket | null>(null);
+  const coinRef = useRef<string>("BTC");
   const coin = useMarketStore((s) => s.coin);
   const updateMarketData = useMarketStore((s) => s.updateMarketData);
   const setAIResult = useMarketStore((s) => s.setAIResult);
   const setAIError = useMarketStore((s) => s.setAIError);
+
+  coinRef.current = coin;
 
   useEffect(() => {
     const socket = io(WS_URL, {
@@ -25,7 +28,7 @@ export function useWebSocket() {
 
     socket.on("connect", () => {
       console.log("[WS] connected");
-      socket.emit("subscribe", { coin });
+      socket.emit("subscribe", { coin: coinRef.current });
     });
 
     socket.on("market_update", (data: MarketUpdate) => {

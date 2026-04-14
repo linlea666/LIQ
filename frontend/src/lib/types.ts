@@ -296,7 +296,25 @@ export interface MarketUpdate {
   funding?: FundingRateData;
   basis?: BasisData;
   orderbook?: OrderBookAnalysis;
+  multi_funding?: Record<string, unknown>;
+  ls_ratio?: Record<string, unknown>;
+  ls_ratio_top_account?: Record<string, unknown>;
+  ls_ratio_top_position?: Record<string, unknown>;
+  etf_flow?: Record<string, unknown>;
+  global_liq?: Record<string, unknown>;
+  market_index?: Record<string, unknown>;
+  sniper_entries?: Record<string, unknown>[];
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
   key_levels?: KeyLevelSnapshot;
+  option_max_pain?: Record<string, unknown>;
+  option_info?: Record<string, unknown>;
+  large_orders?: Record<string, unknown>;
+  whale_data?: Record<string, unknown>;
+  liq_max_pain?: Record<string, unknown>;
+  liq_heatmaps?: Record<string, Record<string, unknown>>;
+  rsi_14?: number;
+  macd?: Record<string, unknown>;
+  boll?: Record<string, unknown>;
+  news_count?: number;
 }

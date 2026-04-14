@@ -17,7 +17,7 @@ from ai.snapshot import build_ai_snapshot
 from api.ws import push_to_coin
 from config.settings import CoinConfig, get_settings
 from models.flow import (
-    BasisData, CVDData, CVDPoint, CyclePositionData, ETFFlowData,
+    BasisData, CVDData, CVDPoint, CyclePositionData, ETFFlowData, ETFFlowDay,
     FundingRateData, GlobalLiquidationData, LongShortRatioData,
     LongShortRatioExchange, MarketIndexData, MultiFundingRateData,
     ExchangeFundingRate, OIData, OISnapshot, RangeSignalData, TakerFlowData,
@@ -250,69 +250,70 @@ class Engine:
     def _create_full_poll_tasks(self, coin: CoinConfig, stagger: int) -> list[asyncio.Task]:
         """为活跃币种创建完整轮询任务集"""
         ccy = coin.ccy
+        s = stagger
         return [
             asyncio.create_task(self._poll_loop(
                 f"cg_oi_{ccy}", self._poll_oi, coin,
-                self._poll_cfg.get("oi", 60), stagger,
+                self._poll_cfg.get("oi", 60), s,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_{ccy}", self._poll_liquidation_map, coin,
-                self._poll_cfg.get("liquidation_map", 60), stagger + 5,
+                self._poll_cfg.get("liquidation_map", 60), s + 2,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_cvd_{ccy}", self._poll_cvd, coin,
-                self._poll_cfg.get("cvd", 60), stagger + 10,
+                self._poll_cfg.get("cvd", 60), s + 4,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_ls_{ccy}", self._poll_ls_ratio, coin,
-                self._poll_cfg.get("long_short", 120), stagger + 15,
+                self._poll_cfg.get("long_short", 120), s + 6,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
-                60, stagger + 20,
+                60, s + 8,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_basis_{ccy}", self._poll_basis, coin,
-                self._poll_cfg.get("funding_rate", 60), stagger + 25,
+                self._poll_cfg.get("funding_rate", 60), s + 10,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_taker_{ccy}", self._poll_taker_volume, coin,
-                self._poll_cfg.get("taker_volume", 120), stagger + 30,
+                self._poll_cfg.get("taker_volume", 120), s + 12,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_large_orders_{ccy}", self._poll_large_orders, coin,
-                self._poll_cfg.get("large_orders", 120), stagger + 35,
+                self._poll_cfg.get("large_orders", 120), s + 14,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
-                self._poll_cfg.get("liquidation_map", 60), stagger + 40,
+                self._poll_cfg.get("liquidation_map", 60), s + 16,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_indicators_{ccy}", self._poll_indicators, coin,
-                self._poll_cfg.get("indicators", 600), stagger + 45,
+                self._poll_cfg.get("indicators", 600), s + 18,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_heatmap_{ccy}", self._poll_liq_heatmap, coin,
-                self._poll_cfg.get("liquidation_heatmap", 600), stagger + 50,
+                self._poll_cfg.get("liquidation_heatmap", 600), s + 20,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
-                self._poll_cfg.get("orderbook", 60), stagger + 55,
+                self._poll_cfg.get("orderbook", 60), s + 22,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_oi_rank_{ccy}", self._poll_oi_exchange_rank, coin,
-                120, stagger + 60,
+                120, s + 24,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                600, stagger + 65,
+                600, s + 26,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                3600, stagger + 70,
+                3600, s + 28,
             )),
             asyncio.create_task(self._poll_loop(
-                f"cg_push_{ccy}", self._push_loop, coin, 5, stagger,
+                f"cg_push_{ccy}", self._push_loop, coin, 5, s,
             )),
         ]
 
@@ -1382,6 +1383,7 @@ class Engine:
 
     async def _poll_etf_flow(self, _coin: CoinConfig):
         """获取 ETF 资金流"""
+        from datetime import datetime
         for asset, fetch_fn in [
             ("BTC", self._cg.fetch_btc_etf_flow_history),
             ("ETH", self._cg.fetch_eth_etf_flow_history),
@@ -1389,6 +1391,7 @@ class Engine:
             try:
                 data = await fetch_fn()
                 if not data or not isinstance(data, list):
+                    logger.warning("ETF %s: no data or not list (type=%s)", asset, type(data).__name__)
                     continue
 
                 recent = data[-5:] if len(data) >= 5 else data
@@ -1398,8 +1401,10 @@ class Engine:
                     try:
                         total_net = float(item.get("flow_usd",
                                         item.get("total_netflow", item.get("totalNetflow", item.get("netflow", 0)))))
+                        ts_ms = item.get("timestamp", item.get("time", 0))
+                        date_str = datetime.utcfromtimestamp(int(ts_ms) / 1000).strftime("%Y-%m-%d") if ts_ms else ""
                         days.append(ETFFlowDay(
-                            date=item.get("date", ""),
+                            date=date_str,
                             total_net=total_net,
                         ))
                         net_3d += total_net
@@ -1411,12 +1416,14 @@ class Engine:
                     ts=int(time.time()), asset=asset,
                     recent_days=days, net_3d=net_3d, trend=trend,
                 )
+                logger.info("ETF %s parsed | days=%d net_3d=%.0f trend=%s",
+                            asset, len(days), net_3d, trend)
 
                 for ccy in self._settings.supported_coins:
                     if asset == "BTC" or ccy == asset:
                         self._states[ccy].etf_flow = etf
             except Exception:
-                logger.debug("etf: %s flow failed", asset, exc_info=True)
+                logger.warning("etf: %s flow failed", asset, exc_info=True)
 
     async def _poll_coinbase_premium(self, _coin: CoinConfig):
         """获取 Coinbase 溢价指数（机构买盘方向信号）"""
@@ -1713,7 +1720,19 @@ class Engine:
         if state.basis:
             payload["basis"] = state.basis.model_dump()
         if state.orderbook:
-            payload["orderbook"] = state.orderbook.model_dump()
+            ob_dict = state.orderbook.model_dump()
+            if state.large_orders and state.large_orders.orders:
+                from models.market import WallInfo
+                bid_walls, ask_walls = [], []
+                for o in sorted(state.large_orders.orders, key=lambda x: x.size_usd, reverse=True)[:10]:
+                    wall = WallInfo(price=o.price, size=0, size_usd=o.size_usd).model_dump()
+                    if o.side == "bid":
+                        bid_walls.append(wall)
+                    else:
+                        ask_walls.append(wall)
+                ob_dict["bid_walls"] = bid_walls
+                ob_dict["ask_walls"] = ask_walls
+            payload["orderbook"] = ob_dict
         if state.multi_funding:
             payload["multi_funding"] = state.multi_funding.model_dump()
         if state.ls_ratio:

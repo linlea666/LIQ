@@ -43,7 +43,10 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
   data: {},
   updateMarketData: (update) =>
     set((state) => ({
-      data: { ...state.data, [update.coin]: update },
+      data: {
+        ...state.data,
+        [update.coin]: { ...state.data[update.coin], ...update },
+      },
     })),
 
   aiResult: null,

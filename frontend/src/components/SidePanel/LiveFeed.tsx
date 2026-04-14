@@ -42,7 +42,7 @@ export default function LiveFeed() {
               {orderbook.ask_walls.slice(0, 3).map((w, i) => (
                 <div key={i} className="flex justify-between text-xs text-slate-400">
                   <span>{formatPrice(w.price, coin)}</span>
-                  <span className="text-red-400">{w.size.toFixed(1)} ({formatUSD(w.size_usd)})</span>
+                  <span className="text-red-400">{w.size_usd ? formatUSD(w.size_usd) : w.size.toFixed(1)}</span>
                 </div>
               ))}
               {orderbook.ask_walls.length === 0 && <div className="text-xs text-slate-600">无大卖单</div>}
@@ -52,7 +52,7 @@ export default function LiveFeed() {
               {orderbook.bid_walls.slice(0, 3).map((w, i) => (
                 <div key={i} className="flex justify-between text-xs text-slate-400">
                   <span>{formatPrice(w.price, coin)}</span>
-                  <span className="text-green-400">{w.size.toFixed(1)} ({formatUSD(w.size_usd)})</span>
+                  <span className="text-green-400">{w.size_usd ? formatUSD(w.size_usd) : w.size.toFixed(1)}</span>
                 </div>
               ))}
               {orderbook.bid_walls.length === 0 && <div className="text-xs text-slate-600">无大买单</div>}
