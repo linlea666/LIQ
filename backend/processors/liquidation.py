@@ -179,7 +179,8 @@ def detect_liq_sweep(
     1. 价格已移入或穿过该簇的价格范围
     2. 该簇在新地图中已消失或大幅缩减（< 50%）
     """
-    if prev_price <= 0 or curr_price <= 0 or abs(curr_price - prev_price) < 1:
+    min_move = prev_price * 0.001  # 0.1% 最小价格变动阈值
+    if prev_price <= 0 or curr_price <= 0 or abs(curr_price - prev_price) < min_move:
         return []
 
     events: list[dict] = []

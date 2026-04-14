@@ -68,10 +68,10 @@ class LiquidationEvent(BaseModel):
 
 
 class LiquidationStats(BaseModel):
-    """爆仓统计"""
+    """爆仓统计（实际窗口由 poll_liq_history 决定，默认 24h = 1440 min）"""
     coin: str
     ts: int
-    period_min: int = 30
+    period_min: int = 1440
     long_total_usd: float = 0
     short_total_usd: float = 0
     long_count: int = 0

@@ -383,7 +383,8 @@ def _calc_sniper_entries(
     vacuums = liq_map.vacuum_zones or []
     min_rr = float(get_settings().processors.levels.get("min_sniper_rr", 2.5))
 
-    for cluster in liq_map.clusters_below[:3]:
+    sniper_below = sorted(liq_map.clusters_below, key=lambda c: c.total_usd, reverse=True)
+    for cluster in sniper_below[:3]:
         if cluster.distance_pct > 5 or cluster.distance_pct < 0.3:
             continue
         entry = cluster.price_from + atr * 0.1
@@ -418,6 +419,8 @@ def _calc_sniper_entries(
 
         if rr1 < min_rr:
             continue
+        if rr2 < 1.5:
+            rr2 = rr1
 
         entries.append(SniperEntry(
             direction="long",
@@ -431,13 +434,14 @@ def _calc_sniper_entries(
             cluster_usd=cluster.total_usd,
             logic=[
                 f"多头清算簇${cluster.total_usd / 1e6:.0f}M在${cluster.price_from:.0f}-${cluster.price_to:.0f}",
-                f"入场于清算簇上沿+ATR缓冲",
+                f"入场于清算簇下沿(price_from)+ATR缓冲，低处接多",
                 f"止损在{'真空区内' if sl_candidates else 'ATR外扩'}",
                 f"止盈指向对侧清算磁吸点",
             ],
         ))
 
-    for cluster in liq_map.clusters_above[:3]:
+    sniper_above = sorted(liq_map.clusters_above, key=lambda c: c.total_usd, reverse=True)
+    for cluster in sniper_above[:3]:
         if cluster.distance_pct > 5 or cluster.distance_pct < 0.3:
             continue
         entry = cluster.price_to - atr * 0.1
@@ -472,6 +476,8 @@ def _calc_sniper_entries(
 
         if rr1 < min_rr:
             continue
+        if rr2 < 1.5:
+            rr2 = rr1
 
         entries.append(SniperEntry(
             direction="short",
@@ -485,7 +491,7 @@ def _calc_sniper_entries(
             cluster_usd=cluster.total_usd,
             logic=[
                 f"空头清算簇${cluster.total_usd / 1e6:.0f}M在${cluster.price_from:.0f}-${cluster.price_to:.0f}",
-                f"入场于清算簇下沿-ATR缓冲",
+                f"入场于清算簇上沿(price_to)-ATR缓冲，高处挂空",
                 f"止损在{'真空区内' if sl_candidates else 'ATR外扩'}",
                 f"止盈指向对侧清算磁吸点",
             ],

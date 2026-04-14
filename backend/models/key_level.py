@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class KeyLevel(BaseModel):
@@ -50,7 +50,7 @@ class KeyLevelSignal(BaseModel):
     tp1: Optional[float] = None
     rr_ratio: Optional[float] = None
     reason: str = ""
-    warnings: list[str] = []
+    warnings: list[str] = Field(default_factory=list)
 
 
 class KeyLevelSnapshot(BaseModel):

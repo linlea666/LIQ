@@ -95,7 +95,7 @@ class CoinState:
         self.liq_sweep_events: deque = deque(maxlen=120)
         # Phase 2: 清算热力图 + 最大痛点 + 爆仓历史
         self.liq_heatmaps: dict[str, HeatmapData] = {}
-        self.liq_max_pain: Optional[LiqMaxPainData] = None
+        self.liq_max_pain: dict[str, LiqMaxPainData] = {}
         self.liq_history: Optional[LiqHistoryData] = None
         # Phase 3: Coinglass 技术指标缓存
         self.rsi_14: Optional[float] = None
@@ -708,7 +708,7 @@ class Engine:
                 "transfers_count": len(state.whale_data.transfers),
             }
         if state.liq_max_pain:
-            payload["liq_max_pain"] = state.liq_max_pain.model_dump()
+            payload["liq_max_pain"] = {k: v.model_dump() for k, v in state.liq_max_pain.items()}
         if state.liq_heatmaps:
             payload["liq_heatmaps"] = {k: v.model_dump() for k, v in state.liq_heatmaps.items()}
         if state.rsi_14 is not None:

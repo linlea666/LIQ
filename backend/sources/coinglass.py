@@ -964,8 +964,52 @@ class CoinglassSource(DataSource):
         return await self._request("/api/grayscale/premium-history", {"symbol": symbol})
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Futures > Net Position (v2) + Coin Netflow
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async def fetch_net_position_v2_history(self, exchange: str, symbol: str,
+                                            interval: str = "1h",
+                                            limit: int = 200) -> Optional[list]:
+        return await self._request("/api/futures/v2/net-position/history", {
+            "exchange": exchange, "symbol": symbol,
+            "interval": interval, "limit": str(limit),
+        })
+
+    async def fetch_futures_coin_netflow(self, symbol: str,
+                                         interval: str = "1h",
+                                         limit: int = 200) -> Optional[list]:
+        return await self._request("/api/futures/coin/netflow", {
+            "symbol": symbol, "interval": interval, "limit": str(limit),
+        })
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Indicators > TD Sequential
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async def fetch_td_sequential(self, exchange: str, symbol: str,
+                                  interval: str = "1d",
+                                  limit: int = 200) -> Optional[list]:
+        return await self._request("/api/futures/indicators/td", {
+            "exchange": exchange, "symbol": symbol,
+            "interval": interval, "limit": str(limit),
+        })
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Other
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async def fetch_financial_events(self, language: str = "zh") -> Optional[list]:
+        params: dict = {"language": language}
+        now_ms = int(time.time() * 1000)
+        params["start_time"] = str(now_ms - 7 * 86400 * 1000)
+        params["end_time"] = str(now_ms + 7 * 86400 * 1000)
+        return await self._request("/api/calendar/financial-events", params)
+
+    async def fetch_newsflash(self, language: str = "zh", per_page: int = 20,
+                              page: int = 1) -> Optional[list]:
+        return await self._request("/api/newsflash/list", {
+            "language": language, "per_page": str(per_page), "page": str(page),
+        })
 
     async def fetch_economic_data(self, language: str = "zh") -> Optional[list]:
         params: dict = {"language": language}

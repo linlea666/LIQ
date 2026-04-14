@@ -111,8 +111,15 @@ class AISnapshot(BaseModel):
     orderbook_ask_total_usd: float = 0
     orderbook_spread_pct: float = 0
 
-    recent_liq_30m_long_usd: float
-    recent_liq_30m_short_usd: float
+    recent_liq_24h_long_usd: float = 0
+    recent_liq_24h_short_usd: float = 0
+    # 向后兼容别名
+    @property
+    def recent_liq_30m_long_usd(self) -> float:
+        return self.recent_liq_24h_long_usd
+    @property
+    def recent_liq_30m_short_usd(self) -> float:
+        return self.recent_liq_24h_short_usd
 
     volume_profile_poc: float
     value_area_high: float
@@ -237,7 +244,21 @@ class AISnapshot(BaseModel):
     sniper_entries: list[dict] = []
     ladder_plans: list[dict] = []
 
-    macro_context: Optional[MacroSnapshot] = None
+    # Phase 11: 净持仓 + 合约资金流 + TD序列
+    net_position_trend: str = ""
+    net_position_latest: Optional[float] = None
+    futures_coin_netflow_1h: Optional[float] = None
+    futures_coin_netflow_trend: str = ""
+    td_sequential_count: Optional[int] = None
+    td_sequential_direction: str = ""
+
+
+class SignalSummary(BaseModel):
+    """AI 一句话结论的结构化表达"""
+    direction: str = ""  # "bullish" | "bearish" | "neutral"
+    confidence: str = ""  # "high" | "medium" | "low"
+    reason: str = ""
+    raw_line: str = ""
 
 
 class AIAnalysisResult(BaseModel):
@@ -245,6 +266,7 @@ class AIAnalysisResult(BaseModel):
     coin: str
     ts: int
     price_at_analysis: float
+    signal_summary: Optional[SignalSummary] = None
     market_overview: str
     key_levels: list[dict]
     stop_loss_suggestion: dict

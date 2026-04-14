@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 
 from ai.prompts import build_system_prompt, build_user_prompt
 from config.settings import get_settings
-from models.snapshot import AIAnalysisResult, AISnapshot
+from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +152,13 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
                 return val
         return ""
 
+    signal = _parse_signal_summary(_find_section("一句话结论", "结论", "Summary"))
+
     return AIAnalysisResult(
         coin=snapshot.coin,
         ts=int(time.time()),
         price_at_analysis=snapshot.price,
+        signal_summary=signal,
         market_overview=_find_section("格局", "总览", "Overview"),
         key_levels=_parse_levels_table(_find_section("价位", "图谱", "Level")),
         stop_loss_suggestion={"raw": _find_section("止损", "Stop")},
@@ -166,6 +169,51 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
         raw_text=raw_text,
         user_prompt=user_prompt,
+    )
+
+
+def _parse_signal_summary(text: str) -> SignalSummary | None:
+    """解析 AI 一句话结论为结构化交易信号。
+
+    预期格式: **看空（置信度：中）**——理由...
+    """
+    if not text or not text.strip():
+        return None
+    raw = text.strip().split("\n")[0].strip()
+    direction = ""
+    confidence = ""
+    reason = ""
+
+    text_lower = raw.replace("**", "").replace("*", "")
+    if "看多" in text_lower:
+        direction = "bullish"
+    elif "看空" in text_lower:
+        direction = "bearish"
+    elif "震荡" in text_lower:
+        direction = "neutral"
+
+    if "置信度：高" in text_lower or "置信度:高" in text_lower:
+        confidence = "high"
+    elif "置信度：中" in text_lower or "置信度:中" in text_lower:
+        confidence = "medium"
+    elif "置信度：低" in text_lower or "置信度:低" in text_lower:
+        confidence = "low"
+
+    for sep in ("——", "—", "--", "：", ":"):
+        if sep in text_lower:
+            parts = text_lower.split(sep, 1)
+            if len(parts) > 1:
+                reason = parts[-1].strip()
+                break
+
+    if not direction:
+        return None
+
+    return SignalSummary(
+        direction=direction,
+        confidence=confidence or "medium",
+        reason=reason[:100],
+        raw_line=raw[:200],
     )
 
 

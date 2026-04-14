@@ -88,6 +88,7 @@ def build_system_prompt() -> str:
 - **矛盾识别**：数据给出相反信号时，必须指出矛盾、分析哪个更可信（实盘资金行为权重 > 情绪指标）
 - **矛盾升级与置信度标注**：CVD/OI 等资金流与方案方向矛盾时，标注置信度（高/中/低），低确信须附加具体确认条件
 - **新增数据强制引用**：§一 或 §七 中须引用波动率、链上资金面、CPS；有利率数据时说明影响；有Coinbase溢价时必须纳入资金面叙事
+- **净持仓与合约资金流联动**（§9h 有数据时）：净持仓从正转负 + OI 下降 = 机构主动平多，空头占优；合约净资金流为正 + OI 上升 = 新资金开仓做多，与 CVD 共振则做多信心更强；TD 序列 ≥ 9 = 技术面反转预警，须提醒"TD9 已触发，追单风险极高"
 - **规则引擎审查**：§四 对每个方案至少质疑 1 个维度
 - **场景偏向**：§八 末尾须选定唯一最偏向场景（禁止骑墙）
 
@@ -174,8 +175,6 @@ def build_system_prompt() -> str:
 """
 
 
-# 启动时懒加载一次亦可；此处每次 build 读取配置以支持热更新 yaml（若未来重载）
-SYSTEM_PROMPT = build_system_prompt()
 
 
 def build_user_prompt(snapshot: dict) -> str:
@@ -389,9 +388,9 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 7. 爆仓数据",
-        f"近30m多头爆仓(OKX): ${snapshot.get('recent_liq_30m_long_usd', 0) / 1e6:.1f}M",
-        f"近30m空头爆仓(OKX): ${snapshot.get('recent_liq_30m_short_usd', 0) / 1e6:.1f}M",
+        "### 7. 爆仓数据（24h聚合）",
+        f"24h多头爆仓: ${snapshot.get('recent_liq_24h_long_usd', snapshot.get('recent_liq_30m_long_usd', 0)) / 1e6:.1f}M",
+        f"24h空头爆仓: ${snapshot.get('recent_liq_24h_short_usd', snapshot.get('recent_liq_30m_short_usd', 0)) / 1e6:.1f}M",
     ])
     gl1h_long = snapshot.get("global_liq_long_1h", 0)
     gl1h_short = snapshot.get("global_liq_short_1h", 0)
@@ -814,6 +813,28 @@ def build_user_prompt(snapshot: dict) -> str:
                 for w in sig.get("warnings", []):
                     lines.append(f"    ⚠ {w}")
 
+    # ── §9h 净持仓 + 合约资金流 + TD序列 ──
+    np_trend = snapshot.get("net_position_trend")
+    np_latest = snapshot.get("net_position_latest")
+    nf_1h = snapshot.get("futures_coin_netflow_1h")
+    nf_trend = snapshot.get("futures_coin_netflow_trend")
+    td_cnt = snapshot.get("td_sequential_count")
+    td_dir = snapshot.get("td_sequential_direction")
+    if any(v for v in (np_trend, nf_trend, td_cnt)):
+        lines.extend(["", "### 9h. 净持仓 + 合约资金流 + TD序列"])
+        if np_latest is not None:
+            lines.append(f"净持仓(v2): {np_latest:+.2f}M ({np_trend or ''})")
+        if nf_1h is not None:
+            nf_label = "资金净流入合约" if nf_1h > 0 else "资金净流出合约"
+            lines.append(f"合约净资金流(1h): ${nf_1h / 1e6:+.1f}M → {nf_label} ({nf_trend or ''})")
+        if td_cnt is not None and td_dir:
+            td_label = f"TD{td_dir}计数={td_cnt}"
+            if td_cnt >= 9:
+                td_label += " ⚠反转信号"
+            elif td_cnt >= 7:
+                td_label += " 接近反转"
+            lines.append(f"TD序列: {td_label}")
+
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([
@@ -824,6 +845,7 @@ def build_user_prompt(snapshot: dict) -> str:
         "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
         f"- 均线箱体: " + (f"已提供(信号={rs.get('signal_grade', '无')}级)" if has_range else "未提供"),
         f"- 关键位状态机: " + (f"已提供(活跃{kl.get('active_count', 0)}个)" if has_kl else "未提供"),
+        f"- 净持仓/资金流/TD序列: " + ("已提供" if any(snapshot.get(k) for k in ("net_position_trend", "futures_coin_netflow_trend", "td_sequential_count")) else "未提供"),
     ])
 
     lines.extend([

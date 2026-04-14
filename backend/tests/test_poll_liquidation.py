@@ -122,8 +122,9 @@ class TestPollLiqMaxPain:
     async def test_writes_to_all_supported_coins(self, cg, btc_state, states):
         cg.fetch_liquidation_max_pain = AsyncMock(return_value=self.SAMPLE)
         await poll_liq_max_pain(cg, ["BTC"], states)
-        assert btc_state.liq_max_pain is not None
-        assert len(btc_state.liq_max_pain.items) >= 1
+        assert len(btc_state.liq_max_pain) >= 1
+        for range_key, pain_data in btc_state.liq_max_pain.items():
+            assert len(pain_data.items) >= 1
 
 
 from unittest.mock import AsyncMock

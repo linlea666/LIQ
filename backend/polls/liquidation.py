@@ -213,7 +213,7 @@ async def poll_liq_max_pain(
     supported_coins: list[str],
     states: dict[str, CoinState],
 ) -> None:
-    """获取清算最大痛点"""
+    """获取清算最大痛点（24h + 7d 分别存储，避免覆盖）"""
     for range_ in ("24h", "7d"):
         data = await cg.fetch_liquidation_max_pain(range_=range_)
         if not data:
@@ -230,11 +230,12 @@ async def poll_liq_max_pain(
             except (ValueError, KeyError):
                 continue
 
+        pain_data = LiqMaxPainData(
+            ts=int(time.time()), range=range_, items=items,
+        )
         for ccy in supported_coins:
             state = states[ccy]
-            state.liq_max_pain = LiqMaxPainData(
-                ts=int(time.time()), range=range_, items=items,
-            )
+            state.liq_max_pain[range_] = pain_data
 
 
 async def poll_liq_history(

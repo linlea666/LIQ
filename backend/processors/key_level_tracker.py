@@ -95,29 +95,29 @@ def _collect_candidates(
     current_price: float,
 ) -> list[KeyLevel]:
     """从 levels + range_signal 收集候选关键位。"""
-    seen: set[int] = set()  # 价格 hash 去重（精度到整数）
     result: list[KeyLevel] = []
+    dedup_tol = 0.003  # 0.3% 相对容差
+
+    def _is_duplicate(price: float) -> bool:
+        for existing in result:
+            if existing.price > 0 and abs(price - existing.price) / existing.price < dedup_tol:
+                return True
+        return False
 
     if levels:
         for pl in levels.supports[:4]:
-            key = int(pl.price)
-            if key not in seen:
-                seen.add(key)
+            if not _is_duplicate(pl.price):
                 result.append(_from_price_level(pl))
         for pl in levels.resistances[:4]:
-            key = int(pl.price)
-            if key not in seen:
-                seen.add(key)
+            if not _is_duplicate(pl.price):
                 result.append(_from_price_level(pl))
 
-    if range_upper and int(range_upper) not in seen:
-        seen.add(int(range_upper))
+    if range_upper and not _is_duplicate(range_upper):
         result.append(KeyLevel(
             price=range_upper, side="resistance",
             sources=["range_box_upper"], strength=2,
         ))
-    if range_lower and int(range_lower) not in seen:
-        seen.add(int(range_lower))
+    if range_lower and not _is_duplicate(range_lower):
         result.append(KeyLevel(
             price=range_lower, side="support",
             sources=["range_box_lower"], strength=2,

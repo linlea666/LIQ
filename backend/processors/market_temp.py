@@ -78,7 +78,13 @@ def calc_market_temperature(
         if abs(delta_m) > 1:
             d2_score += max(min(delta_m * 5, 25), -25)
         if cvd_contract.has_divergence:
-            d2_score = -abs(d2_score) * 0.6 if "顶背离" in (cvd_contract.divergence_note or "") else abs(d2_score) * 0.6
+            note = (cvd_contract.divergence_note or "").lower()
+            if "顶背离" in note or "bearish" in note:
+                d2_score = -abs(d2_score) * 0.6
+            elif "底背离" in note or "bullish" in note:
+                d2_score = abs(d2_score) * 0.6
+            else:
+                d2_score = d2_score * 0.5
         d2_score = max(-50, min(50, d2_score))
         d2_value = f"{delta_m:+.1f}M" if abs(delta_m) > 0.1 else "~0"
         d2_sub = f"合约:{cvd_contract.trend_1h}"
@@ -149,10 +155,27 @@ def calc_market_temperature(
         d6_summary = "买方强势" if taker_flow.dominant == "buyers" else "卖方强势" if taker_flow.dominant == "sellers" else "势均力敌"
     factor_scores["taker"] = d6_score
 
-    # D7: 波幅范围
+    # D7: 波幅范围（动态描述，基于 ATR/价格比）
     d7_value = f"${atr:.0f}" if atr > 0 else "N/A"
-    d7_summary = "波动适中"
     d7_sub = "ATR(14)"
+    price_ref = basis.mark_price if (basis and basis.mark_price > 0) else 0
+    if atr > 0 and price_ref > 0:
+        vol_pct = atr / price_ref * 100
+        if vol_pct > 5:
+            d7_summary = "极高波动"
+        elif vol_pct > 3:
+            d7_summary = "高波动"
+        elif vol_pct > 1.5:
+            d7_summary = "波动适中"
+        elif vol_pct > 0.5:
+            d7_summary = "低波动"
+        else:
+            d7_summary = "极低波动"
+        d7_sub = f"ATR(14) 波幅{vol_pct:.1f}%"
+    elif atr > 0:
+        d7_summary = "波动适中"
+    else:
+        d7_summary = "数据不足"
 
     # D8: 爆仓烈度
     d8_score = 0.0
