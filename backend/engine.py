@@ -472,7 +472,7 @@ class Engine:
         from polls.candles import recompute_range_signal
         state = self._states[ccy]
         btc_state = self._states.get("BTC")
-        recompute_range_signal(state, btc_state, self._settings.processors.get("range_signal", {}))
+        recompute_range_signal(state, btc_state, self._settings.processors.range_signal)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # K 线数据（VP / ATR / range_signal 依赖）

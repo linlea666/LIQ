@@ -105,12 +105,20 @@ log_buffer: deque[dict] = deque(maxlen=500)
 class MemoryHandler(logging.Handler):
     """将日志写入内存 deque，供 /api/logs 端点读取"""
     def emit(self, record: logging.LogRecord):
+        msg = record.getMessage()
+        if record.exc_info and record.exc_info[1] is not None:
+            tb = self.format(record).split("\n", 1)
+            if len(tb) > 1:
+                msg = f"{msg}\n{tb[1]}"
+            else:
+                import traceback
+                msg = f"{msg}\n{''.join(traceback.format_exception(*record.exc_info))}"
         log_buffer.append({
             "ts": record.created,
             "time": self.format(record),
             "level": record.levelname,
             "name": record.name,
-            "msg": record.getMessage(),
+            "msg": msg,
         })
 
 
