@@ -65,8 +65,18 @@ export default function AIAnalysis() {
 
         {aiResult && !aiLoading && (
           <div className="space-y-4">
-            <div className="text-xs text-slate-500">
-              分析时间: {formatTime(aiResult.ts)} | 价格: ${aiResult.price_at_analysis.toLocaleString()}
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-slate-500">
+                分析时间: {formatTime(aiResult.ts)} | 价格: ${aiResult.price_at_analysis.toLocaleString()}
+              </div>
+              <a
+                href={`/ai/${aiResult.coin}/${aiResult.ts}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:text-blue-300 shrink-0 ml-2"
+              >
+                新页面查看 ↗
+              </a>
             </div>
 
             {aiResult.market_overview && (
