@@ -29,7 +29,7 @@ class FixedIntervalLimiter:
     """
 
     def __init__(self, rate_per_min: int = 10):
-        self._min_interval = 60.0 / rate_per_min + 0.5
+        self._min_interval = 60.0 / rate_per_min + 1.0
         self._last_request: float = 0.0
         self._lock = asyncio.Lock()
         self._daily_count = 0
@@ -62,6 +62,15 @@ class CoinglassSource(DataSource):
     默认使用 V4。
     """
 
+    _FAST_PATHS: frozenset[str] = frozenset({
+        "/api/futures/coins-markets",
+        "/api/futures/funding-rate/exchange-list",
+        "/api/futures/open-interest/exchange-list",
+        "/api/coinbase-premium-index",
+    })
+
+    _MIN_CACHE_TTL = 300
+
     def __init__(self, base_url: str, api_key: str, timeout_sec: int = 15,
                  rate_per_min: int = 10):
         super().__init__(name="coinglass", timeout_sec=timeout_sec, max_retries=2)
@@ -70,6 +79,9 @@ class CoinglassSource(DataSource):
         self._limiter = FixedIntervalLimiter(rate_per_min)
         self._headers = {"X-Api-Key": api_key}
         self._cache: dict[str, tuple[float, Any]] = {}  # key → (expire_ts, data)
+        self._cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        self._cache_file = os.path.join(self._cache_dir, "api_cache.json")
+        self._load_disk_cache()
 
     def get_poll_interval(self) -> int:
         return 10
@@ -80,6 +92,51 @@ class CoinglassSource(DataSource):
     @property
     def daily_request_count(self) -> int:
         return self._limiter.daily_count
+
+    # ── 磁盘缓存持久化 ──
+
+    def _load_disk_cache(self):
+        """启动时从磁盘恢复缓存，所有条目 TTL 延长 grace period 以确保首轮 poll 命中。"""
+        if not os.path.exists(self._cache_file):
+            logger.info("No disk cache found at %s, cold start", self._cache_file)
+            return
+        try:
+            with open(self._cache_file, "r", encoding="utf-8") as f:
+                raw: dict = json.load(f)
+            now = time.time()
+            grace = self._MIN_CACHE_TTL
+            loaded = 0
+            for key, entry in raw.items():
+                expire_ts = entry.get("expire_ts", 0)
+                data = entry.get("data")
+                if data is None:
+                    continue
+                new_expire = max(expire_ts, now + grace)
+                self._cache[key] = (new_expire, data)
+                loaded += 1
+            logger.info("Disk cache loaded | entries=%d grace=%ds file=%s",
+                        loaded, grace, self._cache_file)
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning("Failed to load disk cache: %s", e)
+
+    def save_cache_to_disk(self):
+        """将内存缓存序列化到磁盘（原子写：.tmp → rename）。"""
+        try:
+            os.makedirs(self._cache_dir, exist_ok=True)
+            now = time.time()
+            serializable = {}
+            for key, (expire_ts, data) in self._cache.items():
+                if expire_ts < now:
+                    continue
+                serializable[key] = {"expire_ts": expire_ts, "data": data}
+
+            tmp_path = self._cache_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(serializable, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, self._cache_file)
+            logger.debug("Disk cache saved | entries=%d", len(serializable))
+        except (OSError, TypeError) as e:
+            logger.warning("Failed to save disk cache: %s", e)
 
     # ── 核心请求方法 ──
 
@@ -97,6 +154,11 @@ class CoinglassSource(DataSource):
             raw_response: True 时保留完整响应体（仅剥 code/msg），用于
                           data 与元数据（如 last_price）同级的端点。
         """
+        if path not in self._FAST_PATHS:
+            cache_ttl = max(cache_ttl, self._MIN_CACHE_TTL)
+        elif cache_ttl <= 0:
+            cache_ttl = 30
+
         if cache_ttl > 0:
             ck = self._cache_key(path, params)
             cached = self._cache.get(ck)

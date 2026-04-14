@@ -156,6 +156,7 @@ class Engine:
 
         tasks = [
             asyncio.create_task(self._grace_check_loop()),
+            asyncio.create_task(self._cache_persist_loop()),
         ]
 
         # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
@@ -308,6 +309,11 @@ class Engine:
             for t in tasks:
                 t.cancel()
         self._active_tasks.clear()
+        try:
+            self._cg.save_cache_to_disk()
+            logger.info("Cache saved to disk before shutdown")
+        except Exception:
+            logger.error("Failed to save cache on shutdown", exc_info=True)
         await self._cg.close()
         logger.info("Engine stopped")
 
@@ -353,6 +359,15 @@ class Engine:
                 if now - self._coin_last_active[ccy] > self._grace_period_sec:
                     await self._deactivate_coin(ccy)
             await asyncio.sleep(10)
+
+    async def _cache_persist_loop(self):
+        """每 60 秒将 API 内存缓存持久化到磁盘。"""
+        while self._running:
+            await asyncio.sleep(60)
+            try:
+                self._cg.save_cache_to_disk()
+            except Exception:
+                logger.error("Cache persist failed", exc_info=True)
 
     # ── 轮询循环 ──
 

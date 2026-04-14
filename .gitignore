@@ -10,3 +10,5 @@ build/
 *.egg-info/
 .venv/
 venv/
+backend/data/api_cache.json
+backend/data/api_cache.json.tmp
