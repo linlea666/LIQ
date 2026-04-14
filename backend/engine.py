@@ -153,6 +153,7 @@ class Engine:
         self._grace_period_sec = self._settings.engine.grace_period_sec
 
         self._poll_cfg = self._settings.coinglass.poll_intervals
+        self._logged_keys: set[str] = set()
 
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy)
@@ -352,6 +353,15 @@ class Engine:
 
     # ── 轮询循环 ──
 
+    def _log_keys_once(self, tag: str, sample):
+        if tag in self._logged_keys:
+            return
+        self._logged_keys.add(tag)
+        if isinstance(sample, dict):
+            logger.info("API fields [%s]: %s", tag, list(sample.keys())[:20])
+        elif isinstance(sample, list) and sample and isinstance(sample[0], dict):
+            logger.info("API fields [%s]: %s", tag, list(sample[0].keys())[:20])
+
     async def _poll_loop(self, name: str, fn, coin: CoinConfig, interval: int, initial_delay: float = 0):
         if initial_delay > 0:
             await asyncio.sleep(initial_delay)
@@ -372,6 +382,7 @@ class Engine:
         data = await self._cg.fetch_coins_markets()
         if not data:
             return
+        self._log_keys_once("coins-markets", data)
 
         symbol_to_ccy = {
             self._settings.get_coin(c).symbol_cg: c
@@ -386,10 +397,11 @@ class Engine:
 
             state = self._states[ccy]
             try:
-                price = float(item.get("price", 0))
+                price = float(item.get("current_price", item.get("price", 0)))
                 if price <= 0:
                     continue
-                open_24h = float(item.get("open24h", price))
+                chg_pct = float(item.get("price_change_percent_24h", 0))
+                open_24h = price / (1 + chg_pct / 100) if chg_pct != 0 else price
                 state.ticker = TickerData(
                     coin=ccy,
                     ts=int(time.time() * 1000),
@@ -398,12 +410,10 @@ class Engine:
                     low_24h=float(item.get("low24h", price)),
                     vol_24h=float(item.get("volUsd24h", 0)),
                     change_24h=round(price - open_24h, 2),
-                    change_pct_24h=round(
-                        (price - open_24h) / open_24h * 100, 2
-                    ) if open_24h > 0 else 0,
+                    change_pct_24h=round(chg_pct, 2),
                 )
 
-                oi_usd = float(item.get("openInterest", 0))
+                oi_usd = float(item.get("open_interest_usd", item.get("openInterest", 0)))
                 if oi_usd > 0:
                     snapshot = OISnapshot(
                         coin=ccy, ts=int(time.time()),
@@ -425,7 +435,7 @@ class Engine:
         state = self._states[coin.ccy]
         for item in data:
             try:
-                oi_usd = float(item.get("openInterest", item.get("value", 0)))
+                oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
                 ts = int(item.get("time", item.get("t", 0)))
                 if oi_usd > 0:
                     snapshot = OISnapshot(
@@ -466,6 +476,7 @@ class Engine:
         data = await self._cg.fetch_fr_exchange_list()
         if not data:
             return
+        self._log_keys_once("funding-rate", data)
 
         symbol_to_ccy = {
             self._settings.get_coin(c).symbol_cg: c
@@ -485,10 +496,10 @@ class Engine:
             okx_rate = None
             bn_rate = None
 
-            margin_list = item.get("uMarginList", [])
+            margin_list = item.get("stablecoin_margin_list", item.get("uMarginList", []))
             for ex_item in margin_list:
-                ex_name = ex_item.get("exchangeName", "")
-                rate = ex_item.get("rate")
+                ex_name = ex_item.get("exchange", ex_item.get("exchangeName", ""))
+                rate = ex_item.get("funding_rate", ex_item.get("rate"))
                 if rate is not None:
                     rate = float(rate)
                     exchanges.append(ExchangeFundingRate(
@@ -530,11 +541,11 @@ class Engine:
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def _poll_liquidation_map(self, coin: CoinConfig):
-        """获取多周期清算地图"""
+        """获取 1d + 7d 清算地图（30d 由 _poll_liq_history 低频独立拉取）"""
         state = self._states[coin.ccy]
         price = state.ticker.last if state.ticker else 0
 
-        for cycle in ("1d", "7d", "30d"):
+        for cycle in ("1d", "7d"):
             data = await self._cg.fetch_liquidation_aggregated_map(
                 coin.symbol_cg, range_=cycle,
             )
@@ -555,42 +566,58 @@ class Engine:
         self._recompute(coin.ccy)
 
     def _parse_liquidation_map(self, data: dict, coin: str, cycle: str) -> Optional[LiquidationMap]:
-        """解析 Coinglass 清算地图数据"""
+        """解析 Coinglass V4 清算地图数据。
+
+        V4 格式: {data: [{liqMapV2: {价格: [[价格, 量USD, ?, ?]], ...}, instrument: ...}, ...], last_price: int}
+        将所有交易所合并，按 last_price 分为 short_bands(above) 和 long_bands(below)。
+        """
         from models.liquidation import LiqBand, LiqLeverageGroup
         try:
-            leverage_groups = []
-            for lev_key in ("10", "25", "50", "100"):
-                lev_data = data.get(f"x{lev_key}", data.get(lev_key, {}))
-                if not lev_data:
-                    continue
-                short_bands = []
-                long_bands = []
-                for item in lev_data.get("shortList", lev_data.get("asks", [])):
-                    short_bands.append(LiqBand(
-                        price_from=float(item.get("price", item.get("p", 0))),
-                        price_to=float(item.get("price", item.get("p", 0))),
-                        turnover_usd=float(item.get("volUsd", item.get("v", 0))),
-                    ))
-                for item in lev_data.get("longList", lev_data.get("bids", [])):
-                    long_bands.append(LiqBand(
-                        price_from=float(item.get("price", item.get("p", 0))),
-                        price_to=float(item.get("price", item.get("p", 0))),
-                        turnover_usd=float(item.get("volUsd", item.get("v", 0))),
-                    ))
-                leverage_groups.append(LiqLeverageGroup(
-                    leverage=lev_key,
-                    short_bands=short_bands,
-                    long_bands=long_bands,
-                    short_total_usd=sum(b.turnover_usd for b in short_bands),
-                    long_total_usd=sum(b.turnover_usd for b in long_bands),
-                ))
+            inner_list = data.get("data", [])
+            last_price = float(data.get("last_price", 0))
 
-            if not leverage_groups:
+            if not isinstance(inner_list, list) or not inner_list or last_price <= 0:
                 return None
+
+            merged: dict[int, float] = {}
+            for exchange_item in inner_list:
+                liq_map_v2 = exchange_item.get("liqMapV2", {})
+                if not isinstance(liq_map_v2, dict):
+                    continue
+                for price_str, entries in liq_map_v2.items():
+                    price_int = int(price_str)
+                    for entry in entries:
+                        if isinstance(entry, list) and len(entry) >= 2:
+                            merged[price_int] = merged.get(price_int, 0) + float(entry[1])
+
+            if not merged:
+                return None
+
+            short_bands = []
+            long_bands = []
+            for price_int in sorted(merged.keys()):
+                vol = merged[price_int]
+                band = LiqBand(
+                    price_from=float(price_int),
+                    price_to=float(price_int),
+                    turnover_usd=vol,
+                )
+                if price_int > last_price:
+                    short_bands.append(band)
+                else:
+                    long_bands.append(band)
+
+            group = LiqLeverageGroup(
+                leverage="all",
+                short_bands=short_bands,
+                long_bands=long_bands,
+                short_total_usd=sum(b.turnover_usd for b in short_bands),
+                long_total_usd=sum(b.turnover_usd for b in long_bands),
+            )
 
             return LiquidationMap(
                 coin=coin, ts=int(time.time()), cycle=cycle,
-                leverage_groups=leverage_groups,
+                leverage_groups=[group],
             )
         except Exception:
             logger.error("Parse liquidation map failed | coin=%s cycle=%s", coin, cycle, exc_info=True)
@@ -611,9 +638,9 @@ class Engine:
                 state.liq_sweep_events.append(evt)
 
     async def _poll_liq_heatmap(self, coin: CoinConfig):
-        """获取清算热力图（model1）"""
+        """获取清算热力图（model1，仅 24h 以节省配额）"""
         state = self._states[coin.ccy]
-        for range_ in ("24h", "7d"):
+        for range_ in ("24h",):
             data = await self._cg.fetch_liquidation_aggregated_heatmap(
                 coin.symbol_cg, range_=range_, model=1,
             )
@@ -649,42 +676,55 @@ class Engine:
                 )
 
     async def _poll_liq_history(self, coin: CoinConfig):
-        """获取聚合爆仓历史"""
+        """获取聚合爆仓历史 + 30d 清算地图"""
+        state = self._states[coin.ccy]
+
         data = await self._cg.fetch_liquidation_aggregated_history(
             coin.symbol_cg, interval="1h", limit=24,
         )
-        if not data:
-            return
+        if data and isinstance(data, list):
+            from models.liquidation import LiqHistoryPoint
+            points = []
+            total_long = 0.0
+            total_short = 0.0
+            for item in data:
+                try:
+                    long_usd = float(item.get("longVolUsd", item.get("longLiqUsd", 0)))
+                    short_usd = float(item.get("shortVolUsd", item.get("shortLiqUsd", 0)))
+                    points.append(LiqHistoryPoint(
+                        ts=int(item.get("time", item.get("t", 0))),
+                        long_usd=long_usd, short_usd=short_usd,
+                    ))
+                    total_long += long_usd
+                    total_short += short_usd
+                except (ValueError, KeyError):
+                    continue
 
-        state = self._states[coin.ccy]
-        from models.liquidation import LiqHistoryPoint
-        points = []
-        total_long = 0.0
-        total_short = 0.0
-        for item in data:
-            try:
-                long_usd = float(item.get("longVolUsd", item.get("longLiqUsd", 0)))
-                short_usd = float(item.get("shortVolUsd", item.get("shortLiqUsd", 0)))
-                points.append(LiqHistoryPoint(
-                    ts=int(item.get("time", item.get("t", 0))),
-                    long_usd=long_usd, short_usd=short_usd,
-                ))
-                total_long += long_usd
-                total_short += short_usd
-            except (ValueError, KeyError):
-                continue
+            state.liq_history = LiqHistoryData(
+                coin=coin.ccy, interval="1h", data=points,
+            )
 
-        state.liq_history = LiqHistoryData(
-            coin=coin.ccy, interval="1h", data=points,
+            ratio = total_long / total_short if total_short > 0 else (10.0 if total_long > 0 else 1.0)
+            state.liq_stats = LiquidationStats(
+                coin=coin.ccy, ts=int(time.time()),
+                period_min=1440,
+                long_total_usd=total_long, short_total_usd=total_short,
+                ratio=round(ratio, 2),
+            )
+
+        map_30d = await self._cg.fetch_liquidation_aggregated_map(
+            coin.symbol_cg, range_="30d",
         )
-
-        ratio = total_long / total_short if total_short > 0 else (10.0 if total_long > 0 else 1.0)
-        state.liq_stats = LiquidationStats(
-            coin=coin.ccy, ts=int(time.time()),
-            period_min=1440,
-            long_total_usd=total_long, short_total_usd=total_short,
-            ratio=round(ratio, 2),
-        )
+        if map_30d:
+            price = state.ticker.last if state.ticker else 0
+            liq_map = self._parse_liquidation_map(map_30d, coin.ccy, "30d")
+            if liq_map and price > 0:
+                liq_map = process_liquidation_map(
+                    liq_map, price,
+                    self._settings.processors.levels["min_liq_cluster_usd"],
+                )
+            if liq_map:
+                state.liq_maps["30d"] = liq_map
 
     async def _poll_ls_ratio(self, coin: CoinConfig):
         """获取多空比（全局 + 大户账户 + 大户持仓）"""
@@ -694,7 +734,8 @@ class Engine:
         global_data = await self._cg.fetch_global_ls_ratio_history(
             exchange, coin.symbol_cg_pair, interval="1h", limit=1,
         )
-        if global_data and len(global_data) > 0:
+        self._log_keys_once("ls-ratio-global", global_data)
+        if global_data and isinstance(global_data, list) and len(global_data) > 0:
             item = global_data[-1]
             long_pct = float(item.get("longAccount", item.get("longRatio", 50)))
             short_pct = float(item.get("shortAccount", item.get("shortRatio", 50)))
@@ -711,7 +752,7 @@ class Engine:
         top_acct_data = await self._cg.fetch_top_ls_account_ratio_history(
             exchange, coin.symbol_cg_pair, interval="1h", limit=1,
         )
-        if top_acct_data and len(top_acct_data) > 0:
+        if top_acct_data and isinstance(top_acct_data, list) and len(top_acct_data) > 0:
             item = top_acct_data[-1]
             long_pct = float(item.get("longAccount", item.get("longRatio", 50)))
             short_pct = float(item.get("shortAccount", item.get("shortRatio", 50)))
@@ -728,7 +769,7 @@ class Engine:
         top_pos_data = await self._cg.fetch_top_ls_position_ratio_history(
             exchange, coin.symbol_cg_pair, interval="1h", limit=1,
         )
-        if top_pos_data and len(top_pos_data) > 0:
+        if top_pos_data and isinstance(top_pos_data, list) and len(top_pos_data) > 0:
             item = top_pos_data[-1]
             long_pct = float(item.get("longPosition", item.get("longRatio", 50)))
             short_pct = float(item.get("shortPosition", item.get("shortRatio", 50)))
@@ -749,6 +790,7 @@ class Engine:
         contract_data = await self._cg.fetch_aggregated_cvd_history(
             coin.symbol_cg, interval="5m", limit=100,
         )
+        self._log_keys_once("cvd-futures", contract_data)
         if contract_data:
             points = []
             for item in contract_data:
@@ -865,42 +907,62 @@ class Engine:
         exchange = coin.exchange_primary
         pair = coin.symbol_cg_pair
 
-        rsi_data = await self._cg.fetch_rsi(exchange, pair, interval="1d", limit=2, window=14)
-        if rsi_data and len(rsi_data) > 0:
-            last = rsi_data[-1]
-            state.rsi_14 = float(last.get("rsi", last.get("value", 0)))
+        def _last_item(data):
+            if isinstance(data, list) and len(data) > 0:
+                return data[-1]
+            return None
 
-        macd_data = await self._cg.fetch_macd(exchange, pair, interval="1d", limit=2)
-        if macd_data and len(macd_data) > 0:
-            last = macd_data[-1]
-            state.macd_data = {
-                "macd": float(last.get("macd", 0)),
-                "signal": float(last.get("signal", 0)),
-                "histogram": float(last.get("histogram", last.get("hist", 0))),
-                "above_zero": float(last.get("macd", 0)) > 0,
-            }
+        try:
+            rsi_last = _last_item(await self._cg.fetch_rsi(exchange, pair, interval="1d", limit=2, window=14))
+            if rsi_last:
+                state.rsi_14 = float(rsi_last.get("rsi", rsi_last.get("value", 0)))
+        except Exception:
+            logger.debug("indicators: RSI parse failed", exc_info=True)
 
-        ma60_data = await self._cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=60)
-        if ma60_data and len(ma60_data) > 0:
-            state.ma60_daily_cg = float(ma60_data[-1].get("ma", ma60_data[-1].get("value", 0)))
+        try:
+            macd_last = _last_item(await self._cg.fetch_macd(exchange, pair, interval="1d", limit=2))
+            if macd_last:
+                state.macd_data = {
+                    "macd": float(macd_last.get("macd", 0)),
+                    "signal": float(macd_last.get("signal", 0)),
+                    "histogram": float(macd_last.get("histogram", macd_last.get("hist", 0))),
+                    "above_zero": float(macd_last.get("macd", 0)) > 0,
+                }
+        except Exception:
+            logger.debug("indicators: MACD parse failed", exc_info=True)
 
-        ma120_data = await self._cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=120)
-        if ma120_data and len(ma120_data) > 0:
-            state.ma120_daily_cg = float(ma120_data[-1].get("ma", ma120_data[-1].get("value", 0)))
+        try:
+            ma60_last = _last_item(await self._cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=60))
+            if ma60_last:
+                state.ma60_daily_cg = float(ma60_last.get("ma", ma60_last.get("value", 0)))
+        except Exception:
+            logger.debug("indicators: MA60 parse failed", exc_info=True)
 
-        atr_data = await self._cg.fetch_atr(exchange, pair, interval="1h", limit=2, window=14)
-        if atr_data and len(atr_data) > 0:
-            state.atr_cg = float(atr_data[-1].get("atr", atr_data[-1].get("value", 0)))
-            state.atr = state.atr_cg
+        try:
+            ma120_last = _last_item(await self._cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=120))
+            if ma120_last:
+                state.ma120_daily_cg = float(ma120_last.get("ma", ma120_last.get("value", 0)))
+        except Exception:
+            logger.debug("indicators: MA120 parse failed", exc_info=True)
 
-        boll_data = await self._cg.fetch_boll(exchange, pair, interval="1d", limit=2)
-        if boll_data and len(boll_data) > 0:
-            last = boll_data[-1]
-            state.boll_data = {
-                "upper": float(last.get("upper", last.get("upperBand", 0))),
-                "middle": float(last.get("middle", last.get("middleBand", 0))),
-                "lower": float(last.get("lower", last.get("lowerBand", 0))),
-            }
+        try:
+            atr_last = _last_item(await self._cg.fetch_atr(exchange, pair, interval="1h", limit=2, window=14))
+            if atr_last:
+                state.atr_cg = float(atr_last.get("atr", atr_last.get("value", 0)))
+                state.atr = state.atr_cg
+        except Exception:
+            logger.debug("indicators: ATR parse failed", exc_info=True)
+
+        try:
+            boll_last = _last_item(await self._cg.fetch_boll(exchange, pair, interval="1d", limit=2))
+            if boll_last:
+                state.boll_data = {
+                    "upper": float(boll_last.get("upper", boll_last.get("upperBand", 0))),
+                    "middle": float(boll_last.get("middle", boll_last.get("middleBand", 0))),
+                    "lower": float(boll_last.get("lower", boll_last.get("lowerBand", 0))),
+                }
+        except Exception:
+            logger.debug("indicators: BOLL parse failed", exc_info=True)
 
         self._recompute_range_signal(coin.ccy)
 
@@ -1062,42 +1124,47 @@ class Engine:
 
     async def _poll_options(self, _coin: CoinConfig):
         """获取期权数据"""
+        from models.options import OptionMaxPainExpiry
         for symbol in ("BTC", "ETH"):
-            max_pain = await self._cg.fetch_option_max_pain(symbol)
-            if max_pain:
-                from models.options import OptionMaxPainExpiry
-                expiries = []
-                for item in max_pain:
-                    try:
-                        expiries.append(OptionMaxPainExpiry(
-                            expiry_date=item.get("expiryDate", item.get("date", "")),
-                            max_pain_price=float(item.get("maxPain", item.get("price", 0))),
-                            call_oi=float(item.get("callOI", 0)),
-                            put_oi=float(item.get("putOI", 0)),
-                        ))
-                    except (ValueError, KeyError):
-                        continue
+            try:
+                max_pain = await self._cg.fetch_option_max_pain(symbol)
+                if max_pain and isinstance(max_pain, list):
+                    expiries = []
+                    for item in max_pain:
+                        try:
+                            expiries.append(OptionMaxPainExpiry(
+                                expiry_date=item.get("expiryDate", item.get("date", "")),
+                                max_pain_price=float(item.get("maxPain", item.get("price", 0))),
+                                call_oi=float(item.get("callOI", 0)),
+                                put_oi=float(item.get("putOI", 0)),
+                            ))
+                        except (ValueError, KeyError):
+                            continue
 
-                nearest = expiries[0] if expiries else None
-                for ccy in self._settings.supported_coins:
-                    if ccy == symbol:
-                        self._states[ccy].option_max_pain = OptionMaxPainData(
+                    nearest = expiries[0] if expiries else None
+                    if symbol in self._states:
+                        self._states[symbol].option_max_pain = OptionMaxPainData(
                             symbol=symbol, ts=int(time.time()),
                             expiries=expiries,
                             nearest_max_pain=nearest.max_pain_price if nearest else None,
                             nearest_expiry=nearest.expiry_date if nearest else "",
                         )
+            except Exception:
+                logger.debug("options: max_pain %s failed", symbol, exc_info=True)
 
-            info = await self._cg.fetch_option_info(symbol)
-            if info and symbol in self._states:
-                state = self._states[symbol]
-                state.option_info = OptionInfoData(
-                    symbol=symbol, ts=int(time.time()),
-                    total_oi_usd=float(info.get("totalOI", 0)),
-                    total_vol_24h_usd=float(info.get("totalVol24h", 0)),
-                    put_call_oi_ratio=float(info.get("putCallOIRatio", 0)),
-                    put_call_vol_ratio=float(info.get("putCallVolRatio", 0)),
-                )
+            try:
+                info = await self._cg.fetch_option_info(symbol)
+                if info and isinstance(info, dict) and symbol in self._states:
+                    state = self._states[symbol]
+                    state.option_info = OptionInfoData(
+                        symbol=symbol, ts=int(time.time()),
+                        total_oi_usd=float(info.get("totalOI", 0)),
+                        total_vol_24h_usd=float(info.get("totalVol24h", 0)),
+                        put_call_oi_ratio=float(info.get("putCallOIRatio", 0)),
+                        put_call_vol_ratio=float(info.get("putCallVolRatio", 0)),
+                    )
+            except Exception:
+                logger.debug("options: info %s failed", symbol, exc_info=True)
 
     async def _poll_large_orders(self, coin: CoinConfig):
         """获取大单追踪"""
@@ -1188,33 +1255,36 @@ class Engine:
             ("BTC", self._cg.fetch_btc_etf_flow_history),
             ("ETH", self._cg.fetch_eth_etf_flow_history),
         ]:
-            data = await fetch_fn()
-            if not data:
-                continue
-
-            recent = data[-5:] if len(data) >= 5 else data
-            days = []
-            net_3d = 0.0
-            for item in recent:
-                try:
-                    total_net = float(item.get("totalNetflow", item.get("netflow", 0)))
-                    days.append(ETFFlowDay(
-                        date=item.get("date", ""),
-                        total_net=total_net,
-                    ))
-                    net_3d += total_net
-                except (ValueError, KeyError):
+            try:
+                data = await fetch_fn()
+                if not data or not isinstance(data, list):
                     continue
 
-            trend = "inflow" if net_3d > 0 else "outflow" if net_3d < 0 else "mixed"
-            etf = ETFFlowData(
-                ts=int(time.time()), asset=asset,
-                recent_days=days, net_3d=net_3d, trend=trend,
-            )
+                recent = data[-5:] if len(data) >= 5 else data
+                days = []
+                net_3d = 0.0
+                for item in recent:
+                    try:
+                        total_net = float(item.get("totalNetflow", item.get("netflow", 0)))
+                        days.append(ETFFlowDay(
+                            date=item.get("date", ""),
+                            total_net=total_net,
+                        ))
+                        net_3d += total_net
+                    except (ValueError, KeyError):
+                        continue
 
-            for ccy in self._settings.supported_coins:
-                if asset == "BTC" or ccy == asset:
-                    self._states[ccy].etf_flow = etf
+                trend = "inflow" if net_3d > 0 else "outflow" if net_3d < 0 else "mixed"
+                etf = ETFFlowData(
+                    ts=int(time.time()), asset=asset,
+                    recent_days=days, net_3d=net_3d, trend=trend,
+                )
+
+                for ccy in self._settings.supported_coins:
+                    if asset == "BTC" or ccy == asset:
+                        self._states[ccy].etf_flow = etf
+            except Exception:
+                logger.debug("etf: %s flow failed", asset, exc_info=True)
 
     async def _poll_global_liq(self, _coin: CoinConfig):
         """获取全网爆仓统计"""

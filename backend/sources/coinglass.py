@@ -21,14 +21,16 @@ from sources.base import DataSource, CoinConfig
 logger = logging.getLogger(__name__)
 
 
-class TokenBucketLimiter:
-    """令牌桶限流器，控制每分钟请求次数。"""
+class FixedIntervalLimiter:
+    """固定间隔限流器：每两次请求之间强制等待 min_interval 秒。
+
+    与 Token Bucket 不同，不允许突发——彻底避免滑动窗口 429。
+    rate_per_min=10 → min_interval=7s（留 ~15% 余量）。
+    """
 
     def __init__(self, rate_per_min: int = 10):
-        self._rate = rate_per_min
-        self._tokens = float(rate_per_min)
-        self._max_tokens = float(rate_per_min)
-        self._last_refill = time.monotonic()
+        self._min_interval = 60.0 / rate_per_min + 1.0
+        self._last_request: float = 0.0
         self._lock = asyncio.Lock()
         self._daily_count = 0
         self._daily_reset_ts = time.time()
@@ -36,17 +38,12 @@ class TokenBucketLimiter:
     async def acquire(self):
         async with self._lock:
             now = time.monotonic()
-            elapsed = now - self._last_refill
-            self._tokens = min(self._max_tokens, self._tokens + elapsed * (self._rate / 60.0))
-            self._last_refill = now
-
-            if self._tokens < 1.0:
-                wait = (1.0 - self._tokens) / (self._rate / 60.0)
-                logger.debug("Rate limiter: waiting %.1fs", wait)
+            elapsed = now - self._last_request
+            if elapsed < self._min_interval:
+                wait = self._min_interval - elapsed
+                logger.debug("Rate limiter: spacing %.1fs", wait)
                 await asyncio.sleep(wait)
-                self._tokens = 1.0
-
-            self._tokens -= 1.0
+            self._last_request = time.monotonic()
             self._daily_count += 1
 
             if time.time() - self._daily_reset_ts > 86400:
@@ -70,7 +67,7 @@ class CoinglassSource(DataSource):
         super().__init__(name="coinglass", timeout_sec=timeout_sec, max_retries=2)
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        self._limiter = TokenBucketLimiter(rate_per_min)
+        self._limiter = FixedIntervalLimiter(rate_per_min)
         self._headers = {"X-Api-Key": api_key}
         self._cache: dict[str, tuple[float, Any]] = {}  # key → (expire_ts, data)
 
@@ -115,9 +112,7 @@ class CoinglassSource(DataSource):
                 if resp.status == 429:
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
                     self._mark_failure()
-                    async with self._limiter._lock:
-                        self._limiter._tokens = 0
-                    await asyncio.sleep(12)
+                    await asyncio.sleep(15)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
