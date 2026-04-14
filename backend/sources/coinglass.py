@@ -88,11 +88,14 @@ class CoinglassSource(DataSource):
         return hashlib.md5(raw.encode()).hexdigest()
 
     async def _request(self, path: str, params: Optional[dict] = None,
-                       version: str = "v4", cache_ttl: int = 0) -> Optional[dict]:
+                       version: str = "v4", cache_ttl: int = 0,
+                       raw_response: bool = False) -> Optional[dict]:
         """发起单次 API 请求，自动限流、TTL 缓存、错误处理。
 
         Args:
             cache_ttl: 缓存有效期(秒)。>0 时命中缓存直接返回，不消耗限流令牌。
+            raw_response: True 时保留完整响应体（仅剥 code/msg），用于
+                          data 与元数据（如 last_price）同级的端点。
         """
         if cache_ttl > 0:
             ck = self._cache_key(path, params)
@@ -124,7 +127,10 @@ class CoinglassSource(DataSource):
                                    path, code, data.get("msg", ""))
                     return None
 
-                result = data.get("data") if "data" in data else data
+                if raw_response:
+                    result = data
+                else:
+                    result = data.get("data") if "data" in data else data
                 if cache_ttl > 0 and result is not None:
                     self._cache[self._cache_key(path, params)] = (
                         time.time() + cache_ttl, result,
@@ -363,7 +369,7 @@ class CoinglassSource(DataSource):
                                                range_: str = "7d") -> Optional[dict]:
         return await self._request("/api/futures/liquidation/aggregated-map", {
             "symbol": symbol, "range": range_,
-        }, cache_ttl=60)
+        }, cache_ttl=60, raw_response=True)
 
     async def fetch_liquidation_max_pain(self, range_: str = "24h") -> Optional[list]:
         return await self._request("/api/futures/liquidation/max-pain",

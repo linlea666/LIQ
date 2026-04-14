@@ -6,6 +6,9 @@
 - A 级做空 = 价格反弹至上沿 + MACD 0 轴下方
 - A 级做多 = 价格下探至下沿 + 流动性扫取确认
 - 中间区域 = 无信号，不交易
+
+设计说明：使用本地 K 线序列计算 MACD/SMA（需完整 150 根序列做交叉和背离判断），
+与 engine._poll_indicators 的 Coinglass 预计算指标（仅最新值，服务 AI prompt）互不替代。
 """
 
 from __future__ import annotations

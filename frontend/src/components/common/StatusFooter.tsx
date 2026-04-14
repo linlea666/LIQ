@@ -14,11 +14,14 @@ export default function StatusFooter() {
   return (
     <div className="h-7 bg-slate-900 border-t border-slate-700 flex items-center px-4 text-xs text-slate-500 gap-6">
       {sourceHealth.length > 0 ? (
-        sourceHealth.map((s) => (
+        sourceHealth.map((s: Record<string, any>) => (
           <span key={s.name}>
             {STATUS_ICON[s.status] || "⚪"} {s.name}
             {s.status === "connected" && s.latency_ms > 0 && (
-              <span className="text-slate-600">({s.latency_ms.toFixed(0)}ms)</span>
+              <span className="text-slate-600"> ({s.latency_ms.toFixed(0)}ms)</span>
+            )}
+            {s.daily_requests !== undefined && (
+              <span className="text-slate-600"> ({s.daily_requests}/{s.daily_limit} {s.usage_pct}%)</span>
             )}
           </span>
         ))

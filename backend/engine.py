@@ -46,7 +46,6 @@ from processors.cvd import detect_cvd_price_divergence
 from processors.levels import calculate_levels
 from processors.liquidation import detect_liq_sweep, process_liquidation_map
 from processors.market_temp import build_waterfall, calc_market_temperature
-from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_volume_profile
 from processors.cycle import calculate_cycle_position
@@ -111,23 +110,24 @@ class CoinState:
         self.ema20_cg: Optional[float] = None
         self.boll_data: Optional[dict] = None
         self.atr_cg: Optional[float] = None
-        # Phase 4: 新维度
+        # Phase 4: 新维度（已接入）
         self.option_max_pain: Optional[OptionMaxPainData] = None
         self.option_info: Optional[OptionInfoData] = None
         self.large_orders: Optional[LargeOrderSnapshot] = None
-        self.footprint: Optional[FootprintData] = None
         self.whale_data: Optional[WhaleData] = None
+        self.news: Optional[NewsData] = None
+        # Phase 4: 预留字段（TODO: 未接入，待后续迭代对接 Coinglass API）
+        self.footprint: Optional[FootprintData] = None
         self.exchange_balance: Optional[ExchangeBalanceData] = None
         self.token_unlock: Optional[TokenUnlockData] = None
-        self.fear_greed: Optional[FearGreedData] = None
-        self.btc_dominance: Optional[BtcDominanceData] = None
+        self.fear_greed: Optional[FearGreedData] = None  # 实际值存于 market_index.fear_greed
+        self.btc_dominance: Optional[BtcDominanceData] = None  # 实际值存于 market_index.btc_dominance
         self.altcoin_season: Optional[AltcoinSeasonData] = None
         self.coinbase_premium: Optional[CoinbasePremiumData] = None
         self.stablecoin_mcap: Optional[StablecoinMcapData] = None
         self.bubble_index: Optional[BubbleIndexData] = None
         self.bull_peak: Optional[BullMarketPeakData] = None
         self.economic_calendar: Optional[EconomicCalendarData] = None
-        self.news: Optional[NewsData] = None
         self.net_position: Optional[NetPositionData] = None
         self.basis_history: Optional[BasisHistoryData] = None
         self.spot_cvd: Optional[SpotCVDData] = None
@@ -323,7 +323,7 @@ class Engine:
         coin = self._settings.get_coin(ccy)
         logger.info("Coin activated | ccy=%s", ccy)
 
-        self._active_tasks[ccy] = self._create_full_poll_tasks(coin, 0)
+        self._active_tasks[ccy] = self._create_full_poll_tasks(coin, 3)
 
     def mark_coin_viewer_left(self, ccy: str):
         ccy = ccy.upper()
@@ -552,7 +552,7 @@ class Engine:
             if not data:
                 continue
 
-            liq_map = self._parse_liquidation_map(data, coin.ccy, cycle)
+            liq_map = self._parse_liquidation_map(data, coin.ccy, cycle, current_price=price)
             if liq_map and price > 0:
                 liq_map = process_liquidation_map(
                     liq_map, price,
@@ -565,44 +565,60 @@ class Engine:
 
         self._recompute(coin.ccy)
 
-    def _parse_liquidation_map(self, data: dict, coin: str, cycle: str) -> Optional[LiquidationMap]:
+    def _parse_liquidation_map(self, data, coin: str, cycle: str,
+                               current_price: float = 0) -> Optional[LiquidationMap]:
         """解析 Coinglass V4 清算地图数据。
 
-        V4 格式: {data: [{liqMapV2: {价格: [[价格, 量USD, ?, ?]], ...}, instrument: ...}, ...], last_price: int}
-        将所有交易所合并，按 last_price 分为 short_bands(above) 和 long_bands(below)。
+        raw_response=True 时 data 结构:
+          {code, data: [{liqMapV2: {价格: [[价格,量USD,...]], ...}, ...}], last_price: int}
+        _request 解包后也可能是 list（旧缓存/兼容），此处统一处理。
         """
         from models.liquidation import LiqBand, LiqLeverageGroup
         try:
-            inner_list = data.get("data", [])
-            last_price = float(data.get("last_price", 0))
+            if isinstance(data, list):
+                inner_list = data
+                last_price = current_price
+            elif isinstance(data, dict):
+                inner_list = data.get("data", [])
+                last_price = float(data.get("last_price", 0) or 0)
+                if isinstance(inner_list, dict):
+                    if last_price <= 0:
+                        last_price = float(inner_list.get("last_price", 0) or 0)
+                    inner_list = inner_list.get("data", [])
+                if last_price <= 0:
+                    last_price = current_price
+            else:
+                return None
 
             if not isinstance(inner_list, list) or not inner_list or last_price <= 0:
                 return None
 
             merged: dict[int, float] = {}
             for exchange_item in inner_list:
+                if not isinstance(exchange_item, dict):
+                    continue
                 liq_map_v2 = exchange_item.get("liqMapV2", {})
                 if not isinstance(liq_map_v2, dict):
                     continue
                 for price_str, entries in liq_map_v2.items():
-                    price_int = int(price_str)
+                    price_key = int(float(price_str))
                     for entry in entries:
                         if isinstance(entry, list) and len(entry) >= 2:
-                            merged[price_int] = merged.get(price_int, 0) + float(entry[1])
+                            merged[price_key] = merged.get(price_key, 0) + float(entry[1])
 
             if not merged:
                 return None
 
             short_bands = []
             long_bands = []
-            for price_int in sorted(merged.keys()):
-                vol = merged[price_int]
+            for price_key in sorted(merged.keys()):
+                vol = merged[price_key]
                 band = LiqBand(
-                    price_from=float(price_int),
-                    price_to=float(price_int),
+                    price_from=float(price_key),
+                    price_to=float(price_key),
                     turnover_usd=vol,
                 )
-                if price_int > last_price:
+                if price_key > last_price:
                     short_bands.append(band)
                 else:
                     long_bands.append(band)
@@ -639,16 +655,46 @@ class Engine:
 
     async def _poll_liq_heatmap(self, coin: CoinConfig):
         """获取清算热力图（model1，仅 24h 以节省配额）"""
+        from models.liquidation import HeatmapDataPoint
         state = self._states[coin.ccy]
         for range_ in ("24h",):
             data = await self._cg.fetch_liquidation_aggregated_heatmap(
                 coin.symbol_cg, range_=range_, model=1,
             )
-            if data:
-                state.liq_heatmaps[f"m1_{range_}"] = HeatmapData(
-                    coin=coin.ccy, ts=int(time.time()),
-                    model=1, range=range_, data=[],
-                )
+            if not data:
+                continue
+            points: list[HeatmapDataPoint] = []
+            try:
+                if isinstance(data, dict):
+                    prices = data.get("prices", data.get("y", []))
+                    time_list = data.get("time", data.get("x", []))
+                    heat_data = data.get("data", data.get("z", []))
+                    if isinstance(heat_data, list):
+                        for t_idx, row in enumerate(heat_data):
+                            ts_val = int(time_list[t_idx]) if t_idx < len(time_list) else 0
+                            if not isinstance(row, list):
+                                continue
+                            for p_idx, val in enumerate(row):
+                                if val and float(val) > 0 and p_idx < len(prices):
+                                    points.append(HeatmapDataPoint(
+                                        price=float(prices[p_idx]),
+                                        value=float(val),
+                                        ts=ts_val,
+                                    ))
+                elif isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            points.append(HeatmapDataPoint(
+                                price=float(item.get("price", 0)),
+                                value=float(item.get("value", item.get("vol", 0))),
+                                ts=int(item.get("time", item.get("ts", 0))),
+                            ))
+            except Exception:
+                logger.debug("heatmap parse failed | coin=%s range=%s", coin.ccy, range_, exc_info=True)
+            state.liq_heatmaps[f"m1_{range_}"] = HeatmapData(
+                coin=coin.ccy, ts=int(time.time()),
+                model=1, range=range_, data=points,
+            )
 
     async def _poll_liq_max_pain(self, _coin: CoinConfig):
         """获取清算最大痛点"""
@@ -663,8 +709,8 @@ class Engine:
                     items.append(LiqMaxPainItem(
                         symbol=item.get("symbol", ""),
                         price=float(item.get("price", 0)),
-                        long_liq_usd=float(item.get("longLiqUsd", 0)),
-                        short_liq_usd=float(item.get("shortLiqUsd", 0)),
+                        long_liq_usd=float(item.get("long_liq_usd", item.get("longLiqUsd", 0))),
+                        short_liq_usd=float(item.get("short_liq_usd", item.get("shortLiqUsd", 0))),
                     ))
                 except (ValueError, KeyError):
                     continue
@@ -687,16 +733,23 @@ class Engine:
             points = []
             total_long = 0.0
             total_short = 0.0
+            long_count = 0
+            short_count = 0
             for item in data:
                 try:
                     long_usd = float(item.get("longVolUsd", item.get("longLiqUsd", 0)))
                     short_usd = float(item.get("shortVolUsd", item.get("shortLiqUsd", 0)))
+                    lc = int(item.get("longCount", item.get("longLiqCount", 0)) or 0)
+                    sc = int(item.get("shortCount", item.get("shortLiqCount", 0)) or 0)
                     points.append(LiqHistoryPoint(
                         ts=int(item.get("time", item.get("t", 0))),
                         long_usd=long_usd, short_usd=short_usd,
+                        long_count=lc, short_count=sc,
                     ))
                     total_long += long_usd
                     total_short += short_usd
+                    long_count += lc
+                    short_count += sc
                 except (ValueError, KeyError):
                     continue
 
@@ -709,6 +762,7 @@ class Engine:
                 coin=coin.ccy, ts=int(time.time()),
                 period_min=1440,
                 long_total_usd=total_long, short_total_usd=total_short,
+                long_count=long_count, short_count=short_count,
                 ratio=round(ratio, 2),
             )
 
@@ -717,7 +771,7 @@ class Engine:
         )
         if map_30d:
             price = state.ticker.last if state.ticker else 0
-            liq_map = self._parse_liquidation_map(map_30d, coin.ccy, "30d")
+            liq_map = self._parse_liquidation_map(map_30d, coin.ccy, "30d", current_price=price)
             if liq_map and price > 0:
                 liq_map = process_liquidation_map(
                     liq_map, price,
@@ -899,6 +953,9 @@ class Engine:
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Phase 3: 技术指标（Coinglass 直取）
+    # 设计说明：这些指标(RSI/MACD/BOLL/MA)取最新值，服务 AI 分析 prompt。
+    # 箱体模块(range_signal)使用本地 K 线计算完整序列，以支持交叉/背离检测，
+    # 两者数据源相同(Coinglass K 线)但用途不同，属设计分工而非冗余。
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def _poll_indicators(self, coin: CoinConfig):
@@ -963,6 +1020,13 @@ class Engine:
                 }
         except Exception:
             logger.debug("indicators: BOLL parse failed", exc_info=True)
+
+        try:
+            ema20_last = _last_item(await self._cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=20))
+            if ema20_last:
+                state.ema20_cg = float(ema20_last.get("ema", ema20_last.get("value", 0)))
+        except Exception:
+            logger.debug("indicators: EMA20 parse failed", exc_info=True)
 
         self._recompute_range_signal(coin.ccy)
 
@@ -1271,7 +1335,7 @@ class Engine:
                 net_3d = 0.0
                 for item in recent:
                     try:
-                        total_net = float(item.get("totalNetflow", item.get("netflow", 0)))
+                        total_net = float(item.get("total_netflow", item.get("totalNetflow", item.get("netflow", 0))))
                         days.append(ETFFlowDay(
                             date=item.get("date", ""),
                             total_net=total_net,
@@ -1685,15 +1749,17 @@ class Engine:
         return "中性"
 
     def get_source_health(self) -> list[dict]:
+        daily = self._cg.daily_request_count
+        limit = self._settings.coinglass.daily_limit
+        usage_pct = round(daily / limit * 100, 1) if limit > 0 else 0
         return [
             self._cg.health().model_dump(),
             {
                 "name": "coinglass_daily_usage",
-                "status": "ok",
-                "daily_requests": self._cg.daily_request_count,
-                "daily_limit": self._settings.coinglass.daily_limit,
-                "usage_pct": round(
-                    self._cg.daily_request_count / self._settings.coinglass.daily_limit * 100, 1
-                ),
+                "status": "degraded" if usage_pct > 80 else "connected",
+                "daily_requests": daily,
+                "daily_limit": limit,
+                "usage_pct": usage_pct,
+                "latency_ms": 0,
             },
         ]

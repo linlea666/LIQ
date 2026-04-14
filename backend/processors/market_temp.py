@@ -162,8 +162,10 @@ def calc_market_temperature(
     if liq_stats:
         ratio = liq_stats.ratio
         d8_score = min((ratio - 1) * 15, 50) if ratio > 1 else max((ratio - 1) * 15, -50)
-        d8_value = f"多{liq_stats.long_count}:空{liq_stats.short_count}"
-        d8_sub = f"多${liq_stats.long_total_usd / 1e6:.1f}M 空${liq_stats.short_total_usd / 1e6:.1f}M"
+        long_m = liq_stats.long_total_usd / 1e6
+        short_m = liq_stats.short_total_usd / 1e6
+        d8_value = f"多${long_m:.1f}M:空${short_m:.1f}M"
+        d8_sub = f"多{liq_stats.long_count}笔 空{liq_stats.short_count}笔 比值{ratio:.1f}" if liq_stats.long_count > 0 else f"比值{ratio:.1f}"
         d8_summary = "多头被清洗" if ratio > 2 else "空头被清洗" if ratio < 0.5 else "双向均衡"
     factor_scores["liq_intensity"] = d8_score
 
