@@ -135,13 +135,14 @@ async def trigger_ai_analysis(coin: str):
 
 
 @router.get("/ai/history/{coin}")
-async def get_ai_history(coin: str):
-    """获取 AI 分析历史"""
+async def get_ai_history(coin: str, limit: int = Query(5, ge=1, le=50)):
+    """获取 AI 分析历史（按时间倒序，默认最近 5 条）"""
     if not _engine:
         raise HTTPException(503, "Engine not ready")
     coin = coin.upper()
     history = _engine.get_ai_history(coin)
-    return {"coin": coin, "analyses": [h.model_dump() for h in history]}
+    history.sort(key=lambda h: h.ts, reverse=True)
+    return {"coin": coin, "analyses": [h.model_dump() for h in history[:limit]]}
 
 
 @router.get("/health")

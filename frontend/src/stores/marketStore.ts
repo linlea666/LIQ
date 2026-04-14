@@ -4,6 +4,7 @@ import type {
   MarketUpdate,
   SourceHealth,
 } from "@/lib/types";
+import { API_BASE } from "@/lib/constants";
 import type { CoinType } from "@/lib/constants";
 
 interface MarketStore {
@@ -22,6 +23,7 @@ interface MarketStore {
   setAILoading: (loading: boolean) => void;
   setAIError: (error: string | null) => void;
   setAIAvailable: (available: boolean) => void;
+  loadAIHistory: (coin: string) => Promise<void>;
 
   sourceHealth: SourceHealth[];
   setSourceHealth: (health: SourceHealth[]) => void;
@@ -55,15 +57,38 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
   aiHistory: [],
   aiAvailable: false,
   setAIResult: (result) =>
-    set((state) => ({
-      aiResult: result,
-      aiLoading: false,
-      aiError: null,
-      aiHistory: [result, ...state.aiHistory].slice(0, 5),
-    })),
+    set((state) => {
+      const exists = state.aiHistory.some((h) => h.ts === result.ts);
+      const history = exists
+        ? state.aiHistory
+        : [result, ...state.aiHistory].slice(0, 5);
+      return { aiResult: result, aiLoading: false, aiError: null, aiHistory: history };
+    }),
   setAILoading: (loading) => set({ aiLoading: loading, aiError: null }),
   setAIError: (error) => set({ aiError: error, aiLoading: false }),
   setAIAvailable: (available) => set({ aiAvailable: available }),
+  loadAIHistory: async (coin) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/ai/history/${coin}?limit=5`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const analyses: AIAnalysisResult[] = data.analyses ?? [];
+      if (analyses.length > 0) {
+        set((state) => {
+          const merged = [...analyses];
+          for (const existing of state.aiHistory) {
+            if (!merged.some((m) => m.ts === existing.ts)) {
+              merged.push(existing);
+            }
+          }
+          merged.sort((a, b) => b.ts - a.ts);
+          return { aiHistory: merged.slice(0, 5) };
+        });
+      }
+    } catch {
+      // silently ignore
+    }
+  },
 
   sourceHealth: [],
   setSourceHealth: (health) => set({ sourceHealth: health }),

@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import time
 from collections import deque
 from typing import Any, Optional
@@ -75,7 +77,7 @@ class CoinState:
         self.candle_prices: list[float] = []
         self.candle_ts: list[int] = []
         self.oi_history: deque = deque(maxlen=720)
-        self.ai_history: deque[AIAnalysisResult] = deque(maxlen=5)
+        self.ai_history: deque[AIAnalysisResult] = deque(maxlen=50)
         self.last_ai_ts: float = 0
         self.multi_funding: Optional[MultiFundingRateData] = None
         self.ls_ratio: Optional[LongShortRatioData] = None
@@ -139,12 +141,53 @@ class Engine:
         self._poll_cfg = self._settings.coinglass.poll_intervals
         self._logged_keys: set[str] = set()
 
+        self._data_dir = os.path.join(os.path.dirname(__file__), "data")
+        self._ai_history_file = os.path.join(self._data_dir, "ai_history.json")
+
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy)
+
+        self._load_ai_history()
 
     @property
     def ai_available(self) -> bool:
         return self._analyzer.available
+
+    def _load_ai_history(self):
+        if not os.path.exists(self._ai_history_file):
+            logger.info("No AI history file found, starting fresh")
+            return
+        try:
+            with open(self._ai_history_file, "r", encoding="utf-8") as f:
+                raw: dict = json.load(f)
+            total = 0
+            for ccy, items in raw.items():
+                if ccy not in self._states:
+                    continue
+                for item in items:
+                    try:
+                        self._states[ccy].ai_history.append(AIAnalysisResult(**item))
+                        total += 1
+                    except Exception:
+                        continue
+            logger.info("AI history loaded from disk | entries=%d", total)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load AI history: %s", e)
+
+    def _save_ai_history(self):
+        try:
+            os.makedirs(self._data_dir, exist_ok=True)
+            data: dict[str, list] = {}
+            for ccy, state in self._states.items():
+                if state.ai_history:
+                    data[ccy] = [h.model_dump() for h in state.ai_history]
+            tmp_path = self._ai_history_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, self._ai_history_file)
+            logger.debug("AI history saved to disk | coins=%d", len(data))
+        except (OSError, TypeError) as e:
+            logger.warning("Failed to save AI history: %s", e)
 
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
@@ -300,6 +343,11 @@ class Engine:
             logger.info("Cache saved to disk before shutdown")
         except Exception:
             logger.error("Failed to save cache on shutdown", exc_info=True)
+        try:
+            self._save_ai_history()
+            logger.info("AI history saved to disk before shutdown")
+        except Exception:
+            logger.error("Failed to save AI history on shutdown", exc_info=True)
         await self._cg.close()
         logger.info("Engine stopped")
 
@@ -826,6 +874,7 @@ class Engine:
         result = await self._analyzer.analyze(snapshot)
         state.ai_history.append(result)
         state.last_ai_ts = time.time()
+        self._save_ai_history()
         return result
 
     @staticmethod

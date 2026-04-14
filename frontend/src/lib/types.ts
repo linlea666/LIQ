@@ -200,6 +200,12 @@ export interface SourceHealth {
   latency_ms: number;
 }
 
+export interface SignalSummary {
+  direction: "bullish" | "bearish" | "neutral";
+  confidence: "high" | "medium" | "low";
+  reason: string;
+}
+
 export interface AIAnalysisResult {
   coin: string;
   ts: number;
@@ -208,15 +214,13 @@ export interface AIAnalysisResult {
   key_levels: { type: string; price: string; strength: string; reason: string }[];
   stop_loss_suggestion: { raw: string };
   entry_zones: { direction: string; raw: string; details: string[] }[];
-  /** 第四节「狙击挂单计划」解析文本 */
   sniper_setup?: string;
-  /** 第五节「阶梯埋伏计划」解析文本 */
   ladder_plan_text?: string;
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];
   raw_text: string;
-  /** 发送给 AI 的完整 user prompt，用于验证数据是否传入 */
   user_prompt?: string;
+  signal_summary?: SignalSummary | null;
 }
 
 export interface RangeSignalData {

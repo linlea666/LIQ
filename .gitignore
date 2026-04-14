@@ -12,3 +12,5 @@ build/
 venv/
 backend/data/api_cache.json
 backend/data/api_cache.json.tmp
+backend/data/ai_history.json
+backend/data/ai_history.json.tmp

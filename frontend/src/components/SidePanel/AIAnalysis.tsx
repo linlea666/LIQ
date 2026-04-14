@@ -1,7 +1,28 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useMarketStore } from "@/stores/marketStore";
 import { formatTime } from "@/lib/format";
+
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand("copy");
+    return Promise.resolve();
+  } catch {
+    return Promise.reject(new Error("execCommand copy failed"));
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
 
 export default function AIAnalysis() {
   const aiPanelOpen = useMarketStore((s) => s.aiPanelOpen);
@@ -10,6 +31,15 @@ export default function AIAnalysis() {
   const aiLoading = useMarketStore((s) => s.aiLoading);
   const aiError = useMarketStore((s) => s.aiError);
   const aiHistory = useMarketStore((s) => s.aiHistory);
+  const coin = useMarketStore((s) => s.coin);
+  const setAIResult = useMarketStore((s) => s.setAIResult);
+  const loadAIHistory = useMarketStore((s) => s.loadAIHistory);
+
+  const [copyLabel, setCopyLabel] = useState("📋 复制分析文本");
+
+  useEffect(() => {
+    if (aiPanelOpen) loadAIHistory(coin);
+  }, [aiPanelOpen, coin, loadAIHistory]);
 
   if (!aiPanelOpen) return null;
 
@@ -111,22 +141,62 @@ export default function AIAnalysis() {
             )}
 
             <button
-              onClick={() => navigator.clipboard.writeText(aiResult.raw_text)}
+              onClick={() => {
+                copyToClipboard(aiResult.raw_text)
+                  .then(() => {
+                    setCopyLabel("✅ 已复制");
+                    setTimeout(() => setCopyLabel("📋 复制分析文本"), 1500);
+                  })
+                  .catch(() => {
+                    setCopyLabel("❌ 复制失败");
+                    setTimeout(() => setCopyLabel("📋 复制分析文本"), 1500);
+                  });
+              }}
               className="w-full py-2 text-xs text-slate-400 border border-slate-700 rounded hover:text-white hover:border-slate-500 transition"
             >
-              📋 复制分析文本
+              {copyLabel}
             </button>
           </div>
         )}
 
-        {aiHistory.length > 1 && !aiLoading && (
+        {aiHistory.length > 0 && !aiLoading && (
           <div className="mt-6 border-t border-slate-700 pt-3">
             <div className="text-xs text-slate-500 mb-2">历史分析 ({aiHistory.length})</div>
-            {aiHistory.slice(1).map((h, i) => (
-              <div key={i} className="text-xs text-slate-600 mb-1">
-                {formatTime(h.ts)} - ${h.price_at_analysis.toLocaleString()}
-              </div>
-            ))}
+            {aiHistory.map((h, i) => {
+              const isActive = aiResult?.ts === h.ts;
+              const sig = h.signal_summary;
+              const dirLabel =
+                sig?.direction === "bullish" ? "看多" :
+                sig?.direction === "bearish" ? "看空" :
+                sig?.direction === "neutral" ? "震荡" : "";
+              const confLabel =
+                sig?.confidence === "high" ? "高" :
+                sig?.confidence === "medium" ? "中" :
+                sig?.confidence === "low" ? "低" : "";
+              return (
+                <button
+                  key={h.ts + "-" + i}
+                  onClick={() => setAIResult(h)}
+                  className={`w-full text-left px-2 py-1.5 rounded text-xs mb-1 transition ${
+                    isActive
+                      ? "bg-blue-900/40 border border-blue-700 text-white"
+                      : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                  }`}
+                >
+                  <span className="font-medium">{formatTime(h.ts)}</span>
+                  <span className="ml-2">${h.price_at_analysis.toLocaleString()}</span>
+                  {dirLabel && (
+                    <span className={`ml-2 ${
+                      sig?.direction === "bullish" ? "text-green-400" :
+                      sig?.direction === "bearish" ? "text-red-400" :
+                      "text-yellow-400"
+                    }`}>
+                      {dirLabel}{confLabel ? `(${confLabel})` : ""}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
