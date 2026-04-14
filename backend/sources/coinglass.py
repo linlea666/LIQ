@@ -390,11 +390,13 @@ class CoinglassSource(DataSource):
     async def fetch_orderbook_aggregated_ask_bids(self, symbol: str,
                                                   interval: str = "5m",
                                                   limit: int = 200,
-                                                  range_pct: str = "1") -> Optional[list]:
+                                                  range_pct: str = "1",
+                                                  exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/futures/orderbook/aggregated-ask-bids-history", {
             "symbol": symbol, "interval": interval,
             "limit": str(limit), "range": range_pct,
-        })
+            "exchange_list": exchange_list,
+        }, cache_ttl=30)
 
     async def fetch_orderbook_heatmap(self, exchange: str, symbol: str,
                                       limit: int = 100) -> Optional[list]:

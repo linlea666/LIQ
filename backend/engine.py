@@ -287,12 +287,16 @@ class Engine:
                 self._poll_cfg.get("liquidation_heatmap", 600), stagger + 50,
             )),
             asyncio.create_task(self._poll_loop(
+                f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
+                self._poll_cfg.get("orderbook", 60), stagger + 55,
+            )),
+            asyncio.create_task(self._poll_loop(
                 f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                600, stagger + 55,
+                600, stagger + 60,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                3600, stagger + 60,
+                3600, stagger + 65,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, stagger,
@@ -737,8 +741,10 @@ class Engine:
             short_count = 0
             for item in data:
                 try:
-                    long_usd = float(item.get("longVolUsd", item.get("longLiqUsd", 0)))
-                    short_usd = float(item.get("shortVolUsd", item.get("shortLiqUsd", 0)))
+                    long_usd = float(item.get("aggregated_long_liquidation_usd",
+                                     item.get("longVolUsd", item.get("longLiqUsd", 0))))
+                    short_usd = float(item.get("aggregated_short_liquidation_usd",
+                                      item.get("shortVolUsd", item.get("shortLiqUsd", 0))))
                     lc = int(item.get("longCount", item.get("longLiqCount", 0)) or 0)
                     sc = int(item.get("shortCount", item.get("shortLiqCount", 0)) or 0)
                     points.append(LiqHistoryPoint(
@@ -1042,7 +1048,7 @@ class Engine:
         state = self._states[coin.ccy]
         try:
             last = data[-1]
-            basis_pct = float(last.get("basisRate", last.get("basis", 0))) * 100
+            basis_pct = float(last.get("close_basis", last.get("basisRate", last.get("basis", 0))))
             price = state.ticker.last if state.ticker else 0
             interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
             state.basis = BasisData(
@@ -1051,6 +1057,27 @@ class Engine:
                 index_price=price * (1 - basis_pct / 200),
                 basis_pct=round(basis_pct, 4),
                 interpretation=interp,
+            )
+        except (ValueError, KeyError, IndexError):
+            pass
+
+    async def _poll_orderbook_depth(self, coin: CoinConfig):
+        """获取订单簿深度聚合数据"""
+        state = self._states[coin.ccy]
+        data = await self._cg.fetch_orderbook_aggregated_ask_bids(
+            coin.symbol_cg, interval="5m", limit=12,
+        )
+        if not data or not isinstance(data, list):
+            return
+        try:
+            last = data[-1]
+            bid_usd = float(last.get("aggregated_bids_usd", 0))
+            ask_usd = float(last.get("aggregated_asks_usd", 0))
+            spread = (ask_usd - bid_usd) / ((ask_usd + bid_usd) / 2) * 100 if (ask_usd + bid_usd) > 0 else 0
+            state.orderbook = OrderBookAnalysis(
+                coin=coin.ccy, ts=int(time.time()),
+                bid_total_usd=bid_usd, ask_total_usd=ask_usd,
+                spread_pct=round(spread, 2),
             )
         except (ValueError, KeyError, IndexError):
             pass
@@ -1335,7 +1362,8 @@ class Engine:
                 net_3d = 0.0
                 for item in recent:
                     try:
-                        total_net = float(item.get("total_netflow", item.get("totalNetflow", item.get("netflow", 0))))
+                        total_net = float(item.get("flow_usd",
+                                        item.get("total_netflow", item.get("totalNetflow", item.get("netflow", 0)))))
                         days.append(ETFFlowDay(
                             date=item.get("date", ""),
                             total_net=total_net,
