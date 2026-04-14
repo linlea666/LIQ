@@ -20,6 +20,7 @@ from models.flow import (
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
     MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
 )
+from models.key_level import KeyLevel, KeyLevelSnapshot
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationEvent, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, OrderBookLevel, OrderBookSnapshot, TickerData, VolumeProfileData
@@ -37,6 +38,7 @@ from processors.orderbook import analyze_orderbook
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_atr, calc_volume_profile
 from processors.cycle import calculate_cycle_position
+from processors.key_level_tracker import update_key_levels
 from processors.range_signal import calculate_range_signal
 from sources.bbx import create_bbx_source, create_bbx_extended_source
 from sources.binance_rest import create_binance_rest_source
@@ -83,6 +85,9 @@ class CoinState:
         self.candles_daily: list = []
         self.candles_weekly: list = []
         self.range_signal: Optional[RangeSignalData] = None
+        # Phase 10: 关键位状态机
+        self.key_levels: list[KeyLevel] = []
+        self.key_level_snapshot: Optional[KeyLevelSnapshot] = None
         # Sweep detection: 前次快照 + 近 1h 扫取事件
         self._prev_liq_map_24h: Optional[LiquidationMap] = None
         self._prev_price_at_liq_poll: float = 0
@@ -746,6 +751,44 @@ class Engine:
         if state.candles_daily:
             self._recompute_range_signal(ccy)
 
+        # 关键位状态机（依赖 levels + range_signal + liq_map + sweep，在它们之后计算）
+        self._recompute_key_levels(ccy)
+
+    def _recompute_key_levels(self, ccy: str):
+        """更新关键位状态机。"""
+        state = self._states[ccy]
+        price = state.ticker.last if state.ticker else 0
+        if price <= 0:
+            return
+
+        cutoff = int(time.time()) - 3600
+        recent_sweeps = [
+            e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
+        ]
+
+        range_upper = None
+        range_lower = None
+        if state.range_signal:
+            range_upper = state.range_signal.range_upper
+            range_lower = state.range_signal.range_lower
+
+        kl_cfg = self._settings.processors.key_level_tracker
+
+        snapshot = update_key_levels(
+            prev_levels=state.key_levels,
+            current_price=price,
+            levels=state.levels,
+            liq_map=state.liq_maps.get("24h"),
+            range_upper=range_upper,
+            range_lower=range_lower,
+            sweep_events_1h=recent_sweeps,
+            atr=state.atr,
+            cfg=kl_cfg if kl_cfg else None,
+        )
+
+        state.key_levels = snapshot.levels
+        state.key_level_snapshot = snapshot
+
     # ── 推送循环 ──
 
     async def _push_loop(self, coin: CoinConfig):
@@ -802,6 +845,8 @@ class Engine:
             payload["ladder_plans"] = [lp.model_dump() for lp in state.levels.ladder_plans]
         if state.range_signal:
             payload["range_signal"] = state.range_signal.model_dump()
+        if state.key_level_snapshot and state.key_level_snapshot.levels:
+            payload["key_levels"] = state.key_level_snapshot.model_dump()
 
         await push_to_coin(coin.ccy, "market_update", payload)
 
@@ -912,6 +957,7 @@ class Engine:
             cycle_position=state.cycle_position,
             liq_sweep_events=recent_sweeps,
             range_signal=state.range_signal,
+            key_level_snapshot=state.key_level_snapshot,
         )
 
         result = await self._analyzer.analyze(snapshot)

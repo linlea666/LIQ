@@ -183,6 +183,9 @@ class AISnapshot(BaseModel):
     # Phase 9: 均线箱体信号 (Range Signal)
     range_signal: Optional[dict] = None
 
+    # Phase 10: 关键位状态机 (Key Level State Machine)
+    key_levels: Optional[dict] = None
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

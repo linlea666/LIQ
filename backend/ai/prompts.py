@@ -51,6 +51,17 @@ def build_system_prompt() -> str:
 - **与CPS联动**：CPS 4-7（震荡区）时箱体策略权重上调；CPS极端值时箱体可能被突破，须降权
 - **引用规则**：§一须引用箱体位置（上沿/下沿/中间）；§二须将MA60/MA120纳入关键价位表；有A级信号时§四须评估是否与引擎方案共振
 
+### 关键位状态机（§9g 有数据时启用）
+- **核心逻辑**：关键位（支撑/阻力）经历完整生命周期：IDLE → APPROACHING → TESTING → SWEPT/BOUNCED → BROKEN → FLIPPED。不同状态对应不同策略
+- **SWEPT 状态（A级信号）**：流动性已被扫取 → "空头/多头弹药耗尽"逻辑，这是最高置信做反向的入场时机。§四狙击方案须优先采纳 SWEPT 状态的信号
+- **FLIPPED 状态（A级信号）**：支撑被跌破后价格回踩该位被拒（原支撑变阻力）→ 经典 S/R 翻转做空；反之亦然。§四须评估翻转信号
+- **BOUNCED 状态（B级信号）**：关键位测试后反弹确认 → 常规支撑/阻力反弹策略
+- **TESTING/APPROACHING 状态**：等待确认，§一须提示"价格正在测试/接近关键位"
+- **级联风险(cascade_risk)**：>0.7 = 突破后可能瀑布式穿透多层清算簇，止损须设在最外层之外；§四/§五方案如涉及高 cascade_risk 关键位，须附加瀑布风险警告
+- **与箱体联动**：range_box 上下沿若也是关键位，状态机信号权重上调（多源共振）
+- **与CPS联动**：CPS 4-7（震荡区）时关键位反弹策略权重上调；CPS 极端值时关键位突破策略权重上调
+- **§四关键位优先**：若关键位状态机输出 SWEPT/FLIPPED 信号 且 与引擎狙击方案方向一致，该方案置信度提升至A级
+
 ### 宏观-微观联动（仅当用户提示中该项有数值时引用；无则写「数据未提供」勿编造）
 - DXY 单日波动较大 → 风险资产承压/支撑需结合当日数据
 - 纳斯达克/标普走弱 → risk-off，谨慎追高
@@ -589,6 +600,54 @@ def build_user_prompt(snapshot: dict) -> str:
         else:
             lines.append(f"  信号: 无（价格在箱体中间，不适合基于箱体逻辑开单）")
 
+    # ── §9g 关键位状态机 ──
+    kl = snapshot.get("key_levels")
+    has_kl = kl is not None and len(kl.get("levels", [])) > 0
+    if has_kl:
+        lines.append("")
+        lines.append("### 9g. 关键位状态机 [实时·生命周期追踪]")
+        lines.append(f"活跃关键位: {kl.get('active_count', 0)}个")
+        lines.append("")
+        lines.append("| 价位 | 类型 | 状态 | 距当前 | 测试次数 | 扫取量 | 级联风险 | 来源 |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for lv in kl.get("levels", [])[:8]:
+            side_cn = "支撑" if lv.get("side") == "support" else "阻力"
+            state_cn = {
+                "idle": "待观察", "approaching": "正接近",
+                "testing": "正测试", "swept": "已扫取",
+                "bounced": "已反弹", "broken": "已突破",
+                "flipped": "已翻转",
+            }.get(lv.get("state", ""), lv.get("state", ""))
+            cascade_str = f"{lv.get('cascade_risk', 0):.0%}" if lv.get("cascade_risk", 0) > 0 else "低"
+            sweep_str = f"${lv.get('sweep_usd', 0)/1e6:.1f}M" if lv.get("sweep_usd", 0) > 0 else "-"
+            sources = ", ".join(lv.get("sources", [])[:3])
+            lines.append(
+                f"| ${lv.get('price', 0):,.0f} | {side_cn} | {state_cn} | "
+                f"{lv.get('distance_pct', 0):+.2f}% | {lv.get('test_count', 0)} | "
+                f"{sweep_str} | {cascade_str} | {sources} |"
+            )
+
+        kl_signals = kl.get("signals", [])
+        if kl_signals:
+            lines.append("")
+            lines.append("关键位信号:")
+            for sig in kl_signals:
+                action_cn = {
+                    "snipe_long": "狙击做多", "snipe_short": "狙击做空",
+                    "flip_long": "翻转做多", "flip_short": "翻转做空",
+                    "wait_sweep": "等待扫取", "wait_approach": "等待接近",
+                }.get(sig.get("action", ""), sig.get("action", ""))
+                entry_str = f"入场${sig['entry_price']:,.0f}" if sig.get("entry_price") else ""
+                sl_str = f"止损${sig['stop_loss']:,.0f}" if sig.get("stop_loss") else ""
+                rr_str = f"R:R={sig['rr_ratio']:.1f}" if sig.get("rr_ratio") else ""
+                parts = [p for p in [entry_str, sl_str, rr_str] if p]
+                lines.append(
+                    f"  {sig.get('confidence', 'C')}级 {action_cn} @${sig.get('level_price', 0):,.0f}: "
+                    f"{sig.get('reason', '')} {'| ' + ' '.join(parts) if parts else ''}"
+                )
+                for w in sig.get("warnings", []):
+                    lines.append(f"    ⚠ {w}")
+
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([
@@ -598,6 +657,7 @@ def build_user_prompt(snapshot: dict) -> str:
         f"- 传统外盘(DXY/纳指/标普/黄金): {'已提供部分或全部数值' if has_trad else '本条目中未解析到有效数值（若恐惧贪婪已提供，不得写宏观完全缺失）'}",
         "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
         f"- 均线箱体: " + (f"已提供(信号={rs.get('signal_grade', '无')}级)" if has_range else "未提供"),
+        f"- 关键位状态机: " + (f"已提供(活跃{kl.get('active_count', 0)}个)" if has_kl else "未提供"),
     ])
 
     lines.extend([
@@ -674,5 +734,6 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.append("请基于以上数据输出，**必须包含八个章节**，且第四节「狙击挂单计划」和第五节「阶梯埋伏计划」均为必答。")
     cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§五须评估CPS与阶梯方向一致性" if has_cps else ""
     range_note = " 6) §9f有数据时，§一须引用箱体位置，§二须纳入MA关键价位，有A级信号时§四须评估共振" if has_range else ""
-    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}{}".format(min_rr, cps_note, range_note))
+    kl_note = " 7) §9g有信号时，§四须优先评估关键位SWEPT/FLIPPED信号与引擎方案的共振，高cascade_risk须警告" if has_kl else ""
+    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}{}{}".format(min_rr, cps_note, range_note, kl_note))
     return "\n".join(lines)

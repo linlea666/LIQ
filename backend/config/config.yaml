@@ -112,6 +112,15 @@ processors:
     wick_min_atr_mult: 1.2       # 影线长度 ≥ ATR*1.2 才标记为 unfilled wick
     candles_daily_poll_sec: 300  # 日线K线轮询间隔(秒)
     candles_weekly_poll_sec: 900 # 周线K线轮询间隔(秒)
+  key_level_tracker:
+    approach_pct: 2.0         # 距关键位 <2% → APPROACHING
+    test_pct: 0.5             # 距关键位 <0.5% → TESTING
+    bounce_pct: 1.0           # 价格远离 >1% → BOUNCED 确认
+    break_confirm_sec: 300    # 突破后持续 5min → BROKEN 确认
+    break_depth_pct: 0.3      # 突破深度 >0.3% 才算真突破
+    flip_zone_pct: 0.5        # 回踩到被破位 ±0.5% → 翻转区
+    max_tracked_levels: 8     # 每币种最多追踪 8 个关键位
+    level_expire_sec: 86400   # 24h 无活动的 IDLE 位自动清除
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

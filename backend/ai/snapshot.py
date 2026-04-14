@@ -10,6 +10,7 @@ from models.flow import (
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
     MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
 )
+from models.key_level import KeyLevelSnapshot
 from models.levels import LevelAnalysis
 from models.liquidation import LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
@@ -67,6 +68,7 @@ def build_ai_snapshot(
     cycle_position: Optional[CyclePositionData] = None,
     liq_sweep_events: list[dict] | None = None,
     range_signal: Optional[RangeSignalData] = None,
+    key_level_snapshot: Optional[KeyLevelSnapshot] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -290,6 +292,7 @@ def build_ai_snapshot(
         ),
         liq_sweep_events=liq_sweep_events or [],
         range_signal=range_signal.model_dump() if range_signal else None,
+        key_levels=key_level_snapshot.model_dump() if key_level_snapshot else None,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,

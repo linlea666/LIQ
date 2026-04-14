@@ -6,6 +6,7 @@ import CVDOIChart from "./CVDOIChart";
 import WaterfallChart from "./WaterfallChart";
 import MarketSummary from "./MarketSummary";
 import RangeSignalView from "./RangeSignalView";
+import KeyLevelView from "./KeyLevelView";
 
 const PRO_TABS = [
   { id: "liquidation", label: "清算地图" },
@@ -13,11 +14,13 @@ const PRO_TABS = [
   { id: "waterfall", label: "数据总览" },
   { id: "summary", label: "市场总结" },
   { id: "range_signal", label: "箱体信号" },
+  { id: "key_level", label: "关键位" },
 ] as const;
 
 const BEGINNER_TABS = [
   { id: "summary", label: "市场总结" },
   { id: "range_signal", label: "箱体信号" },
+  { id: "key_level", label: "关键位" },
   { id: "liquidation", label: "清算地图" },
 ] as const;
 
@@ -53,6 +56,7 @@ export default function TabContainer() {
         {validTab === "waterfall" && <WaterfallChart />}
         {validTab === "summary" && <MarketSummary />}
         {validTab === "range_signal" && <RangeSignalView />}
+        {validTab === "key_level" && <KeyLevelView />}
       </div>
     </div>
   );

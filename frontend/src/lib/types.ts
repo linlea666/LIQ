@@ -242,6 +242,43 @@ export interface RangeSignalData {
   cps_aligned: boolean;
 }
 
+export interface KeyLevel {
+  price: number;
+  side: "support" | "resistance";
+  sources: string[];
+  strength: number;
+  state: "idle" | "approaching" | "testing" | "swept" | "bounced" | "broken" | "flipped";
+  state_ts: number;
+  prev_state: string;
+  test_count: number;
+  sweep_usd: number;
+  cascade_risk: number;
+  cascade_layers: number;
+  cascade_total_usd: number;
+  distance_pct: number;
+}
+
+export interface KeyLevelSignal {
+  level_price: number;
+  side: string;
+  state: string;
+  action: string;
+  confidence: "A" | "B" | "C";
+  entry_price?: number;
+  stop_loss?: number;
+  tp1?: number;
+  rr_ratio?: number;
+  reason: string;
+  warnings: string[];
+}
+
+export interface KeyLevelSnapshot {
+  ts: number;
+  levels: KeyLevel[];
+  signals: KeyLevelSignal[];
+  active_count: number;
+}
+
 export interface MarketUpdate {
   coin: string;
   ts: number;
@@ -261,4 +298,5 @@ export interface MarketUpdate {
   orderbook?: OrderBookAnalysis;
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
+  key_levels?: KeyLevelSnapshot;
 }
