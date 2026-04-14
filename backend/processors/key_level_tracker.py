@@ -17,6 +17,8 @@ from models.liquidation import LiquidationMap
 
 logger = logging.getLogger(__name__)
 
+_SIDE_CN = {"support": "支撑", "resistance": "阻力"}
+
 _DEFAULT_CFG: dict = {
     "approach_pct": 2.0,
     "test_pct": 0.5,
@@ -26,6 +28,9 @@ _DEFAULT_CFG: dict = {
     "flip_zone_pct": 0.5,
     "max_tracked_levels": 8,
     "level_expire_sec": 86400,
+    "sweep_proximity_pct": 2.0,
+    "cascade_weight_cap_m": 20.0,
+    "cascade_norm": 50.0,
 }
 
 
@@ -62,7 +67,7 @@ def update_key_levels(
     # ── 4. 级联风险计算 ──
     if liq_map:
         for lv in tracked:
-            _calc_cascade_risk(lv, liq_map, current_price)
+            _calc_cascade_risk(lv, liq_map, current_price, cfg)
 
     # ── 5. 生成信号 ──
     signals = []
@@ -225,8 +230,8 @@ def _transition(
             if lv.lowest_wick is None or price > lv.lowest_wick:
                 lv.lowest_wick = price
 
-        # 检查 sweep
-        swept = _check_sweep(lv, sweep_events)
+        # 检查 sweep（需价格邻近）
+        swept = _check_sweep(lv, sweep_events, cfg.get("sweep_proximity_pct", 2.0))
         if swept:
             lv.sweep_usd = swept
             _set_state(lv, "swept", now)
@@ -275,15 +280,15 @@ def _transition(
             _set_state(lv, "idle", now)
 
     elif lv.state == "broken":
-        # 突破后检测回踩（S/R 翻转）
-        # 支撑被跌破：价格重新回升到该位附近 → flipped
-        # 阻力被突破：价格回落到该位附近 → flipped
+        # 突破后检测回踩（经典 S/R 翻转）
+        # 支撑跌破后：价格从下方接近该位（回踩阻力）→ flipped
+        # 阻力突破后：价格从上方接近该位（回踩支撑）→ flipped
         if dist_abs <= flip_zone_pct:
-            flipped_side = (
+            on_broken_side = (
                 (is_support and price < lv.price) or
                 (not is_support and price > lv.price)
             )
-            if not flipped_side:
+            if on_broken_side:
                 _set_state(lv, "flipped", now)
                 lv.side = "resistance" if is_support else "support"
 
@@ -310,25 +315,31 @@ def _is_broken(lv: KeyLevel, price: float, depth_pct: float) -> bool:
         return price > lv.price * (1 + depth_pct / 100)
 
 
-def _check_sweep(lv: KeyLevel, sweep_events: list[dict]) -> float:
-    """检查最近 1h sweep 事件是否覆盖了该关键位。"""
+def _check_sweep(lv: KeyLevel, sweep_events: list[dict], proximity_pct: float = 2.0) -> float:
+    """检查最近 1h sweep 事件是否覆盖了该关键位（需价格邻近）。"""
     total = 0.0
+    tol = lv.price * proximity_pct / 100
     for ev in sweep_events:
         ev_side = ev.get("side", "")
         ev_usd = ev.get("usd", 0)
-        if lv.side == "support" and ev_side == "below" and ev_usd > 0:
+        if ev_usd <= 0:
+            continue
+        ev_from = ev.get("price_from", 0)
+        ev_to = ev.get("price_to", 0)
+        if ev_from > 0 and ev_to > 0:
+            if ev_to < lv.price - tol or ev_from > lv.price + tol:
+                continue
+        if lv.side == "support" and ev_side == "below":
             total += ev_usd
-        elif lv.side == "resistance" and ev_side == "above" and ev_usd > 0:
+        elif lv.side == "resistance" and ev_side == "above":
             total += ev_usd
     return total
 
 
 # ── 级联风险计算 ──
 
-def _calc_cascade_risk(lv: KeyLevel, liq_map: LiquidationMap, current_price: float):
+def _calc_cascade_risk(lv: KeyLevel, liq_map: LiquidationMap, current_price: float, cfg: dict):
     """计算如果该关键位被突破后的级联穿透风险。"""
-    # 对支撑：看下方还有多少层清算簇、间距多密
-    # 对阻力：看上方还有多少层清算簇
     if lv.side == "support":
         clusters = [c for c in liq_map.clusters_below if c.price_center < lv.price]
         clusters.sort(key=lambda c: c.price_center, reverse=True)
@@ -345,19 +356,19 @@ def _calc_cascade_risk(lv: KeyLevel, liq_map: LiquidationMap, current_price: flo
     lv.cascade_layers = len(clusters)
     lv.cascade_total_usd = sum(c.total_usd for c in clusters)
 
-    # 风险 = 簇越密、量越大 → 级联概率越高
-    # 用相邻簇间距的倒数加权
+    weight_cap = cfg.get("cascade_weight_cap_m", 20.0)
+    norm = cfg.get("cascade_norm", 50.0)
+
     risk_score = 0.0
     prev_price = lv.price
-    for c in clusters[:5]:  # 最多看 5 层
+    for c in clusters[:5]:
         gap_pct = abs(c.price_center - prev_price) / max(current_price, 1) * 100
-        gap_pct = max(gap_pct, 0.1)  # 防除零
-        weight = c.total_usd / 1e6  # 以百万为单位
+        gap_pct = max(gap_pct, 0.1)
+        weight = min(c.total_usd / 1e6, weight_cap)
         risk_score += weight / gap_pct
         prev_price = c.price_center
 
-    # 归一化到 0-1（经验值：risk_score > 10 = 极高风险）
-    lv.cascade_risk = round(min(1.0, risk_score / 10.0), 2)
+    lv.cascade_risk = round(min(1.0, risk_score / norm), 2)
 
 
 # ── 信号生成 ──
@@ -369,10 +380,13 @@ def _generate_signal(
     cfg: dict,
 ) -> KeyLevelSignal | None:
     """根据关键位状态生成交易信号。"""
-    if lv.state in ("idle",):
+    if lv.state == "idle":
+        return None
+    if atr <= 0:
         return None
 
     is_support = lv.side == "support"
+    side_cn = _SIDE_CN.get(lv.side, lv.side)
     base = KeyLevelSignal(
         level_price=lv.price,
         side=lv.side,
@@ -384,27 +398,29 @@ def _generate_signal(
     if lv.state == "approaching":
         base.action = "wait_approach"
         direction = "做多" if is_support else "做空"
-        base.reason = f"价格正在接近{lv.side}位${lv.price:,.0f}，准备关注{direction}机会"
+        base.reason = f"价格正在接近{side_cn}位${lv.price:,.0f}，准备关注{direction}机会"
         base.confidence = "C"
         return base
 
     if lv.state == "testing":
         base.action = "wait_sweep"
-        base.reason = f"价格正在测试${lv.price:,.0f}，等待流动性扫取确认后入场"
+        wick_info = ""
+        if lv.lowest_wick is not None and abs(lv.lowest_wick - lv.price) > atr * 0.05:
+            wick_info = f"，已触及${lv.lowest_wick:,.0f}"
+        base.reason = f"价格正在测试{side_cn}位${lv.price:,.0f}{wick_info}，等待流动性扫取确认后入场"
         base.confidence = "C"
         if lv.cascade_risk > 0.7:
             base.warnings.append(f"级联风险{lv.cascade_risk:.0%}，突破后可能瀑布")
         return base
 
     if lv.state == "swept":
-        # A 级信号：扫完再接
         if is_support:
             entry = lv.price + atr * 0.15
             sl = lv.price - atr * 1.5
             tp1 = price + atr * 3 if price > 0 else entry + atr * 3
             base.action = "snipe_long"
             base.reason = (
-                f"支撑${lv.price:,.0f}下方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}下方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
                 f"空头弹药耗尽 → A级做多"
             )
         else:
@@ -413,7 +429,7 @@ def _generate_signal(
             tp1 = price - atr * 3 if price > 0 else entry - atr * 3
             base.action = "snipe_short"
             base.reason = (
-                f"阻力${lv.price:,.0f}上方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}上方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
                 f"多头弹药耗尽 → A级做空"
             )
         base.confidence = "A"
@@ -428,19 +444,32 @@ def _generate_signal(
         return base
 
     if lv.state == "bounced":
+        has_sweep = lv.sweep_usd > 0
         if is_support:
             entry = lv.price + atr * 0.2
             sl = lv.price - atr * 1.2
             tp1 = price + atr * 2.5 if price > 0 else entry + atr * 2.5
             base.action = "snipe_long"
-            base.reason = f"支撑${lv.price:,.0f}反弹确认(第{lv.test_count}次测试) → B级做多"
+            if has_sweep:
+                base.reason = (
+                    f"{side_cn}${lv.price:,.0f}流动性扫取后反弹确认"
+                    f"(${lv.sweep_usd/1e6:.1f}M) → A级做多"
+                )
+            else:
+                base.reason = f"{side_cn}${lv.price:,.0f}反弹确认(第{lv.test_count}次测试) → B级做多"
         else:
             entry = lv.price - atr * 0.2
             sl = lv.price + atr * 1.2
             tp1 = price - atr * 2.5 if price > 0 else entry - atr * 2.5
             base.action = "snipe_short"
-            base.reason = f"阻力${lv.price:,.0f}受阻确认(第{lv.test_count}次测试) → B级做空"
-        base.confidence = "B"
+            if has_sweep:
+                base.reason = (
+                    f"{side_cn}${lv.price:,.0f}流动性扫取后受阻确认"
+                    f"(${lv.sweep_usd/1e6:.1f}M) → A级做空"
+                )
+            else:
+                base.reason = f"{side_cn}${lv.price:,.0f}受阻确认(第{lv.test_count}次测试) → B级做空"
+        base.confidence = "A" if has_sweep else "B"
         base.entry_price = round(entry, 2)
         base.stop_loss = round(sl, 2)
         base.tp1 = round(tp1, 2)
@@ -450,19 +479,14 @@ def _generate_signal(
         return base
 
     if lv.state == "broken":
-        # 等回踩翻转
-        orig_side = "支撑" if is_support else "阻力"
         base.action = "wait_approach"
-        base.reason = f"{orig_side}${lv.price:,.0f}已被突破，等待回踩确认S/R翻转"
+        base.reason = f"{side_cn}${lv.price:,.0f}已被突破，等待回踩确认S/R翻转"
         base.confidence = "C"
         base.warnings.append("突破后不要追单，等回踩")
         return base
 
     if lv.state == "flipped":
-        # S/R 翻转信号
-        # 原来是支撑被跌破 → 现在是阻力 → 做空
-        # 原来是阻力被突破 → 现在是支撑 → 做多
-        if lv.side == "resistance":  # 原支撑翻为阻力
+        if lv.side == "resistance":
             entry = lv.price - atr * 0.1
             sl = lv.price + atr * 1.2
             tp1 = entry - atr * 3
@@ -470,7 +494,7 @@ def _generate_signal(
             base.reason = (
                 f"原支撑${lv.price:,.0f}已翻转为阻力，价格回踩被拒 → A级翻转做空"
             )
-        else:  # 原阻力翻为支撑
+        else:
             entry = lv.price + atr * 0.1
             sl = lv.price - atr * 1.2
             tp1 = entry + atr * 3

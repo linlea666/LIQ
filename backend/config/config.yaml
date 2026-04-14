@@ -121,6 +121,9 @@ processors:
     flip_zone_pct: 0.5        # 回踩到被破位 ±0.5% → 翻转区
     max_tracked_levels: 8     # 每币种最多追踪 8 个关键位
     level_expire_sec: 86400   # 24h 无活动的 IDLE 位自动清除
+    sweep_proximity_pct: 2.0  # sweep 事件需在关键位 ±2% 内才计入
+    cascade_weight_cap_m: 20  # 单簇权重上限（百万USD），防巨簇垄断
+    cascade_norm: 50          # 级联风险归一化分母（越大 → 越难达到100%）
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

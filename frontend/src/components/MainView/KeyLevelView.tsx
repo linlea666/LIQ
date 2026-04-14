@@ -2,7 +2,7 @@
 
 import { useMarketStore } from "@/stores/marketStore";
 import { formatPrice } from "@/lib/format";
-import type { KeyLevel, KeyLevelSignal } from "@/lib/types";
+import type { KeyLevel, KeyLevelSignal, KeyLevelSnapshot } from "@/lib/types";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -43,11 +43,83 @@ export default function KeyLevelView() {
 
   return (
     <div className="space-y-4 max-w-4xl">
+      <PlainSummary kl={kl} price={price} coin={coin} />
       <Summary kl={kl} price={price} coin={coin} />
       {activeSignals.length > 0 && (
         <SignalCards signals={activeSignals} coin={coin} />
       )}
       <LevelTable levels={kl.levels} price={price} coin={coin} />
+    </div>
+  );
+}
+
+function PlainSummary({
+  kl,
+  price,
+  coin,
+}: {
+  kl: KeyLevelSnapshot;
+  price: number;
+  coin: string;
+}) {
+  const aSignals = kl.signals.filter((s) => s.confidence === "A");
+  const bSignals = kl.signals.filter((s) => s.confidence === "B");
+  const activeLevels = kl.levels.filter((l) => l.state !== "idle");
+  const nearSupport = activeLevels
+    .filter((l) => l.side === "support")
+    .sort((a, b) => b.price - a.price)[0];
+  const nearResist = activeLevels
+    .filter((l) => l.side === "resistance")
+    .sort((a, b) => a.price - b.price)[0];
+  const highCascade = kl.levels.filter((l) => l.cascade_risk > 0.7);
+
+  let title = "";
+  let desc = "";
+  let borderColor = "border-slate-600";
+
+  if (aSignals.length > 0) {
+    const s = aSignals[0];
+    const isLong = s.action.includes("long");
+    title = isLong ? "发现做多机会" : "发现做空机会";
+    borderColor = isLong ? "border-green-500/50" : "border-red-500/50";
+    const slStr = s.stop_loss ? `，止损设在${formatPrice(s.stop_loss, coin)}` : "";
+    desc = `${formatPrice(s.level_price, coin)}处的关键位出现了高置信信号。简单说：这个价位的流动性已经被"洗"过了，${isLong ? "空头弹药消耗殆尽，反弹概率较高" : "多头弹药消耗殆尽，回落概率较高"}。如果打算${isLong ? "做多" : "做空"}，可以关注这个位置${slStr}。`;
+  } else if (bSignals.length > 0) {
+    title = "初步信号，等待确认";
+    borderColor = "border-yellow-500/40";
+    desc = `${formatPrice(bSignals[0].level_price, coin)}附近出现了反弹/受阻迹象，但还没有流动性扫取确认（B级信号），建议再等等看，不急着入场。`;
+  } else if (nearSupport || nearResist) {
+    title = "正在接近关键位，留意机会";
+    borderColor = "border-blue-500/40";
+    const parts: string[] = [];
+    if (nearResist) {
+      const stateText = nearResist.state === "testing" ? "正在被测试" : "正在靠近";
+      parts.push(`上方${formatPrice(nearResist.price, coin)}有一道阻力${stateText}`);
+    }
+    if (nearSupport) {
+      const stateText = nearSupport.state === "testing" ? "正在被测试" : "正在靠近";
+      parts.push(`下方${formatPrice(nearSupport.price, coin)}有一道支撑${stateText}`);
+    }
+    desc = `价格${parts.join("，")}。等价格到达后观察它的反应——是被弹回来还是直接穿过去——再做决定。`;
+  } else {
+    title = "暂无明确信号，耐心等待";
+    desc = `当前价格${formatPrice(price, coin)}离所有关键支撑和阻力位都比较远，这种时候不适合盲目开单。等价格走到关键位附近再找机会，好的交易都是等出来的。`;
+  }
+
+  return (
+    <div className={`bg-slate-800/60 border ${borderColor} rounded-lg p-4`}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
+          白话解读
+        </span>
+        <span className="text-sm font-semibold text-slate-200">{title}</span>
+      </div>
+      <p className="text-sm text-slate-300 leading-relaxed">{desc}</p>
+      {highCascade.length > 0 && (
+        <p className="text-xs text-orange-400 mt-2">
+          注意：有{highCascade.length}个关键位存在级联风险，一旦被突破可能引发连锁清算（瀑布行情），止损一定要设好。
+        </p>
+      )}
     </div>
   );
 }
