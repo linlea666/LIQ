@@ -9,8 +9,9 @@ import type { LiquidationMap } from "@/lib/types";
 export default function MarketSummary() {
   const coin = useMarketStore((s) => s.coin);
   const data = useMarketStore((s) => s.data[s.coin]);
-  const [liq24h, setLiq24h] = useState<LiquidationMap | null>(null); // "1d" cycle
+  const [liq24h, setLiq24h] = useState<LiquidationMap | null>(null);
   const [liq7d, setLiq7d] = useState<LiquidationMap | null>(null);
+  const [liq30d, setLiq30d] = useState<LiquidationMap | null>(null);
 
   const ticker = data?.ticker;
   const funding = data?.funding;
@@ -22,18 +23,20 @@ export default function MarketSummary() {
   const cvd = data?.cvd_contract;
 
   useEffect(() => {
-    const fetchBoth = async () => {
+    const fetchAll = async () => {
       try {
-        const [r24, r7] = await Promise.all([
+        const [r24, r7, r30] = await Promise.all([
           fetch(`${API_BASE}/api/liquidation/${coin}?cycle=1d`),
           fetch(`${API_BASE}/api/liquidation/${coin}?cycle=7d`),
+          fetch(`${API_BASE}/api/liquidation/${coin}?cycle=30d`),
         ]);
         if (r24.ok) setLiq24h(await r24.json());
         if (r7.ok) setLiq7d(await r7.json());
+        if (r30.ok) setLiq30d(await r30.json());
       } catch { /* silent */ }
     };
-    fetchBoth();
-    const timer = setInterval(fetchBoth, 30000);
+    fetchAll();
+    const timer = setInterval(fetchAll, 30000);
     return () => clearInterval(timer);
   }, [coin]);
 
@@ -102,6 +105,12 @@ export default function MarketSummary() {
               <ClusterList clusters={liq7d.clusters_above} coin={coin} label="7d" />
             </>
           )}
+          {liq30d && liq30d.clusters_above.length > 0 && (
+            <>
+              <div className="border-t border-slate-700 my-2" />
+              <ClusterList clusters={liq30d.clusters_above} coin={coin} label="30d" />
+            </>
+          )}
         </SummaryCard>
 
         <SummaryCard>
@@ -112,6 +121,12 @@ export default function MarketSummary() {
             <>
               <div className="border-t border-slate-700 my-2" />
               <ClusterList clusters={liq7d.clusters_below} coin={coin} label="7d" />
+            </>
+          )}
+          {liq30d && liq30d.clusters_below.length > 0 && (
+            <>
+              <div className="border-t border-slate-700 my-2" />
+              <ClusterList clusters={liq30d.clusters_below} coin={coin} label="30d" />
             </>
           )}
         </SummaryCard>

@@ -175,7 +175,7 @@ class Engine:
             asyncio.create_task(self._grace_check_loop()),
         ]
 
-        # 全局层 —— stagger 保证启动时分散请求
+        # 全局层 —— stagger 2s 间隔，关键数据优先，30s 内全部首轮完成
         btc_coin = self._settings.get_coin("BTC")
         tasks.extend([
             asyncio.create_task(self._poll_loop(
@@ -184,47 +184,47 @@ class Engine:
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_fr", self._poll_funding_all, btc_coin,
-                self._poll_cfg.get("funding_rate", 60), 8,
+                self._poll_cfg.get("funding_rate", 60), 2,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_global_liq", self._poll_global_liq, btc_coin,
-                self._poll_cfg.get("liquidation_map", 60), 16,
+                self._poll_cfg.get("liquidation_map", 60), 4,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_liq_max_pain", self._poll_liq_max_pain, btc_coin,
-                self._poll_cfg.get("liquidation_map", 60), 24,
+                self._poll_cfg.get("liquidation_map", 60), 6,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_macro", self._poll_macro_index, btc_coin,
-                self._poll_cfg.get("macro_index", 600), 45,
+                self._poll_cfg.get("macro_index", 600), 8,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_etf", self._poll_etf_flow, btc_coin,
-                self._poll_cfg.get("etf", 1800), 60,
-            )),
-            asyncio.create_task(self._poll_loop(
-                "cg_onchain", self._poll_onchain_cycle, btc_coin,
-                self._poll_cfg.get("onchain", 3600), 90,
+                self._poll_cfg.get("etf", 1800), 10,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_whale", self._poll_whale_data, btc_coin,
-                self._poll_cfg.get("whale", 600), 50,
-            )),
-            asyncio.create_task(self._poll_loop(
-                "cg_options", self._poll_options, btc_coin,
-                self._poll_cfg.get("options", 600), 70,
-            )),
-            asyncio.create_task(self._poll_loop(
-                "cg_news", self._poll_news, btc_coin,
-                self._poll_cfg.get("news", 1800), 120,
+                self._poll_cfg.get("whale", 600), 12,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_cb_premium", self._poll_coinbase_premium, btc_coin,
-                120, 55,
+                120, 14,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_options", self._poll_options, btc_coin,
+                self._poll_cfg.get("options", 600), 16,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_onchain", self._poll_onchain_cycle, btc_coin,
+                self._poll_cfg.get("onchain", 3600), 18,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_stablecoin", self._poll_stablecoin_mcap, btc_coin,
-                3600, 100,
+                3600, 20,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_news", self._poll_news, btc_coin,
+                self._poll_cfg.get("news", 1800), 22,
             )),
         ])
 
@@ -1284,7 +1284,7 @@ class Engine:
         for item in data:
             try:
                 raw_side = str(item.get("order_side", item.get("side", ""))).lower()
-                side = "bid" if raw_side in ("buy", "bid", "1") else "ask"
+                side = "bid" if raw_side in ("buy", "bid", "2") else "ask"
                 size_usd = float(item.get("start_usd_value", item.get("volUsd", 0)))
                 orders.append(LargeOrder(
                     ts=int(item.get("start_time", item.get("time", 0))),
