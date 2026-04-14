@@ -1,0 +1,346 @@
+"""
+衍生品 / 资金费率相关 Coinglass 轮询（模块级 async 函数）。
+
+由 Engine 注入 cg、state(s)、percentile 等依赖；不在此模块内调用 recompute。
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from config.settings import CoinConfig
+
+if TYPE_CHECKING:
+    from engine import CoinState
+from models.flow import (
+    BasisData,
+    ExchangeFundingRate,
+    FundingRateData,
+    LongShortRatioData,
+    LongShortRatioExchange,
+    MultiFundingRateData,
+    OIData,
+    OISnapshot,
+)
+from models.market import TickerData
+from processors.percentile import PercentileTracker
+from sources.coinglass import CoinglassSource
+
+logger = logging.getLogger(__name__)
+
+
+def log_api_fields_once(tag: str, sample: Any, logged_keys: set[str]) -> None:
+    """与 Engine._log_keys_once 等价：每个 tag 仅记录一次 API 字段名。"""
+    if tag in logged_keys:
+        return
+    logged_keys.add(tag)
+    if isinstance(sample, dict):
+        logger.info("API fields [%s]: %s", tag, list(sample.keys())[:20])
+    elif isinstance(sample, list) and sample and isinstance(sample[0], dict):
+        logger.info("API fields [%s]: %s", tag, list(sample[0].keys())[:20])
+
+
+async def poll_ticker_all(
+    cg: CoinglassSource,
+    states: dict[str, CoinState],
+    supported_coins: list[str],
+    get_coin: Callable[[str], CoinConfig],
+    percentile: PercentileTracker,
+    logged_keys: set[str],
+) -> None:
+    """coins-markets 一次获取全币种行情。"""
+    data = await cg.fetch_coins_markets()
+    if not data:
+        return
+    log_api_fields_once("coins-markets", data, logged_keys)
+
+    symbol_to_ccy = {
+        get_coin(c).symbol_cg: c
+        for c in supported_coins
+    }
+
+    for item in data:
+        symbol = item.get("symbol", "")
+        ccy = symbol_to_ccy.get(symbol)
+        if not ccy:
+            continue
+
+        state = states[ccy]
+        try:
+            price = float(item.get("current_price", item.get("price", 0)))
+            if price <= 0:
+                continue
+            chg_pct = float(item.get("price_change_percent_24h", 0))
+            open_24h = price / (1 + chg_pct / 100) if chg_pct != 0 else price
+            state.ticker = TickerData(
+                coin=ccy,
+                ts=int(time.time() * 1000),
+                last=price,
+                high_24h=float(item.get("high24h", price)),
+                low_24h=float(item.get("low24h", price)),
+                vol_24h=float(item.get("volUsd24h", 0)),
+                change_24h=round(price - open_24h, 2),
+                change_pct_24h=round(chg_pct, 2),
+            )
+
+            oi_usd = float(item.get("open_interest_usd", item.get("openInterest", 0)))
+            if oi_usd > 0:
+                snapshot = OISnapshot(
+                    coin=ccy, ts=int(time.time()),
+                    oi=oi_usd, oi_usd=oi_usd,
+                )
+                state.oi_history.append(snapshot)
+                percentile.push(ccy, "oi", oi_usd)
+        except (ValueError, KeyError):
+            continue
+
+
+async def poll_oi(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+) -> None:
+    """获取 OI 聚合历史。"""
+    data = await cg.fetch_oi_aggregated_history(
+        coin.symbol_cg, interval="5m", limit=50,
+    )
+    if not data:
+        return
+
+    for item in data:
+        try:
+            oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
+            ts = int(item.get("time", item.get("t", 0)))
+            if oi_usd > 0:
+                snapshot = OISnapshot(
+                    coin=coin.ccy, ts=ts, oi=oi_usd, oi_usd=oi_usd,
+                )
+                state.oi_history.append(snapshot)
+        except (ValueError, KeyError):
+            continue
+
+    if state.oi_history:
+        current = state.oi_history[-1]
+        first = state.oi_history[0]
+        change_1h = 0.0
+        if first.oi_usd > 0:
+            change_1h = (current.oi_usd - first.oi_usd) / first.oi_usd * 100
+
+        recent_5m = list(state.oi_history)[-30:]
+        change_5m = 0.0
+        if recent_5m and recent_5m[0].oi_usd > 0:
+            change_5m = (current.oi_usd - recent_5m[0].oi_usd) / recent_5m[0].oi_usd * 100
+
+        trend = "stable"
+        if change_1h > 3:
+            trend = "surging"
+        elif change_1h < -3:
+            trend = "declining"
+
+        state.oi = OIData(
+            coin=coin.ccy, ts=current.ts,
+            current_usd=current.oi_usd,
+            change_1h_pct=round(change_1h, 2),
+            change_5m_pct=round(change_5m, 2),
+            trend=trend,
+        )
+
+
+async def poll_funding_all(
+    cg: CoinglassSource,
+    states: dict[str, CoinState],
+    supported_coins: list[str],
+    get_coin: Callable[[str], CoinConfig],
+    percentile: PercentileTracker,
+    logged_keys: set[str],
+) -> None:
+    """获取全币种多交易所资金费率。"""
+    data = await cg.fetch_fr_exchange_list()
+    if not data:
+        return
+    log_api_fields_once("funding-rate", data, logged_keys)
+
+    symbol_to_ccy = {
+        get_coin(c).symbol_cg: c
+        for c in supported_coins
+    }
+
+    for item in data:
+        symbol = item.get("symbol", "")
+        ccy = symbol_to_ccy.get(symbol)
+        if not ccy:
+            continue
+
+        state = states[ccy]
+        exchanges = []
+        avg_current = 0.0
+        count = 0
+        okx_rate = None
+        bn_rate = None
+
+        margin_list = item.get("stablecoin_margin_list", item.get("uMarginList", []))
+        for ex_item in margin_list:
+            ex_name = ex_item.get("exchange", ex_item.get("exchangeName", ""))
+            rate = ex_item.get("funding_rate", ex_item.get("rate"))
+            if rate is not None:
+                rate = float(rate)
+                exchanges.append(ExchangeFundingRate(
+                    exchange=ex_name, current=rate,
+                ))
+                avg_current += rate
+                count += 1
+                if "okx" in ex_name.lower() or "okex" in ex_name.lower():
+                    okx_rate = rate
+                elif "binance" in ex_name.lower():
+                    bn_rate = rate
+
+        if count > 0:
+            avg_current /= count
+
+        interp = "中性"
+        if avg_current > 0.01:
+            interp = "多头拥挤"
+        elif avg_current < -0.01:
+            interp = "空头拥挤"
+
+        state.multi_funding = MultiFundingRateData(
+            coin=ccy, ts=int(time.time()),
+            exchanges=exchanges,
+            avg_current=round(avg_current, 6),
+            interpretation=interp,
+        )
+
+        state.funding = FundingRateData(
+            coin=ccy, ts=int(time.time()),
+            okx_rate=okx_rate, binance_rate=bn_rate,
+            avg_rate=round(avg_current, 6),
+            interpretation=interp,
+        )
+        percentile.push(ccy, "funding", avg_current)
+
+
+async def poll_ls_ratio(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+    logged_keys: set[str],
+) -> None:
+    """获取多空比（全局 + 大户账户 + 大户持仓）。"""
+    exchange = coin.exchange_primary
+
+    global_data = await cg.fetch_global_ls_ratio_history(
+        exchange, coin.symbol_cg_pair, interval="1h", limit=1,
+    )
+    log_api_fields_once("ls-ratio-global", global_data, logged_keys)
+    if global_data and isinstance(global_data, list) and len(global_data) > 0:
+        item = global_data[-1]
+        long_pct = float(item.get("global_account_long_percent", item.get("longAccount", 50)))
+        short_pct = float(item.get("global_account_short_percent", item.get("shortAccount", 50)))
+        ratio = float(item.get("global_account_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
+        state.ls_ratio = LongShortRatioData(
+            coin=coin.ccy, ts=int(time.time()),
+            dimension="global",
+            exchanges=[LongShortRatioExchange(
+                exchange=exchange, long_pct=long_pct, short_pct=short_pct, ratio=ratio,
+            )],
+            avg_ratio=ratio,
+        )
+
+    top_acct_data = await cg.fetch_top_ls_account_ratio_history(
+        exchange, coin.symbol_cg_pair, interval="1h", limit=1,
+    )
+    if top_acct_data and isinstance(top_acct_data, list) and len(top_acct_data) > 0:
+        item = top_acct_data[-1]
+        long_pct = float(item.get("top_account_long_percent", item.get("longAccount", 50)))
+        short_pct = float(item.get("top_account_short_percent", item.get("shortAccount", 50)))
+        ratio = float(item.get("top_account_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
+        state.ls_ratio_top_account = LongShortRatioData(
+            coin=coin.ccy, ts=int(time.time()),
+            dimension="top_account",
+            exchanges=[LongShortRatioExchange(
+                exchange=exchange, long_pct=long_pct, short_pct=short_pct, ratio=ratio,
+            )],
+            avg_ratio=ratio,
+        )
+
+    top_pos_data = await cg.fetch_top_ls_position_ratio_history(
+        exchange, coin.symbol_cg_pair, interval="1h", limit=1,
+    )
+    if top_pos_data and isinstance(top_pos_data, list) and len(top_pos_data) > 0:
+        item = top_pos_data[-1]
+        long_pct = float(item.get("top_position_long_percent", item.get("longPosition", 50)))
+        short_pct = float(item.get("top_position_short_percent", item.get("shortPosition", 50)))
+        ratio = float(item.get("top_position_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
+        state.ls_ratio_top_position = LongShortRatioData(
+            coin=coin.ccy, ts=int(time.time()),
+            dimension="top_position",
+            exchanges=[LongShortRatioExchange(
+                exchange=exchange, long_pct=long_pct, short_pct=short_pct, ratio=ratio,
+            )],
+            avg_ratio=ratio,
+        )
+
+
+async def poll_basis(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+) -> None:
+    """获取期现溢价。"""
+    data = await cg.fetch_basis_history(
+        coin.exchange_primary, coin.symbol_cg_pair,
+        interval="5m", limit=1,
+    )
+    if not data:
+        return
+
+    try:
+        last = data[-1]
+        basis_pct = float(last.get("close_basis", last.get("basisRate", last.get("basis", 0))))
+        price = state.ticker.last if state.ticker else 0
+        interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
+        state.basis = BasisData(
+            coin=coin.ccy, ts=int(time.time()),
+            mark_price=price * (1 + basis_pct / 200),
+            index_price=price * (1 - basis_pct / 200),
+            basis_pct=round(basis_pct, 4),
+            interpretation=interp,
+        )
+    except (ValueError, KeyError, IndexError):
+        pass
+
+
+async def poll_oi_exchange_rank(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+) -> None:
+    """获取交易所 OI 持仓占比排名。"""
+    data = await cg.fetch_oi_exchange_list(symbol=coin.symbol_cg)
+    if not data or not isinstance(data, list):
+        return
+    try:
+        exchanges = []
+        total_oi = 0.0
+        for item in data:
+            ex = item.get("exchange", "")
+            if ex == "All":
+                total_oi = float(item.get("open_interest_usd", 0))
+                continue
+            exchanges.append({
+                "exchange": ex,
+                "oi_usd": float(item.get("open_interest_usd", 0)),
+                "change_1h": float(item.get("open_interest_change_percent_1h", 0)),
+                "change_24h": float(item.get("open_interest_change_percent_24h", 0)),
+            })
+        exchanges.sort(key=lambda x: x["oi_usd"], reverse=True)
+        state.oi_exchange_rank = {
+            "ts": int(time.time()),
+            "total_oi_usd": total_oi,
+            "exchanges": exchanges[:8],
+        }
+    except (ValueError, KeyError):
+        logger.debug("oi_exchange_rank parse failed", exc_info=True)

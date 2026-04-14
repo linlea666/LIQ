@@ -1,0 +1,213 @@
+"""K 线 / 指标领域：Coinglass K 线与技术指标轮询。
+
+模块级 async 函数接收 cg 与 state，不依赖 Engine 实例。
+range_signal 重算由 Engine 在适当时机调用 ``recompute_range_signal``。
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import TYPE_CHECKING, Any
+
+from config.settings import CoinConfig
+from models.market import CandleData
+from processors.range_signal import calculate_range_signal
+from processors.volume_profile import calc_volume_profile
+from sources.coinglass import CoinglassSource
+
+if TYPE_CHECKING:
+    from engine import CoinState
+
+logger = logging.getLogger(__name__)
+
+
+def parse_candles(raw: list) -> list[dict]:
+    """将 Coinglass K 线数据统一为 {ts, o, h, l, c, vol} 格式。"""
+    candles = []
+    for item in raw:
+        try:
+            candles.append({
+                "ts": int(item.get("t", item.get("ts", 0))),
+                "o": float(item.get("o", item.get("open", 0))),
+                "h": float(item.get("h", item.get("high", 0))),
+                "l": float(item.get("l", item.get("low", 0))),
+                "c": float(item.get("c", item.get("close", 0))),
+                "vol": float(item.get("v", item.get("vol", item.get("volume", 0)))),
+            })
+        except (ValueError, TypeError):
+            continue
+    return candles
+
+
+def recompute_range_signal(
+    state: CoinState,
+    btc_state: CoinState | None,
+    settings_range: dict[str, Any] | None,
+) -> None:
+    """用 Coinglass 指标重新计算均线箱体信号。"""
+    if not state.ticker:
+        return
+    price = state.ticker.last
+    if price <= 0:
+        return
+
+    sweep_above = sum(
+        e.get("usd", 0) for e in state.liq_sweep_events
+        if e.get("side") == "above" and e.get("ts", 0) > int(time.time()) - 3600
+    )
+    sweep_below = sum(
+        e.get("usd", 0) for e in state.liq_sweep_events
+        if e.get("side") == "below" and e.get("ts", 0) > int(time.time()) - 3600
+    )
+
+    cps = None
+    if btc_state and btc_state.cycle_position and btc_state.cycle_position.cps is not None:
+        cps = btc_state.cycle_position.cps
+
+    if state.candles_daily:
+        state.range_signal = calculate_range_signal(
+            candles_1d=state.candles_daily,
+            candles_1w=state.candles_weekly,
+            current_price=price,
+            atr=state.atr,
+            sweep_above_1h=sweep_above,
+            sweep_below_1h=sweep_below,
+            cps=cps,
+            cfg=settings_range,
+        )
+
+
+async def poll_indicators(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """从 Coinglass 获取所有技术指标：RSI/MACD/MA/EMA/ATR/BOLL"""
+    exchange = coin.exchange_primary
+    pair = coin.symbol_cg_pair
+
+    def _last_item(data):
+        if isinstance(data, list) and len(data) > 0:
+            return data[-1]
+        return None
+
+    try:
+        rsi_last = _last_item(await cg.fetch_rsi(exchange, pair, interval="1d", limit=2, window=14))
+        if rsi_last:
+            state.rsi_14 = float(rsi_last.get("rsi", rsi_last.get("value", 0)))
+    except Exception:
+        logger.debug("indicators: RSI parse failed", exc_info=True)
+
+    try:
+        macd_last = _last_item(await cg.fetch_macd(exchange, pair, interval="1d", limit=2))
+        if macd_last:
+            state.macd_data = {
+                "macd": float(macd_last.get("macd", 0)),
+                "signal": float(macd_last.get("signal", 0)),
+                "histogram": float(macd_last.get("histogram", macd_last.get("hist", 0))),
+                "above_zero": float(macd_last.get("macd", 0)) > 0,
+            }
+    except Exception:
+        logger.debug("indicators: MACD parse failed", exc_info=True)
+
+    try:
+        ma60_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=60))
+        if ma60_last:
+            state.ma60_daily_cg = float(ma60_last.get("ma", ma60_last.get("value", 0)))
+    except Exception:
+        logger.debug("indicators: MA60 parse failed", exc_info=True)
+
+    try:
+        ma120_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=120))
+        if ma120_last:
+            state.ma120_daily_cg = float(ma120_last.get("ma", ma120_last.get("value", 0)))
+    except Exception:
+        logger.debug("indicators: MA120 parse failed", exc_info=True)
+
+    try:
+        atr_last = _last_item(await cg.fetch_atr(exchange, pair, interval="1h", limit=2, window=14))
+        if atr_last:
+            state.atr_cg = float(atr_last.get("atr", atr_last.get("value", 0)))
+            state.atr = state.atr_cg
+    except Exception:
+        logger.debug("indicators: ATR parse failed", exc_info=True)
+
+    try:
+        boll_last = _last_item(await cg.fetch_boll(exchange, pair, interval="1d", limit=2))
+        if boll_last:
+            state.boll_data = {
+                "upper": float(boll_last.get("upper", boll_last.get("upperBand", 0))),
+                "middle": float(boll_last.get("middle", boll_last.get("middleBand", 0))),
+                "lower": float(boll_last.get("lower", boll_last.get("lowerBand", 0))),
+            }
+    except Exception:
+        logger.debug("indicators: BOLL parse failed", exc_info=True)
+
+    try:
+        ema20_last = _last_item(await cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=20))
+        if ema20_last:
+            state.ema20_cg = float(ema20_last.get("ema", ema20_last.get("value", 0)))
+    except Exception:
+        logger.debug("indicators: EMA20 parse failed", exc_info=True)
+
+
+async def poll_candles_1h(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """获取 1H K线用于 Volume Profile / ATR 计算。"""
+    data = await cg.fetch_price_history(
+        coin.exchange_primary, coin.symbol_cg_pair,
+        interval="1h", limit=200,
+    )
+    if not data:
+        return
+    raw = parse_candles(data)
+    if not raw:
+        return
+
+    state.candle_prices = [c["c"] for c in raw]
+    state.candle_ts = [c["ts"] for c in raw]
+
+    candle_models = [
+        CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                   l=c["l"], c=c["c"], vol=c["vol"])
+        for c in raw
+    ]
+    vp = calc_volume_profile(candle_models, coin=coin.ccy)
+    if vp:
+        state.vp = vp
+
+    if len(candle_models) >= 15 and state.atr_cg is None:
+        from processors.volume_profile import calc_atr
+        atr_val = calc_atr(candle_models)
+        if atr_val > 0:
+            state.atr = atr_val
+
+
+async def poll_candles_daily(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """获取日线 K线用于 range_signal 箱体检测。"""
+    data = await cg.fetch_price_history(
+        coin.exchange_primary, coin.symbol_cg_pair,
+        interval="1d", limit=150,
+    )
+    if not data:
+        return
+    raw = parse_candles(data)
+    if raw:
+        state.candles_daily = [
+            CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                       l=c["l"], c=c["c"], vol=c["vol"])
+            for c in raw
+        ]
+
+
+async def poll_candles_weekly(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """获取周线 K线用于 range_signal 周线 MA60。"""
+    data = await cg.fetch_price_history(
+        coin.exchange_primary, coin.symbol_cg_pair,
+        interval="1w", limit=70,
+    )
+    if not data:
+        return
+    raw = parse_candles(data)
+    if raw:
+        state.candles_weekly = [
+            CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                       l=c["l"], c=c["c"], vol=c["vol"])
+            for c in raw
+        ]
