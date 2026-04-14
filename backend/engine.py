@@ -174,7 +174,7 @@ class Engine:
             asyncio.create_task(self._grace_check_loop()),
         ]
 
-        # 全局层（不分币种，一次拿全部）—— stagger ≥ 6s 避免并发 429
+        # 全局层 —— stagger 保证启动时分散请求
         btc_coin = self._settings.get_coin("BTC")
         tasks.extend([
             asyncio.create_task(self._poll_loop(
@@ -183,45 +183,45 @@ class Engine:
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_fr", self._poll_funding_all, btc_coin,
-                self._poll_cfg.get("funding_rate", 120), 8,
+                self._poll_cfg.get("funding_rate", 60), 8,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_global_liq", self._poll_global_liq, btc_coin,
-                self._poll_cfg.get("liquidation_map", 120), 16,
+                self._poll_cfg.get("liquidation_map", 60), 16,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_liq_max_pain", self._poll_liq_max_pain, btc_coin,
-                self._poll_cfg.get("liquidation_map", 120), 24,
+                self._poll_cfg.get("liquidation_map", 60), 24,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_macro", self._poll_macro_index, btc_coin,
-                self._poll_cfg.get("macro_index", 1800), 60,
+                self._poll_cfg.get("macro_index", 600), 45,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_etf", self._poll_etf_flow, btc_coin,
-                self._poll_cfg.get("etf", 1800), 90,
+                self._poll_cfg.get("etf", 1800), 60,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_onchain", self._poll_onchain_cycle, btc_coin,
-                self._poll_cfg.get("onchain", 3600), 120,
+                self._poll_cfg.get("onchain", 3600), 90,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_whale", self._poll_whale_data, btc_coin,
-                self._poll_cfg.get("whale", 900), 75,
+                self._poll_cfg.get("whale", 600), 50,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_options", self._poll_options, btc_coin,
-                self._poll_cfg.get("options", 900), 105,
+                self._poll_cfg.get("options", 600), 70,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_news", self._poll_news, btc_coin,
-                self._poll_cfg.get("news", 1800), 150,
+                self._poll_cfg.get("news", 1800), 120,
             )),
         ])
 
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
-            stagger = 2 + idx * 8
+            stagger = 2 + idx * 6
 
             if ccy == self._default_coin:
                 tasks.extend(self._create_full_poll_tasks(coin, stagger))
@@ -248,51 +248,51 @@ class Engine:
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_{ccy}", self._poll_liquidation_map, coin,
-                self._poll_cfg.get("liquidation_map", 120), stagger + 8,
+                self._poll_cfg.get("liquidation_map", 60), stagger + 5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_cvd_{ccy}", self._poll_cvd, coin,
-                self._poll_cfg.get("cvd", 120), stagger + 16,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
-                60, stagger + 24,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_basis_{ccy}", self._poll_basis, coin,
-                self._poll_cfg.get("funding_rate", 120), stagger + 32,
+                self._poll_cfg.get("cvd", 60), stagger + 10,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_ls_{ccy}", self._poll_ls_ratio, coin,
-                self._poll_cfg.get("long_short", 300), stagger + 40,
+                self._poll_cfg.get("long_short", 120), stagger + 15,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
+                60, stagger + 20,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_basis_{ccy}", self._poll_basis, coin,
+                self._poll_cfg.get("funding_rate", 60), stagger + 25,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_taker_{ccy}", self._poll_taker_volume, coin,
-                self._poll_cfg.get("taker_volume", 300), stagger + 48,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_indicators_{ccy}", self._poll_indicators, coin,
-                self._poll_cfg.get("indicators", 600), stagger + 56,
+                self._poll_cfg.get("taker_volume", 120), stagger + 30,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_large_orders_{ccy}", self._poll_large_orders, coin,
-                self._poll_cfg.get("large_orders", 300), stagger + 64,
+                self._poll_cfg.get("large_orders", 120), stagger + 35,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
-                self._poll_cfg.get("liquidation_map", 120), stagger + 72,
+                self._poll_cfg.get("liquidation_map", 60), stagger + 40,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_indicators_{ccy}", self._poll_indicators, coin,
+                self._poll_cfg.get("indicators", 600), stagger + 45,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_heatmap_{ccy}", self._poll_liq_heatmap, coin,
-                self._poll_cfg.get("liquidation_heatmap", 600), stagger + 80,
+                self._poll_cfg.get("liquidation_heatmap", 600), stagger + 50,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                600, stagger + 88,
+                600, stagger + 55,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                3600, stagger + 96,
+                3600, stagger + 60,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, stagger,
@@ -737,9 +737,9 @@ class Engine:
         self._log_keys_once("ls-ratio-global", global_data)
         if global_data and isinstance(global_data, list) and len(global_data) > 0:
             item = global_data[-1]
-            long_pct = float(item.get("longAccount", item.get("longRatio", 50)))
-            short_pct = float(item.get("shortAccount", item.get("shortRatio", 50)))
-            ratio = long_pct / short_pct if short_pct > 0 else 1.0
+            long_pct = float(item.get("global_account_long_percent", item.get("longAccount", 50)))
+            short_pct = float(item.get("global_account_short_percent", item.get("shortAccount", 50)))
+            ratio = float(item.get("global_account_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
             state.ls_ratio = LongShortRatioData(
                 coin=coin.ccy, ts=int(time.time()),
                 dimension="global",
@@ -754,9 +754,9 @@ class Engine:
         )
         if top_acct_data and isinstance(top_acct_data, list) and len(top_acct_data) > 0:
             item = top_acct_data[-1]
-            long_pct = float(item.get("longAccount", item.get("longRatio", 50)))
-            short_pct = float(item.get("shortAccount", item.get("shortRatio", 50)))
-            ratio = long_pct / short_pct if short_pct > 0 else 1.0
+            long_pct = float(item.get("top_account_long_percent", item.get("longAccount", 50)))
+            short_pct = float(item.get("top_account_short_percent", item.get("shortAccount", 50)))
+            ratio = float(item.get("top_account_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
             state.ls_ratio_top_account = LongShortRatioData(
                 coin=coin.ccy, ts=int(time.time()),
                 dimension="top_account",
@@ -771,9 +771,9 @@ class Engine:
         )
         if top_pos_data and isinstance(top_pos_data, list) and len(top_pos_data) > 0:
             item = top_pos_data[-1]
-            long_pct = float(item.get("longPosition", item.get("longRatio", 50)))
-            short_pct = float(item.get("shortPosition", item.get("shortRatio", 50)))
-            ratio = long_pct / short_pct if short_pct > 0 else 1.0
+            long_pct = float(item.get("top_position_long_percent", item.get("longPosition", 50)))
+            short_pct = float(item.get("top_position_short_percent", item.get("shortPosition", 50)))
+            ratio = float(item.get("top_position_long_short_ratio", long_pct / short_pct if short_pct > 0 else 1.0))
             state.ls_ratio_top_position = LongShortRatioData(
                 coin=coin.ccy, ts=int(time.time()),
                 dimension="top_position",
@@ -791,14 +791,14 @@ class Engine:
             coin.symbol_cg, interval="5m", limit=100,
         )
         self._log_keys_once("cvd-futures", contract_data)
-        if contract_data:
+        if contract_data and isinstance(contract_data, list):
             points = []
             for item in contract_data:
                 try:
                     ts = int(item.get("time", item.get("t", 0)))
-                    buy = float(item.get("buyVolUsd", item.get("buyVol", 0)))
-                    sell = float(item.get("sellVolUsd", item.get("sellVol", 0)))
-                    cvd_val = float(item.get("cvd", buy - sell))
+                    buy = float(item.get("agg_taker_buy_vol", item.get("buyVolUsd", 0)))
+                    sell = float(item.get("agg_taker_sell_vol", item.get("sellVolUsd", 0)))
+                    cvd_val = float(item.get("cum_vol_delta", item.get("cvd", buy - sell)))
                     points.append(CVDPoint(
                         ts=ts, buy_vol=buy, sell_vol=sell,
                         delta=buy - sell, cvd=cvd_val,
@@ -820,14 +820,14 @@ class Engine:
         spot_data = await self._cg.fetch_spot_aggregated_cvd(
             coin.symbol_cg, interval="5m", limit=100,
         )
-        if spot_data:
+        if spot_data and isinstance(spot_data, list):
             points = []
             for item in spot_data:
                 try:
                     ts = int(item.get("time", item.get("t", 0)))
-                    buy = float(item.get("buyVolUsd", item.get("buyVol", 0)))
-                    sell = float(item.get("sellVolUsd", item.get("sellVol", 0)))
-                    cvd_val = float(item.get("cvd", buy - sell))
+                    buy = float(item.get("agg_taker_buy_vol", item.get("buyVolUsd", 0)))
+                    sell = float(item.get("agg_taker_sell_vol", item.get("sellVolUsd", 0)))
+                    cvd_val = float(item.get("cum_vol_delta", item.get("cvd", buy - sell)))
                     points.append(CVDPoint(
                         ts=ts, buy_vol=buy, sell_vol=sell,
                         delta=buy - sell, cvd=cvd_val,
@@ -870,19 +870,19 @@ class Engine:
         )
 
         c_buy = c_sell = s_buy = s_sell = 0.0
-        if contract_data:
+        if contract_data and isinstance(contract_data, list):
             for item in contract_data:
                 try:
-                    c_buy += float(item.get("buyVolUsd", item.get("buyVol", 0)))
-                    c_sell += float(item.get("sellVolUsd", item.get("sellVol", 0)))
+                    c_buy += float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
+                    c_sell += float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
                 except (ValueError, KeyError):
                     continue
 
-        if spot_data:
+        if spot_data and isinstance(spot_data, list):
             for item in spot_data:
                 try:
-                    s_buy += float(item.get("buyVolUsd", item.get("buyVol", 0)))
-                    s_sell += float(item.get("sellVolUsd", item.get("sellVol", 0)))
+                    s_buy += float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
+                    s_sell += float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
                 except (ValueError, KeyError):
                     continue
 
@@ -1178,16 +1178,17 @@ class Engine:
         total_bid = total_ask = 0.0
         for item in data:
             try:
-                side = "bid" if item.get("side", "").lower() in ("buy", "bid") else "ask"
-                size_usd = float(item.get("volUsd", item.get("sizeUsd", 0)))
+                raw_side = str(item.get("order_side", item.get("side", ""))).lower()
+                side = "bid" if raw_side in ("buy", "bid", "1") else "ask"
+                size_usd = float(item.get("start_usd_value", item.get("volUsd", 0)))
                 orders.append(LargeOrder(
-                    ts=int(item.get("time", item.get("ts", 0))),
-                    exchange=coin.exchange_primary,
-                    symbol=coin.symbol_cg_pair,
-                    price=float(item.get("price", 0)),
+                    ts=int(item.get("start_time", item.get("time", 0))),
+                    exchange=item.get("exchange_name", coin.exchange_primary),
+                    symbol=item.get("symbol", coin.symbol_cg_pair),
+                    price=float(item.get("limit_price", item.get("price", 0))),
                     size_usd=size_usd,
                     side=side,
-                    status=item.get("status", "active"),
+                    status=item.get("order_state", item.get("status", "active")),
                 ))
                 if side == "bid":
                     total_bid += size_usd
@@ -1207,17 +1208,22 @@ class Engine:
 
         alerts_data = await self._cg.fetch_hyperliquid_whale_alert()
         alerts = []
-        if alerts_data:
+        if alerts_data and isinstance(alerts_data, list):
             for item in alerts_data:
                 try:
+                    pos_size = float(item.get("position_size", item.get("sizeUsd", 0)))
+                    side = "short" if pos_size < 0 else "long"
+                    action_code = item.get("position_action", item.get("action", ""))
+                    action_map = {1: "open", 2: "close", 3: "increase", 4: "decrease"}
+                    action = action_map.get(action_code, str(action_code)) if isinstance(action_code, int) else str(action_code)
                     alerts.append(HyperliquidWhaleAlert(
-                        ts=int(item.get("time", item.get("ts", 0))),
+                        ts=int(item.get("create_time", item.get("time", 0))),
                         symbol=item.get("symbol", ""),
-                        side=item.get("side", ""),
-                        size_usd=float(item.get("sizeUsd", item.get("volUsd", 0))),
-                        entry_price=float(item.get("entryPrice", item.get("price", 0))),
-                        address=item.get("address", ""),
-                        action=item.get("action", ""),
+                        side=side,
+                        size_usd=float(item.get("position_value_usd", abs(pos_size))),
+                        entry_price=float(item.get("entry_price", item.get("entryPrice", 0))),
+                        address=item.get("user", item.get("address", "")),
+                        action=action,
                     ))
                 except (ValueError, KeyError):
                     continue
@@ -1295,8 +1301,8 @@ class Engine:
         long_24h = short_24h = 0.0
         for item in data:
             try:
-                long_24h += float(item.get("longLiqUsd", item.get("buyVolUsd", 0)))
-                short_24h += float(item.get("shortLiqUsd", item.get("sellVolUsd", 0)))
+                long_24h += float(item.get("longLiquidation_usd", item.get("longLiqUsd", 0)))
+                short_24h += float(item.get("shortLiquidation_usd", item.get("shortLiqUsd", 0)))
             except (ValueError, KeyError):
                 continue
 
@@ -1316,17 +1322,21 @@ class Engine:
 
         try:
             fg_data = await self._cg.fetch_fear_greed()
-            if fg_data and isinstance(fg_data, list) and len(fg_data) > 0:
-                last = fg_data[-1]
-                mi.fear_greed = float(last.get("value", 0))
+            if fg_data:
+                if isinstance(fg_data, dict):
+                    data_list = fg_data.get("data_list", [])
+                    if data_list:
+                        mi.fear_greed = float(data_list[-1])
+                elif isinstance(fg_data, list) and fg_data:
+                    mi.fear_greed = float(fg_data[-1].get("value", 0))
         except Exception:
             logger.debug("macro: fear_greed parse failed", exc_info=True)
 
         try:
             dom_data = await self._cg.fetch_btc_dominance()
-            if dom_data and isinstance(dom_data, list) and len(dom_data) > 0:
+            if dom_data and isinstance(dom_data, list) and dom_data:
                 last = dom_data[-1]
-                mi.btc_dominance = float(last.get("value", last.get("dominance", 0)))
+                mi.btc_dominance = float(last.get("bitcoin_dominance", last.get("dominance", 0)))
         except Exception:
             logger.debug("macro: btc_dominance parse failed", exc_info=True)
 

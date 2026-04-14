@@ -307,10 +307,12 @@ class CoinglassSource(DataSource):
 
     async def fetch_liquidation_aggregated_history(self, symbol: str,
                                                    interval: str = "1h",
-                                                   limit: int = 200) -> Optional[list]:
+                                                   limit: int = 200,
+                                                   exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/futures/liquidation/aggregated-history", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
-        })
+            "exchange_list": exchange_list,
+        }, cache_ttl=60)
 
     async def fetch_liquidation_coin_list(self, exchange: str = "Binance") -> Optional[list]:
         return await self._request("/api/futures/liquidation/coin-list",
@@ -591,7 +593,8 @@ class CoinglassSource(DataSource):
         params = {}
         if symbol:
             params["symbol"] = symbol
-        return await self._request("/api/chain/v2/whale-transfer", params or None)
+        return await self._request("/api/chain/v2/whale-transfer", params or None,
+                                   cache_ttl=300)
 
     async def fetch_onchain_transfers(self, symbol: str = "",
                                       min_usd: str = "1000000") -> Optional[list]:

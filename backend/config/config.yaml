@@ -31,19 +31,19 @@ sources:
       ticker: 15
       oi: 60
       indicators: 600
-      funding_rate: 120
-      liquidation_map: 120
+      funding_rate: 60
+      liquidation_map: 60
       liquidation_heatmap: 600
       orderbook: 60
-      large_orders: 300
-      long_short: 300
-      taker_volume: 300
-      cvd: 120
-      options: 900
+      large_orders: 120
+      long_short: 120
+      taker_volume: 120
+      cvd: 60
+      options: 600
       etf: 1800
       onchain: 3600
-      macro_index: 1800
-      whale: 900
+      macro_index: 600
+      whale: 600
       news: 1800
 
 processors:
