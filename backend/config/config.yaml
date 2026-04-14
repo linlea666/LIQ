@@ -107,17 +107,17 @@ engine:
 
 ai:
   active: "deepseek"
-  timeout_sec: 120
+  timeout_sec: 300
   max_retries: 2
   cooldown_sec: 30
-  max_history: 5
+  max_history: 50
   providers:
     openai:
       model: "gpt-4o"
       api_base: "https://api.openai.com/v1"
       env_key: "OPENAI_API_KEY"
     deepseek:
-      model: "deepseek-chat"
+      model: "deepseek-reasoner"
       api_base: "https://api.deepseek.com"
       env_key: "DEEPSEEK_API_KEY"
 

@@ -59,34 +59,57 @@ class AIAnalyzer:
             self._model, self._timeout,
         )
 
+        is_reasoner = "reasoner" in self._model.lower()
+
         raw_text = ""
         for attempt in range(1, self._max_retries + 1):
             try:
                 logger.info(
-                    "AI API call attempt %d/%d | coin=%s model=%s",
-                    attempt, self._max_retries, snapshot.coin, self._model,
+                    "AI API call attempt %d/%d | coin=%s model=%s reasoner=%s",
+                    attempt, self._max_retries, snapshot.coin, self._model, is_reasoner,
                 )
                 t0 = time.time()
-                response = await self._client.chat.completions.create(
-                    model=self._model,
-                    messages=[
+
+                api_kwargs: dict = {
+                    "model": self._model,
+                    "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    temperature=0.3,
-                    timeout=self._timeout,
-                )
+                    "timeout": self._timeout,
+                }
+                if not is_reasoner:
+                    api_kwargs["temperature"] = 0.3
+
+                response = await self._client.chat.completions.create(**api_kwargs)
                 elapsed = time.time() - t0
 
-                raw_text = response.choices[0].message.content or ""
+                msg = response.choices[0].message
+                raw_text = msg.content or ""
                 tokens_in = response.usage.prompt_tokens if response.usage else 0
                 tokens_out = response.usage.completion_tokens if response.usage else 0
 
+                reasoning = getattr(msg, "reasoning_content", None) or ""
+                reasoning_tokens = getattr(
+                    response.usage, "completion_tokens_details", None
+                )
+                r_tok = (
+                    getattr(reasoning_tokens, "reasoning_tokens", 0)
+                    if reasoning_tokens else 0
+                )
+
                 logger.info(
                     "AI API call success | coin=%s | %.1fs | "
-                    "tokens_in=%d out=%d | response_len=%d chars",
-                    snapshot.coin, elapsed, tokens_in, tokens_out, len(raw_text),
+                    "tokens_in=%d out=%d reasoning_tok=%d | "
+                    "response_len=%d reasoning_len=%d chars",
+                    snapshot.coin, elapsed, tokens_in, tokens_out, r_tok,
+                    len(raw_text), len(reasoning),
                 )
+                if reasoning:
+                    logger.debug(
+                        "AI reasoning chain | coin=%s | %.200s...",
+                        snapshot.coin, reasoning[:200],
+                    )
                 break
 
             except Exception as e:
