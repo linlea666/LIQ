@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import time
@@ -70,6 +72,7 @@ class CoinglassSource(DataSource):
         self._api_key = api_key
         self._limiter = TokenBucketLimiter(rate_per_min)
         self._headers = {"X-Api-Key": api_key}
+        self._cache: dict[str, tuple[float, Any]] = {}  # key → (expire_ts, data)
 
     def get_poll_interval(self) -> int:
         return 10
@@ -83,9 +86,23 @@ class CoinglassSource(DataSource):
 
     # ── 核心请求方法 ──
 
+    def _cache_key(self, path: str, params: Optional[dict]) -> str:
+        raw = path + (json.dumps(params, sort_keys=True) if params else "")
+        return hashlib.md5(raw.encode()).hexdigest()
+
     async def _request(self, path: str, params: Optional[dict] = None,
-                       version: str = "v4") -> Optional[dict]:
-        """发起单次 API 请求，自动限流、错误处理。"""
+                       version: str = "v4", cache_ttl: int = 0) -> Optional[dict]:
+        """发起单次 API 请求，自动限流、TTL 缓存、错误处理。
+
+        Args:
+            cache_ttl: 缓存有效期(秒)。>0 时命中缓存直接返回，不消耗限流令牌。
+        """
+        if cache_ttl > 0:
+            ck = self._cache_key(path, params)
+            cached = self._cache.get(ck)
+            if cached and cached[0] > time.time():
+                return cached[1]
+
         await self._limiter.acquire()
 
         url = f"{self._base_url}/{version}{path}"
@@ -98,7 +115,9 @@ class CoinglassSource(DataSource):
                 if resp.status == 429:
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
                     self._mark_failure()
-                    await asyncio.sleep(10)
+                    async with self._limiter._lock:
+                        self._limiter._tokens = 0
+                    await asyncio.sleep(12)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
@@ -110,7 +129,12 @@ class CoinglassSource(DataSource):
                                    path, code, data.get("msg", ""))
                     return None
 
-                return data.get("data") if "data" in data else data
+                result = data.get("data") if "data" in data else data
+                if cache_ttl > 0 and result is not None:
+                    self._cache[self._cache_key(path, params)] = (
+                        time.time() + cache_ttl, result,
+                    )
+                return result
         except aiohttp.ClientResponseError as e:
             self._mark_failure()
             logger.error("Coinglass HTTP %d | path=%s | %s", e.status, path, str(e))
@@ -132,17 +156,19 @@ class CoinglassSource(DataSource):
         params = {}
         if exchange_list:
             params["exchange_list"] = exchange_list
-        return await self._request("/api/futures/coins-markets", params or None)
+        return await self._request("/api/futures/coins-markets", params or None,
+                                   cache_ttl=15)
 
     async def fetch_pairs_markets(self, symbol: str) -> Optional[list]:
         return await self._request("/api/futures/pairs-markets", {"symbol": symbol})
 
     async def fetch_price_history(self, exchange: str, symbol: str,
                                   interval: str = "1h", limit: int = 200) -> Optional[list]:
+        ttl = 30 if interval in ("1m", "5m", "15m", "1h") else 300
         return await self._request("/api/futures/price/history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
-        })
+        }, cache_ttl=ttl)
 
     async def fetch_coins_price_change(self) -> Optional[list]:
         return await self._request("/api/futures/coins-price-change")
@@ -153,7 +179,7 @@ class CoinglassSource(DataSource):
 
     async def fetch_oi_exchange_list(self, symbol: str = "BTC") -> Optional[list]:
         return await self._request("/api/futures/open-interest/exchange-list",
-                                   {"symbol": symbol})
+                                   {"symbol": symbol}, cache_ttl=30)
 
     async def fetch_oi_history(self, exchange: str, symbol: str,
                                interval: str = "1h", limit: int = 200,
@@ -193,7 +219,8 @@ class CoinglassSource(DataSource):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def fetch_fr_exchange_list(self) -> Optional[list]:
-        return await self._request("/api/futures/funding-rate/exchange-list")
+        return await self._request("/api/futures/funding-rate/exchange-list",
+                                   cache_ttl=60)
 
     async def fetch_fr_history(self, exchange: str, symbol: str,
                                interval: str = "1h", limit: int = 200) -> Optional[list]:
@@ -236,7 +263,7 @@ class CoinglassSource(DataSource):
             "/api/futures/global-long-short-account-ratio/history", {
                 "exchange": exchange, "symbol": symbol,
                 "interval": interval, "limit": str(limit),
-            })
+            }, cache_ttl=120)
 
     async def fetch_top_ls_account_ratio_history(self, exchange: str, symbol: str,
                                                  interval: str = "1h",
@@ -245,7 +272,7 @@ class CoinglassSource(DataSource):
             "/api/futures/top-long-short-account-ratio/history", {
                 "exchange": exchange, "symbol": symbol,
                 "interval": interval, "limit": str(limit),
-            })
+            }, cache_ttl=120)
 
     async def fetch_top_ls_position_ratio_history(self, exchange: str, symbol: str,
                                                   interval: str = "1h",
@@ -254,7 +281,7 @@ class CoinglassSource(DataSource):
             "/api/futures/top-long-short-position-ratio/history", {
                 "exchange": exchange, "symbol": symbol,
                 "interval": interval, "limit": str(limit),
-            })
+            }, cache_ttl=120)
 
     async def fetch_taker_bs_exchange_list(self, symbol: str,
                                            range_: str = "24h") -> Optional[list]:
@@ -299,7 +326,8 @@ class CoinglassSource(DataSource):
         params: dict = {"range": range_}
         if symbol:
             params["symbol"] = symbol
-        return await self._request("/api/futures/liquidation/exchange-list", params)
+        return await self._request("/api/futures/liquidation/exchange-list", params,
+                                   cache_ttl=60)
 
     async def fetch_liquidation_order(self, exchange: str = "", symbol: str = "",
                                       min_amount: float = 0) -> Optional[list]:
@@ -326,7 +354,7 @@ class CoinglassSource(DataSource):
         return await self._request(
             f"/api/futures/liquidation/aggregated-heatmap/model{model}", {
                 "symbol": symbol, "range": range_,
-            })
+            }, cache_ttl=300)
 
     async def fetch_liquidation_map(self, exchange: str, symbol: str,
                                     range_: str = "7d") -> Optional[dict]:
@@ -338,11 +366,11 @@ class CoinglassSource(DataSource):
                                                range_: str = "7d") -> Optional[dict]:
         return await self._request("/api/futures/liquidation/aggregated-map", {
             "symbol": symbol, "range": range_,
-        })
+        }, cache_ttl=60)
 
     async def fetch_liquidation_max_pain(self, range_: str = "24h") -> Optional[list]:
         return await self._request("/api/futures/liquidation/max-pain",
-                                   {"range": range_})
+                                   {"range": range_}, cache_ttl=60)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Futures > Orderbook
@@ -374,7 +402,7 @@ class CoinglassSource(DataSource):
     async def fetch_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
         return await self._request("/api/futures/orderbook/large-limit-order", {
             "exchange": exchange, "symbol": symbol,
-        })
+        }, cache_ttl=60)
 
     async def fetch_large_orders_history(self, exchange: str, symbol: str,
                                          start_time: str = "",
@@ -401,11 +429,12 @@ class CoinglassSource(DataSource):
     async def fetch_aggregated_taker_bs_history(self, symbol: str,
                                                 interval: str = "1h",
                                                 limit: int = 200,
-                                                unit: str = "usd") -> Optional[list]:
+                                                unit: str = "usd",
+                                                exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/futures/aggregated-taker-buy-sell-volume/history", {
             "symbol": symbol, "interval": interval,
-            "limit": str(limit), "unit": unit,
-        })
+            "limit": str(limit), "unit": unit, "exchange_list": exchange_list,
+        }, cache_ttl=60)
 
     async def fetch_cvd_history(self, exchange: str, symbol: str,
                                 interval: str = "1h",
@@ -417,11 +446,12 @@ class CoinglassSource(DataSource):
 
     async def fetch_aggregated_cvd_history(self, symbol: str, interval: str = "1h",
                                            limit: int = 200,
-                                           unit: str = "usd") -> Optional[list]:
+                                           unit: str = "usd",
+                                           exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/futures/aggregated-cvd/history", {
             "symbol": symbol, "interval": interval,
-            "limit": str(limit), "unit": unit,
-        })
+            "limit": str(limit), "unit": unit, "exchange_list": exchange_list,
+        }, cache_ttl=60)
 
     async def fetch_footprint_history(self, exchange: str, symbol: str,
                                       interval: str = "1h",
@@ -442,10 +472,10 @@ class CoinglassSource(DataSource):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def fetch_hyperliquid_whale_alert(self) -> Optional[list]:
-        return await self._request("/api/hyperliquid/whale-alert")
+        return await self._request("/api/hyperliquid/whale-alert", cache_ttl=300)
 
     async def fetch_hyperliquid_whale_position(self) -> Optional[list]:
-        return await self._request("/api/hyperliquid/whale-position")
+        return await self._request("/api/hyperliquid/whale-position", cache_ttl=300)
 
     async def fetch_hyperliquid_position(self, symbol: str) -> Optional[list]:
         return await self._request("/api/hyperliquid/position", {"symbol": symbol})
@@ -481,10 +511,12 @@ class CoinglassSource(DataSource):
         })
 
     async def fetch_spot_aggregated_taker_bs(self, symbol: str, interval: str = "1h",
-                                             limit: int = 200) -> Optional[list]:
+                                             limit: int = 200,
+                                             exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/spot/aggregated-taker-buy-sell-volume/history", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
-        })
+            "exchange_list": exchange_list,
+        }, cache_ttl=60)
 
     async def fetch_spot_cvd_history(self, exchange: str, symbol: str,
                                      interval: str = "1h",
@@ -495,10 +527,12 @@ class CoinglassSource(DataSource):
         })
 
     async def fetch_spot_aggregated_cvd(self, symbol: str, interval: str = "1h",
-                                        limit: int = 200) -> Optional[list]:
+                                        limit: int = 200,
+                                        exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
         return await self._request("/api/spot/aggregated-cvd/history", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
-        })
+            "exchange_list": exchange_list,
+        }, cache_ttl=60)
 
     async def fetch_spot_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
         return await self._request("/api/spot/orderbook/large-limit-order", {
@@ -527,10 +561,11 @@ class CoinglassSource(DataSource):
                                     exchange: str = "Deribit") -> Optional[list]:
         return await self._request("/api/option/max-pain", {
             "symbol": symbol, "exchange": exchange,
-        })
+        }, cache_ttl=600)
 
     async def fetch_option_info(self, symbol: str = "BTC") -> Optional[dict]:
-        return await self._request("/api/option/info", {"symbol": symbol})
+        return await self._request("/api/option/info", {"symbol": symbol},
+                                   cache_ttl=600)
 
     async def fetch_option_exchange_oi_history(self, symbol: str = "BTC",
                                                range_: str = "30d") -> Optional[dict]:
@@ -590,7 +625,7 @@ class CoinglassSource(DataSource):
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        })
+        }, cache_ttl=300)
 
     async def fetch_rsi_list(self) -> Optional[list]:
         return await self._request("/api/futures/rsi/list")
@@ -602,7 +637,7 @@ class CoinglassSource(DataSource):
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        })
+        }, cache_ttl=300)
 
     async def fetch_ma_list(self) -> Optional[list]:
         return await self._request("/api/futures/ma/list")
@@ -614,7 +649,7 @@ class CoinglassSource(DataSource):
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        })
+        }, cache_ttl=300)
 
     async def fetch_ema_list(self) -> Optional[list]:
         return await self._request("/api/futures/ema/list")
@@ -626,7 +661,7 @@ class CoinglassSource(DataSource):
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "mult": str(mult),
-        })
+        }, cache_ttl=300)
 
     async def fetch_macd(self, exchange: str, symbol: str, interval: str = "1d",
                          limit: int = 200, fast_window: int = 12,
@@ -638,7 +673,7 @@ class CoinglassSource(DataSource):
             "fast_window": str(fast_window),
             "slow_window": str(slow_window),
             "signal_window": str(signal_window),
-        })
+        }, cache_ttl=300)
 
     async def fetch_macd_list(self) -> Optional[list]:
         return await self._request("/api/futures/macd/list")
@@ -649,7 +684,7 @@ class CoinglassSource(DataSource):
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window),
-        })
+        }, cache_ttl=300)
 
     async def fetch_atr_list(self) -> Optional[list]:
         return await self._request("/api/futures/avg-true-range/list")
@@ -660,7 +695,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/futures/basis/history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
-        })
+        }, cache_ttl=60)
 
     async def fetch_whale_index(self, exchange: str, symbol: str,
                                 interval: str = "1h",
@@ -681,7 +716,7 @@ class CoinglassSource(DataSource):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def fetch_ahr999(self) -> Optional[list]:
-        return await self._request("/api/index/ahr999")
+        return await self._request("/api/index/ahr999", cache_ttl=1800)
 
     async def fetch_puell_multiple(self) -> Optional[list]:
         return await self._request("/api/index/puell-multiple")
@@ -690,7 +725,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/index/stock-flow")
 
     async def fetch_pi_cycle(self) -> Optional[list]:
-        return await self._request("/api/index/pi-cycle-indicator")
+        return await self._request("/api/index/pi-cycle-indicator", cache_ttl=1800)
 
     async def fetch_golden_ratio(self) -> Optional[list]:
         return await self._request("/api/index/golden-ratio-multiplier")
@@ -699,7 +734,8 @@ class CoinglassSource(DataSource):
         return await self._request("/api/index/2-year-ma-multiplier")
 
     async def fetch_200w_ma_heatmap(self) -> Optional[list]:
-        return await self._request("/api/index/200-week-moving-average-heatmap")
+        return await self._request("/api/index/200-week-moving-average-heatmap",
+                                   cache_ttl=1800)
 
     async def fetch_rainbow_chart(self) -> Optional[list]:
         return await self._request("/api/index/bitcoin/rainbow-chart")
@@ -720,7 +756,8 @@ class CoinglassSource(DataSource):
         return await self._request("/api/index/bitcoin-lth-sopr")
 
     async def fetch_sth_realized_price(self) -> Optional[list]:
-        return await self._request("/api/index/bitcoin-sth-realized-price")
+        return await self._request("/api/index/bitcoin-sth-realized-price",
+                                   cache_ttl=1800)
 
     async def fetch_lth_realized_price(self) -> Optional[list]:
         return await self._request("/api/index/bitcoin-lth-realized-price")
@@ -763,7 +800,7 @@ class CoinglassSource(DataSource):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     async def fetch_fear_greed(self) -> Optional[list]:
-        return await self._request("/api/index/fear-greed-history")
+        return await self._request("/api/index/fear-greed-history", cache_ttl=600)
 
     async def fetch_stablecoin_mcap(self) -> Optional[list]:
         return await self._request("/api/index/stableCoin-marketCap-history")
@@ -772,7 +809,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/index/altcoin-season")
 
     async def fetch_btc_dominance(self) -> Optional[list]:
-        return await self._request("/api/index/bitcoin-dominance")
+        return await self._request("/api/index/bitcoin-dominance", cache_ttl=600)
 
     async def fetch_option_vs_futures_oi_ratio(self) -> Optional[list]:
         return await self._request("/api/index/option-vs-futures-oi-ratio")
@@ -821,7 +858,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/etf/bitcoin/list")
 
     async def fetch_btc_etf_flow_history(self) -> Optional[list]:
-        return await self._request("/api/etf/bitcoin/flow-history")
+        return await self._request("/api/etf/bitcoin/flow-history", cache_ttl=1800)
 
     async def fetch_btc_etf_net_assets_history(self, ticker: str = "") -> Optional[list]:
         params = {}
@@ -839,7 +876,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/etf/ethereum/list")
 
     async def fetch_eth_etf_flow_history(self) -> Optional[list]:
-        return await self._request("/api/etf/ethereum/flow-history")
+        return await self._request("/api/etf/ethereum/flow-history", cache_ttl=1800)
 
     async def fetch_eth_etf_net_assets(self) -> Optional[list]:
         return await self._request("/api/etf/ethereum/net-assets/history")
@@ -871,7 +908,7 @@ class CoinglassSource(DataSource):
                          page: int = 1) -> Optional[list]:
         return await self._request("/api/article/list", {
             "language": language, "per_page": str(per_page), "page": str(page),
-        })
+        }, cache_ttl=600)
 
     async def fetch_account_subscription(self) -> Optional[dict]:
         return await self._request("/api/user/account/subscription")

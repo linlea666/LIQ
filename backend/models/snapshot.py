@@ -213,6 +213,15 @@ class AISnapshot(BaseModel):
     large_orders_sell_count: int = 0
     large_orders_net_usd: float = 0
 
+    # 3 维多空比
+    ls_ratio_top_account: Optional[float] = None
+    ls_ratio_top_position: Optional[float] = None
+
+    # 巨鲸追踪
+    whale_hl_alerts_count: int = 0
+    whale_transfers_count: int = 0
+    whale_net_direction: str = ""
+
     # Phase 4: 规则引擎预计算结果
     rule_supports: list[dict] = []
     rule_resistances: list[dict] = []

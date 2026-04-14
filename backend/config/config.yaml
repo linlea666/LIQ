@@ -28,23 +28,23 @@ sources:
     rate_limit_per_min: 10
     daily_limit: 50000
     poll_intervals:
-      ticker: 10
-      oi: 30
-      indicators: 300
-      funding_rate: 60
-      liquidation_map: 60
-      liquidation_heatmap: 300
-      orderbook: 30
-      large_orders: 60
-      long_short: 60
-      taker_volume: 60
-      cvd: 60
-      options: 300
-      etf: 600
-      onchain: 1800
-      macro_index: 600
-      whale: 300
-      news: 600
+      ticker: 15
+      oi: 60
+      indicators: 600
+      funding_rate: 120
+      liquidation_map: 120
+      liquidation_heatmap: 600
+      orderbook: 60
+      large_orders: 300
+      long_short: 300
+      taker_volume: 300
+      cvd: 120
+      options: 900
+      etf: 1800
+      onchain: 3600
+      macro_index: 1800
+      whale: 900
+      news: 1800
 
 processors:
   cvd:

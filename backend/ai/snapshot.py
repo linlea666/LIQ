@@ -83,6 +83,11 @@ def build_ai_snapshot(
     large_orders_buy_count: int = 0,
     large_orders_sell_count: int = 0,
     large_orders_net_usd: float = 0,
+    ls_ratio_top_account: Optional[float] = None,
+    ls_ratio_top_position: Optional[float] = None,
+    whale_hl_alerts_count: int = 0,
+    whale_transfers_count: int = 0,
+    whale_net_direction: str = "",
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -334,6 +339,11 @@ def build_ai_snapshot(
         large_orders_buy_count=large_orders_buy_count,
         large_orders_sell_count=large_orders_sell_count,
         large_orders_net_usd=large_orders_net_usd,
+        ls_ratio_top_account=ls_ratio_top_account,
+        ls_ratio_top_position=ls_ratio_top_position,
+        whale_hl_alerts_count=whale_hl_alerts_count,
+        whale_transfers_count=whale_transfers_count,
+        whale_net_direction=whale_net_direction,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,

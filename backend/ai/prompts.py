@@ -327,9 +327,20 @@ def build_user_prompt(snapshot: dict) -> str:
     ])
     ls = snapshot.get("ls_ratio")
     if ls is not None:
-        lines.append(f"综合多空比: {ls:.2f} ({snapshot.get('ls_ratio_interpretation', '')})")
+        lines.append(f"全局账户多空比: {ls:.2f} ({snapshot.get('ls_ratio_interpretation', '')})")
     else:
-        lines.append("数据暂缺")
+        lines.append("全局账户多空比: 数据暂缺")
+    ls_ta = snapshot.get("ls_ratio_top_account")
+    ls_tp = snapshot.get("ls_ratio_top_position")
+    if ls_ta is not None:
+        ta_label = "大户偏多" if ls_ta > 1.1 else ("大户偏空" if ls_ta < 0.9 else "大户中性")
+        lines.append(f"大户账户多空比: {ls_ta:.2f} → {ta_label}")
+    if ls_tp is not None:
+        tp_label = "大户持仓偏多" if ls_tp > 1.1 else ("大户持仓偏空" if ls_tp < 0.9 else "大户持仓中性")
+        lines.append(f"大户持仓多空比: {ls_tp:.2f} → {tp_label}")
+    if ls is not None and ls_ta is not None:
+        if (ls > 1.1 and ls_ta < 0.9) or (ls < 0.9 and ls_ta > 1.1):
+            lines.append(f"  ⚠ 散户vs大户多空分歧：散户{'偏多' if ls > 1 else '偏空'}而大户{'偏多' if ls_ta > 1 else '偏空'}，关注大户方向")
     okx_ls = snapshot.get("okx_ls_ratio_btc")
     bn_ls = snapshot.get("binance_ls_ratio_btc")
     if okx_ls is not None or bn_ls is not None:
@@ -441,6 +452,18 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"  大资金偏向: 买入为主(净流入)")
         elif lo_net < 0:
             lines.append(f"  大资金偏向: 卖出为主(净流出)")
+
+    w_alerts = snapshot.get("whale_hl_alerts_count", 0)
+    w_transfers = snapshot.get("whale_transfers_count", 0)
+    w_dir = snapshot.get("whale_net_direction", "")
+    if w_alerts > 0 or w_transfers > 0:
+        lines.extend(["", "### 8e. 巨鲸追踪 [链上+Hyperliquid]"])
+        if w_alerts > 0:
+            lines.append(f"Hyperliquid 巨鲸警报: {w_alerts}条")
+        if w_transfers > 0:
+            lines.append(f"链上巨鲸转账: {w_transfers}笔")
+        if w_dir:
+            lines.append(f"巨鲸方向: {w_dir}")
 
     lines.extend([
         "",
