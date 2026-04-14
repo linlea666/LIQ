@@ -206,10 +206,6 @@ class Engine:
                 "cg_stablecoin", self._poll_stablecoin_mcap, btc_coin,
                 3600, 3.0,
             )),
-            asyncio.create_task(self._poll_loop(
-                "cg_news", self._poll_news, btc_coin,
-                self._poll_cfg.get("news", 1800), 3.3,
-            )),
         ])
 
         for idx, ccy in enumerate(self._settings.supported_coins):
@@ -218,16 +214,6 @@ class Engine:
 
             if ccy == self._default_coin:
                 tasks.extend(self._create_full_poll_tasks(coin, stagger))
-            else:
-                tasks.extend([
-                    asyncio.create_task(self._poll_loop(
-                        f"cg_liq_{ccy}", self._poll_liquidation_map, coin,
-                        self._poll_cfg.get("liquidation_map", 60), stagger,
-                    )),
-                    asyncio.create_task(self._poll_loop(
-                        f"cg_push_{ccy}", self._push_loop, coin, 10, stagger + 0.5,
-                    )),
-                ])
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -550,10 +536,6 @@ class Engine:
     async def _poll_onchain_cycle(self, _coin: CoinConfig):
         from polls.macro import poll_onchain_cycle
         await poll_onchain_cycle(self._cg, self._states, self._settings.supported_coins)
-
-    async def _poll_news(self, _coin: CoinConfig):
-        from polls.macro import poll_news
-        await poll_news(self._cg, self._states, self._settings.supported_coins)
 
     # ── 重新计算 ──
 

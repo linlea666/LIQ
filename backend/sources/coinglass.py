@@ -998,31 +998,12 @@ class CoinglassSource(DataSource):
     # Other
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    async def fetch_financial_events(self, language: str = "zh") -> Optional[list]:
-        params: dict = {"language": language}
-        now_ms = int(time.time() * 1000)
-        params["start_time"] = str(now_ms - 7 * 86400 * 1000)
-        params["end_time"] = str(now_ms + 7 * 86400 * 1000)
-        return await self._request("/api/calendar/financial-events", params)
-
-    async def fetch_newsflash(self, language: str = "zh", per_page: int = 20,
-                              page: int = 1) -> Optional[list]:
-        return await self._request("/api/newsflash/list", {
-            "language": language, "per_page": str(per_page), "page": str(page),
-        })
-
     async def fetch_economic_data(self, language: str = "zh") -> Optional[list]:
         params: dict = {"language": language}
         now_ms = int(time.time() * 1000)
         params["start_time"] = str(now_ms - 15 * 86400 * 1000)
         params["end_time"] = str(now_ms + 15 * 86400 * 1000)
         return await self._request("/api/calendar/economic-data", params)
-
-    async def fetch_news(self, language: str = "zh", per_page: int = 20,
-                         page: int = 1) -> Optional[list]:
-        return await self._request("/api/article/list", {
-            "language": language, "per_page": str(per_page), "page": str(page),
-        }, cache_ttl=600)
 
     async def fetch_account_subscription(self) -> Optional[dict]:
         return await self._request("/api/user/account/subscription")
