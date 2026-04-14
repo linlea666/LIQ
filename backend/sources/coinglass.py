@@ -29,7 +29,7 @@ class FixedIntervalLimiter:
     """
 
     def __init__(self, rate_per_min: int = 10):
-        self._min_interval = 60.0 / rate_per_min + 1.0
+        self._min_interval = 60.0 / rate_per_min + 0.5
         self._last_request: float = 0.0
         self._lock = asyncio.Lock()
         self._daily_count = 0

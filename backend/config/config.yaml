@@ -25,7 +25,7 @@ sources:
     api_key_env: "COINGLASS_API_KEY"
     api_key_default: "ks_live_eab38da3fef4c429848d11b1fda6bf2b"
     timeout_sec: 15
-    rate_limit_per_min: 10
+    rate_limit_per_min: 30
     daily_limit: 50000
     poll_intervals:
       ticker: 15

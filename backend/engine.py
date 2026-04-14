@@ -158,7 +158,7 @@ class Engine:
             asyncio.create_task(self._grace_check_loop()),
         ]
 
-        # 全局层 —— stagger 2s 间隔，关键数据优先，30s 内全部首轮完成
+        # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
         btc_coin = self._settings.get_coin("BTC")
         tasks.extend([
             asyncio.create_task(self._poll_loop(
@@ -167,53 +167,53 @@ class Engine:
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_fr", self._poll_funding_all, btc_coin,
-                self._poll_cfg.get("funding_rate", 60), 2,
+                self._poll_cfg.get("funding_rate", 60), 0.3,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_global_liq", self._poll_global_liq, btc_coin,
-                self._poll_cfg.get("liquidation_map", 60), 4,
+                self._poll_cfg.get("liquidation_map", 60), 0.6,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_liq_max_pain", self._poll_liq_max_pain, btc_coin,
-                self._poll_cfg.get("liquidation_map", 60), 6,
+                self._poll_cfg.get("liquidation_map", 60), 0.9,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_macro", self._poll_macro_index, btc_coin,
-                self._poll_cfg.get("macro_index", 600), 8,
+                self._poll_cfg.get("macro_index", 600), 1.2,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_etf", self._poll_etf_flow, btc_coin,
-                self._poll_cfg.get("etf", 1800), 10,
+                self._poll_cfg.get("etf", 1800), 1.5,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_whale", self._poll_whale_data, btc_coin,
-                self._poll_cfg.get("whale", 600), 12,
+                self._poll_cfg.get("whale", 600), 1.8,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_cb_premium", self._poll_coinbase_premium, btc_coin,
-                120, 14,
+                120, 2.1,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_options", self._poll_options, btc_coin,
-                self._poll_cfg.get("options", 600), 16,
+                self._poll_cfg.get("options", 600), 2.4,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_onchain", self._poll_onchain_cycle, btc_coin,
-                self._poll_cfg.get("onchain", 3600), 18,
+                self._poll_cfg.get("onchain", 3600), 2.7,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_stablecoin", self._poll_stablecoin_mcap, btc_coin,
-                3600, 20,
+                3600, 3.0,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_news", self._poll_news, btc_coin,
-                self._poll_cfg.get("news", 1800), 22,
+                self._poll_cfg.get("news", 1800), 3.3,
             )),
         ])
 
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
-            stagger = 2 + idx * 6
+            stagger = 1.0 + idx * 1.5
 
             if ccy == self._default_coin:
                 tasks.extend(self._create_full_poll_tasks(coin, stagger))
@@ -224,79 +224,81 @@ class Engine:
                         self._poll_cfg.get("liquidation_map", 60), stagger,
                     )),
                     asyncio.create_task(self._poll_loop(
-                        f"cg_push_{ccy}", self._push_loop, coin, 10, stagger + 1,
+                        f"cg_push_{ccy}", self._push_loop, coin, 10, stagger + 0.5,
                     )),
                 ])
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _create_full_poll_tasks(self, coin: CoinConfig, stagger: int) -> list[asyncio.Task]:
-        """为活跃币种创建完整轮询任务集"""
+    def _create_full_poll_tasks(self, coin: CoinConfig, stagger: float) -> list[asyncio.Task]:
+        """为活跃币种创建完整轮询任务集。
+        stagger 间隔 0.5s，关键数据优先，8s 内全部启动。
+        """
         ccy = coin.ccy
         s = stagger
         return [
             asyncio.create_task(self._poll_loop(
+                f"cg_push_{ccy}", self._push_loop, coin, 5, s,
+            )),
+            asyncio.create_task(self._poll_loop(
                 f"cg_oi_{ccy}", self._poll_oi, coin,
-                self._poll_cfg.get("oi", 60), s,
+                self._poll_cfg.get("oi", 60), s + 0.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_{ccy}", self._poll_liquidation_map, coin,
-                self._poll_cfg.get("liquidation_map", 60), s + 2,
+                self._poll_cfg.get("liquidation_map", 60), s + 1.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_cvd_{ccy}", self._poll_cvd, coin,
-                self._poll_cfg.get("cvd", 60), s + 4,
+                self._poll_cfg.get("cvd", 60), s + 1.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_ls_{ccy}", self._poll_ls_ratio, coin,
-                self._poll_cfg.get("long_short", 120), s + 6,
+                self._poll_cfg.get("long_short", 120), s + 2.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
-                60, s + 8,
+                60, s + 2.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_basis_{ccy}", self._poll_basis, coin,
-                self._poll_cfg.get("funding_rate", 60), s + 10,
+                self._poll_cfg.get("funding_rate", 60), s + 3.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_taker_{ccy}", self._poll_taker_volume, coin,
-                self._poll_cfg.get("taker_volume", 120), s + 12,
+                self._poll_cfg.get("taker_volume", 120), s + 3.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_large_orders_{ccy}", self._poll_large_orders, coin,
-                self._poll_cfg.get("large_orders", 120), s + 14,
+                self._poll_cfg.get("large_orders", 120), s + 4.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
-                self._poll_cfg.get("liquidation_map", 60), s + 16,
+                self._poll_cfg.get("liquidation_map", 60), s + 4.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_indicators_{ccy}", self._poll_indicators, coin,
-                self._poll_cfg.get("indicators", 600), s + 18,
+                self._poll_cfg.get("indicators", 600), s + 5.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_heatmap_{ccy}", self._poll_liq_heatmap, coin,
-                self._poll_cfg.get("liquidation_heatmap", 600), s + 20,
+                self._poll_cfg.get("liquidation_heatmap", 600), s + 5.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
-                self._poll_cfg.get("orderbook", 60), s + 22,
+                self._poll_cfg.get("orderbook", 60), s + 6.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_oi_rank_{ccy}", self._poll_oi_exchange_rank, coin,
-                120, s + 24,
+                120, s + 6.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                600, s + 26,
+                600, s + 7.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                3600, s + 28,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_push_{ccy}", self._push_loop, coin, 5, s,
+                3600, s + 7.5,
             )),
         ]
 
