@@ -18,9 +18,10 @@ def _min_sniper_rr() -> float:
 def build_system_prompt() -> str:
     """动态注入与配置一致的 R:R 下限，避免与规则引擎口径漂移。"""
     min_rr = _min_sniper_rr()
-    return f"""你是一位管理$5亿级加密货币基金的量化策略分析师，兼任永续合约交易教练。分析对象为使用高杠杆的专业交易员。
+    return f"""你是一位管理$5亿级永续合约基金的实盘交易员兼教练，10年加密衍生品经验。你不是在写研报，你是在给即将下单的高杠杆交易员做最后的战前推演。
 
-你的核心价值：识别庄家借助清算地图的止损猎杀意图，结合规则引擎输出高 R:R 狙击参考（非喊单），通过宏观-微观联动判断方向与风险。
+你的每一句话都要回答三个问题：**"所以应该怎么做？为什么？如果错了怎么办？"**
+你的核心能力：像庄家一样思考——看穿清算地图背后的止损猎杀意图，判断"谁会被收割、价格最可能走哪条路径"，输出高 R:R 狙击参考（非喊单）。
 
 ### 铁律
 - 你是**决策参考工具**，交易员最终拍板；禁止"保证盈利"类表述、禁止输出胜率数字
@@ -28,6 +29,7 @@ def build_system_prompt() -> str:
 - 数据矛盾时必须指出并判断哪个更可信（实盘资金行为 > 情绪指标）
 - 若宏观数据中已有恐惧贪婪/DXY/纳指等任一数值，不得写"宏观数据完全缺失"
 - 订单簿合计深度为 0 时表述为"未获得有效 L2 数据"，禁止断言"流动性完全消失"
+- **数据异常值怀疑**：遇到标注"⚠ 极端异常值"的数据，必须在引用时标注可能不准确，权重降至最低，不得作为方向判断的核心依据。交易员不信任离群数据点。
 
 ### Smart Money 流动性框架
 - clusters_above = BSL（上方流动性，空头清算=强制买入→推高价格）；clusters_below = SSL（下方流动性，多头清算=强制卖出→压低价格）
@@ -65,10 +67,11 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - 净持仓正转负 + OI↓ = 机构平多；合约净资金流正 + OI↑ = 新资金开多；TD ≥ 9 = "追单风险极高"
 
 ### 交易员推理框架
+**像庄家一样思考**：先问"如果我持有$10亿仓位，我会把价格往哪推来最大化清算收益？"，然后构建猎杀路径。
 构建**资金流叙事链**：资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
-- §一结尾须用简表列 ≥7 维方向信号（CVD/OI/费率/清算失衡/CB溢价/ETF/巨鲸）+ 共振强度
-- §八末尾须选定**唯一**最偏向场景（禁止骑墙）
-- §四对每个方案至少质疑 1 个维度
+- §一先写 3-5 句叙事链总结（用因果逻辑串联多维数据，如"因为X所以Y导致Z"），再用简表列 ≥7 维方向信号作为佐证
+- §八**核心不是"涨或跌"而是"价格最可能走哪条路径"**——须推演庄家的最优猎杀路线（先扫哪侧流动性→反转→再扫另一侧），末尾选定**唯一**最偏向场景（禁止骑墙）
+- §四每个方案必须回答："如果这笔交易亏了，最可能的原因是什么？"——不是复述风险提示，而是从对手盘角度推演失败场景
 
 ### 狙击挂单原则（§四）
 - 引擎 R:R 已按 ≥ **1:{min_rr:.1f}** 过滤；须在§四完整展开，禁止"审核通过"或省略
@@ -90,7 +93,8 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 **第一行必须是白话总结：**
 > 📝 **看多/看空/震荡（置信度：高/中/低）**——30字以内核心理由（禁止专业术语）
 
-然后 3-5 句专业分析 + 结尾多维交叉验证表
+然后用 3-5 句**因果叙事链**串联核心矛盾（如"ETF资金持续流入→推高OI→但价格卡在关键阻力→说明多头在堆仓但还没突破"），让交易员一读就知道"现在是什么局面、谁在主导、关键变量是什么"。
+结尾附简表（≥7 维方向信号 + 共振强度），作为叙事链的量化佐证。
 
 ## 二、关键价位图谱
 | 类型 | 价位区间 | 依据(≥2维+时效) |
@@ -100,6 +104,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 
 ## 四、狙击挂单计划（高 R:R 埋伏单）
 基于§11 规则引擎方案逐条处理，止损须引用§三安全区
+每个方案末尾必须有"**如果亏了**"段：从对手盘视角推演失败场景（不是重复风险提示，而是"庄家怎么打掉我的止损"）
 
 ## 五、阶梯埋伏计划（多空双向多层网）
 基于§12 规则引擎方案逐条处理
@@ -137,7 +142,7 @@ def build_user_prompt(snapshot: dict) -> str:
         "",
         f"【引擎约束】规则引擎狙击方案仅保留 R:R ≥ 1:{min_rr:.1f} 的条目；第四节须与之一致或明确调整理由。",
         "",
-        "### 1. 清算地图数据 [实时]",
+        "### 1. 清算地图数据 [核心·实时]",
         f"多空失衡比: {snapshot.get('liq_imbalance_ratio', 0):.2f} (>1=空头清算多/看多磁吸, <1=多头清算多/看空磁吸)",
     ]
 
@@ -260,7 +265,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 2. 资金流数据 [实时]",
+        "### 2. 资金流数据 [核心·实时]",
         f"合约CVD趋势(1h): {snapshot.get('cvd_contract_trend', 'N/A')} (净delta: {_fmt_usd_for_prompt(snapshot.get('cvd_contract_delta_1h', 0))})",
         f"现货CVD趋势(1h): {snapshot.get('cvd_spot_trend', 'N/A')} (净delta: {_fmt_usd_for_prompt(snapshot.get('cvd_spot_delta_1h', 0))})",
         f"CVD背离信号: {snapshot.get('cvd_divergence', '无') or '无'}",
@@ -272,7 +277,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 3. 持仓与杠杆 [实时]",
+        "### 3. 持仓与杠杆 [核心·实时]",
         f"OI总量: ${snapshot.get('oi_current_usd', 0) / 1e9:.2f}B",
         f"OI变化(1h): {snapshot.get('oi_change_1h_pct', 0):+.2f}%",
         f"OI变化(5m): {snapshot.get('oi_change_5m_pct', 0):+.2f}%",
@@ -281,7 +286,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 4. 资金费率 [多交易所]",
+        "### 4. 资金费率 [核心·多交易所]",
     ])
     funding_exchanges = snapshot.get("funding_exchanges", [])
     if funding_exchanges:
@@ -300,6 +305,12 @@ def build_user_prompt(snapshot: dict) -> str:
     avg7d = snapshot.get("funding_avg_7d")
     if avg7d is not None:
         lines.append(f"7d均值: {avg7d*100:.4f}%")
+    if funding_exchanges:
+        extreme_fr = [fe for fe in funding_exchanges
+                      if fe.get("current") is not None and abs(fe["current"]) > 0.001]
+        if extreme_fr:
+            names = ", ".join(fe.get("exchange", "") for fe in extreme_fr)
+            lines.append(f"  ⚠ {names} 费率绝对值>0.1%，属于极端水平，需警惕轧空/轧多风险")
 
     lines.extend([
         f"期现溢价: {snapshot.get('basis_pct', 0):+.4f}%",
@@ -372,7 +383,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 8. 成交分布与波动率 [1H K线]",
+        "### 8. 成交分布与波动率 [参考·1H K线]",
         f"Volume Profile POC: ${snapshot.get('volume_profile_poc', 0):,.2f}",
         f"Value Area: ${snapshot.get('value_area_low', 0):,.2f} - ${snapshot.get('value_area_high', 0):,.2f}",
         f"VWAP(多日成交加权): ${snapshot.get('vwap', 0):,.2f}",
@@ -462,10 +473,12 @@ def build_user_prompt(snapshot: dict) -> str:
     cb_premium = snapshot.get("coinbase_premium", 0)
     cb_trend = snapshot.get("coinbase_premium_trend", "")
     if cb_premium != 0 or cb_trend:
-        lines.extend(["", "### 8f. Coinbase 溢价 [机构买盘信号·实时]"])
+        lines.extend(["", "### 8f. Coinbase 溢价 [核心·机构买盘信号·实时]"])
         prem_pct = cb_premium * 100 if abs(cb_premium) < 1 else cb_premium
         lines.append(f"溢价率: {prem_pct:+.3f}%")
-        if prem_pct > 0.05:
+        if abs(prem_pct) > 1.0:
+            lines.append(f"  ⚠ 极端异常值（正常范围 ±0.5%）！可能为数据采集误差或流动性异常时点报价，**必须大幅降低此指标权重**，不得作为核心判断依据。")
+        elif prem_pct > 0.05:
             lines.append("  正溢价=美股时段机构/散户净买入, 价格上行压力")
         elif prem_pct < -0.05:
             lines.append("  负溢价=Coinbase端卖出偏重, 机构可能在减仓")
@@ -497,7 +510,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.extend([
         "",
-        "### 9. 宏观与情绪指标",
+        "### 9. 宏观与情绪指标 [参考·日级]",
     ])
     fgi = snapshot.get("fear_greed_index")
     if fgi is not None:
@@ -689,7 +702,7 @@ def build_user_prompt(snapshot: dict) -> str:
     has_range = rs is not None and (rs.get("range_upper") or rs.get("ma60_daily"))
     if has_range:
         lines.append("")
-        lines.append("### 9f. 箱体信号 [多维共振箱体+状态机+突破概率]")
+        lines.append("### 9f. 箱体信号 [核心·多维共振箱体+状态机+突破概率]")
 
         if rs.get("range_upper") and rs.get("range_lower"):
             lines.append(f"  核心箱体(MA骨架): ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')})")
@@ -759,7 +772,7 @@ def build_user_prompt(snapshot: dict) -> str:
     has_kl = kl is not None and len(kl.get("levels", [])) > 0
     if has_kl:
         lines.append("")
-        lines.append("### 9g. 关键位状态机 [V2·多维共振+生命周期追踪]")
+        lines.append("### 9g. 关键位状态机 [核心·V2·多维共振+生命周期追踪]")
         lines.append(f"活跃关键位: {kl.get('active_count', 0)}个")
 
         struct = kl.get("structure_summary")
@@ -847,13 +860,20 @@ def build_user_prompt(snapshot: dict) -> str:
     nf_trend = snapshot.get("futures_coin_netflow_trend")
     td_cnt = snapshot.get("td_sequential_count")
     td_dir = snapshot.get("td_sequential_direction")
-    if any(v is not None and v != "" for v in (np_latest, np_trend, nf_trend, td_cnt)):
+    pf = snapshot.get("poll_failures", {})
+    has_9h_data = any(v is not None and v != "" for v in (np_latest, np_trend, nf_trend, td_cnt))
+    has_9h_failures = any(k in pf for k in ("net_position", "coin_netflow", "td_sequential"))
+    if has_9h_data or has_9h_failures:
         lines.extend(["", "### 9h. 净持仓 + 合约资金流 + TD序列"])
         if np_latest is not None:
             lines.append(f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})")
+        elif "net_position" in pf:
+            lines.append(f"净持仓(v2): ⚠ 采集失败（{pf['net_position']}），本次分析不含此维度")
         if nf_1h is not None:
             nf_label = "资金净流入合约" if nf_1h > 0 else "资金净流出合约"
             lines.append(f"合约净资金流(1h): {_fmt_usd_for_prompt(nf_1h)} → {nf_label} ({nf_trend or ''})")
+        elif "coin_netflow" in pf:
+            lines.append(f"合约净资金流(1h): ⚠ 采集失败（{pf['coin_netflow']}），本次分析不含此维度")
         if td_cnt is not None and td_dir:
             td_label = f"TD{td_dir}计数={td_cnt}"
             if td_cnt >= 9:
@@ -861,6 +881,8 @@ def build_user_prompt(snapshot: dict) -> str:
             elif td_cnt >= 7:
                 td_label += " 接近反转"
             lines.append(f"TD序列: {td_label}")
+        elif "td_sequential" in pf:
+            lines.append(f"TD序列: ⚠ 采集失败（{pf['td_sequential']}），本次分析不含此维度")
 
     has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None

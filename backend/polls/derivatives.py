@@ -381,7 +381,8 @@ async def poll_net_position(
             else:
                 state.net_position_trend = "持平"
     except Exception:
-        logger.debug("poll_net_position failed", exc_info=True)
+        logger.warning("poll_net_position failed", exc_info=True)
+        state.poll_failures["net_position"] = "API调用失败"
 
 
 async def poll_futures_coin_netflow(
@@ -411,7 +412,8 @@ async def poll_futures_coin_netflow(
             else:
                 state.futures_coin_netflow_trend = "交替"
     except Exception:
-        logger.debug("poll_futures_coin_netflow failed", exc_info=True)
+        logger.warning("poll_futures_coin_netflow failed", exc_info=True)
+        state.poll_failures["coin_netflow"] = "API调用失败"
 
 
 async def poll_td_sequential(
@@ -435,4 +437,5 @@ async def poll_td_sequential(
         if direction:
             state.td_sequential_direction = str(direction)
     except Exception:
-        logger.debug("poll_td_sequential failed", exc_info=True)
+        logger.warning("poll_td_sequential failed", exc_info=True)
+        state.poll_failures["td_sequential"] = "API调用失败"

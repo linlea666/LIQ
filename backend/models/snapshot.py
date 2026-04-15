@@ -259,6 +259,7 @@ class AISnapshot(BaseModel):
     futures_coin_netflow_trend: str = ""
     td_sequential_count: Optional[int] = None
     td_sequential_direction: str = ""
+    poll_failures: dict[str, str] = {}
 
 
 class SignalSummary(BaseModel):

@@ -132,6 +132,7 @@ class CoinState:
         self.futures_coin_netflow_trend: str = ""
         self.td_sequential_count: Optional[int] = None
         self.td_sequential_direction: str = ""
+        self.poll_failures: dict[str, str] = {}
 
 
 class Engine:
@@ -1030,6 +1031,7 @@ class Engine:
             futures_coin_netflow_trend=state.futures_coin_netflow_trend,
             td_sequential_count=state.td_sequential_count,
             td_sequential_direction=state.td_sequential_direction,
+            poll_failures=dict(state.poll_failures),
         )
 
         result = await self._analyzer.analyze(snapshot)

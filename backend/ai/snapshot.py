@@ -103,6 +103,7 @@ def build_ai_snapshot(
     td_sequential_count: Optional[int] = None,
     td_sequential_direction: str = "",
     liq_heatmap: Optional[HeatmapData] = None,
+    poll_failures: dict[str, str] | None = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -404,6 +405,7 @@ def build_ai_snapshot(
         futures_coin_netflow_trend=futures_coin_netflow_trend,
         td_sequential_count=td_sequential_count,
         td_sequential_direction=td_sequential_direction,
+        poll_failures=poll_failures or {},
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,
