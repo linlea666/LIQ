@@ -43,6 +43,16 @@ class CoinglassSourceConfig:
 
 
 @dataclass(frozen=True)
+class BinanceSourceConfig:
+    """Binance Futures 公共数据源配置"""
+    base_url: str
+    timeout_sec: int = 10
+    use_for_ticker: bool = True
+    use_for_klines: bool = True
+    use_for_basis: bool = True
+
+
+@dataclass(frozen=True)
 class ProcessorsConfig:
     cvd: dict[str, Any]
     percentile: dict[str, Any]
@@ -98,14 +108,36 @@ class ServerConfig:
 
 
 @dataclass(frozen=True)
+class EmailNotificationConfig:
+    enabled: bool = False
+    smtp_host: str = "smtp.163.com"
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    from_name: str = "LIQ监控"
+    to: list[str] = field(default_factory=list)
+    min_signal_tier: str = "S"
+    cooldown_minutes: int = 30
+    include_range: bool = True
+    include_key_levels: bool = True
+
+
+@dataclass(frozen=True)
+class NotificationsConfig:
+    email: EmailNotificationConfig = field(default_factory=EmailNotificationConfig)
+
+
+@dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
+    binance: BinanceSourceConfig
     processors: ProcessorsConfig
     ai: AIConfig
     push: PushConfig
     server: ServerConfig
     engine: EngineConfig = field(default_factory=EngineConfig)
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -145,6 +177,14 @@ def _build_settings(raw: dict) -> Settings:
 
     src = raw["sources"]
     coinglass = CoinglassSourceConfig(**src["coinglass"])
+    bn_raw = src.get("binance", {})
+    binance = BinanceSourceConfig(
+        base_url=bn_raw.get("base_url", "https://fapi.binance.com"),
+        timeout_sec=int(bn_raw.get("timeout_sec", 10)),
+        use_for_ticker=bool(bn_raw.get("use_for_ticker", True)),
+        use_for_klines=bool(bn_raw.get("use_for_klines", True)),
+        use_for_basis=bool(bn_raw.get("use_for_basis", True)),
+    )
 
     processors = ProcessorsConfig(**raw["processors"])
 
@@ -189,14 +229,33 @@ def _build_settings(raw: dict) -> Settings:
         grace_period_sec=eng_raw.get("grace_period_sec", 60),
     )
 
+    notif_raw = raw.get("notifications", {})
+    email_raw = notif_raw.get("email", {})
+    email_cfg = EmailNotificationConfig(
+        enabled=email_raw.get("enabled", False),
+        smtp_host=email_raw.get("smtp_host", "smtp.163.com"),
+        smtp_port=email_raw.get("smtp_port", 465),
+        smtp_user=os.getenv("SMTP_USER", email_raw.get("smtp_user", "")),
+        smtp_pass=os.getenv("SMTP_PASS", email_raw.get("smtp_pass", "")),
+        from_name=email_raw.get("from_name", "LIQ监控"),
+        to=email_raw.get("to", []),
+        min_signal_tier=email_raw.get("min_signal_tier", "S"),
+        cooldown_minutes=email_raw.get("cooldown_minutes", 30),
+        include_range=email_raw.get("include_range", True),
+        include_key_levels=email_raw.get("include_key_levels", True),
+    )
+    notifications_cfg = NotificationsConfig(email=email_cfg)
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
+        binance=binance,
         processors=processors,
         ai=ai,
         push=push,
         server=server,
         engine=engine_cfg,
+        notifications=notifications_cfg,
         default_coin=default_coin,
     )
 

@@ -27,6 +27,7 @@ from models.flow import (
 )
 from models.market import TickerData
 from processors.percentile import PercentileTracker
+from sources.binance_futures import BinanceFuturesSource
 from sources.coinglass import CoinglassSource
 
 logger = logging.getLogger(__name__)
@@ -50,12 +51,17 @@ async def poll_ticker_all(
     get_coin: Callable[[str], CoinConfig],
     percentile: PercentileTracker,
     logged_keys: set[str],
+    bn: BinanceFuturesSource | None = None,
 ) -> None:
     """coins-markets 一次获取全币种行情。"""
-    data = await cg.fetch_coins_markets()
+    data = None
+    if bn:
+        data = await bn.fetch_tickers_24h()
+    if not data:
+        data = await cg.fetch_coins_markets()
     if not data:
         return
-    log_api_fields_once("coins-markets", data, logged_keys)
+    log_api_fields_once("ticker-markets", data, logged_keys)
 
     symbol_to_ccy = {
         get_coin(c).symbol_cg: c
@@ -70,18 +76,18 @@ async def poll_ticker_all(
 
         state = states[ccy]
         try:
-            price = float(item.get("current_price", item.get("price", 0)))
+            price = float(item.get("current_price", item.get("lastPrice", item.get("price", 0))))
             if price <= 0:
                 continue
-            chg_pct = float(item.get("price_change_percent_24h", 0))
+            chg_pct = float(item.get("price_change_percent_24h", item.get("priceChangePercent", 0)))
             open_24h = price / (1 + chg_pct / 100) if chg_pct != 0 else price
             state.ticker = TickerData(
                 coin=ccy,
                 ts=int(time.time() * 1000),
                 last=price,
-                high_24h=float(item.get("high24h", price)),
-                low_24h=float(item.get("low24h", price)),
-                vol_24h=float(item.get("volUsd24h", 0)),
+                high_24h=float(item.get("high24h", item.get("highPrice", price))),
+                low_24h=float(item.get("low24h", item.get("lowPrice", price))),
+                vol_24h=float(item.get("volUsd24h", item.get("quoteVolume", 0))),
                 change_24h=round(price - open_24h, 2),
                 change_pct_24h=round(chg_pct, 2),
             )
@@ -288,15 +294,36 @@ async def poll_basis(
     cg: CoinglassSource,
     coin: CoinConfig,
     state: CoinState,
+    bn: BinanceFuturesSource | None = None,
 ) -> None:
-    """获取期现溢价。"""
+    """获取期现溢价：优先 Binance premiumIndex，本地计算 basis；失败回退 Coinglass。"""
+    if bn:
+        try:
+            premium = await bn.fetch_premium_index(coin.symbol_cg_pair)
+            if premium:
+                mark_price = float(premium.get("markPrice", 0))
+                index_price = float(premium.get("indexPrice", 0))
+                if mark_price > 0 and index_price > 0:
+                    basis_pct = (mark_price - index_price) / index_price * 100
+                    interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
+                    state.basis = BasisData(
+                        coin=coin.ccy,
+                        ts=int(time.time()),
+                        mark_price=mark_price,
+                        index_price=index_price,
+                        basis_pct=round(basis_pct, 4),
+                        interpretation=interp,
+                    )
+                    return
+        except Exception:
+            logger.debug("poll_basis from binance failed, fallback coinglass", exc_info=True)
+
     data = await cg.fetch_basis_history(
         coin.exchange_primary, coin.symbol_cg_pair,
         interval="5m", limit=1,
     )
     if not data:
         return
-
     try:
         last = data[-1]
         basis_pct = float(last.get("close_basis", last.get("basisRate", last.get("basis", 0))))
@@ -356,7 +383,7 @@ async def poll_net_position(
     """拉取净持仓 v2 (1h)，取最新值与趋势。"""
     try:
         rows = await cg.fetch_net_position_v2_history(
-            exchange="Binance", symbol=coin.symbol, interval="1h", limit=24,
+            exchange="Binance", symbol=coin.symbol_cg, interval="1h", limit=24,
         )
         if not rows:
             return
@@ -391,7 +418,7 @@ async def poll_futures_coin_netflow(
     """拉取合约币种净资金流 (1h)，取最近 1h 净值与趋势。"""
     try:
         rows = await cg.fetch_futures_coin_netflow(
-            symbol=coin.symbol, interval="1h", limit=24,
+            symbol=coin.symbol_cg, interval="1h", limit=24,
         )
         if not rows:
             return
@@ -422,7 +449,7 @@ async def poll_td_sequential(
     """拉取 TD 序列 (1d)，取最新计数与方向。"""
     try:
         rows = await cg.fetch_td_sequential(
-            exchange="Binance", symbol=coin.symbol, interval="1d", limit=10,
+            exchange="Binance", symbol=coin.symbol_cg, interval="1d", limit=10,
         )
         if not rows:
             return

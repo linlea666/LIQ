@@ -45,6 +45,12 @@ sources:
       macro_index: 600
       whale: 600
       news: 1800
+  binance:
+    base_url: "https://fapi.binance.com"
+    timeout_sec: 10
+    use_for_ticker: true
+    use_for_klines: true
+    use_for_basis: true
 
 processors:
   cvd:
@@ -127,6 +133,19 @@ push:
   liq_map_interval_ms: 30000
   cvd_oi_interval_ms: 10000
   orderbook_interval_ms: 2000
+
+notifications:
+  email:
+    enabled: true
+    smtp_host: "smtp.163.com"
+    smtp_port: 465
+    from_name: "LIQ监控"
+    to:
+      - "466460082@qq.com"
+    min_signal_tier: "S"       # S=仅S级, A=S+A级都通知
+    cooldown_minutes: 30
+    include_range: true        # 箱体S级信号
+    include_key_levels: true   # 关键位S级信号
 
 server:
   host: "0.0.0.0"

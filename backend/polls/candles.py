@@ -12,8 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 from config.settings import CoinConfig
 from models.market import CandleData
+from processors.ta_core import calc_atr as calc_atr_series
+from processors.ta_core import calc_ema, calc_macd, calc_sma, last_valid
 from processors.range_signal import calculate_range_signal
 from processors.volume_profile import calc_volume_profile
+from sources.binance_futures import BinanceFuturesSource
 from sources.coinglass import CoinglassSource
 
 if TYPE_CHECKING:
@@ -27,6 +30,16 @@ def parse_candles(raw: list) -> list[dict]:
     candles = []
     for item in raw:
         try:
+            if isinstance(item, list) and len(item) >= 6:
+                candles.append({
+                    "ts": int(item[0]),
+                    "o": float(item[1]),
+                    "h": float(item[2]),
+                    "l": float(item[3]),
+                    "c": float(item[4]),
+                    "vol": float(item[5]),
+                })
+                continue
             candles.append({
                 "ts": int(item.get("t", item.get("ts", 0))),
                 "o": float(item.get("o", item.get("open", 0))),
@@ -69,11 +82,15 @@ def recompute_range_signal(
     bb_squeeze = False
     if state.boll_data and hasattr(state, "boll_4h_data"):
         from processors.ta_core import detect_bb_squeeze
-        if state.candles_4h and len(state.candles_4h) >= 20:
-            closes = [c.close for c in state.candles_4h]
-            highs = [c.high for c in state.candles_4h]
-            lows = [c.low for c in state.candles_4h]
-            sq = detect_bb_squeeze(closes, highs, lows)
+        boll = state.boll_4h_data or state.boll_data
+        if boll:
+            sq = detect_bb_squeeze(
+                boll.get("upper"),
+                boll.get("lower"),
+                boll.get("middle"),
+                None,
+                state.macd_data.get("histogram") if state.macd_data else None,
+            )
             bb_squeeze = sq.is_squeeze
 
     oi_change_1h = state.oi.change_1h_pct if state.oi else 0
@@ -105,112 +122,108 @@ def recompute_range_signal(
     )
 
 
-async def poll_indicators(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
-    """从 Coinglass 获取所有技术指标：RSI/MACD/MA/EMA/ATR/BOLL"""
-    exchange = coin.exchange_primary
-    pair = coin.symbol_cg_pair
-
-    def _last_item(data):
-        if isinstance(data, list) and len(data) > 0:
-            return data[-1]
+def _calc_rsi(values: list[float], period: int = 14) -> float | None:
+    if len(values) < period + 1:
         return None
+    gains: list[float] = []
+    losses: list[float] = []
+    for i in range(1, len(values)):
+        diff = values[i] - values[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
-    try:
-        rsi_last = _last_item(await cg.fetch_rsi(exchange, pair, interval="1d", limit=2, window=14))
-        if rsi_last:
-            state.rsi_14 = float(rsi_last.get("rsi", rsi_last.get("value", 0)))
-    except Exception:
-        logger.debug("indicators: RSI parse failed", exc_info=True)
 
-    try:
-        macd_last = _last_item(await cg.fetch_macd(exchange, pair, interval="1d", limit=2))
-        if macd_last:
-            state.macd_data = {
-                "macd": float(macd_last.get("macd", 0)),
-                "signal": float(macd_last.get("signal", 0)),
-                "histogram": float(macd_last.get("histogram", macd_last.get("hist", 0))),
-                "above_zero": float(macd_last.get("macd", 0)) > 0,
-            }
-    except Exception:
-        logger.debug("indicators: MACD parse failed", exc_info=True)
+def _calc_boll(values: list[float], window: int = 20, mult: float = 2.0) -> dict | None:
+    if len(values) < window:
+        return None
+    segment = values[-window:]
+    mid = sum(segment) / window
+    var = sum((v - mid) ** 2 for v in segment) / window
+    std = var ** 0.5
+    return {"upper": mid + mult * std, "middle": mid, "lower": mid - mult * std}
 
-    try:
-        ma60_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=60))
-        if ma60_last:
-            state.ma60_daily_cg = float(ma60_last.get("ma", ma60_last.get("value", 0)))
-    except Exception:
-        logger.debug("indicators: MA60 parse failed", exc_info=True)
 
-    try:
-        ma120_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=120))
-        if ma120_last:
-            state.ma120_daily_cg = float(ma120_last.get("ma", ma120_last.get("value", 0)))
-    except Exception:
-        logger.debug("indicators: MA120 parse failed", exc_info=True)
+async def poll_indicators(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
+    """本地计算技术指标：RSI/MACD/MA/EMA/ATR/BOLL（不消耗 Coinglass 配额）。"""
+    del cg, coin, bn
 
-    try:
-        atr_last = _last_item(await cg.fetch_atr(exchange, pair, interval="1h", limit=2, window=14))
-        if atr_last:
-            state.atr_cg = float(atr_last.get("atr", atr_last.get("value", 0)))
-            state.atr = state.atr_cg
-    except Exception:
-        logger.debug("indicators: ATR parse failed", exc_info=True)
+    if state.candles_daily and len(state.candles_daily) >= 30:
+        closes_1d = [c.close for c in state.candles_daily]
 
-    try:
-        boll_last = _last_item(await cg.fetch_boll(exchange, pair, interval="1d", limit=2))
-        if boll_last:
-            state.boll_data = {
-                "upper": float(boll_last.get("upper", boll_last.get("upperBand", 0))),
-                "middle": float(boll_last.get("middle", boll_last.get("middleBand", 0))),
-                "lower": float(boll_last.get("lower", boll_last.get("lowerBand", 0))),
-            }
-    except Exception:
-        logger.debug("indicators: BOLL parse failed", exc_info=True)
+        rsi = _calc_rsi(closes_1d, period=14)
+        if rsi is not None:
+            state.rsi_14 = float(rsi)
 
-    try:
-        ema20_last = _last_item(await cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=20))
-        if ema20_last:
-            val = float(ema20_last.get("ema", ema20_last.get("value", 0)))
-            state.ema20_cg = val
-            state.ema_daily[20] = val
-    except Exception:
-        logger.debug("indicators: EMA20 parse failed", exc_info=True)
+        macd = calc_macd(closes_1d, fast=12, slow=26, signal=9)
+        state.macd_data = {
+            "macd": float(last_valid(macd["macd_line"]) or 0),
+            "signal": float(last_valid(macd["signal_line"]) or 0),
+            "histogram": float(last_valid(macd["histogram"]) or 0),
+            "above_zero": bool(macd["above_zero"]),
+        }
 
-    # V2 新增：日线 EMA 50/100/200 + SMA 200（关键位多维共振）
-    for period in (50, 100, 200):
-        try:
-            item = _last_item(await cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=period))
-            if item:
-                state.ema_daily[period] = float(item.get("ema", item.get("value", 0)))
-        except Exception:
-            logger.debug("indicators: EMA%d parse failed", period, exc_info=True)
+        ma60 = last_valid(calc_sma(closes_1d, 60))
+        if ma60 is not None:
+            state.ma60_daily_cg = float(ma60)
+        ma120 = last_valid(calc_sma(closes_1d, 120))
+        if ma120 is not None:
+            state.ma120_daily_cg = float(ma120)
+        sma200 = last_valid(calc_sma(closes_1d, 200))
+        if sma200 is not None:
+            state.sma200_daily_cg = float(sma200)
 
-    try:
-        sma200_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=200))
-        if sma200_last:
-            state.sma200_daily_cg = float(sma200_last.get("ma", sma200_last.get("value", 0)))
-    except Exception:
-        logger.debug("indicators: SMA200 parse failed", exc_info=True)
+        ema20 = last_valid(calc_ema(closes_1d, 20))
+        if ema20 is not None:
+            state.ema20_cg = float(ema20)
+            state.ema_daily[20] = float(ema20)
+        for period in (50, 100, 200):
+            emav = last_valid(calc_ema(closes_1d, period))
+            if emav is not None:
+                state.ema_daily[period] = float(emav)
 
-    # V2 新增：4H 布林带（突破蓄力检测）
-    try:
-        boll_4h = _last_item(await cg.fetch_boll(exchange, pair, interval="4h", limit=2))
+        boll = _calc_boll(closes_1d, window=20, mult=2.0)
+        if boll:
+            state.boll_data = boll
+
+    if state.candles_1h and len(state.candles_1h) >= 20:
+        highs = [c.high for c in state.candles_1h]
+        lows = [c.low for c in state.candles_1h]
+        closes = [c.close for c in state.candles_1h]
+        atr = last_valid(calc_atr_series(highs, lows, closes, period=14))
+        if atr is not None and atr > 0:
+            state.atr_cg = float(atr)
+            state.atr = float(atr)
+
+    if state.candles_4h and len(state.candles_4h) >= 20:
+        closes_4h = [c.close for c in state.candles_4h]
+        boll_4h = _calc_boll(closes_4h, window=20, mult=2.0)
         if boll_4h:
-            state.boll_4h_data = {
-                "upper": float(boll_4h.get("upper", boll_4h.get("upperBand", 0))),
-                "middle": float(boll_4h.get("middle", boll_4h.get("middleBand", 0))),
-                "lower": float(boll_4h.get("lower", boll_4h.get("lowerBand", 0))),
-            }
-    except Exception:
-        logger.debug("indicators: BOLL 4H parse failed", exc_info=True)
+            state.boll_4h_data = boll_4h
 
 
-async def poll_candles_4h(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+async def poll_candles_4h(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
     """获取 4H K 线用于 Swing 检测 / 中期 Fibonacci / Pivot Points。"""
-    data = await cg.fetch_price_history(
-        coin.exchange_primary, coin.symbol_cg_pair,
-        interval="4h", limit=200,
-    )
+    data = None
+    if bn:
+        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="4h", limit=200)
+    if not data:
+        data = await cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="4h", limit=200,
+        )
     if not data:
         return
     raw = parse_candles(data)
@@ -222,12 +235,18 @@ async def poll_candles_4h(cg: CoinglassSource, coin: CoinConfig, state: CoinStat
         ]
 
 
-async def poll_candles_1h(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+async def poll_candles_1h(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
     """获取 1H K线用于 Volume Profile / ATR 计算。"""
-    data = await cg.fetch_price_history(
-        coin.exchange_primary, coin.symbol_cg_pair,
-        interval="1h", limit=200,
-    )
+    data = None
+    if bn:
+        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1h", limit=200)
+    if not data:
+        data = await cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1h", limit=200,
+        )
     if not data:
         return
     raw = parse_candles(data)
@@ -242,6 +261,7 @@ async def poll_candles_1h(cg: CoinglassSource, coin: CoinConfig, state: CoinStat
                    l=c["l"], c=c["c"], vol=c["vol"])
         for c in raw
     ]
+    state.candles_1h = candle_models
     vp = calc_volume_profile(candle_models, coin=coin.ccy)
     if vp:
         state.vp = vp
@@ -253,12 +273,18 @@ async def poll_candles_1h(cg: CoinglassSource, coin: CoinConfig, state: CoinStat
             state.atr = atr_val
 
 
-async def poll_candles_daily(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+async def poll_candles_daily(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
     """获取日线 K线用于 range_signal 箱体检测。"""
-    data = await cg.fetch_price_history(
-        coin.exchange_primary, coin.symbol_cg_pair,
-        interval="1d", limit=150,
-    )
+    data = None
+    if bn:
+        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1d", limit=150)
+    if not data:
+        data = await cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1d", limit=150,
+        )
     if not data:
         return
     raw = parse_candles(data)
@@ -270,12 +296,18 @@ async def poll_candles_daily(cg: CoinglassSource, coin: CoinConfig, state: CoinS
         ]
 
 
-async def poll_candles_weekly(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+async def poll_candles_weekly(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
     """获取周线 K线用于 range_signal 周线 MA60。"""
-    data = await cg.fetch_price_history(
-        coin.exchange_primary, coin.symbol_cg_pair,
-        interval="1w", limit=70,
-    )
+    data = None
+    if bn:
+        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1w", limit=70)
+    if not data:
+        data = await cg.fetch_price_history(
+            coin.exchange_primary, coin.symbol_cg_pair,
+            interval="1w", limit=70,
+        )
     if not data:
         return
     raw = parse_candles(data)

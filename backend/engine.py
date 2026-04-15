@@ -50,6 +50,7 @@ from processors.cycle import calculate_cycle_position
 from processors.key_level_tracker import update_key_levels
 from processors.range_signal import calculate_range_signal
 from sources.coinglass import CoinglassSource, create_coinglass_source
+from sources.binance_futures import BinanceFuturesSource, create_binance_source
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class CoinState:
         self.liq_stats: Optional[LiquidationStats] = None
         self.candle_prices: list[float] = []
         self.candle_ts: list[int] = []
+        self.candles_1h: list = []
         self.oi_history: deque = deque(maxlen=720)
         self.ai_history: deque[AIAnalysisResult] = deque(maxlen=50)
         self.last_ai_ts: float = 0
@@ -141,6 +143,7 @@ class Engine:
     def __init__(self):
         self._settings = get_settings()
         self._cg: CoinglassSource = create_coinglass_source()
+        self._bn: BinanceFuturesSource = create_binance_source()
         self._analyzer = create_analyzer()
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
@@ -164,6 +167,13 @@ class Engine:
             self._states[ccy] = CoinState(ccy)
 
         self._load_ai_history()
+
+        # S 级信号邮件通知
+        from notifications.signal_monitor import AlertDedup
+        self._alert_dedup = AlertDedup(
+            cooldown_seconds=self._settings.notifications.email.cooldown_minutes * 60,
+        )
+        self._notif_cfg = self._settings.notifications.email
 
     @property
     def ai_available(self) -> bool:
@@ -381,6 +391,7 @@ class Engine:
         except Exception:
             logger.error("Failed to save AI history on shutdown", exc_info=True)
         await self._cg.close()
+        await self._bn.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──
@@ -463,9 +474,10 @@ class Engine:
 
     async def _poll_ticker_all(self, _coin: CoinConfig):
         from polls.derivatives import poll_ticker_all
+        bn = self._bn if self._settings.binance.use_for_ticker else None
         await poll_ticker_all(
             self._cg, self._states, self._settings.supported_coins,
-            self._settings.get_coin, self._percentile, self._logged_keys,
+            self._settings.get_coin, self._percentile, self._logged_keys, bn,
         )
 
     async def _poll_oi(self, coin: CoinConfig):
@@ -540,11 +552,12 @@ class Engine:
 
     async def _poll_indicators(self, coin: CoinConfig):
         from polls.candles import poll_indicators
-        await poll_indicators(self._cg, coin, self._states[coin.ccy])
+        await poll_indicators(self._cg, coin, self._states[coin.ccy], self._bn)
 
     async def _poll_basis(self, coin: CoinConfig):
         from polls.derivatives import poll_basis
-        await poll_basis(self._cg, coin, self._states[coin.ccy])
+        bn = self._bn if self._settings.binance.use_for_basis else None
+        await poll_basis(self._cg, coin, self._states[coin.ccy], bn)
 
     async def _poll_orderbook_depth(self, coin: CoinConfig):
         from polls.orderflow import poll_orderbook_depth
@@ -562,19 +575,23 @@ class Engine:
 
     async def _poll_candles_1h(self, coin: CoinConfig):
         from polls.candles import poll_candles_1h
-        await poll_candles_1h(self._cg, coin, self._states[coin.ccy])
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_candles_1h(self._cg, coin, self._states[coin.ccy], bn)
 
     async def _poll_candles_daily(self, coin: CoinConfig):
         from polls.candles import poll_candles_daily
-        await poll_candles_daily(self._cg, coin, self._states[coin.ccy])
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_candles_daily(self._cg, coin, self._states[coin.ccy], bn)
 
     async def _poll_candles_weekly(self, coin: CoinConfig):
         from polls.candles import poll_candles_weekly
-        await poll_candles_weekly(self._cg, coin, self._states[coin.ccy])
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_candles_weekly(self._cg, coin, self._states[coin.ccy], bn)
 
     async def _poll_candles_4h(self, coin: CoinConfig):
         from polls.candles import poll_candles_4h
-        await poll_candles_4h(self._cg, coin, self._states[coin.ccy])
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_candles_4h(self._cg, coin, self._states[coin.ccy], bn)
 
     async def _poll_net_position(self, coin: CoinConfig):
         from polls.derivatives import poll_net_position
@@ -670,6 +687,38 @@ class Engine:
         self._recompute_key_levels(ccy)
 
         self._recompute_range_signal(ccy)
+
+        if self._notif_cfg.enabled:
+            asyncio.ensure_future(self._check_alerts(ccy))
+
+    async def _check_alerts(self, ccy: str):
+        """检测 S/A 级信号变化并发送邮件通知。"""
+        try:
+            from notifications.signal_monitor import scan_alerts
+            from notifications.email_alert import send_alert_email
+
+            state = self._states[ccy]
+            price = state.ticker.last if state.ticker else 0
+            if price <= 0:
+                return
+
+            events = scan_alerts(
+                coin=ccy,
+                price=price,
+                kl_snapshot=state.key_level_snapshot_v2,
+                range_signal=state.range_signal,
+                min_tier=self._notif_cfg.min_signal_tier,
+                include_key_levels=self._notif_cfg.include_key_levels,
+                include_range=self._notif_cfg.include_range,
+            )
+
+            for event in events:
+                if self._alert_dedup.should_send(event.dedup_key):
+                    await send_alert_email(event, self._notif_cfg)
+
+            self._alert_dedup.cleanup()
+        except Exception:
+            logger.debug("_check_alerts error", exc_info=True)
 
     def _recompute_key_levels(self, ccy: str):
         state = self._states[ccy]
