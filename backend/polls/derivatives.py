@@ -63,14 +63,18 @@ async def poll_ticker_all(
         return
     log_api_fields_once("ticker-markets", data, logged_keys)
 
-    symbol_to_ccy = {
-        get_coin(c).symbol_cg: c
-        for c in supported_coins
-    }
+    symbol_to_ccy: dict[str, str] = {}
+    for c in supported_coins:
+        coin_cfg = get_coin(c)
+        # 兼容 Coinglass(BTC) 与 Binance(BTCUSDT) 两种 symbol 形态
+        symbol_to_ccy[coin_cfg.symbol_cg] = c
+        symbol_to_ccy[coin_cfg.symbol_cg_pair] = c
 
     for item in data:
-        symbol = item.get("symbol", "")
+        symbol = str(item.get("symbol", ""))
         ccy = symbol_to_ccy.get(symbol)
+        if not ccy and symbol.endswith("USDT"):
+            ccy = symbol_to_ccy.get(symbol.replace("USDT", ""))
         if not ccy:
             continue
 
