@@ -11,7 +11,8 @@ body {
   overflow: hidden;
 }
 
-body:has(.ai-detail-page) {
+body:has(.ai-detail-page),
+body:has(.levels-detail-page) {
   overflow: auto;
 }
 

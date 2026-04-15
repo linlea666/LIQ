@@ -113,7 +113,7 @@ export default function KeyLevelDetailPage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-300">
+    <div className="levels-detail-page min-h-screen bg-slate-950 text-slate-300">
       {/* Header */}
       <header className="border-b border-slate-700 bg-slate-900/80 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">

@@ -227,7 +227,9 @@ class CoinglassSource(DataSource):
 
     async def fetch_price_history(self, exchange: str, symbol: str,
                                   interval: str = "1h", limit: int = 200) -> Optional[list]:
-        ttl = 30 if interval in ("1m", "5m", "15m", "1h") else 300
+        _KLINE_CACHE_TTL = {"1m": 15, "5m": 30, "15m": 60, "1h": 60,
+                            "4h": 3600, "1d": 3600, "1w": 7200}
+        ttl = _KLINE_CACHE_TTL.get(interval, 300)
         return await self._request("/api/futures/price/history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
@@ -689,11 +691,12 @@ class CoinglassSource(DataSource):
     async def fetch_rsi(self, exchange: str, symbol: str, interval: str = "1d",
                         limit: int = 200, window: int = 14,
                         series_type: str = "close") -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 300
         return await self._request("/api/futures/indicators/rsi", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_rsi_list(self) -> Optional[list]:
         return await self._request("/api/futures/rsi/list")
@@ -701,11 +704,12 @@ class CoinglassSource(DataSource):
     async def fetch_ma(self, exchange: str, symbol: str, interval: str = "1d",
                        limit: int = 200, window: int = 60,
                        series_type: str = "close") -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 300
         return await self._request("/api/futures/indicators/ma", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_ma_list(self) -> Optional[list]:
         return await self._request("/api/futures/ma/list")
@@ -713,11 +717,12 @@ class CoinglassSource(DataSource):
     async def fetch_ema(self, exchange: str, symbol: str, interval: str = "1d",
                         limit: int = 200, window: int = 20,
                         series_type: str = "close") -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 300
         return await self._request("/api/futures/indicators/ema", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "series_type": series_type,
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_ema_list(self) -> Optional[list]:
         return await self._request("/api/futures/ema/list")
@@ -725,34 +730,37 @@ class CoinglassSource(DataSource):
     async def fetch_boll(self, exchange: str, symbol: str, interval: str = "1d",
                          limit: int = 200, window: int = 20,
                          mult: float = 2.0) -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 600 if interval == "4h" else 300
         return await self._request("/api/futures/indicators/boll", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window), "mult": str(mult),
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_macd(self, exchange: str, symbol: str, interval: str = "1d",
                          limit: int = 200, fast_window: int = 12,
                          slow_window: int = 26,
                          signal_window: int = 9) -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 300
         return await self._request("/api/futures/indicators/macd", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "fast_window": str(fast_window),
             "slow_window": str(slow_window),
             "signal_window": str(signal_window),
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_macd_list(self) -> Optional[list]:
         return await self._request("/api/futures/macd/list")
 
     async def fetch_atr(self, exchange: str, symbol: str, interval: str = "1h",
                         limit: int = 200, window: int = 14) -> Optional[list]:
+        ttl = 3600 if interval in ("1d", "1w") else 300
         return await self._request("/api/futures/indicators/avg-true-range", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
             "window": str(window),
-        }, cache_ttl=300)
+        }, cache_ttl=ttl)
 
     async def fetch_atr_list(self) -> Optional[list]:
         return await self._request("/api/futures/avg-true-range/list")

@@ -124,6 +124,7 @@ class CoinState:
         self.boll_4h_data: Optional[dict] = None
         self.key_levels_v2: list = []
         self.key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None
+        self._kl_v2_discovery_ts: float = 0.0
 
 
 class Engine:
@@ -677,9 +678,9 @@ class Engine:
         # V2 关键位系统
         self._recompute_key_levels_v2(ccy)
 
+    _KL_V2_DISCOVERY_INTERVAL = 60
+
     def _recompute_key_levels_v2(self, ccy: str):
-        from processors.level_discovery import discover_levels
-        from processors.confluence_scoring import score_and_build_snapshot
         from processors.key_level_tracker_v2 import run_tracker_v2
 
         state = self._states[ccy]
@@ -687,6 +688,55 @@ class Engine:
         if price <= 0:
             return
 
+        now = time.time()
+        need_full = (now - state._kl_v2_discovery_ts) >= self._KL_V2_DISCOVERY_INTERVAL
+
+        if need_full:
+            snapshot_v2 = self._run_kl_v2_discovery(ccy, price)
+            state._kl_v2_discovery_ts = now
+        else:
+            snapshot_v2 = state.key_level_snapshot_v2
+            if not snapshot_v2:
+                return
+            snapshot_v2.current_price = price
+            for lv in snapshot_v2.levels:
+                lv.distance_pct = round(abs(lv.price - price) / price * 100, 4) if price else 0
+
+        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        cutoff = int(now) - 3600
+        recent_sweeps = [
+            e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
+        ]
+
+        taker_buy = 0.0
+        taker_sell = 0.0
+        if state.taker_flow:
+            taker_buy = state.taker_flow.contract_buy_vol + state.taker_flow.spot_buy_vol
+            taker_sell = state.taker_flow.contract_sell_vol + state.taker_flow.spot_sell_vol
+
+        temp_score = state.temperature.score if state.temperature else 50
+        oi_change_1h = state.oi.change_1h_pct if state.oi else 0
+        kl_cfg = self._settings.processors.key_level_tracker
+
+        snapshot_v2 = run_tracker_v2(
+            snapshot=snapshot_v2,
+            liq_map=liq_map,
+            sweep_events_1h=recent_sweeps,
+            taker_buy_vol=taker_buy,
+            taker_sell_vol=taker_sell,
+            oi_change_pct_1h=oi_change_1h,
+            temperature_score=temp_score,
+            cfg=kl_cfg if kl_cfg else None,
+        )
+
+        state.key_levels_v2 = snapshot_v2.levels
+        state.key_level_snapshot_v2 = snapshot_v2
+
+    def _run_kl_v2_discovery(self, ccy: str, price: float) -> "KeyLevelSnapshotV2":
+        from processors.level_discovery import discover_levels
+        from processors.confluence_scoring import score_and_build_snapshot
+
+        state = self._states[ccy]
         liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
         liq_map_7d = state.liq_maps.get("7d")
         vwap = state.vp.vwap if state.vp else 0
@@ -719,7 +769,7 @@ class Engine:
         if state.macd_data:
             macd_hist = state.macd_data.get("histogram")
 
-        snapshot_v2 = score_and_build_snapshot(
+        return score_and_build_snapshot(
             discovery=discovery,
             current_price=price,
             atr=state.atr,
@@ -728,35 +778,6 @@ class Engine:
             boll_4h_data=state.boll_4h_data,
             macd_histogram=macd_hist,
         )
-
-        cutoff = int(time.time()) - 3600
-        recent_sweeps = [
-            e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
-        ]
-
-        taker_buy = 0.0
-        taker_sell = 0.0
-        if state.taker_flow:
-            taker_buy = state.taker_flow.contract_buy_vol + state.taker_flow.spot_buy_vol
-            taker_sell = state.taker_flow.contract_sell_vol + state.taker_flow.spot_sell_vol
-
-        temp_score = state.temperature.score if state.temperature else 50
-        oi_change_1h = state.oi.change_1h_pct if state.oi else 0
-        kl_cfg = self._settings.processors.key_level_tracker
-
-        snapshot_v2 = run_tracker_v2(
-            snapshot=snapshot_v2,
-            liq_map=liq_map,
-            sweep_events_1h=recent_sweeps,
-            taker_buy_vol=taker_buy,
-            taker_sell_vol=taker_sell,
-            oi_change_pct_1h=oi_change_1h,
-            temperature_score=temp_score,
-            cfg=kl_cfg if kl_cfg else None,
-        )
-
-        state.key_levels_v2 = snapshot_v2.levels
-        state.key_level_snapshot_v2 = snapshot_v2
 
     # ── 推送循环 ──
 
