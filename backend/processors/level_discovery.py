@@ -14,6 +14,17 @@ import logging
 from dataclasses import dataclass, field
 
 from models.flow import CyclePositionData, RangeSignalData
+
+
+def _fmt_usd(usd: float) -> str:
+    """将 USD 金额格式化为中文单位（亿/千万/百万）。"""
+    if usd >= 1e8:
+        return f"{usd / 1e8:.1f}亿"
+    if usd >= 1e7:
+        return f"{usd / 1e7:.0f}千万"
+    if usd >= 1e6:
+        return f"{usd / 1e6:.0f}百万"
+    return f"{usd / 1e4:.0f}万"
 from models.liquidation import LiquidationMap
 from models.market import CandleData, OrderBookAnalysis, VolumeProfileData
 from processors.ta_core import (
@@ -427,7 +438,7 @@ def _discover_capital_flow(
             cands.append(RawCandidate(
                 price=c.price_from, side="support",
                 dimension="capital_flow",
-                source=f"{c.dominant_leverage}x多头清算${c.total_usd/1e6:.0f}M",
+                source=f"{c.dominant_leverage}x多头清算{_fmt_usd(c.total_usd)}",
                 source_tag="liq_cluster_below_1d",
                 base_score=score, timeframe="1D", data_age_hours=0,
             ))
@@ -438,7 +449,7 @@ def _discover_capital_flow(
             cands.append(RawCandidate(
                 price=c.price_to, side="resistance",
                 dimension="capital_flow",
-                source=f"{c.dominant_leverage}x空头清算${c.total_usd/1e6:.0f}M",
+                source=f"{c.dominant_leverage}x空头清算{_fmt_usd(c.total_usd)}",
                 source_tag="liq_cluster_above_1d",
                 base_score=score, timeframe="1D", data_age_hours=0,
             ))
@@ -460,7 +471,7 @@ def _discover_capital_flow(
             cands.append(RawCandidate(
                 price=c.price_from, side="support",
                 dimension="capital_flow",
-                source=f"7d清算簇${c.total_usd/1e6:.0f}M",
+                source=f"7d清算簇{_fmt_usd(c.total_usd)}",
                 source_tag="liq_cluster_below_7d",
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
@@ -479,7 +490,7 @@ def _discover_capital_flow(
             cands.append(RawCandidate(
                 price=c.price_to, side="resistance",
                 dimension="capital_flow",
-                source=f"7d清算簇${c.total_usd/1e6:.0f}M",
+                source=f"7d清算簇{_fmt_usd(c.total_usd)}",
                 source_tag="liq_cluster_above_7d",
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
@@ -525,7 +536,7 @@ def _discover_capital_flow(
                 continue
             cands.append(RawCandidate(
                 price=round(wall.price, 2), side="support",
-                dimension="capital_flow", source=f"买墙${usd_m:.1f}M",
+                dimension="capital_flow", source=f"买墙{_fmt_usd(wall.size_usd)}",
                 source_tag="orderbook_bid_wall",
                 base_score=min(usd_m * 10, 25), timeframe="1H",
                 data_age_hours=0,
@@ -536,7 +547,7 @@ def _discover_capital_flow(
                 continue
             cands.append(RawCandidate(
                 price=round(wall.price, 2), side="resistance",
-                dimension="capital_flow", source=f"卖墙${usd_m:.1f}M",
+                dimension="capital_flow", source=f"卖墙{_fmt_usd(wall.size_usd)}",
                 source_tag="orderbook_ask_wall",
                 base_score=min(usd_m * 10, 25), timeframe="1H",
                 data_age_hours=0,

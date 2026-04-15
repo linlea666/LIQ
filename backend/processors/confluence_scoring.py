@@ -437,11 +437,10 @@ def _find_zone_or_single(
     price: float,
     side: str,
 ) -> str | None:
-    """在同一 side 的 S/A 级 level 中识别支撑/阻力带或单一价位。"""
+    """在已筛选的 level 中识别支撑/阻力带或单一价位。"""
     strong = [
         lv for lv in levels
         if lv.side == side
-        and lv.strength_tier in ("S", "A")
         and ((lv.price < price) if side == "support" else (lv.price > price))
     ]
     if not strong:
@@ -469,8 +468,20 @@ def _find_tf_levels(
         "daily_sup": None, "daily_res": None,
         "weekly_sup": None, "weekly_res": None,
     }
-    daily_levels = [lv for lv in scored_levels if lv.timeframe in ("1D", "4H")]
-    weekly_levels = [lv for lv in scored_levels if lv.timeframe == "1W"]
+
+    _is_weekly_source = lambda lv: any(
+        kw in s for s in lv.sources
+        for kw in ("1W", "牛市支撑带", "bmsa", "200W", "STH", "Pi Cycle", "CVDD")
+    )
+    daily_levels = [
+        lv for lv in scored_levels
+        if lv.timeframe in ("1D", "4H") and lv.strength_tier in ("S", "A")
+    ]
+    weekly_levels = [
+        lv for lv in scored_levels
+        if (lv.timeframe == "1W" or _is_weekly_source(lv))
+        and lv.strength_tier in ("S", "A", "B")
+    ]
 
     result["daily_sup"] = _find_zone_or_single(daily_levels, price, "support")
     result["daily_res"] = _find_zone_or_single(daily_levels, price, "resistance")
