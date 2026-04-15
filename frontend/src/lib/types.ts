@@ -283,6 +283,83 @@ export interface KeyLevelSnapshot {
   active_count: number;
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V2 关键位系统
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface KeyLevelV2 {
+  price: number;
+  side: "support" | "resistance";
+  category: string;
+  sources: string[];
+  source_count: number;
+  confluence_score: number;
+  strength_tier: "S" | "A" | "B" | "C";
+  state: "idle" | "approaching" | "testing" | "swept" | "bounced" | "broken" | "flipped";
+  state_ts: number;
+  prev_state: string;
+  test_count: number;
+  sweep_usd: number;
+  lowest_wick?: number;
+  break_start_ts: number;
+  cascade_risk: number;
+  cascade_layers: number;
+  cascade_total_usd: number;
+  distance_pct: number;
+  timeframe: string;
+  first_seen_ts: number;
+  last_confirmed_ts: number;
+  note: string;
+}
+
+export interface BullBearLine {
+  sma200d: number | null;
+  bmsa_upper: number | null;
+  bmsa_lower: number | null;
+  ichimoku_cloud_top: number | null;
+  ichimoku_cloud_bottom: number | null;
+  current_regime: "bull" | "bear" | "neutral" | "";
+  regime_reason: string;
+}
+
+export interface BreakoutZone {
+  bb_squeeze: boolean;
+  squeeze_direction: "up" | "down" | "unknown" | "";
+  bb_upper: number | null;
+  bb_lower: number | null;
+  keltner_upper: number | null;
+  keltner_lower: number | null;
+  note: string;
+}
+
+export interface FibSnapshotLevel {
+  ratio: number;
+  price: number;
+  label: string;
+}
+
+export interface FibSnapshot {
+  swing_high: number;
+  swing_low: number;
+  direction: string;
+  levels: FibSnapshotLevel[];
+}
+
+export interface KeyLevelSnapshotV2 {
+  ts: number;
+  current_price: number;
+  atr: number;
+  levels: KeyLevelV2[];
+  bull_bear_line: BullBearLine | null;
+  breakout_zone: BreakoutZone | null;
+  fib_snapshot: FibSnapshot | null;
+  signals: KeyLevelSignal[];
+  active_count: number;
+  structure_summary: string;
+  nearest_strong_support: number | null;
+  nearest_strong_resistance: number | null;
+}
+
 export interface MarketUpdate {
   coin: string;
   ts: number;
@@ -311,6 +388,7 @@ export interface MarketUpdate {
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
   key_levels?: KeyLevelSnapshot;
+  key_levels_v2?: KeyLevelSnapshotV2;
   option_max_pain?: Record<string, unknown>;
   option_info?: Record<string, unknown>;
   large_orders?: Record<string, unknown>;

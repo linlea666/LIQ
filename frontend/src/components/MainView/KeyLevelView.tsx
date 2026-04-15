@@ -2,7 +2,14 @@
 
 import { useMarketStore } from "@/stores/marketStore";
 import { formatPrice } from "@/lib/format";
-import type { KeyLevel, KeyLevelSignal, KeyLevelSnapshot } from "@/lib/types";
+import type {
+  KeyLevelV2,
+  KeyLevelSignal,
+  KeyLevelSnapshotV2,
+  BullBearLine,
+  BreakoutZone,
+} from "@/lib/types";
+import Link from "next/link";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -12,6 +19,13 @@ const STATE_LABELS: Record<string, { text: string; color: string }> = {
   bounced: { text: "已反弹", color: "text-green-400" },
   broken: { text: "已突破", color: "text-red-500" },
   flipped: { text: "已翻转", color: "text-purple-400" },
+};
+
+const TIER_STYLES: Record<string, { bg: string; text: string }> = {
+  S: { bg: "bg-amber-500/20", text: "text-amber-400" },
+  A: { bg: "bg-red-500/15", text: "text-red-400" },
+  B: { bg: "bg-blue-500/15", text: "text-blue-400" },
+  C: { bg: "bg-slate-500/15", text: "text-slate-400" },
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -26,7 +40,7 @@ const ACTION_LABELS: Record<string, string> = {
 export default function KeyLevelView() {
   const coin = useMarketStore((s) => s.coin);
   const data = useMarketStore((s) => s.data[s.coin]);
-  const kl = data?.key_levels;
+  const kl = data?.key_levels_v2;
 
   if (!kl || kl.levels.length === 0) {
     return (
@@ -36,168 +50,267 @@ export default function KeyLevelView() {
     );
   }
 
-  const price = data?.ticker?.last ?? 0;
+  const price = kl.current_price || data?.ticker?.last || 0;
   const activeSignals = kl.signals.filter(
     (s) => s.confidence === "A" || s.confidence === "B"
   );
 
   return (
     <div className="space-y-4 max-w-4xl">
-      <PlainSummary kl={kl} price={price} coin={coin} />
-      <Summary kl={kl} price={price} coin={coin} />
+      <StructureSummary kl={kl} price={price} coin={coin} />
+      {kl.bull_bear_line && (
+        <BullBearCard bb={kl.bull_bear_line} price={price} coin={coin} />
+      )}
+      {kl.breakout_zone && <BreakoutCard zone={kl.breakout_zone} coin={coin} />}
+      <PriceRuler levels={kl.levels} price={price} coin={coin} />
       {activeSignals.length > 0 && (
         <SignalCards signals={activeSignals} coin={coin} />
       )}
-      <LevelTable levels={kl.levels} price={price} coin={coin} />
+      <LevelList levels={kl.levels} price={price} coin={coin} />
+      <div className="text-center pt-2 pb-4">
+        <Link
+          href={`/levels/${coin}`}
+          target="_blank"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700/60 hover:bg-slate-600/60 border border-slate-600 rounded-lg text-sm text-slate-300 transition-colors"
+        >
+          查看完整分析
+          <span className="text-xs text-slate-500">↗</span>
+        </Link>
+      </div>
     </div>
   );
 }
 
-function PlainSummary({
+function StructureSummary({
   kl,
   price,
   coin,
 }: {
-  kl: KeyLevelSnapshot;
+  kl: KeyLevelSnapshotV2;
   price: number;
   coin: string;
 }) {
   const aSignals = kl.signals.filter((s) => s.confidence === "A");
-  const bSignals = kl.signals.filter((s) => s.confidence === "B");
-  const activeLevels = kl.levels.filter((l) => l.state !== "idle");
-  const nearSupport = activeLevels
-    .filter((l) => l.side === "support")
-    .sort((a, b) => b.price - a.price)[0];
-  const nearResist = activeLevels
-    .filter((l) => l.side === "resistance")
-    .sort((a, b) => a.price - b.price)[0];
-  const highCascade = kl.levels.filter((l) => l.cascade_risk > 0.7);
-
-  let title = "";
-  let desc = "";
+  let title = kl.structure_summary || "分析中...";
   let borderColor = "border-slate-600";
 
   if (aSignals.length > 0) {
     const s = aSignals[0];
     const isLong = s.action.includes("long");
-    title = isLong ? "发现做多机会" : "发现做空机会";
     borderColor = isLong ? "border-green-500/50" : "border-red-500/50";
-    const slStr = s.stop_loss ? `，止损设在${formatPrice(s.stop_loss, coin)}` : "";
-    desc = `${formatPrice(s.level_price, coin)}处的关键位出现了高置信信号。简单说：这个价位的流动性已经被"洗"过了，${isLong ? "空头弹药消耗殆尽，反弹概率较高" : "多头弹药消耗殆尽，回落概率较高"}。如果打算${isLong ? "做多" : "做空"}，可以关注这个位置${slStr}。`;
-  } else if (bSignals.length > 0) {
-    title = "初步信号，等待确认";
+  } else if (kl.active_count > 0) {
     borderColor = "border-yellow-500/40";
-    desc = `${formatPrice(bSignals[0].level_price, coin)}附近出现了反弹/受阻迹象，但还没有流动性扫取确认（B级信号），建议再等等看，不急着入场。`;
-  } else if (nearSupport || nearResist) {
-    title = "正在接近关键位，留意机会";
-    borderColor = "border-blue-500/40";
-    const parts: string[] = [];
-    if (nearResist) {
-      const stateText = nearResist.state === "testing" ? "正在被测试" : "正在靠近";
-      parts.push(`上方${formatPrice(nearResist.price, coin)}有一道阻力${stateText}`);
-    }
-    if (nearSupport) {
-      const stateText = nearSupport.state === "testing" ? "正在被测试" : "正在靠近";
-      parts.push(`下方${formatPrice(nearSupport.price, coin)}有一道支撑${stateText}`);
-    }
-    desc = `价格${parts.join("，")}。等价格到达后观察它的反应——是被弹回来还是直接穿过去——再做决定。`;
-  } else {
-    title = "暂无明确信号，耐心等待";
-    desc = `当前价格${formatPrice(price, coin)}离所有关键支撑和阻力位都比较远，这种时候不适合盲目开单。等价格走到关键位附近再找机会，好的交易都是等出来的。`;
   }
 
   return (
     <div className={`bg-slate-800/60 border ${borderColor} rounded-lg p-4`}>
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
-          白话解读
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
+            市场结构
+          </span>
+          <span className="text-sm font-semibold text-slate-200">{title}</span>
+        </div>
+        <span className="text-xs text-slate-500">
+          追踪 {kl.levels.length} 个关键位 · 活跃 {kl.active_count}
         </span>
-        <span className="text-sm font-semibold text-slate-200">{title}</span>
       </div>
-      <p className="text-sm text-slate-300 leading-relaxed">{desc}</p>
-      {highCascade.length > 0 && (
-        <p className="text-xs text-orange-400 mt-2">
-          注意：有{highCascade.length}个关键位存在级联风险，一旦被突破可能引发连锁清算（瀑布行情），止损一定要设好。
-        </p>
+      <div className="flex gap-6 text-xs text-slate-400">
+        {kl.nearest_strong_support && (
+          <span>
+            最近强支撑:{" "}
+            <span className="text-green-400 font-mono">
+              {formatPrice(kl.nearest_strong_support, coin)}
+            </span>
+          </span>
+        )}
+        {kl.nearest_strong_resistance && (
+          <span>
+            最近强阻力:{" "}
+            <span className="text-red-400 font-mono">
+              {formatPrice(kl.nearest_strong_resistance, coin)}
+            </span>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BullBearCard({
+  bb,
+  price,
+  coin,
+}: {
+  bb: BullBearLine;
+  price: number;
+  coin: string;
+}) {
+  const isBull = bb.current_regime === "bull";
+  const isBear = bb.current_regime === "bear";
+  const bgColor = isBull
+    ? "bg-green-950/30 border-green-700/40"
+    : isBear
+      ? "bg-red-950/30 border-red-700/40"
+      : "bg-slate-800/50 border-slate-700";
+
+  return (
+    <div className={`border rounded-lg p-3 ${bgColor}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={`w-2.5 h-2.5 rounded-full ${
+            isBull ? "bg-green-400" : isBear ? "bg-red-400" : "bg-yellow-400"
+          }`}
+        />
+        <span className="text-sm font-semibold text-slate-200">
+          多空分界线 —{" "}
+          {isBull ? "当前偏多" : isBear ? "当前偏空" : "多空胶着"}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+        {bb.sma200d && (
+          <span>
+            200日均线:{" "}
+            <span className="text-slate-200 font-mono">
+              {formatPrice(bb.sma200d, coin)}
+            </span>
+            <span
+              className={`ml-1 ${price > bb.sma200d ? "text-green-400" : "text-red-400"}`}
+            >
+              {price > bb.sma200d ? "▲在上方" : "▼在下方"}
+            </span>
+          </span>
+        )}
+        {bb.bmsa_upper && bb.bmsa_lower && (
+          <span>
+            牛市支撑带:{" "}
+            <span className="text-slate-200 font-mono">
+              {formatPrice(bb.bmsa_lower, coin)}-{formatPrice(bb.bmsa_upper, coin)}
+            </span>
+          </span>
+        )}
+        {bb.ichimoku_cloud_top && bb.ichimoku_cloud_bottom && (
+          <span>
+            一目云层:{" "}
+            <span className="text-slate-200 font-mono">
+              {formatPrice(bb.ichimoku_cloud_bottom, coin)}-
+              {formatPrice(bb.ichimoku_cloud_top, coin)}
+            </span>
+          </span>
+        )}
+      </div>
+      {bb.regime_reason && (
+        <p className="text-xs text-slate-500 mt-1.5">{bb.regime_reason}</p>
       )}
     </div>
   );
 }
 
-function Summary({
-  kl,
+function BreakoutCard({
+  zone,
+  coin,
+}: {
+  zone: BreakoutZone;
+  coin: string;
+}) {
+  if (!zone.bb_squeeze) return null;
+  return (
+    <div className="bg-purple-950/20 border border-purple-700/40 rounded-lg p-3">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+        <span className="text-sm font-semibold text-purple-300">
+          突破蓄力中
+        </span>
+      </div>
+      <p className="text-xs text-slate-300">{zone.note}</p>
+    </div>
+  );
+}
+
+function PriceRuler({
+  levels,
   price,
   coin,
 }: {
-  kl: { levels: KeyLevel[]; signals: KeyLevelSignal[]; active_count: number };
+  levels: KeyLevelV2[];
   price: number;
   coin: string;
 }) {
-  const aSignals = kl.signals.filter((s) => s.confidence === "A");
-  const bSignals = kl.signals.filter((s) => s.confidence === "B");
-  const nearestSupport = kl.levels
-    .filter((l) => l.side === "support" && l.price < price)
-    .sort((a, b) => b.price - a.price)[0];
-  const nearestResistance = kl.levels
-    .filter((l) => l.side === "resistance" && l.price > price)
-    .sort((a, b) => a.price - b.price)[0];
-
-  const highCascade = kl.levels.filter((l) => l.cascade_risk > 0.7);
-
-  let summaryText = "";
-  if (aSignals.length > 0) {
-    const s = aSignals[0];
-    summaryText = `${s.confidence}级信号: ${s.reason}`;
-  } else if (bSignals.length > 0) {
-    const s = bSignals[0];
-    summaryText = `${s.confidence}级信号: ${s.reason}`;
-  } else if (kl.active_count > 0) {
-    const states = kl.levels
-      .filter((l) => l.state !== "idle")
-      .map((l) => `${formatPrice(l.price, coin)} ${STATE_LABELS[l.state]?.text ?? l.state}`)
-      .join("、");
-    summaryText = `${kl.active_count}个关键位活跃: ${states}`;
-  } else {
-    summaryText = "所有关键位处于待观察状态，暂无明确交易信号";
-  }
+  const resistances = levels
+    .filter((l) => l.price > price)
+    .sort((a, b) => a.price - b.price)
+    .slice(0, 6);
+  const supports = levels
+    .filter((l) => l.price < price)
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 6);
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-slate-300">
-          关键位状态机
-        </h3>
-        <span className="text-xs text-slate-500">
-          追踪 {kl.levels.length} 个 · 活跃 {kl.active_count} 个
+    <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-slate-300 mb-3">
+        价格标尺
+      </h3>
+      <div className="flex flex-col items-stretch">
+        {resistances.reverse().map((lv, i) => (
+          <RulerRow key={`r-${i}`} level={lv} coin={coin} side="resistance" />
+        ))}
+
+        <div className="flex items-center my-2 gap-2">
+          <div className="flex-1 h-px bg-yellow-500/60" />
+          <span className="text-sm font-bold text-yellow-400 font-mono whitespace-nowrap">
+            当前 {formatPrice(price, coin)}
+          </span>
+          <div className="flex-1 h-px bg-yellow-500/60" />
+        </div>
+
+        {supports.map((lv, i) => (
+          <RulerRow key={`s-${i}`} level={lv} coin={coin} side="support" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RulerRow({
+  level,
+  coin,
+  side,
+}: {
+  level: KeyLevelV2;
+  coin: string;
+  side: "support" | "resistance";
+}) {
+  const tier = TIER_STYLES[level.strength_tier] || TIER_STYLES.C;
+  const sideColor = side === "support" ? "text-green-400" : "text-red-400";
+  const barColor = side === "support" ? "bg-green-500" : "bg-red-500";
+  const barWidth = Math.min(100, level.confluence_score);
+  const stateInfo = STATE_LABELS[level.state];
+
+  return (
+    <div className="flex items-center gap-2 py-1 group">
+      <span className={`text-xs font-mono w-24 text-right ${sideColor}`}>
+        {formatPrice(level.price, coin)}
+      </span>
+      <div className="flex-1 h-3 bg-slate-700/50 rounded-full overflow-hidden relative">
+        <div
+          className={`h-full ${barColor} rounded-full transition-all`}
+          style={{ width: `${barWidth}%`, opacity: 0.3 + barWidth * 0.007 }}
+        />
+      </div>
+      <span
+        className={`text-[10px] px-1.5 py-0.5 rounded ${tier.bg} ${tier.text} font-bold w-6 text-center`}
+      >
+        {level.strength_tier}
+      </span>
+      <span className="text-[10px] text-slate-500 w-14 text-right">
+        {level.distance_pct > 0 ? "+" : ""}
+        {level.distance_pct.toFixed(1)}%
+      </span>
+      {stateInfo && level.state !== "idle" && (
+        <span className={`text-[10px] ${stateInfo.color}`}>
+          {stateInfo.text}
         </span>
-      </div>
-      <p className="text-sm text-slate-200 mb-3">{summaryText}</p>
-      <div className="flex gap-4 text-xs text-slate-400">
-        {nearestSupport && (
-          <span>
-            最近支撑:{" "}
-            <span className="text-green-400">
-              {formatPrice(nearestSupport.price, coin)}
-            </span>{" "}
-            ({nearestSupport.distance_pct.toFixed(1)}%)
-          </span>
-        )}
-        {nearestResistance && (
-          <span>
-            最近阻力:{" "}
-            <span className="text-red-400">
-              {formatPrice(nearestResistance.price, coin)}
-            </span>{" "}
-            ({nearestResistance.distance_pct > 0 ? "+" : ""}
-            {nearestResistance.distance_pct.toFixed(1)}%)
-          </span>
-        )}
-        {highCascade.length > 0 && (
-          <span className="text-orange-400">
-            {highCascade.length}个高级联风险位
-          </span>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -214,14 +327,14 @@ function SignalCards({
       {signals.map((sig, i) => {
         const isLong =
           sig.action === "snipe_long" || sig.action === "flip_long";
-        const borderColor = sig.confidence === "A"
-          ? isLong
-            ? "border-green-500/60"
-            : "border-red-500/60"
-          : "border-yellow-500/40";
-        const bgColor = sig.confidence === "A"
-          ? "bg-slate-800/80"
-          : "bg-slate-800/50";
+        const borderColor =
+          sig.confidence === "A"
+            ? isLong
+              ? "border-green-500/60"
+              : "border-red-500/60"
+            : "border-yellow-500/40";
+        const bgColor =
+          sig.confidence === "A" ? "bg-slate-800/80" : "bg-slate-800/50";
 
         return (
           <div
@@ -288,7 +401,7 @@ function SignalCards({
               <div className="mt-2 space-y-1">
                 {sig.warnings.map((w, j) => (
                   <p key={j} className="text-xs text-orange-400">
-                    ⚠ {w}
+                    {w}
                   </p>
                 ))}
               </div>
@@ -300,23 +413,31 @@ function SignalCards({
   );
 }
 
-function LevelTable({
+function LevelList({
   levels,
   price,
   coin,
 }: {
-  levels: KeyLevel[];
+  levels: KeyLevelV2[];
   price: number;
   coin: string;
 }) {
-  const sorted = [...levels].sort((a, b) => b.price - a.price);
+  const resistances = levels
+    .filter((l) => l.price > price)
+    .sort((a, b) => a.price - b.price);
+  const supports = levels
+    .filter((l) => l.price <= price)
+    .sort((a, b) => b.price - a.price);
 
   return (
     <div className="bg-slate-800/30 border border-slate-700 rounded-lg overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-700">
+      <div className="px-4 py-2 border-b border-slate-700 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-300">
-          关键位追踪表
+          关键位追踪列表
         </h3>
+        <span className="text-[10px] text-slate-500">
+          从近到远 · 共 {levels.length} 个
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -324,81 +445,51 @@ function LevelTable({
             <tr className="text-slate-500 border-b border-slate-700/50">
               <th className="px-3 py-2 text-left">价位</th>
               <th className="px-3 py-2 text-left">类型</th>
+              <th className="px-3 py-2 text-center">强度</th>
               <th className="px-3 py-2 text-left">状态</th>
               <th className="px-3 py-2 text-right">距当前</th>
-              <th className="px-3 py-2 text-right">强度</th>
-              <th className="px-3 py-2 text-right">测试</th>
-              <th className="px-3 py-2 text-right">级联风险</th>
+              <th className="px-3 py-2 text-right">共振分</th>
+              <th className="px-3 py-2 text-right">级联</th>
               <th className="px-3 py-2 text-left">来源</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((lv, i) => {
-              const stateInfo = STATE_LABELS[lv.state] ?? {
-                text: lv.state,
-                color: "text-slate-400",
-              };
-              const isAbove = lv.price > price;
-              const cascadeColor =
-                lv.cascade_risk > 0.7
-                  ? "text-red-400"
-                  : lv.cascade_risk > 0.4
-                    ? "text-orange-400"
-                    : "text-slate-500";
-
-              return (
-                <tr
-                  key={i}
-                  className={`border-b border-slate-800/50 ${
-                    lv.state !== "idle"
-                      ? "bg-slate-700/20"
-                      : ""
-                  }`}
+            {resistances.length > 0 && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-3 py-1 text-[10px] text-red-400/60 bg-red-950/10"
                 >
-                  <td className="px-3 py-2 font-mono text-slate-200">
-                    {formatPrice(lv.price, coin)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        lv.side === "support"
-                          ? "text-green-400"
-                          : "text-red-400"
-                      }
-                    >
-                      {lv.side === "support" ? "支撑" : "阻力"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={stateInfo.color}>
-                      {stateInfo.text}
-                    </span>
-                  </td>
-                  <td
-                    className={`px-3 py-2 text-right font-mono ${
-                      isAbove ? "text-red-400" : "text-green-400"
-                    }`}
-                  >
-                    {lv.distance_pct > 0 ? "+" : ""}
-                    {lv.distance_pct.toFixed(2)}%
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <StrengthDots strength={lv.strength} />
-                  </td>
-                  <td className="px-3 py-2 text-right text-slate-400">
-                    {lv.test_count > 0 ? lv.test_count : "-"}
-                  </td>
-                  <td className={`px-3 py-2 text-right ${cascadeColor}`}>
-                    {lv.cascade_risk > 0
-                      ? `${(lv.cascade_risk * 100).toFixed(0)}%`
-                      : "低"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-500 max-w-[120px] truncate">
-                    {lv.sources.slice(0, 2).join(", ")}
-                  </td>
-                </tr>
-              );
-            })}
+                  — 上方阻力 —
+                </td>
+              </tr>
+            )}
+            {resistances.map((lv, i) => (
+              <LevelRow
+                key={`r-${i}`}
+                level={lv}
+                coin={coin}
+                price={price}
+              />
+            ))}
+            <tr>
+              <td
+                colSpan={8}
+                className="px-3 py-1.5 bg-yellow-500/5 border-y border-yellow-500/20"
+              >
+                <span className="text-xs text-yellow-400 font-mono font-bold">
+                  当前价格 {formatPrice(price, coin)}
+                </span>
+              </td>
+            </tr>
+            {supports.map((lv, i) => (
+              <LevelRow
+                key={`s-${i}`}
+                level={lv}
+                coin={coin}
+                price={price}
+              />
+            ))}
           </tbody>
         </table>
       </div>
@@ -406,17 +497,81 @@ function LevelTable({
   );
 }
 
-function StrengthDots({ strength }: { strength: number }) {
+function LevelRow({
+  level,
+  coin,
+  price,
+}: {
+  level: KeyLevelV2;
+  coin: string;
+  price: number;
+}) {
+  const stateInfo = STATE_LABELS[level.state] ?? {
+    text: level.state,
+    color: "text-slate-400",
+  };
+  const tier = TIER_STYLES[level.strength_tier] || TIER_STYLES.C;
+  const isAbove = level.price > price;
+  const cascadeColor =
+    level.cascade_risk > 0.7
+      ? "text-red-400"
+      : level.cascade_risk > 0.4
+        ? "text-orange-400"
+        : "text-slate-500";
+  const sideColor = level.side === "support" ? "text-green-400" : "text-red-400";
+
+  const tierDepth =
+    level.strength_tier === "S"
+      ? "bg-slate-700/30"
+      : level.strength_tier === "A"
+        ? "bg-slate-700/20"
+        : "";
+
   return (
-    <div className="flex gap-0.5 justify-end">
-      {Array.from({ length: 5 }, (_, i) => (
-        <div
-          key={i}
-          className={`w-1.5 h-1.5 rounded-full ${
-            i < strength ? "bg-amber-400" : "bg-slate-700"
-          }`}
-        />
-      ))}
-    </div>
+    <tr
+      className={`border-b border-slate-800/50 ${
+        level.state !== "idle" ? "bg-slate-700/20" : tierDepth
+      }`}
+    >
+      <td className="px-3 py-2 font-mono text-slate-200">
+        {formatPrice(level.price, coin)}
+      </td>
+      <td className="px-3 py-2">
+        <span className={sideColor}>
+          {level.side === "support" ? "支撑" : "阻力"}
+        </span>
+      </td>
+      <td className="px-3 py-2 text-center">
+        <span
+          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${tier.bg} ${tier.text}`}
+        >
+          {level.strength_tier}
+        </span>
+      </td>
+      <td className="px-3 py-2">
+        <span className={stateInfo.color}>{stateInfo.text}</span>
+      </td>
+      <td
+        className={`px-3 py-2 text-right font-mono ${
+          isAbove ? "text-red-400" : "text-green-400"
+        }`}
+      >
+        {level.distance_pct > 0 ? "+" : ""}
+        {level.distance_pct.toFixed(2)}%
+      </td>
+      <td className="px-3 py-2 text-right text-slate-300">
+        {level.confluence_score.toFixed(0)}
+      </td>
+      <td className={`px-3 py-2 text-right ${cascadeColor}`}>
+        {level.cascade_risk > 0
+          ? `${(level.cascade_risk * 100).toFixed(0)}%`
+          : "低"}
+      </td>
+      <td className="px-3 py-2 text-slate-500 max-w-[160px]">
+        <span className="truncate block" title={level.sources.join(", ")}>
+          {level.sources.slice(0, 3).join(", ")}
+        </span>
+      </td>
+    </tr>
   );
 }

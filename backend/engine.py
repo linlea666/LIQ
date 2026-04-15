@@ -24,7 +24,7 @@ from models.flow import (
     LongShortRatioExchange, MarketIndexData, MultiFundingRateData,
     ExchangeFundingRate, OIData, OISnapshot, RangeSignalData, TakerFlowData,
 )
-from models.key_level import KeyLevel, KeyLevelSnapshot
+from models.key_level import KeyLevel, KeyLevelSnapshot, KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
 from models.liquidation import (
     HeatmapData, LiqHistoryData, LiqMaxPainData,
@@ -117,6 +117,13 @@ class CoinState:
         self.coinbase_premium: Optional[CoinbasePremiumData] = None
         self.stablecoin_mcap: Optional[StablecoinMcapData] = None
         self.oi_exchange_rank: Optional[dict] = None
+        # V2 关键位系统新增字段
+        self.candles_4h: list = []
+        self.ema_daily: dict[int, float] = {}   # {20: price, 50: price, 100: price, 200: price}
+        self.sma200_daily_cg: Optional[float] = None
+        self.boll_4h_data: Optional[dict] = None
+        self.key_levels_v2: list = []
+        self.key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None
 
 
 class Engine:
@@ -330,6 +337,10 @@ class Engine:
                 f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
                 3600, s + 7.5,
             )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_4h_{ccy}", self._poll_candles_4h, coin,
+                900, s + 8.0,
+            )),
         ]
 
     async def stop(self):
@@ -541,6 +552,10 @@ class Engine:
         from polls.candles import poll_candles_weekly
         await poll_candles_weekly(self._cg, coin, self._states[coin.ccy])
 
+    async def _poll_candles_4h(self, coin: CoinConfig):
+        from polls.candles import poll_candles_4h
+        await poll_candles_4h(self._cg, coin, self._states[coin.ccy])
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Phase 4: 新维度
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -659,6 +674,90 @@ class Engine:
         state.key_levels = snapshot.levels
         state.key_level_snapshot = snapshot
 
+        # V2 关键位系统
+        self._recompute_key_levels_v2(ccy)
+
+    def _recompute_key_levels_v2(self, ccy: str):
+        from processors.level_discovery import discover_levels
+        from processors.confluence_scoring import score_and_build_snapshot
+        from processors.key_level_tracker_v2 import run_tracker_v2
+
+        state = self._states[ccy]
+        price = state.ticker.last if state.ticker else 0
+        if price <= 0:
+            return
+
+        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_map_7d = state.liq_maps.get("7d")
+        vwap = state.vp.vwap if state.vp else 0
+
+        oi_hist = None
+        if state.oi and state.oi.history:
+            oi_hist = [{"ts": s.ts, "oi": s.oi_usd} for s in state.oi.history]
+
+        discovery = discover_levels(
+            current_price=price,
+            atr=state.atr,
+            candles_4h=state.candles_4h or None,
+            candles_1d=state.candles_daily or None,
+            candles_1w=state.candles_weekly or None,
+            liq_map=liq_map,
+            liq_map_7d=liq_map_7d,
+            vp=state.vp,
+            orderbook=state.orderbook,
+            ema_daily=state.ema_daily if state.ema_daily else None,
+            sma200_daily=state.sma200_daily_cg,
+            boll_data=state.boll_data,
+            boll_4h_data=state.boll_4h_data,
+            vwap=vwap,
+            cycle_position=state.cycle_position,
+            range_signal=state.range_signal,
+            oi_history=oi_hist,
+        )
+
+        macd_hist = None
+        if state.macd_data:
+            macd_hist = state.macd_data.get("histogram")
+
+        snapshot_v2 = score_and_build_snapshot(
+            discovery=discovery,
+            current_price=price,
+            atr=state.atr,
+            prev_levels=state.key_levels_v2 or None,
+            boll_data=state.boll_data,
+            boll_4h_data=state.boll_4h_data,
+            macd_histogram=macd_hist,
+        )
+
+        cutoff = int(time.time()) - 3600
+        recent_sweeps = [
+            e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
+        ]
+
+        taker_buy = 0.0
+        taker_sell = 0.0
+        if state.taker_flow:
+            taker_buy = state.taker_flow.contract_buy_vol + state.taker_flow.spot_buy_vol
+            taker_sell = state.taker_flow.contract_sell_vol + state.taker_flow.spot_sell_vol
+
+        temp_score = state.temperature.score if state.temperature else 50
+        oi_change_1h = state.oi.change_1h_pct if state.oi else 0
+        kl_cfg = self._settings.processors.key_level_tracker
+
+        snapshot_v2 = run_tracker_v2(
+            snapshot=snapshot_v2,
+            liq_map=liq_map,
+            sweep_events_1h=recent_sweeps,
+            taker_buy_vol=taker_buy,
+            taker_sell_vol=taker_sell,
+            oi_change_pct_1h=oi_change_1h,
+            temperature_score=temp_score,
+            cfg=kl_cfg if kl_cfg else None,
+        )
+
+        state.key_levels_v2 = snapshot_v2.levels
+        state.key_level_snapshot_v2 = snapshot_v2
+
     # ── 推送循环 ──
 
     async def _push_loop(self, coin: CoinConfig):
@@ -724,6 +823,8 @@ class Engine:
             payload["range_signal"] = state.range_signal.model_dump()
         if state.key_level_snapshot and state.key_level_snapshot.levels:
             payload["key_levels"] = state.key_level_snapshot.model_dump()
+        if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.levels:
+            payload["key_levels_v2"] = state.key_level_snapshot_v2.model_dump()
 
         # 新维度
         if state.option_max_pain:

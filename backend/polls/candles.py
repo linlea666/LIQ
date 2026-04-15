@@ -143,9 +143,56 @@ async def poll_indicators(cg: CoinglassSource, coin: CoinConfig, state: CoinStat
     try:
         ema20_last = _last_item(await cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=20))
         if ema20_last:
-            state.ema20_cg = float(ema20_last.get("ema", ema20_last.get("value", 0)))
+            val = float(ema20_last.get("ema", ema20_last.get("value", 0)))
+            state.ema20_cg = val
+            state.ema_daily[20] = val
     except Exception:
         logger.debug("indicators: EMA20 parse failed", exc_info=True)
+
+    # V2 新增：日线 EMA 50/100/200 + SMA 200（关键位多维共振）
+    for period in (50, 100, 200):
+        try:
+            item = _last_item(await cg.fetch_ema(exchange, pair, interval="1d", limit=2, window=period))
+            if item:
+                state.ema_daily[period] = float(item.get("ema", item.get("value", 0)))
+        except Exception:
+            logger.debug("indicators: EMA%d parse failed", period, exc_info=True)
+
+    try:
+        sma200_last = _last_item(await cg.fetch_ma(exchange, pair, interval="1d", limit=2, window=200))
+        if sma200_last:
+            state.sma200_daily_cg = float(sma200_last.get("ma", sma200_last.get("value", 0)))
+    except Exception:
+        logger.debug("indicators: SMA200 parse failed", exc_info=True)
+
+    # V2 新增：4H 布林带（突破蓄力检测）
+    try:
+        boll_4h = _last_item(await cg.fetch_boll(exchange, pair, interval="4h", limit=2))
+        if boll_4h:
+            state.boll_4h_data = {
+                "upper": float(boll_4h.get("upper", boll_4h.get("upperBand", 0))),
+                "middle": float(boll_4h.get("middle", boll_4h.get("middleBand", 0))),
+                "lower": float(boll_4h.get("lower", boll_4h.get("lowerBand", 0))),
+            }
+    except Exception:
+        logger.debug("indicators: BOLL 4H parse failed", exc_info=True)
+
+
+async def poll_candles_4h(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """获取 4H K 线用于 Swing 检测 / 中期 Fibonacci / Pivot Points。"""
+    data = await cg.fetch_price_history(
+        coin.exchange_primary, coin.symbol_cg_pair,
+        interval="4h", limit=200,
+    )
+    if not data:
+        return
+    raw = parse_candles(data)
+    if raw:
+        state.candles_4h = [
+            CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                       l=c["l"], c=c["c"], vol=c["vol"])
+            for c in raw
+        ]
 
 
 async def poll_candles_1h(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:

@@ -157,6 +157,21 @@ async def get_ai_detail(coin: str, ts: int):
     raise HTTPException(404, f"Analysis not found: {coin}/{ts}")
 
 
+@router.get("/key-levels/{coin}")
+async def get_key_levels_v2(coin: str):
+    """获取 V2 关键位完整快照（详情页 + 大屏）"""
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+
+    state = _engine._states.get(coin)
+    if not state or not state.key_level_snapshot_v2:
+        raise HTTPException(503, f"No key level data for {coin}")
+    return state.key_level_snapshot_v2.model_dump()
+
+
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""
