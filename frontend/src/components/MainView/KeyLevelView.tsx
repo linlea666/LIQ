@@ -268,6 +268,31 @@ function BreakoutCard({
   );
 }
 
+function groupZones(sorted: KeyLevelV2[], price: number): { zone: boolean; items: KeyLevelV2[] }[] {
+  const groups: { zone: boolean; items: KeyLevelV2[] }[] = [];
+  let buf: KeyLevelV2[] = [];
+
+  for (const lv of sorted) {
+    if (buf.length === 0) {
+      buf.push(lv);
+      continue;
+    }
+    const last = buf[buf.length - 1];
+    const gap = Math.abs(lv.price - last.price) / Math.max(price, 1);
+    const bothStrong = ["S", "A"].includes(lv.strength_tier) && ["S", "A"].includes(last.strength_tier);
+    if (gap < 0.005 && bothStrong) {
+      buf.push(lv);
+    } else {
+      groups.push({ zone: buf.length >= 2 && ["S", "A"].includes(buf[0].strength_tier), items: [...buf] });
+      buf = [lv];
+    }
+  }
+  if (buf.length > 0) {
+    groups.push({ zone: buf.length >= 2 && ["S", "A"].includes(buf[0].strength_tier), items: [...buf] });
+  }
+  return groups;
+}
+
 function PriceRuler({
   levels,
   price,
@@ -289,15 +314,30 @@ function PriceRuler({
     .slice(0, 6)
     .sort((a, b) => b.price - a.price);
 
+  const resDisplayOrder = [...resistances].reverse();
+  const resGroups = groupZones(resDisplayOrder, price);
+  const supGroups = groupZones(supports, price);
+
   return (
     <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-4">
       <h3 className="text-sm font-semibold text-slate-300 mb-3">
         价格标尺
       </h3>
       <div className="flex flex-col items-stretch">
-        {resistances.reverse().map((lv, i) => (
-          <RulerRow key={`r-${i}`} level={lv} coin={coin} side="resistance" />
-        ))}
+        {resGroups.map((g, gi) =>
+          g.zone ? (
+            <div key={`rz-${gi}`} className="border-l-2 border-red-500/40 bg-red-950/15 rounded-r pl-2 my-0.5">
+              <div className="text-[9px] text-red-400/70 py-0.5">共振阻力带</div>
+              {g.items.map((lv, i) => (
+                <RulerRow key={`r-${gi}-${i}`} level={lv} coin={coin} side="resistance" />
+              ))}
+            </div>
+          ) : (
+            g.items.map((lv, i) => (
+              <RulerRow key={`r-${gi}-${i}`} level={lv} coin={coin} side="resistance" />
+            ))
+          )
+        )}
 
         <div className="flex items-center my-2 gap-2">
           <div className="flex-1 h-px bg-yellow-500/60" />
@@ -307,9 +347,20 @@ function PriceRuler({
           <div className="flex-1 h-px bg-yellow-500/60" />
         </div>
 
-        {supports.map((lv, i) => (
-          <RulerRow key={`s-${i}`} level={lv} coin={coin} side="support" />
-        ))}
+        {supGroups.map((g, gi) =>
+          g.zone ? (
+            <div key={`sz-${gi}`} className="border-l-2 border-green-500/40 bg-green-950/15 rounded-r pl-2 my-0.5">
+              <div className="text-[9px] text-green-400/70 py-0.5">共振支撑带</div>
+              {g.items.map((lv, i) => (
+                <RulerRow key={`s-${gi}-${i}`} level={lv} coin={coin} side="support" />
+              ))}
+            </div>
+          ) : (
+            g.items.map((lv, i) => (
+              <RulerRow key={`s-${gi}-${i}`} level={lv} coin={coin} side="support" />
+            ))
+          )
+        )}
       </div>
     </div>
   );

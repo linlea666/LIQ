@@ -288,21 +288,23 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
         lv.cascade_total_usd = 0
         return
 
-    lv.cascade_layers = len(clusters)
-    lv.cascade_total_usd = sum(c.total_usd for c in clusters)
+    lv.cascade_layers = min(len(clusters), 5)
+    lv.cascade_total_usd = sum(c.total_usd for c in clusters[:5])
 
     weight_cap = cfg.get("cascade_weight_cap_m", 20.0)
-    norm = cfg.get("cascade_norm", 50.0)
+    norm = cfg.get("cascade_norm", 200.0)
     risk_score = 0.0
     prev_price = lv.price
     for c in clusters[:5]:
         gap_pct = abs(c.price_center - prev_price) / max(price, 1) * 100
-        gap_pct = max(gap_pct, 0.1)
+        gap_pct = max(gap_pct, 0.2)
         weight = min(c.total_usd / 1e6, weight_cap)
         risk_score += weight / gap_pct
         prev_price = c.price_center
 
-    lv.cascade_risk = round(min(1.0, risk_score / norm), 2)
+    dist_from_price = abs(lv.price - price) / max(price, 1) * 100
+    dist_decay = 1.0 / (1.0 + dist_from_price / 3.0)
+    lv.cascade_risk = round(min(1.0, risk_score / norm * dist_decay), 2)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -338,13 +340,28 @@ def _generate_signal(
         base.action = "wait_approach"
         direction = "做多" if is_support else "做空"
         base.reason = f"价格正在接近{side_cn}位${lv.price:,.0f}({lv.source_count}维共振)，准备关注{direction}机会"
-        base.confidence = "C"
+        if lv.strength_tier in ("S", "A"):
+            base.confidence = "B"
+            base.reason = (
+                f"价格正在接近{lv.strength_tier}级{side_cn}位${lv.price:,.0f}"
+                f"({lv.source_count}维共振，距离{abs(lv.distance_pct):.1f}%)，"
+                f"建议提前准备{direction}策略"
+            )
+        else:
+            base.confidence = "C"
         return base
 
     if lv.state == "testing":
         base.action = "wait_sweep"
-        base.reason = f"价格正在测试{side_cn}位${lv.price:,.0f}，等待流动性扫取确认后入场"
-        base.confidence = "C"
+        if lv.strength_tier in ("S", "A"):
+            base.confidence = "B"
+            base.reason = (
+                f"价格正在测试{lv.strength_tier}级{side_cn}位${lv.price:,.0f}"
+                f"(已测试{lv.test_count}次)，等待流动性扫取确认后入场"
+            )
+        else:
+            base.confidence = "C"
+            base.reason = f"价格正在测试{side_cn}位${lv.price:,.0f}，等待流动性扫取确认后入场"
         if lv.cascade_risk > 0.7:
             base.warnings.append(f"级联风险{lv.cascade_risk:.0%}，突破后可能瀑布")
         return base
