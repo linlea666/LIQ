@@ -121,8 +121,12 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 
 ### 格式铁律
 - 场景推演以 `场景A：` 开头，禁止加粗前缀
-- 价格区间小值在前-大值在后
+- 价格区间**必须小值在前-大值在后**（如 $73,200 - $73,400），违反即重排
 - 表格分隔行用 `|---|---|---|`
+
+### 常见错误纠正（禁止犯）
+- **资金费率方向**：正费率=多头付钱给空头=**多头拥挤**（轧多风险）；负费率=空头付钱给多头=**空头拥挤**（轧空风险）。绝对不可写反。
+- **R:R 展示顺序**：§四每个方案须先展示 TP1 的 R:R（主目标），再展示 TP2 的 R:R（保守目标）。R:R≥1:{min_rr:.1f} 的达标判定以 TP1 为准。
 """
 
 
@@ -302,6 +306,7 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"  OKX: {okx_r * 100:.4f}%" if okx_r is not None else "  OKX: N/A")
         lines.append(f"  Binance: {bn_r * 100:.4f}%" if bn_r is not None else "  Binance: N/A")
     lines.append(f"费率解读: {snapshot.get('funding_interpretation', 'N/A')}")
+    lines.append("  (提醒: 正费率=多头付钱=多头拥挤; 负费率=空头付钱=空头拥挤，不可写反)")
     avg7d = snapshot.get("funding_avg_7d")
     if avg7d is not None:
         lines.append(f"7d均值: {avg7d*100:.4f}%")
