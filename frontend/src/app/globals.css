@@ -12,7 +12,8 @@ body {
 }
 
 body:has(.ai-detail-page),
-body:has(.levels-detail-page) {
+body:has(.levels-detail-page),
+body:has(.range-detail-page) {
   overflow: auto;
 }
 

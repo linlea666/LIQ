@@ -225,25 +225,49 @@ export interface AIAnalysisResult {
 
 export interface RangeSignalData {
   ts: number;
+  range_upper: number | null;
+  range_upper_source: string;
+  range_upper_tier: string;
+  range_upper_score: number;
+  range_upper_test_count: number;
+  range_lower: number | null;
+  range_lower_source: string;
+  range_lower_tier: string;
+  range_lower_score: number;
+  range_lower_test_count: number;
+  price_position: string;
+  price_position_pct: number;
+  box_state: string;
+  box_state_ts: number;
+  box_age_hours: number;
+  box_width_pct: number;
+  box_quality: number;
+  breakout_probability: number;
+  breakout_direction_bias: string;
+  breakout_reason: string;
   ma60_daily: number | null;
   ma120_daily: number | null;
   ma60_weekly: number | null;
   macd_daily_above_zero: boolean | null;
   macd_daily_histogram: number | null;
   macd_daily_hist_rising: boolean | null;
-  range_upper: number | null;
-  range_upper_source: string;
-  range_lower: number | null;
-  range_lower_source: string;
-  price_position: string;
-  price_position_pct: number;
   unfilled_wick_low: number | null;
   unfilled_wick_high: number | null;
   signal_grade: string | null;
   signal_direction: string | null;
   signal_reason: string;
+  signal_entry: number | null;
+  signal_stop_loss: number | null;
+  signal_tp1: number | null;
+  signal_rr_ratio: number | null;
   sweep_confirmed: boolean;
   cps_aligned: boolean;
+  bb_squeeze: boolean;
+  oi_buildup: boolean;
+  volume_declining: boolean;
+  funding_extreme: boolean;
+  orderbook_imbalance: string;
+  confluence_count: number;
 }
 
 export interface KeyLevel {

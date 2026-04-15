@@ -244,27 +244,68 @@ class CyclePositionData(BaseModel):
 
 
 class RangeSignalData(BaseModel):
-    """多时间框架均线箱体 + MACD 位置 + 信号分级"""
+    """箱体信号 V2 — 基于关键位多维共振 + 状态机 + 突破概率"""
     ts: int
+
+    # ── 箱体边界（来自关键位 V2 的强支撑/阻力）──
+    range_upper: Optional[float] = None
+    range_upper_source: str = ""
+    range_upper_tier: str = ""          # "S"/"A"/"B"
+    range_upper_score: float = 0        # 共振评分
+    range_upper_test_count: int = 0
+    range_lower: Optional[float] = None
+    range_lower_source: str = ""
+    range_lower_tier: str = ""
+    range_lower_score: float = 0
+    range_lower_test_count: int = 0
+
+    # ── 价格位置 ──
+    price_position: str = "middle"      # "near_upper" / "near_lower" / "middle" / "above" / "below"
+    price_position_pct: float = 50.0    # 0(下沿)~100(上沿)
+
+    # ── 箱体状态机 ──
+    box_state: str = "none"
+    # "none" / "forming" / "confirmed" / "mature" / "squeeze" / "breaking_up" / "breaking_down" / "broken"
+    box_state_ts: int = 0
+    box_age_hours: float = 0            # 箱体存续时长
+    box_width_pct: float = 0            # 箱体宽度占价格百分比
+    box_quality: int = 0                # 0-100 箱体质量评分
+
+    # ── 突破概率 ──
+    breakout_probability: float = 0     # 0-1
+    breakout_direction_bias: str = ""   # "up" / "down" / "neutral"
+    breakout_reason: str = ""
+
+    # ── MA + MACD（保留洪七公策略的方向性过滤）──
     ma60_daily: Optional[float] = None
     ma120_daily: Optional[float] = None
     ma60_weekly: Optional[float] = None
     macd_daily_above_zero: Optional[bool] = None
     macd_daily_histogram: Optional[float] = None
     macd_daily_hist_rising: Optional[bool] = None
-    range_upper: Optional[float] = None
-    range_upper_source: str = ""
-    range_lower: Optional[float] = None
-    range_lower_source: str = ""
-    price_position: str = "middle"
-    price_position_pct: float = 50.0
+
+    # ── 未回补影线（保留）──
     unfilled_wick_low: Optional[float] = None
     unfilled_wick_high: Optional[float] = None
+
+    # ── 信号分级（增强：S/A/B/C）──
     signal_grade: Optional[str] = None
     signal_direction: Optional[str] = None
     signal_reason: str = ""
+    signal_entry: Optional[float] = None
+    signal_stop_loss: Optional[float] = None
+    signal_tp1: Optional[float] = None
+    signal_rr_ratio: Optional[float] = None
+
+    # ── 共振因子 ──
     sweep_confirmed: bool = False
     cps_aligned: bool = False
+    bb_squeeze: bool = False
+    oi_buildup: bool = False            # OI 在箱体内持续堆积
+    volume_declining: bool = False      # 成交量递减（成熟标志）
+    funding_extreme: bool = False       # 资金费率极端（拥挤标志）
+    orderbook_imbalance: str = ""       # "bid_heavy" / "ask_heavy" / ""
+    confluence_count: int = 0           # 共振因子总数
 
 
 # ── 新增数据模型 ──

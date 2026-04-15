@@ -45,37 +45,64 @@ def recompute_range_signal(
     btc_state: CoinState | None,
     settings_range: dict[str, Any] | None,
 ) -> None:
-    """用 Coinglass 指标重新计算均线箱体信号。"""
+    """基于关键位 V2 快照重新计算箱体信号。"""
     if not state.ticker:
         return
     price = state.ticker.last
     if price <= 0:
         return
 
+    cutoff = int(time.time()) - 3600
     sweep_above = sum(
         e.get("usd", 0) for e in state.liq_sweep_events
-        if e.get("side") == "above" and e.get("ts", 0) > int(time.time()) - 3600
+        if e.get("side") == "above" and e.get("ts", 0) > cutoff
     )
     sweep_below = sum(
         e.get("usd", 0) for e in state.liq_sweep_events
-        if e.get("side") == "below" and e.get("ts", 0) > int(time.time()) - 3600
+        if e.get("side") == "below" and e.get("ts", 0) > cutoff
     )
 
     cps = None
     if btc_state and btc_state.cycle_position and btc_state.cycle_position.cps is not None:
         cps = btc_state.cycle_position.cps
 
-    if state.candles_daily:
-        state.range_signal = calculate_range_signal(
-            candles_1d=state.candles_daily,
-            candles_1w=state.candles_weekly,
-            current_price=price,
-            atr=state.atr,
-            sweep_above_1h=sweep_above,
-            sweep_below_1h=sweep_below,
-            cps=cps,
-            cfg=settings_range,
-        )
+    bb_squeeze = False
+    if state.boll_data and hasattr(state, "boll_4h_data"):
+        from processors.ta_core import detect_bb_squeeze, calc_keltner
+        if state.candles_4h and len(state.candles_4h) >= 20:
+            closes = [c.close for c in state.candles_4h]
+            highs = [c.high for c in state.candles_4h]
+            lows = [c.low for c in state.candles_4h]
+            sq = detect_bb_squeeze(closes, highs, lows)
+            bb_squeeze = sq.is_squeeze
+
+    oi_change_1h = state.oi.change_1h_pct if state.oi else 0
+    funding_rate = None
+    if state.funding:
+        funding_rate = state.funding.oi_weighted_rate or state.funding.avg_rate
+
+    ob_bid = ob_ask = 0.0
+    if state.orderbook:
+        ob_bid = state.orderbook.bid_total_usd or 0
+        ob_ask = state.orderbook.ask_total_usd or 0
+
+    state.range_signal = calculate_range_signal(
+        kl_snapshot=state.key_level_snapshot_v2,
+        current_price=price,
+        atr=state.atr,
+        candles_1d=state.candles_daily or None,
+        candles_1w=state.candles_weekly or None,
+        prev_range=state.range_signal,
+        sweep_above_1h=sweep_above,
+        sweep_below_1h=sweep_below,
+        cps=cps,
+        bb_squeeze=bb_squeeze,
+        oi_change_1h=oi_change_1h,
+        funding_rate=funding_rate,
+        orderbook_bid_total=ob_bid,
+        orderbook_ask_total=ob_ask,
+        cfg=settings_range,
+    )
 
 
 async def poll_indicators(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:

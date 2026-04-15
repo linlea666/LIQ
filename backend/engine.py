@@ -521,7 +521,6 @@ class Engine:
     async def _poll_indicators(self, coin: CoinConfig):
         from polls.candles import poll_indicators
         await poll_indicators(self._cg, coin, self._states[coin.ccy])
-        self._recompute_range_signal(coin.ccy)
 
     async def _poll_basis(self, coin: CoinConfig):
         from polls.derivatives import poll_basis
@@ -636,10 +635,9 @@ class Engine:
             cycle_position=state.cycle_position,
         )
 
-        if state.candles_daily:
-            self._recompute_range_signal(ccy)
-
         self._recompute_key_levels(ccy)
+
+        self._recompute_range_signal(ccy)
 
     def _recompute_key_levels(self, ccy: str):
         state = self._states[ccy]

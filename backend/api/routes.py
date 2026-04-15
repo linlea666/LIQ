@@ -172,6 +172,21 @@ async def get_key_levels_v2(coin: str):
     return state.key_level_snapshot_v2.model_dump()
 
 
+@router.get("/range-signal/{coin}")
+async def get_range_signal(coin: str):
+    """获取箱体信号完整数据（详情页）"""
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+
+    state = _engine._states.get(coin)
+    if not state or not state.range_signal:
+        raise HTTPException(503, f"No range signal data for {coin}")
+    return state.range_signal.model_dump()
+
+
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""

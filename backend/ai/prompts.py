@@ -723,16 +723,37 @@ def build_user_prompt(snapshot: dict) -> str:
             for val, src, nature, dist in onchain_levels:
                 lines.append(f"| ${val:,.0f} | {src} | {nature} | {dist:+.1f}% |")
 
-    # ── §9f 均线箱体信号 ──
+    # ── §9f 箱体信号 V2 ──
     rs = snapshot.get("range_signal")
-    has_range = rs is not None and rs.get("ma60_daily") is not None
+    has_range = rs is not None and (rs.get("range_upper") or rs.get("ma60_daily"))
     if has_range:
         lines.append("")
-        lines.append("### 9f. 均线箱体信号 [日级·多时间框架MA+MACD]")
+        lines.append("### 9f. 箱体信号 [多维共振箱体+状态机+突破概率]")
+
+        if rs.get("range_upper") and rs.get("range_lower"):
+            lines.append(f"  箱体范围: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')},{rs.get('range_lower_tier','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')},{rs.get('range_upper_tier','')})")
+            lines.append(f"  价格位置: {rs.get('price_position', 'middle')} ({rs.get('price_position_pct', 50):.0f}%)")
+            lines.append(f"  箱体宽度: {rs.get('box_width_pct', 0):.1f}%")
+
+        box_state = rs.get("box_state", "none")
+        state_map = {"none": "未形成", "forming": "形成中", "confirmed": "已确认",
+                     "mature": "成熟", "squeeze": "挤压蓄力", "breaking_up": "向上突破中",
+                     "breaking_down": "向下突破中", "broken": "已突破"}
+        lines.append(f"  箱体状态: {state_map.get(box_state, box_state)} (质量{rs.get('box_quality', 0)}分)")
+        if rs.get("box_age_hours", 0) > 0:
+            lines.append(f"  存续时长: {rs['box_age_hours']:.0f}h")
+
+        bp = rs.get("breakout_probability", 0)
+        if bp > 0:
+            bias = {"up": "偏向上破", "down": "偏向下破", "neutral": "方向不明"}.get(rs.get("breakout_direction_bias", ""), "")
+            lines.append(f"  突破概率: {bp:.0%} {bias}")
+            if rs.get("breakout_reason"):
+                lines.append(f"    原因: {rs['breakout_reason']}")
+
         if rs.get("ma60_daily"):
             lines.append(f"  日线MA60: ${rs['ma60_daily']:,.0f}")
         if rs.get("ma120_daily"):
-            lines.append(f"  日线MA120(≈2日MA60): ${rs['ma120_daily']:,.0f}")
+            lines.append(f"  日线MA120: ${rs['ma120_daily']:,.0f}")
         if rs.get("ma60_weekly"):
             lines.append(f"  周线MA60: ${rs['ma60_weekly']:,.0f}")
 
@@ -744,28 +765,30 @@ def build_user_prompt(snapshot: dict) -> str:
             hist_dir = "，柱状图下降"
         lines.append(f"  日线MACD: {macd_pos}{hist_dir}")
 
-        if rs.get("range_upper") and rs.get("range_lower"):
-            lines.append(f"  箱体范围: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')})")
-            lines.append(f"  价格位置: {rs.get('price_position', 'middle')} ({rs.get('price_position_pct', 50):.0f}%)")
-        elif rs.get("range_upper"):
-            lines.append(f"  箱体上沿: ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')}), 下沿未确定")
-        elif rs.get("range_lower"):
-            lines.append(f"  箱体下沿: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}), 上沿未确定")
-
         if rs.get("unfilled_wick_low"):
             lines.append(f"  未回补下影线: ${rs['unfilled_wick_low']:,.0f} (价格磁吸目标)")
         if rs.get("unfilled_wick_high"):
             lines.append(f"  未回补上影线: ${rs['unfilled_wick_high']:,.0f} (价格磁吸目标)")
 
         if rs.get("signal_grade"):
-            grade_emoji = "🔴" if rs["signal_grade"] == "A" else "🟡"
-            lines.append(f"  {grade_emoji} 信号: {rs['signal_grade']}级 {rs.get('signal_direction', '')} — {rs.get('signal_reason', '')}")
+            grade_map = {"S": "🔴", "A": "🟠", "B": "🟡", "C": "⚪"}
+            emoji = grade_map.get(rs["signal_grade"], "⚪")
+            lines.append(f"  {emoji} 信号: {rs['signal_grade']}级 {rs.get('signal_direction', '')} — {rs.get('signal_reason', '')}")
+            confirms = []
             if rs.get("sweep_confirmed"):
-                lines.append(f"  ✅ Sweep确认: 流动性扫取与信号方向一致")
+                confirms.append("Sweep确认")
             if rs.get("cps_aligned"):
-                lines.append(f"  ✅ CPS一致: 周期评分支持当前信号方向")
+                confirms.append("CPS一致")
+            if rs.get("bb_squeeze"):
+                confirms.append("BB挤压")
+            if rs.get("oi_buildup"):
+                confirms.append("OI堆积")
+            if rs.get("volume_declining"):
+                confirms.append("量缩")
+            if confirms:
+                lines.append(f"  共振因子({rs.get('confluence_count', 0)}): {', '.join(confirms)}")
         else:
-            lines.append(f"  信号: 无（价格在箱体中间，不适合基于箱体逻辑开单）")
+            lines.append(f"  信号: 无（价格在箱体中间/箱体未形成）")
 
     # ── §9g 关键位状态机 ──
     kl = snapshot.get("key_levels")
