@@ -161,3 +161,9 @@ class KeyLevelSnapshotV2(BaseModel):
     structure_summary: str = ""
     nearest_strong_support: Optional[float] = None
     nearest_strong_resistance: Optional[float] = None
+
+    # 多周期关键位（日线 / 周线级别最强支撑阻力）
+    daily_strong_support: Optional[str] = None
+    daily_strong_resistance: Optional[str] = None
+    weekly_strong_support: Optional[str] = None
+    weekly_strong_resistance: Optional[str] = None

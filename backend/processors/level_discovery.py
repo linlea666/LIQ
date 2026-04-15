@@ -443,12 +443,18 @@ def _discover_capital_flow(
                 base_score=score, timeframe="1D", data_age_hours=0,
             ))
 
-    # 清算簇（7d — 远距覆盖，较低权重）
+    # 清算簇（7d — 远距覆盖，较低权重，各方向最多 6 个）
+    _MAX_7D_LIQ_PER_SIDE = 6
     if liq_map_7d:
         existing_prices = {round(c.price, -1) for c in cands}
-        for c in liq_map_7d.clusters_below:
-            if c.distance_pct > 20 or c.distance_pct < 5:
-                continue
+        below_sorted = sorted(
+            [c for c in liq_map_7d.clusters_below if 5 <= c.distance_pct <= 20],
+            key=lambda c: c.total_usd, reverse=True,
+        )
+        added_below = 0
+        for c in below_sorted:
+            if added_below >= _MAX_7D_LIQ_PER_SIDE:
+                break
             if round(c.price_from, -1) in existing_prices:
                 continue
             cands.append(RawCandidate(
@@ -459,9 +465,15 @@ def _discover_capital_flow(
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
             ))
-        for c in liq_map_7d.clusters_above:
-            if c.distance_pct > 20 or c.distance_pct < 5:
-                continue
+            added_below += 1
+        above_sorted = sorted(
+            [c for c in liq_map_7d.clusters_above if 5 <= c.distance_pct <= 20],
+            key=lambda c: c.total_usd, reverse=True,
+        )
+        added_above = 0
+        for c in above_sorted:
+            if added_above >= _MAX_7D_LIQ_PER_SIDE:
+                break
             if round(c.price_to, -1) in existing_prices:
                 continue
             cands.append(RawCandidate(
@@ -472,6 +484,7 @@ def _discover_capital_flow(
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
             ))
+            added_above += 1
 
     # Volume Profile POC + VA
     if vp:

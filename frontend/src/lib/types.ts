@@ -358,6 +358,10 @@ export interface KeyLevelSnapshotV2 {
   structure_summary: string;
   nearest_strong_support: number | null;
   nearest_strong_resistance: number | null;
+  daily_strong_support: string | null;
+  daily_strong_resistance: string | null;
+  weekly_strong_support: string | null;
+  weekly_strong_resistance: string | null;
 }
 
 export interface MarketUpdate {

@@ -158,7 +158,7 @@ export default function KeyLevelDetailPage() {
           <div className="text-base text-white font-medium mb-3">
             {data.structure_summary || "数据分析中..."}
           </div>
-          <div className="flex gap-6 text-sm text-slate-400">
+          <div className="flex gap-6 text-sm text-slate-400 mb-3">
             {data.nearest_strong_support && (
               <span>
                 最近强支撑:{" "}
@@ -176,6 +176,39 @@ export default function KeyLevelDetailPage() {
               </span>
             )}
           </div>
+          {(data.daily_strong_support || data.daily_strong_resistance
+            || data.weekly_strong_support || data.weekly_strong_resistance) && (
+            <div className="border-t border-slate-700/50 pt-3 grid grid-cols-2 gap-3 text-sm">
+              {(data.daily_strong_support || data.daily_strong_resistance) && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-400 text-xs font-bold">日线</span>
+                    <span className="text-slate-500">支撑</span>
+                    <span className="text-green-400 font-mono">{data.daily_strong_support || "-"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-400 text-xs font-bold">日线</span>
+                    <span className="text-slate-500">阻力</span>
+                    <span className="text-red-400 font-mono">{data.daily_strong_resistance || "-"}</span>
+                  </div>
+                </>
+              )}
+              {(data.weekly_strong_support || data.weekly_strong_resistance) && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-400 text-xs font-bold">周线</span>
+                    <span className="text-slate-500">支撑</span>
+                    <span className="text-green-400 font-mono">{data.weekly_strong_support || "-"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-400 text-xs font-bold">周线</span>
+                    <span className="text-slate-500">阻力</span>
+                    <span className="text-red-400 font-mono">{data.weekly_strong_resistance || "-"}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </Card>
 
         {/* Bull/Bear Line */}
@@ -219,7 +252,7 @@ export default function KeyLevelDetailPage() {
         )}
 
         {/* Cascade Risk */}
-        <CascadeRiskSection levels={data.levels} coin={coin} />
+        <CascadeRiskSection levels={data.levels} coin={coin} price={price} />
 
         {/* Footer */}
         <div className="text-center text-xs text-slate-600 py-6 border-t border-slate-800">
@@ -450,12 +483,23 @@ function LevelTable({
   coin: string;
   price: number;
 }) {
+  const [showC, setShowC] = useState(false);
+
+  const important = levels.filter(
+    (l) => l.strength_tier !== "C" || l.state !== "idle"
+  );
+  const cLevels = levels.filter(
+    (l) => l.strength_tier === "C" && l.state === "idle"
+  );
+  const visible = showC ? levels : important;
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-700 text-slate-500 text-xs">
             <th className="text-left py-2 pr-3">价位</th>
+            <th className="text-left py-2 pr-3">类型</th>
             <th className="text-center py-2 pr-3">强度</th>
             <th className="text-left py-2 pr-3">状态</th>
             <th className="text-right py-2 pr-3">距当前</th>
@@ -466,7 +510,7 @@ function LevelTable({
           </tr>
         </thead>
         <tbody>
-          {levels.map((lv, i) => {
+          {visible.map((lv, i) => {
             const stateInfo = STATE_LABELS[lv.state] || {
               text: lv.state,
               color: "text-slate-400",
@@ -478,6 +522,7 @@ function LevelTable({
                 : lv.cascade_risk > 0.4
                   ? "text-orange-400"
                   : "text-slate-500";
+            const isAbove = lv.price > price;
 
             return (
               <tr
@@ -488,6 +533,11 @@ function LevelTable({
               >
                 <td className="py-2.5 pr-3 font-mono text-white">
                   {formatPrice(lv.price, coin)}
+                </td>
+                <td className="py-2.5 pr-3">
+                  <span className={isAbove ? "text-red-400" : "text-green-400"}>
+                    {isAbove ? "阻力" : "支撑"}
+                  </span>
                 </td>
                 <td className="py-2.5 pr-3 text-center">
                   <span
@@ -501,7 +551,7 @@ function LevelTable({
                 </td>
                 <td
                   className={`py-2.5 pr-3 text-right font-mono ${
-                    lv.price > price ? "text-red-400" : "text-green-400"
+                    isAbove ? "text-red-400" : "text-green-400"
                   }`}
                 >
                   {lv.distance_pct > 0 ? "+" : ""}
@@ -528,6 +578,18 @@ function LevelTable({
           })}
         </tbody>
       </table>
+      {cLevels.length > 0 && (
+        <div className="px-3 py-2 border-t border-slate-800/50 text-center">
+          <button
+            onClick={() => setShowC(!showC)}
+            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            {showC
+              ? `收起 ${cLevels.length} 个弱级别`
+              : `展开显示全部 ${cLevels.length} 个 C 级关键位`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -646,9 +708,11 @@ function BreakoutDetail({
 function CascadeRiskSection({
   levels,
   coin,
+  price,
 }: {
   levels: KeyLevelV2[];
   coin: string;
+  price: number;
 }) {
   const risky = levels
     .filter((l) => l.cascade_risk > 0.3)
@@ -671,6 +735,7 @@ function CascadeRiskSection({
               : riskPct > 50
                 ? "bg-orange-500"
                 : "bg-yellow-500";
+          const isAbove = lv.price > price;
           return (
             <div key={i} className="flex items-center gap-3">
               <span className="text-sm font-mono text-slate-200 w-24 text-right shrink-0">
@@ -678,10 +743,10 @@ function CascadeRiskSection({
               </span>
               <span
                 className={`text-xs w-10 text-right ${
-                  lv.side === "support" ? "text-green-400" : "text-red-400"
+                  isAbove ? "text-red-400" : "text-green-400"
                 }`}
               >
-                {lv.side === "support" ? "支撑" : "阻力"}
+                {isAbove ? "阻力" : "支撑"}
               </span>
               <div className="flex-1 h-4 bg-slate-800 rounded-full overflow-hidden">
                 <div

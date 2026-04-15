@@ -76,7 +76,7 @@ def score_and_build_snapshot(
     scored_levels: list[KeyLevelV2] = []
     for cl in clusters:
         level = _score_cluster(cl, current_price, atr, now)
-        if level.confluence_score < 5:
+        if level.confluence_score < 10:
             continue
         scored_levels.append(level)
 
@@ -109,6 +109,9 @@ def score_and_build_snapshot(
     nearest_res = min(resistances, key=lambda l: abs(l.distance_pct)) if resistances else None
     structure = _summarize_structure(current_price, bull_bear, nearest_sup, nearest_res)
 
+    # 8. 多周期分层
+    tf_info = _find_tf_levels(scored_levels, current_price)
+
     return KeyLevelSnapshotV2(
         ts=now,
         current_price=round(current_price, 2),
@@ -122,6 +125,10 @@ def score_and_build_snapshot(
         structure_summary=structure,
         nearest_strong_support=nearest_sup.price if nearest_sup else None,
         nearest_strong_resistance=nearest_res.price if nearest_res else None,
+        daily_strong_support=tf_info["daily_sup"],
+        daily_strong_resistance=tf_info["daily_res"],
+        weekly_strong_support=tf_info["weekly_sup"],
+        weekly_strong_resistance=tf_info["weekly_res"],
     )
 
 
@@ -284,7 +291,7 @@ def _merge_with_prev(
         for i, prev in enumerate(prev_levels):
             if i in matched:
                 continue
-            if abs(lv.price - prev.price) / max(lv.price, 1) < merge_tol and lv.side == prev.side:
+            if abs(lv.price - prev.price) / max(lv.price, 1) < merge_tol:
                 lv.state = prev.state
                 lv.state_ts = prev.state_ts
                 lv.prev_state = prev.prev_state
@@ -305,6 +312,14 @@ def _merge_with_prev(
 def _update_distance(lv: KeyLevelV2, price: float):
     if price > 0:
         lv.distance_pct = round((lv.price - price) / price * 100, 3)
+        new_side = "resistance" if lv.price > price else "support"
+        if new_side != lv.side:
+            old_cn = "支撑" if lv.side == "support" else "阻力"
+            new_cn = "支撑" if new_side == "support" else "阻力"
+            lv.side = new_side
+            lv.category = _classify(lv)
+            if old_cn in lv.note:
+                lv.note = lv.note.replace(old_cn, new_cn)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -415,6 +430,53 @@ def _build_fib_snapshot(discovery: DiscoveryResult) -> FibSnapshot | None:
             for fl in discovery.fib_levels
         ],
     )
+
+
+def _find_zone_or_single(
+    levels: list[KeyLevelV2],
+    price: float,
+    side: str,
+) -> str | None:
+    """在同一 side 的 S/A 级 level 中识别支撑/阻力带或单一价位。"""
+    strong = [
+        lv for lv in levels
+        if lv.side == side
+        and lv.strength_tier in ("S", "A")
+        and ((lv.price < price) if side == "support" else (lv.price > price))
+    ]
+    if not strong:
+        return None
+    strong.sort(key=lambda l: abs(l.distance_pct))
+    best = strong[0]
+    zone_peers = [
+        lv for lv in strong
+        if abs(lv.price - best.price) / max(best.price, 1) < 0.005
+        and lv is not best
+    ]
+    if zone_peers:
+        lo = min(best.price, *(p.price for p in zone_peers))
+        hi = max(best.price, *(p.price for p in zone_peers))
+        return f"${lo:,.0f}~${hi:,.0f}({abs(best.distance_pct):.1f}%)"
+    return f"${best.price:,.0f}({abs(best.distance_pct):.1f}%)"
+
+
+def _find_tf_levels(
+    scored_levels: list[KeyLevelV2],
+    price: float,
+) -> dict:
+    """按日线/周线分层提取最强支撑阻力。"""
+    result: dict[str, str | None] = {
+        "daily_sup": None, "daily_res": None,
+        "weekly_sup": None, "weekly_res": None,
+    }
+    daily_levels = [lv for lv in scored_levels if lv.timeframe in ("1D", "4H")]
+    weekly_levels = [lv for lv in scored_levels if lv.timeframe == "1W"]
+
+    result["daily_sup"] = _find_zone_or_single(daily_levels, price, "support")
+    result["daily_res"] = _find_zone_or_single(daily_levels, price, "resistance")
+    result["weekly_sup"] = _find_zone_or_single(weekly_levels, price, "support")
+    result["weekly_res"] = _find_zone_or_single(weekly_levels, price, "resistance")
+    return result
 
 
 def _summarize_structure(

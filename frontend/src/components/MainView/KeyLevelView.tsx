@@ -55,6 +55,8 @@ export default function KeyLevelView() {
     (s) => s.confidence === "A" || s.confidence === "B"
   );
 
+  const totalCount = kl.levels.length;
+
   return (
     <div className="space-y-4 max-w-4xl">
       <StructureSummary kl={kl} price={price} coin={coin} />
@@ -63,17 +65,21 @@ export default function KeyLevelView() {
       )}
       {kl.breakout_zone && <BreakoutCard zone={kl.breakout_zone} coin={coin} />}
       <PriceRuler levels={kl.levels} price={price} coin={coin} />
-      {activeSignals.length > 0 && (
+      {activeSignals.length > 0 ? (
         <SignalCards signals={activeSignals} coin={coin} />
+      ) : (
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg px-4 py-3 text-center text-xs text-slate-500">
+          暂无高确定性交易信号，等待关键位状态变化...
+        </div>
       )}
-      <LevelList levels={kl.levels} price={price} coin={coin} />
+      <LevelList levels={kl.levels} price={price} coin={coin} totalCount={totalCount} />
       <div className="text-center pt-2 pb-4">
         <Link
           href={`/levels/${coin}`}
           target="_blank"
           className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700/60 hover:bg-slate-600/60 border border-slate-600 rounded-lg text-sm text-slate-300 transition-colors"
         >
-          查看完整分析
+          查看完整分析（含全部 {totalCount} 个关键位）
           <span className="text-xs text-slate-500">↗</span>
         </Link>
       </div>
@@ -101,6 +107,9 @@ function StructureSummary({
   } else if (kl.active_count > 0) {
     borderColor = "border-yellow-500/40";
   }
+
+  const hasTfData = kl.daily_strong_support || kl.daily_strong_resistance
+    || kl.weekly_strong_support || kl.weekly_strong_resistance;
 
   return (
     <div className={`bg-slate-800/60 border ${borderColor} rounded-lg p-4`}>
@@ -133,6 +142,38 @@ function StructureSummary({
           </span>
         )}
       </div>
+      {hasTfData && (
+        <div className="mt-2.5 pt-2.5 border-t border-slate-700/50 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+          {(kl.daily_strong_support || kl.daily_strong_resistance) && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-bold shrink-0">日线</span>
+                <span className="text-slate-500">支撑</span>
+                <span className="text-green-400 font-mono">{kl.daily_strong_support || "-"}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-bold shrink-0">日线</span>
+                <span className="text-slate-500">阻力</span>
+                <span className="text-red-400 font-mono">{kl.daily_strong_resistance || "-"}</span>
+              </div>
+            </>
+          )}
+          {(kl.weekly_strong_support || kl.weekly_strong_resistance) && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 text-[10px] font-bold shrink-0">周线</span>
+                <span className="text-slate-500">支撑</span>
+                <span className="text-green-400 font-mono">{kl.weekly_strong_support || "-"}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 text-[10px] font-bold shrink-0">周线</span>
+                <span className="text-slate-500">阻力</span>
+                <span className="text-red-400 font-mono">{kl.weekly_strong_resistance || "-"}</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -236,14 +277,17 @@ function PriceRuler({
   price: number;
   coin: string;
 }) {
+  const tierRank = (t: string) => t === "S" ? 0 : t === "A" ? 1 : t === "B" ? 2 : 3;
   const resistances = levels
-    .filter((l) => l.price > price)
-    .sort((a, b) => a.price - b.price)
-    .slice(0, 6);
+    .filter((l) => l.price > price && l.strength_tier !== "C")
+    .sort((a, b) => tierRank(a.strength_tier) - tierRank(b.strength_tier) || a.price - b.price)
+    .slice(0, 6)
+    .sort((a, b) => a.price - b.price);
   const supports = levels
-    .filter((l) => l.price < price)
-    .sort((a, b) => b.price - a.price)
-    .slice(0, 6);
+    .filter((l) => l.price < price && l.strength_tier !== "C")
+    .sort((a, b) => tierRank(a.strength_tier) - tierRank(b.strength_tier) || b.price - a.price)
+    .slice(0, 6)
+    .sort((a, b) => b.price - a.price);
 
   return (
     <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-4">
@@ -417,17 +461,23 @@ function LevelList({
   levels,
   price,
   coin,
+  totalCount,
 }: {
   levels: KeyLevelV2[];
   price: number;
   coin: string;
+  totalCount: number;
 }) {
-  const resistances = levels
+  const visible = levels.filter(
+    (l) => l.strength_tier !== "C" || l.state !== "idle"
+  );
+  const resistances = visible
     .filter((l) => l.price > price)
     .sort((a, b) => a.price - b.price);
-  const supports = levels
+  const supports = visible
     .filter((l) => l.price <= price)
     .sort((a, b) => b.price - a.price);
+  const hiddenCount = totalCount - visible.length;
 
   return (
     <div className="bg-slate-800/30 border border-slate-700 rounded-lg overflow-hidden">
@@ -436,7 +486,7 @@ function LevelList({
           关键位追踪列表
         </h3>
         <span className="text-[10px] text-slate-500">
-          从近到远 · 共 {levels.length} 个
+          从近到远 · 显示 {visible.length} 个{hiddenCount > 0 ? `（已隐藏 ${hiddenCount} 个弱级别）` : ""}
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -518,7 +568,7 @@ function LevelRow({
       : level.cascade_risk > 0.4
         ? "text-orange-400"
         : "text-slate-500";
-  const sideColor = level.side === "support" ? "text-green-400" : "text-red-400";
+  const sideColor = isAbove ? "text-red-400" : "text-green-400";
 
   const tierDepth =
     level.strength_tier === "S"
@@ -538,7 +588,7 @@ function LevelRow({
       </td>
       <td className="px-3 py-2">
         <span className={sideColor}>
-          {level.side === "support" ? "支撑" : "阻力"}
+          {isAbove ? "阻力" : "支撑"}
         </span>
       </td>
       <td className="px-3 py-2 text-center">
