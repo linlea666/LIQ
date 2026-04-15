@@ -45,7 +45,7 @@ def recompute_range_signal(
     btc_state: CoinState | None,
     settings_range: dict[str, Any] | None,
 ) -> None:
-    """基于关键位 V2 快照重新计算箱体信号。"""
+    """重新计算箱体信号（MA 骨架 + 微观区间）。"""
     if not state.ticker:
         return
     price = state.ticker.last

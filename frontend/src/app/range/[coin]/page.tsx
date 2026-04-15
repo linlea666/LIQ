@@ -109,28 +109,30 @@ export default function RangeDetailPage() {
         {/* Core Box Boundaries */}
         {hasBox && (
           <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-5">
-            <h2 className="text-sm font-bold text-white mb-1">核心箱体</h2>
-            <p className="text-[10px] text-slate-500 mb-4">基于结构性关键位（swing/VP/MA/Fib），宽度 ≥ 2.5%，适合波段操作</p>
+            <h2 className="text-sm font-bold text-white mb-1">核心箱体（MA 骨架）</h2>
+            <p className="text-[10px] text-slate-500 mb-4">基于均线结构（MA60/MA120 daily、MA60 weekly），机构级宏观交易区间</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <BoundaryCard
                 side="上沿 (阻力)"
                 price={data.range_upper!}
                 source={data.range_upper_source}
-                tier={data.range_upper_tier}
-                score={data.range_upper_score}
-                testCount={data.range_upper_test_count}
+                tier=""
+                score={0}
+                testCount={0}
                 coin={coin}
                 sideColor="text-red-400"
+                compact
               />
               <BoundaryCard
                 side="下沿 (支撑)"
                 price={data.range_lower!}
                 source={data.range_lower_source}
-                tier={data.range_lower_tier}
-                score={data.range_lower_score}
-                testCount={data.range_lower_test_count}
+                tier=""
+                score={0}
+                testCount={0}
                 coin={coin}
                 sideColor="text-green-400"
+                compact
               />
             </div>
           </div>

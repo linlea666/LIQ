@@ -1,9 +1,11 @@
-"""箱体信号处理器 V2 — 基于关键位多维共振的智能箱体检测
+"""箱体信号处理器 V2 — 洪七公 MA 骨架 + 状态机 + 突破概率
 
-架构：箱体 = 关键位 V2 的"消费者"，从 KeyLevelSnapshotV2 中提取
-最近的强支撑/阻力对作为箱体边界，叠加状态机、突破概率、信号分级。
+架构：
+  核心箱体 = 纯 MA 驱动（MA60/MA120 daily、MA60 weekly），定义宏观交易区间
+  微观区间 = 关键位 V2 最近的 S/A/B level，短期参考
+  关键位模块 = 独立展示精确价位（不在此处重复消费）
 
-保留洪七公策略的 MA/MACD 方向性过滤作为加分项。
+洪七公策略：MA 定骨架，MACD 定方向，信号分级 + 共振因子确认。
 """
 
 from __future__ import annotations
@@ -31,18 +33,7 @@ _ST_BROKEN = "broken"
 
 _MIN_BOX_WIDTH_PCT = 2.5   # 核心箱体最小宽度 2.5%
 _MAX_BOX_WIDTH_PCT = 15.0  # 核心箱体最大宽度 15%
-_MIN_BOUNDARY_SCORE = 15   # 边界最小共振分
 _MATURE_HOURS = 72         # 72h 后进入 mature
-
-_CAPITAL_KEYWORDS = ("清算", "liq", "orderbook", "挂单", "大额")
-
-def _is_structural_source(sources: list[str]) -> bool:
-    """判断 level 来源是否包含结构性维度（非纯资金/清算）。"""
-    for s in sources:
-        s_lower = s.lower()
-        if not any(kw in s_lower for kw in _CAPITAL_KEYWORDS):
-            return True
-    return False
 
 def calculate_range_signal(
     kl_snapshot: KeyLevelSnapshotV2 | None,
@@ -61,15 +52,12 @@ def calculate_range_signal(
     orderbook_ask_total: float = 0,
     cfg: dict | None = None,
 ) -> RangeSignalData | None:
-    """从关键位 V2 快照计算箱体信号。
+    """洪七公 MA 骨架箱体信号。
 
     核心流程：
-    1. 从 kl_snapshot.levels 提取最近的强支撑 → 下沿，强阻力 → 上沿
-    2. 验证箱体合法性（宽度、共振分）
-    3. 叠加 MA/MACD 方向性过滤
-    4. 状态机转换（forming → confirmed → mature → squeeze → breaking）
-    5. 突破概率评估
-    6. 信号分级
+    1. 计算 MA60/MA120 daily、MA60 weekly → 选最近一上一下作为核心箱体
+    2. 从 kl_snapshot 提取最近 S/A/B level → 微观区间
+    3. 状态机转换 + 突破概率 + 信号分级（MACD 方向确认）
     """
     if current_price <= 0:
         return None
@@ -78,17 +66,7 @@ def calculate_range_signal(
     near_pct = cfg.get("near_boundary_pct", 1.5)
     now_ts = int(time.time())
 
-    # ── 1. 从关键位提取双层箱体边界 ──
-    (upper_lv, lower_lv), (micro_up_lv, micro_dn_lv) = _extract_dual_boundaries(
-        kl_snapshot, current_price,
-    )
-
-    range_upper = upper_lv.price if upper_lv else None
-    range_lower = lower_lv.price if lower_lv else None
-    micro_upper = micro_up_lv.price if micro_up_lv else None
-    micro_lower = micro_dn_lv.price if micro_dn_lv else None
-
-    # ── 2. MA 计算（保留洪七公参考）──
+    # ── 1. MA 计算（洪七公核心）──
     ma60_daily = ma120_daily = ma60_weekly = None
     macd_above_zero = macd_histogram = macd_hist_rising = None
 
@@ -109,7 +87,20 @@ def calculate_range_signal(
         sma60_w = calc_sma(weekly_closes, 60)
         ma60_weekly = last_valid(sma60_w)
 
-    # ── 3. 未回补影线（保留）──
+    # ── 2. 核心箱体 = MA 骨架 ──
+    range_upper, range_upper_src = _pick_ma_boundary(
+        current_price, ma60_daily, ma120_daily, ma60_weekly, side="above",
+    )
+    range_lower, range_lower_src = _pick_ma_boundary(
+        current_price, ma60_daily, ma120_daily, ma60_weekly, side="below",
+    )
+
+    # ── 3. 微观区间 = 关键位最近 S/A/B level ──
+    micro_up_lv, micro_dn_lv = _extract_micro_boundaries(kl_snapshot, current_price)
+    micro_upper = micro_up_lv.price if micro_up_lv else None
+    micro_lower = micro_dn_lv.price if micro_dn_lv else None
+
+    # ── 4. 未回补影线（保留）──
     wick_body_ratio = cfg.get("wick_body_ratio", 0.30)
     wick_min_atr_mult = cfg.get("wick_min_atr_mult", 1.2)
     unfilled_low, unfilled_high = None, None
@@ -118,19 +109,12 @@ def calculate_range_signal(
             candles_1d, current_price, atr, wick_body_ratio, wick_min_atr_mult,
         )
 
-    # ── 4. 箱体合法性验证 ──
+    # ── 5. 箱体合法性验证 ──
     has_box = False
     box_width_pct = 0.0
     if range_upper and range_lower and range_upper > range_lower:
         box_width_pct = (range_upper - range_lower) / current_price * 100
-        min_score = cfg.get("min_boundary_score", _MIN_BOUNDARY_SCORE)
-        upper_ok = upper_lv and upper_lv.confluence_score >= min_score
-        lower_ok = lower_lv and lower_lv.confluence_score >= min_score
-        has_box = (
-            _MIN_BOX_WIDTH_PCT <= box_width_pct <= _MAX_BOX_WIDTH_PCT
-            and upper_ok
-            and lower_ok
-        )
+        has_box = _MIN_BOX_WIDTH_PCT <= box_width_pct <= _MAX_BOX_WIDTH_PCT
 
     # ── 5. 价格位置 ──
     price_pos, pos_pct = _calc_price_position(
@@ -160,32 +144,32 @@ def calculate_range_signal(
     ]
     confluence_count = sum(confluence_flags)
 
-    # ── 7. 箱体状态机 ──
+    # ── 8. 箱体状态机 ──
     box_state, box_state_ts, box_age_hours = _transition_box_state(
         has_box, price_pos, bb_squeeze,
         prev_range, now_ts,
         range_upper, range_lower, current_price,
     )
 
-    # ── 8. 箱体质量评分 ──
+    # ── 9. 箱体质量评分 ──
     box_quality = _calc_box_quality(
-        has_box, upper_lv, lower_lv, box_age_hours,
-        volume_declining, bb_squeeze, box_width_pct,
+        has_box, box_age_hours, volume_declining, bb_squeeze, box_width_pct,
     )
 
-    # ── 9. 突破概率 ──
+    # ── 10. 突破概率 ──
     breakout_prob, breakout_bias, breakout_reason = _calc_breakout_probability(
         box_state, bb_squeeze, oi_buildup, funding_extreme,
         ob_imbalance, volume_declining, box_age_hours,
         macd_above_zero, macd_hist_rising,
     )
 
-    # ── 10. 信号分级 ──
+    # ── 11. 信号分级 ──
     grade, direction, reason, entry, sl, tp1, rr = _grade_signal_v2(
         price_pos, has_box, box_state,
         macd_above_zero, macd_hist_rising,
         sweep_confirmed, bb_squeeze,
-        upper_lv, lower_lv, current_price, atr,
+        range_upper, range_lower, range_upper_src, range_lower_src,
+        current_price, atr,
         breakout_prob, breakout_bias,
     )
 
@@ -196,15 +180,15 @@ def calculate_range_signal(
     return RangeSignalData(
         ts=now_ts,
         range_upper=_round_opt(range_upper),
-        range_upper_source=_build_source_str(upper_lv),
-        range_upper_tier=upper_lv.strength_tier if upper_lv else "",
-        range_upper_score=upper_lv.confluence_score if upper_lv else 0,
-        range_upper_test_count=upper_lv.test_count if upper_lv else 0,
+        range_upper_source=range_upper_src,
+        range_upper_tier="",
+        range_upper_score=0,
+        range_upper_test_count=0,
         range_lower=_round_opt(range_lower),
-        range_lower_source=_build_source_str(lower_lv),
-        range_lower_tier=lower_lv.strength_tier if lower_lv else "",
-        range_lower_score=lower_lv.confluence_score if lower_lv else 0,
-        range_lower_test_count=lower_lv.test_count if lower_lv else 0,
+        range_lower_source=range_lower_src,
+        range_lower_tier="",
+        range_lower_score=0,
+        range_lower_test_count=0,
         micro_upper=_round_opt(micro_upper),
         micro_upper_source=_build_source_str(micro_up_lv),
         micro_upper_tier=micro_up_lv.strength_tier if micro_up_lv else "",
@@ -253,23 +237,47 @@ def calculate_range_signal(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-_BoundaryPair = tuple[Optional[KeyLevelV2], Optional[KeyLevelV2]]
+_MA_LABELS = {
+    "ma60_daily": "日线MA60",
+    "ma120_daily": "日线MA120",
+    "ma60_weekly": "周线MA60",
+}
 
 
-def _extract_dual_boundaries(
+def _pick_ma_boundary(
+    price: float,
+    ma60_d: float | None,
+    ma120_d: float | None,
+    ma60_w: float | None,
+    side: str,
+) -> tuple[float | None, str]:
+    """从 MA 候选中选出核心箱体的上/下沿。
+
+    side="above": 选 price 上方最近的 MA
+    side="below": 选 price 下方最近的 MA
+    """
+    candidates: list[tuple[float, str]] = []
+    for val, key in [(ma60_d, "ma60_daily"), (ma120_d, "ma120_daily"), (ma60_w, "ma60_weekly")]:
+        if val is None:
+            continue
+        if side == "above" and val > price:
+            candidates.append((val, _MA_LABELS[key]))
+        elif side == "below" and val < price:
+            candidates.append((val, _MA_LABELS[key]))
+
+    if not candidates:
+        return None, ""
+    candidates.sort(key=lambda x: abs(x[0] - price))
+    return candidates[0]
+
+
+def _extract_micro_boundaries(
     snapshot: Optional[KeyLevelSnapshotV2],
     price: float,
-) -> tuple[_BoundaryPair, _BoundaryPair]:
-    """提取双层箱体边界：核心箱体(结构性) + 微观区间(最近)。
-
-    核心箱体：优先选结构性来源（swing/VP/MA/Fib），宽度 ≥ 2.5%。
-    微观区间：最近的 S/A/B 级 level（不限来源），作为短期参考。
-
-    返回 ((core_upper, core_lower), (micro_upper, micro_lower))
-    """
-    empty: _BoundaryPair = (None, None)
+) -> tuple[Optional[KeyLevelV2], Optional[KeyLevelV2]]:
+    """从关键位快照中提取微观区间：最近的 S/A/B 级 level。"""
     if not snapshot or not snapshot.levels:
-        return empty, empty
+        return None, None
 
     _MAX_DIST = 15.0
     tier_rank = {"S": 0, "A": 1, "B": 2, "C": 3}
@@ -287,40 +295,20 @@ def _extract_dual_boundaries(
         and abs(lv.price - price) / max(price, 1) * 100 <= _MAX_DIST
     ]
 
-    above_all = [lv for lv in sab if lv.price > price]
-    below_all = [lv for lv in sab if lv.price < price]
+    above = [lv for lv in sab if lv.price > price]
+    below = [lv for lv in sab if lv.price < price]
 
-    def _sort_key(lv: KeyLevelV2, sign: float = 1.0):
-        dist = abs(lv.price - price) / max(price, 1) * 100
-        return (_dist_bucket(dist), tier_rank.get(lv.strength_tier, 9), sign * (lv.price - price))
+    above.sort(key=lambda l: (
+        _dist_bucket((l.price - price) / max(price, 1) * 100),
+        tier_rank.get(l.strength_tier, 9),
+        l.price - price,
+    ))
+    below.sort(key=lambda l: (
+        _dist_bucket((price - l.price) / max(price, 1) * 100),
+        tier_rank.get(l.strength_tier, 9),
+        price - l.price,
+    ))
 
-    above_all.sort(key=lambda l: _sort_key(l, 1.0))
-    below_all.sort(key=lambda l: _sort_key(l, -1.0))
-
-    micro_upper = above_all[0] if above_all else None
-    micro_lower = below_all[0] if below_all else None
-
-    above_struct = [lv for lv in above_all if _is_structural_source(lv.sources)]
-    below_struct = [lv for lv in below_all if _is_structural_source(lv.sources)]
-
-    core_upper, core_lower = _pick_core_pair(
-        above_struct or above_all, below_struct or below_all, price,
-    )
-
-    return (core_upper, core_lower), (micro_upper, micro_lower)
-
-
-def _pick_core_pair(
-    above: list[KeyLevelV2],
-    below: list[KeyLevelV2],
-    price: float,
-) -> _BoundaryPair:
-    """从候选中选出宽度 ≥ _MIN_BOX_WIDTH_PCT 的最优核心箱体对。"""
-    for u in above:
-        for l in below:
-            width = (u.price - l.price) / max(price, 1) * 100
-            if _MIN_BOX_WIDTH_PCT <= width <= _MAX_BOX_WIDTH_PCT:
-                return u, l
     return (above[0] if above else None, below[0] if below else None)
 
 
@@ -445,33 +433,30 @@ def _transition_box_state(
 
 def _calc_box_quality(
     has_box: bool,
-    upper_lv: KeyLevelV2 | None,
-    lower_lv: KeyLevelV2 | None,
     age_hours: float,
     volume_declining: bool,
     bb_squeeze: bool,
     width_pct: float,
 ) -> int:
+    """MA 骨架箱体质量评分（0-100）。"""
     if not has_box:
         return 0
 
-    score = 0.0
-    if upper_lv:
-        score += min(upper_lv.confluence_score, 40)
-    if lower_lv:
-        score += min(lower_lv.confluence_score, 40)
+    score = 40.0
 
     if age_hours >= _MATURE_HOURS:
-        score += 10
+        score += 20
     elif age_hours >= 24:
-        score += 5
+        score += 10
 
     if volume_declining:
-        score += 5
+        score += 10
     if bb_squeeze:
-        score += 5
+        score += 10
 
     if 3.0 <= width_pct <= 8.0:
+        score += 15
+    elif 8.0 < width_pct <= 12.0:
         score += 5
     elif width_pct > 12.0:
         score -= 5
@@ -557,97 +542,89 @@ def _grade_signal_v2(
     macd_hist_rising: bool | None,
     sweep_confirmed: bool,
     bb_squeeze: bool,
-    upper_lv: KeyLevelV2 | None,
-    lower_lv: KeyLevelV2 | None,
+    upper_price: float | None,
+    lower_price: float | None,
+    upper_src: str,
+    lower_src: str,
     price: float,
     atr: float,
     breakout_prob: float,
     breakout_bias: str,
 ) -> tuple[str | None, str | None, str, float | None, float | None, float | None, float | None]:
-    """信号分级（返回 grade, direction, reason, entry, sl, tp1, rr）。
+    """洪七公信号分级（返回 grade, direction, reason, entry, sl, tp1, rr）。
 
-    S 级：边界 S/A 级 + MACD 确认 + sweep 确认 + 箱体 mature/squeeze
-    A 级：边界 S/A 级 + MACD 确认（或 sweep 确认）
-    B 级：接近边界 + 部分确认
+    S 级：MACD 确认 + sweep 确认 + 箱体 mature/squeeze
+    A 级：MACD 确认 或 sweep 确认
+    B 级：接近 MA 边界 + 部分确认
     """
     if not has_box or price_pos in ("middle", "above", "below"):
         if box_state in (_ST_BREAKING_UP, _ST_BREAKING_DOWN):
             direction = "long" if box_state == _ST_BREAKING_UP else "short"
-            reason = f"箱体正在向{'上' if direction == 'long' else '下'}突破"
+            reason = f"价格突破{upper_src if box_state == _ST_BREAKING_UP else lower_src}"
             if breakout_prob >= 0.5:
                 reason += f"(突破概率{breakout_prob:.0%})"
             return "B", direction, reason, None, None, None, None
         return None, None, "", None, None, None, None
 
-    if price_pos == "near_upper" and upper_lv:
+    if price_pos == "near_upper" and upper_price:
         direction = "short"
-        tier = upper_lv.strength_tier
         entry = price
-        sl = upper_lv.price + atr * 1.0 if atr > 0 else None
-        tp1 = lower_lv.price if lower_lv else (price - atr * 3) if atr > 0 else None
+        sl = upper_price + atr * 1.0 if atr > 0 else None
+        tp1 = lower_price if lower_price else (price - atr * 3) if atr > 0 else None
         rr = abs(entry - tp1) / abs(sl - entry) if sl and tp1 and sl != entry else None
 
         macd_bearish = macd_above_zero is False
         is_mature = box_state in (_ST_MATURE, _ST_SQUEEZE)
 
-        if tier in ("S", "A") and macd_bearish and sweep_confirmed and is_mature:
+        if macd_bearish and sweep_confirmed and is_mature:
             grade = "S"
             reason = (
-                f"价格到达{tier}级箱体上沿${upper_lv.price:,.0f}"
-                f"({upper_lv.source_count}维共振) + MACD空头 + 流动性扫取确认"
-                f" + 箱体成熟{box_state}"
+                f"价格到达{upper_src}(${upper_price:,.0f})"
+                f" + MACD空头确认 + 流动性扫取 + 箱体成熟"
             )
-        elif tier in ("S", "A") and (macd_bearish or sweep_confirmed):
+        elif macd_bearish or sweep_confirmed:
             grade = "A"
             confirms = []
             if macd_bearish:
                 confirms.append("MACD在0轴下方")
             if sweep_confirmed:
                 confirms.append("流动性扫取确认")
-            reason = (
-                f"价格到达{tier}级箱体上沿${upper_lv.price:,.0f}"
-                f"({upper_lv.source_count}维共振)，{'、'.join(confirms)}"
-            )
+            reason = f"价格到达{upper_src}(${upper_price:,.0f})，{'、'.join(confirms)}"
         else:
             grade = "B"
-            reason = f"价格接近箱体上沿${upper_lv.price:,.0f}({tier}级)"
+            reason = f"价格接近{upper_src}(${upper_price:,.0f})"
             if macd_above_zero is True:
                 reason += "，但MACD在0轴上方，逆势做空需谨慎"
 
         return grade, direction, reason, _round_opt(entry), _round_opt(sl), _round_opt(tp1), rr
 
-    if price_pos == "near_lower" and lower_lv:
+    if price_pos == "near_lower" and lower_price:
         direction = "long"
-        tier = lower_lv.strength_tier
         entry = price
-        sl = lower_lv.price - atr * 1.0 if atr > 0 else None
-        tp1 = upper_lv.price if upper_lv else (price + atr * 3) if atr > 0 else None
+        sl = lower_price - atr * 1.0 if atr > 0 else None
+        tp1 = upper_price if upper_price else (price + atr * 3) if atr > 0 else None
         rr = abs(tp1 - entry) / abs(entry - sl) if sl and tp1 and sl != entry else None
 
         macd_bullish = macd_above_zero is True
         is_mature = box_state in (_ST_MATURE, _ST_SQUEEZE)
 
-        if tier in ("S", "A") and sweep_confirmed and macd_bullish and is_mature:
+        if macd_bullish and sweep_confirmed and is_mature:
             grade = "S"
             reason = (
-                f"价格到达{tier}级箱体下沿${lower_lv.price:,.0f}"
-                f"({lower_lv.source_count}维共振) + 流动性扫取确认 + MACD多头"
-                f" + 箱体成熟{box_state}"
+                f"价格到达{lower_src}(${lower_price:,.0f})"
+                f" + MACD多头确认 + 流动性扫取 + 箱体成熟"
             )
-        elif tier in ("S", "A") and (sweep_confirmed or macd_bullish):
+        elif macd_bullish or sweep_confirmed:
             grade = "A"
             confirms = []
             if sweep_confirmed:
                 confirms.append("流动性扫取确认")
             if macd_bullish:
                 confirms.append("MACD在0轴上方")
-            reason = (
-                f"价格到达{tier}级箱体下沿${lower_lv.price:,.0f}"
-                f"({lower_lv.source_count}维共振)，{'、'.join(confirms)}"
-            )
+            reason = f"价格到达{lower_src}(${lower_price:,.0f})，{'、'.join(confirms)}"
         else:
             grade = "B"
-            reason = f"价格接近箱体下沿${lower_lv.price:,.0f}({tier}级)"
+            reason = f"价格接近{lower_src}(${lower_price:,.0f})"
             if not sweep_confirmed:
                 reason += "，等待流动性扫取确认可升级"
 

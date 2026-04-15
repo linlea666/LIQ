@@ -1,4 +1,4 @@
-"""箱体信号 V2 单元测试"""
+"""箱体信号 V2 单元测试 — MA 骨架 + 微观区间"""
 
 import time
 import pytest
@@ -6,9 +6,8 @@ from models.key_level import KeyLevelV2, KeyLevelSnapshotV2
 from models.flow import RangeSignalData
 from processors.range_signal import (
     calculate_range_signal,
-    _extract_dual_boundaries,
-    _is_structural_source,
-    _pick_core_pair,
+    _pick_ma_boundary,
+    _extract_micro_boundaries,
     _calc_price_position,
     _transition_box_state,
     _calc_box_quality,
@@ -44,93 +43,77 @@ def _make_prev_range(box_state="confirmed", upper=86000, lower=83000, ts=None):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 边界提取
+# MA 骨架边界
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestDualBoundaries:
-    def test_basic_core_and_micro(self):
+class TestPickMaBoundary:
+    def test_above_picks_nearest_ma(self):
+        val, src = _pick_ma_boundary(85000, 69000, 77000, 95000, "above")
+        assert val == 95000
+        assert "周线" in src
+
+    def test_below_picks_nearest_ma(self):
+        val, src = _pick_ma_boundary(85000, 69000, 77000, 95000, "below")
+        assert val == 77000
+        assert "MA120" in src
+
+    def test_price_between_ma60_and_ma120(self):
+        upper, u_src = _pick_ma_boundary(73000, 69000, 77000, 95000, "above")
+        lower, l_src = _pick_ma_boundary(73000, 69000, 77000, 95000, "below")
+        assert upper == 77000
+        assert lower == 69000
+
+    def test_all_above(self):
+        val, src = _pick_ma_boundary(60000, 69000, 77000, 95000, "below")
+        assert val is None
+
+    def test_all_below(self):
+        val, src = _pick_ma_boundary(100000, 69000, 77000, 95000, "above")
+        assert val is None
+
+    def test_none_mas(self):
+        val, src = _pick_ma_boundary(85000, None, None, None, "above")
+        assert val is None
+
+    def test_weekly_ma_used_when_only_above(self):
+        val, src = _pick_ma_boundary(90000, 69000, 77000, 95000, "above")
+        assert val == 95000
+        assert "周线" in src
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 微观区间
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestMicroBoundaries:
+    def test_basic(self):
         levels = [
-            _make_level(83000, "A", "support", sources=["Swing Low 1D"]),
-            _make_level(86000, "A", "resistance", sources=["Swing High 1D"]),
-            _make_level(80000, "B", "support", sources=["Fib 0.618"]),
-            _make_level(90000, "B", "resistance", sources=["200日SMA"]),
+            _make_level(86000, "A", "resistance"),
+            _make_level(83000, "A", "support"),
         ]
         snap = _make_snapshot(levels)
-        (core_u, core_l), (micro_u, micro_l) = _extract_dual_boundaries(snap, 85000)
-        assert core_u.price == 86000
-        assert core_l.price == 83000
+        micro_u, micro_l = _extract_micro_boundaries(snap, 85000)
         assert micro_u.price == 86000
         assert micro_l.price == 83000
-
-    def test_structural_over_capital_for_core(self):
-        """纯清算 level 很近但核心箱体应选结构性 level"""
-        levels = [
-            _make_level(85200, "S", "resistance", sources=["25x空头清算5千万"]),
-            _make_level(84800, "S", "support", sources=["10x多头清算8千万"]),
-            _make_level(87000, "A", "resistance", sources=["Swing High 1D", "VP HVN"]),
-            _make_level(82000, "A", "support", sources=["Swing Low 1D", "Fib 0.618"]),
-        ]
-        snap = _make_snapshot(levels)
-        (core_u, core_l), (micro_u, micro_l) = _extract_dual_boundaries(snap, 85000)
-        assert core_u.price == 87000
-        assert core_l.price == 82000
-        assert micro_u.price == 85200
-        assert micro_l.price == 84800
-
-    def test_core_width_minimum(self):
-        """核心箱体宽度 < 2.5% 时跳过该 pair，找更宽的组合"""
-        levels = [
-            _make_level(85500, "A", "resistance", sources=["Swing High"]),
-            _make_level(85000, "A", "support", sources=["Swing Low"]),
-            _make_level(88000, "B", "resistance", sources=["VP HVN"]),
-            _make_level(82000, "B", "support", sources=["Fib 0.382"]),
-        ]
-        snap = _make_snapshot(levels, price=85200)
-        (core_u, core_l), _ = _extract_dual_boundaries(snap, 85200)
-        width = (core_u.price - core_l.price) / 85200 * 100
-        assert width >= 2.5
-        assert core_u.price == 85500
-        assert core_l.price == 82000
-
-    def test_same_bucket_prefers_tier(self):
-        """同距离桶内仍优选更强 tier"""
-        levels = [
-            _make_level(86000, "B", "resistance", score=20, sources=["MA60"]),
-            _make_level(87000, "S", "resistance", score=50, sources=["VP POC"]),
-        ]
-        snap = _make_snapshot(levels, price=85000)
-        _, (micro_u, _) = _extract_dual_boundaries(snap, 85000)
-        assert micro_u.price == 87000
-
-    def test_none_when_no_levels(self):
-        snap = _make_snapshot([])
-        (cu, cl), (mu, ml) = _extract_dual_boundaries(snap, 85000)
-        assert cu is None and cl is None
-        assert mu is None and ml is None
 
     def test_excludes_c_tier(self):
         levels = [_make_level(86000, "C", "resistance")]
         snap = _make_snapshot(levels)
-        _, (micro_u, _) = _extract_dual_boundaries(snap, 85000)
+        micro_u, _ = _extract_micro_boundaries(snap, 85000)
         assert micro_u is None
 
     def test_none_snapshot(self):
-        (cu, cl), (mu, ml) = _extract_dual_boundaries(None, 85000)
-        assert cu is None and cl is None
+        micro_u, micro_l = _extract_micro_boundaries(None, 85000)
+        assert micro_u is None and micro_l is None
 
-
-class TestIsStructuralSource:
-    def test_pure_structural(self):
-        assert _is_structural_source(["Swing High 1D", "VP POC"]) is True
-
-    def test_pure_capital(self):
-        assert _is_structural_source(["25x空头清算5千万", "10x多头清算8千万"]) is False
-
-    def test_mixed(self):
-        assert _is_structural_source(["25x空头清算5千万", "Swing High 1D"]) is True
-
-    def test_orderbook(self):
-        assert _is_structural_source(["orderbook买挂单"]) is False
+    def test_prefers_closer_in_same_bucket(self):
+        levels = [
+            _make_level(85500, "A", "resistance"),
+            _make_level(87000, "A", "resistance"),
+        ]
+        snap = _make_snapshot(levels, price=85000)
+        micro_u, _ = _extract_micro_boundaries(snap, 85000)
+        assert micro_u.price == 85500
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -240,19 +223,20 @@ class TestBoxStateMachine:
 
 class TestBoxQuality:
     def test_high_quality(self):
-        upper = _make_level(86000, "S", score=50)
-        lower = _make_level(83000, "A", score=35)
-        q = _calc_box_quality(True, upper, lower, 100, True, True, 4.0)
+        q = _calc_box_quality(True, 100, True, True, 5.0)
         assert q >= 70
 
     def test_no_box_zero(self):
-        assert _calc_box_quality(False, None, None, 0, False, False, 0) == 0
+        assert _calc_box_quality(False, 0, False, False, 0) == 0
 
-    def test_low_quality(self):
-        upper = _make_level(86000, "B", score=10)
-        lower = _make_level(83000, "C", score=5)
-        q = _calc_box_quality(True, upper, lower, 2, False, False, 13.0)
-        assert q < 30
+    def test_medium_width(self):
+        q = _calc_box_quality(True, 10, False, False, 5.0)
+        assert q >= 50
+
+    def test_too_wide_penalty(self):
+        q_normal = _calc_box_quality(True, 10, False, False, 5.0)
+        q_wide = _calc_box_quality(True, 10, False, False, 13.0)
+        assert q_wide < q_normal
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -295,43 +279,34 @@ class TestBreakoutProbability:
 
 class TestGradeSignal:
     def test_s_grade_short(self):
-        upper = _make_level(86000, "S", score=60)
-        lower = _make_level(83000, "A", score=40)
         grade, direction, reason, *_ = _grade_signal_v2(
             "near_upper", True, "mature",
-            False, False,  # MACD below zero
-            True,  # sweep
-            False,
-            upper, lower, 85800, 500,
-            0.3, "up",
+            False, False,
+            True, False,
+            86000, 83000, "日线MA120", "日线MA60",
+            85800, 500, 0.3, "up",
         )
         assert grade == "S"
         assert direction == "short"
 
     def test_a_grade_long(self):
-        upper = _make_level(86000, "A", score=40)
-        lower = _make_level(83000, "A", score=40)
         grade, direction, *_ = _grade_signal_v2(
             "near_lower", True, "confirmed",
-            True, True,  # MACD above zero
-            False,  # no sweep
-            False,
-            upper, lower, 83200, 500,
-            0.2, "neutral",
+            True, True,
+            False, False,
+            86000, 83000, "日线MA120", "日线MA60",
+            83200, 500, 0.2, "neutral",
         )
         assert grade == "A"
         assert direction == "long"
 
     def test_b_grade_no_confirm(self):
-        upper = _make_level(86000, "B", score=20)
-        lower = _make_level(83000, "B", score=20)
         grade, *_ = _grade_signal_v2(
             "near_upper", True, "confirmed",
-            True, True,  # MACD above zero (wrong side)
-            False,
-            False,
-            upper, lower, 85800, 500,
-            0.1, "neutral",
+            True, True,
+            False, False,
+            86000, 83000, "日线MA120", "日线MA60",
+            85800, 500, 0.1, "neutral",
         )
         assert grade == "B"
 
@@ -339,7 +314,8 @@ class TestGradeSignal:
         grade, direction, *_ = _grade_signal_v2(
             "middle", True, "confirmed",
             None, None, False, False,
-            None, None, 84500, 500, 0.1, "",
+            86000, 83000, "日线MA120", "日线MA60",
+            84500, 500, 0.1, "",
         )
         assert grade is None
         assert direction is None
@@ -348,7 +324,8 @@ class TestGradeSignal:
         grade, direction, *_ = _grade_signal_v2(
             "above", False, "breaking_up",
             None, None, False, False,
-            None, None, 87000, 500, 0.5, "up",
+            86000, 83000, "日线MA120", "日线MA60",
+            87000, 500, 0.5, "up",
         )
         assert grade == "B"
         assert direction == "long"
@@ -381,49 +358,57 @@ class TestVolumeDeclining:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestCalculateRangeSignal:
-    def test_with_valid_snapshot(self):
+    def _make_daily_candles(self, n=130):
+        """生成模拟日线蜡烛，MA60 ≈ 83000, MA120 ≈ 80000"""
+        from models.market import CandleData
+        candles = []
+        for i in range(n):
+            p = 80000 + i * 50
+            candles.append(CandleData(coin="BTC", ts=i * 86400, o=p, h=p + 100, l=p - 100, c=p, vol=1000))
+        return candles
+
+    def test_ma_driven_core_box(self):
+        candles = self._make_daily_candles(130)
+        price = candles[-1].close
         levels = [
-            _make_level(86000, "A", "resistance", score=30, sources=["Swing High 1D"]),
-            _make_level(83000, "A", "support", score=25, sources=["Swing Low 1D"]),
+            _make_level(price + 500, "A", "resistance", score=30),
+            _make_level(price - 500, "A", "support", score=25),
         ]
-        snap = _make_snapshot(levels, price=84500)
+        snap = _make_snapshot(levels, price=price)
         result = calculate_range_signal(
             kl_snapshot=snap,
-            current_price=84500,
+            current_price=price,
             atr=500,
+            candles_1d=candles,
         )
         assert result is not None
-        assert result.range_upper == 86000
-        assert result.range_lower == 83000
-        assert result.box_state == "forming"
-        assert result.micro_upper == 86000
-        assert result.micro_lower == 83000
+        if result.range_upper:
+            assert "MA" in (result.range_upper_source or "")
+        assert result.micro_upper is not None or result.micro_lower is not None
 
-    def test_no_snapshot(self):
+    def test_no_snapshot_still_has_ma_box(self):
+        candles = self._make_daily_candles(130)
+        price = candles[-1].close
+        result = calculate_range_signal(
+            kl_snapshot=None,
+            current_price=price,
+            atr=500,
+            candles_1d=candles,
+        )
+        assert result is not None
+        assert result.micro_upper is None
+        assert result.micro_lower is None
+
+    def test_zero_price_returns_none(self):
+        assert calculate_range_signal(None, 0, 500) is None
+
+    def test_no_candles_no_box(self):
         result = calculate_range_signal(
             kl_snapshot=None,
             current_price=85000,
             atr=500,
         )
         assert result is not None
+        assert result.range_upper is None
+        assert result.range_lower is None
         assert result.box_state == "none"
-
-    def test_zero_price_returns_none(self):
-        assert calculate_range_signal(None, 0, 500) is None
-
-    def test_preserves_state_across_calls(self):
-        levels = [
-            _make_level(86000, "A", "resistance", score=30),
-            _make_level(83000, "A", "support", score=25),
-        ]
-        snap = _make_snapshot(levels, price=84500)
-        first = calculate_range_signal(kl_snapshot=snap, current_price=84500, atr=500)
-        assert first.box_state == "forming"
-
-        # Simulate time passing with prev_range
-        first.box_state_ts = int(time.time()) - 5 * 3600
-        second = calculate_range_signal(
-            kl_snapshot=snap, current_price=84500, atr=500,
-            prev_range=first,
-        )
-        assert second.box_state == "confirmed"

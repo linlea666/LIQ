@@ -731,7 +731,7 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append("### 9f. 箱体信号 [多维共振箱体+状态机+突破概率]")
 
         if rs.get("range_upper") and rs.get("range_lower"):
-            lines.append(f"  核心箱体: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')},{rs.get('range_lower_tier','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')},{rs.get('range_upper_tier','')})")
+            lines.append(f"  核心箱体(MA骨架): ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')})")
             lines.append(f"  价格位置: {rs.get('price_position', 'middle')} ({rs.get('price_position_pct', 50):.0f}%)")
             lines.append(f"  箱体宽度: {rs.get('box_width_pct', 0):.1f}%")
 

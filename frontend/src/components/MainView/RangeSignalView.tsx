@@ -58,7 +58,7 @@ export default function RangeSignalView() {
       {hasBox && (
         <Card>
           <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-            📦 核心箱体 <span className="text-[10px] text-slate-500 font-normal">结构性支撑/阻力</span>
+            📦 核心箱体 <span className="text-[10px] text-slate-500 font-normal">MA 骨架</span>
           </h3>
           <BoxVisualization
             upper={rs.range_upper!}
