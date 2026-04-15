@@ -215,6 +215,17 @@ export interface AIAnalysisResult {
   stop_loss_suggestion: { raw: string };
   entry_zones: { direction: string; raw: string; details: string[] }[];
   sniper_setup?: string;
+  sniper_plans?: {
+    direction: string;
+    entry: number | null;
+    stop_loss: number | null;
+    tp1: number | null;
+    tp2: number | null;
+    rr: number | null;
+    logic: string;
+    invalidation: string;
+    raw_text: string;
+  }[];
   ladder_plan_text?: string;
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];

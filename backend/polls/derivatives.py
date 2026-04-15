@@ -344,3 +344,95 @@ async def poll_oi_exchange_rank(
         }
     except (ValueError, KeyError):
         logger.debug("oi_exchange_rank parse failed", exc_info=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# §9h: 净持仓 + 合约资金流 + TD 序列
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def poll_net_position(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+) -> None:
+    """拉取净持仓 v2 (1h)，取最新值与趋势。"""
+    try:
+        rows = await cg.fetch_net_position_v2_history(
+            exchange="Binance", symbol=coin.symbol, interval="1h", limit=24,
+        )
+        if not rows:
+            return
+        vals = []
+        for r in rows:
+            v = r.get("netPosition", r.get("net_position"))
+            if v is not None:
+                vals.append(float(v))
+        if not vals:
+            return
+        state.net_position_latest = vals[-1]
+        if len(vals) >= 4:
+            recent_avg = sum(vals[-4:]) / 4
+            older_avg = sum(vals[:4]) / 4
+            diff = recent_avg - older_avg
+            base = max(abs(older_avg), 1e-9)
+            pct_change = diff / base
+            if pct_change > 0.05:
+                state.net_position_trend = "上升(多头增仓)"
+            elif pct_change < -0.05:
+                state.net_position_trend = "下降(多头减仓)"
+            else:
+                state.net_position_trend = "持平"
+    except Exception:
+        logger.debug("poll_net_position failed", exc_info=True)
+
+
+async def poll_futures_coin_netflow(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+) -> None:
+    """拉取合约币种净资金流 (1h)，取最近 1h 净值与趋势。"""
+    try:
+        rows = await cg.fetch_futures_coin_netflow(
+            symbol=coin.symbol, interval="1h", limit=24,
+        )
+        if not rows:
+            return
+        vals = []
+        for r in rows:
+            v = r.get("netflow", r.get("netFlow", r.get("value")))
+            if v is not None:
+                vals.append(float(v))
+        if not vals:
+            return
+        state.futures_coin_netflow_1h = vals[-1]
+        if len(vals) >= 4:
+            recent = sum(1 for v in vals[-4:] if v > 0)
+            if recent >= 3:
+                state.futures_coin_netflow_trend = "持续流入"
+            elif recent <= 1:
+                state.futures_coin_netflow_trend = "持续流出"
+            else:
+                state.futures_coin_netflow_trend = "交替"
+    except Exception:
+        logger.debug("poll_futures_coin_netflow failed", exc_info=True)
+
+
+async def poll_td_sequential(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+) -> None:
+    """拉取 TD 序列 (1d)，取最新计数与方向。"""
+    try:
+        rows = await cg.fetch_td_sequential(
+            exchange="Binance", symbol=coin.symbol, interval="1d", limit=10,
+        )
+        if not rows:
+            return
+        latest = rows[-1] if isinstance(rows, list) else None
+        if not latest:
+            return
+        count = latest.get("td_count", latest.get("tdCount", latest.get("count")))
+        direction = latest.get("td_direction", latest.get("tdDirection",
+                               latest.get("direction", "")))
+        if count is not None:
+            state.td_sequential_count = int(count)
+        if direction:
+            state.td_sequential_direction = str(direction)
+    except Exception:
+        logger.debug("poll_td_sequential failed", exc_info=True)

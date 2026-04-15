@@ -17,14 +17,23 @@ from models.flow import CyclePositionData, RangeSignalData
 
 
 def fmt_usd_cn(usd: float) -> str:
-    """将 USD 金额格式化为中文单位（亿/千万/百万）。"""
-    if usd >= 1e8:
-        return f"{usd / 1e8:.1f}亿"
-    if usd >= 1e7:
-        return f"{usd / 1e7:.0f}千万"
-    if usd >= 1e6:
-        return f"{usd / 1e6:.0f}百万"
-    return f"{usd / 1e4:.0f}万"
+    """将 USD 金额格式化为中文单位（亿/千万/百万/万）。
+
+    正确处理负值（保留符号）和小值（<1万直接显示美元）。
+    """
+    sign = "-" if usd < 0 else ""
+    a = abs(usd)
+    if a >= 1e8:
+        return f"{sign}{a / 1e8:.1f}亿"
+    if a >= 1e7:
+        return f"{sign}{a / 1e7:.0f}千万"
+    if a >= 1e6:
+        return f"{sign}{a / 1e6:.0f}百万"
+    if a >= 1e4:
+        return f"{sign}{a / 1e4:.0f}万"
+    if a >= 1:
+        return f"{sign}{a:,.0f}"
+    return "0"
 from models.liquidation import LiquidationMap
 from models.market import CandleData, OrderBookAnalysis, VolumeProfileData
 from processors.ta_core import (

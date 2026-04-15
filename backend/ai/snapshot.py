@@ -10,9 +10,9 @@ from models.flow import (
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
     MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
 )
-from models.key_level import KeyLevelSnapshot
+from models.key_level import KeyLevelSnapshot, KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
-from models.liquidation import LiquidationMap, LiquidationStats
+from models.liquidation import HeatmapData, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
 from models.snapshot import AISnapshot
 
@@ -69,6 +69,7 @@ def build_ai_snapshot(
     liq_sweep_events: list[dict] | None = None,
     range_signal: Optional[RangeSignalData] = None,
     key_level_snapshot: Optional[KeyLevelSnapshot] = None,
+    key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None,
     liq_map_30d: Optional[LiquidationMap] = None,
     rsi_14: Optional[float] = None,
     macd_data: Optional[dict] = None,
@@ -94,6 +95,14 @@ def build_ai_snapshot(
     stablecoin_total_mcap: float = 0,
     stablecoin_7d_change_pct: float = 0,
     oi_exchange_rank: list[dict] | None = None,
+    candles_4h: list | None = None,
+    net_position_latest: Optional[float] = None,
+    net_position_trend: str = "",
+    futures_coin_netflow_1h: Optional[float] = None,
+    futures_coin_netflow_trend: str = "",
+    td_sequential_count: Optional[int] = None,
+    td_sequential_direction: str = "",
+    liq_heatmap: Optional[HeatmapData] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -232,6 +241,31 @@ def build_ai_snapshot(
         sniper_entries = [se.model_dump() for se in levels.sniper_entries[:4]]
         ladder_plans = [lp.model_dump() for lp in levels.ladder_plans]
 
+    # 清算热力图摘要：提取 Top-5 密度峰值
+    heatmap_hotspots: list[dict] = []
+    if liq_heatmap and liq_heatmap.data:
+        pts = sorted(liq_heatmap.data, key=lambda p: p.value, reverse=True)
+        for pt in pts[:5]:
+            pct = ((pt.price - price) / price * 100) if price > 0 else 0
+            heatmap_hotspots.append({
+                "price": pt.price,
+                "total_usd": pt.value,
+                "pct_above": round(pct, 2),
+            })
+
+    # K 线形态检测（最近 4H K 线）
+    pattern_name = ""
+    pattern_side = ""
+    pattern_strength = 0.0
+    if candles_4h and len(candles_4h) >= 2:
+        from processors.candlestick_patterns import detect_reversal_pattern
+        for _side in ("support", "resistance"):
+            pr = detect_reversal_pattern(candles_4h, _side)
+            if pr.found and pr.strength > pattern_strength:
+                pattern_name = pr.name
+                pattern_side = _side
+                pattern_strength = pr.strength
+
     return AISnapshot(
         coin=coin,
         ts=int(time.time()),
@@ -325,7 +359,11 @@ def build_ai_snapshot(
         ),
         liq_sweep_events=liq_sweep_events or [],
         range_signal=range_signal.model_dump() if range_signal else None,
-        key_levels=key_level_snapshot.model_dump() if key_level_snapshot else None,
+        key_levels=(
+            key_level_snapshot_v2.model_dump() if key_level_snapshot_v2
+            else key_level_snapshot.model_dump() if key_level_snapshot
+            else None
+        ),
         liq_clusters_above_30d=clusters_above_30d,
         liq_clusters_below_30d=clusters_below_30d,
         liq_imbalance_ratio_30d=imbalance_30d,
@@ -356,6 +394,16 @@ def build_ai_snapshot(
         stablecoin_total_mcap=stablecoin_total_mcap,
         stablecoin_7d_change_pct=stablecoin_7d_change_pct,
         oi_exchange_rank=oi_exchange_rank or [],
+        liq_heatmap_hotspots=heatmap_hotspots,
+        candlestick_pattern_name=pattern_name,
+        candlestick_pattern_side=pattern_side,
+        candlestick_pattern_strength=pattern_strength,
+        net_position_latest=net_position_latest,
+        net_position_trend=net_position_trend,
+        futures_coin_netflow_1h=futures_coin_netflow_1h,
+        futures_coin_netflow_trend=futures_coin_netflow_trend,
+        td_sequential_count=td_sequential_count,
+        td_sequential_direction=td_sequential_direction,
         rule_supports=rule_supports,
         rule_resistances=rule_resistances,
         rule_stop_loss=rule_stop_loss,

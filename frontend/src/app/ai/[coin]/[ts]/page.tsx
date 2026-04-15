@@ -186,6 +186,34 @@ export default function AIDetailPage() {
         {/* Sniper */}
         {data.sniper_setup && (
           <Card title="🎯 狙击挂单计划（高 R:R）">
+            {data.sniper_plans && data.sniper_plans.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                {data.sniper_plans.map((p, i) => (
+                  <div
+                    key={i}
+                    className={`rounded-lg border p-3 text-sm ${
+                      p.direction === "long"
+                        ? "border-green-700/40 bg-green-950/20"
+                        : "border-red-700/40 bg-red-950/20"
+                    }`}
+                  >
+                    <div className="font-semibold mb-1">
+                      {p.direction === "long" ? "📈 多单埋伏" : "📉 空单埋伏"}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-zinc-300">
+                      {p.entry != null && <div>入场: <span className="text-white">${p.entry.toLocaleString()}</span></div>}
+                      {p.stop_loss != null && <div>止损: <span className="text-white">${p.stop_loss.toLocaleString()}</span></div>}
+                      {p.tp1 != null && <div>止盈1: <span className="text-white">${p.tp1.toLocaleString()}</span></div>}
+                      {p.tp2 != null && <div>止盈2: <span className="text-white">${p.tp2.toLocaleString()}</span></div>}
+                      {p.rr != null && <div className="col-span-2">R:R = <span className="text-amber-400 font-semibold">1:{p.rr.toFixed(1)}</span></div>}
+                    </div>
+                    {p.invalidation && (
+                      <div className="text-xs text-zinc-500 mt-1">⛔ 失效: {p.invalidation}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <RichMarkdown text={data.sniper_setup} />
           </Card>
         )}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 import time
 import traceback
@@ -11,7 +12,7 @@ from openai import AsyncOpenAI
 
 from ai.prompts import build_system_prompt, build_user_prompt
 from config.settings import get_settings
-from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary
+from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary, SniperPlan
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,10 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
     if signal is None:
         overview_text = _find_section("格局", "总览", "Overview")
         signal = _parse_signal_summary_from_overview(overview_text)
+    if signal is None:
+        signal = _parse_signal_summary_from_overview(raw_text)
+
+    sniper_text = _find_sniper_section()
 
     return AIAnalysisResult(
         coin=snapshot.coin,
@@ -189,7 +194,8 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         key_levels=_parse_levels_table(_find_section("价位", "图谱", "Level")),
         stop_loss_suggestion={"raw": _find_section("止损", "Stop")},
         entry_zones=_parse_entry_zones(_find_section("入场", "观察区", "Entry")),
-        sniper_setup=_find_sniper_section(),
+        sniper_setup=sniper_text,
+        sniper_plans=_parse_sniper_plans(sniper_text),
         ladder_plan_text=_find_ladder_section(),
         risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
@@ -202,6 +208,7 @@ def _parse_signal_summary(text: str) -> SignalSummary | None:
     """解析 AI 一句话结论为结构化交易信号。
 
     预期格式: **看空（置信度：中）**——理由...
+    也兼容变体: 偏多/偏空/中性偏多/中性偏空/中性/观望 等
     """
     if not text or not text.strip():
         return None
@@ -210,26 +217,39 @@ def _parse_signal_summary(text: str) -> SignalSummary | None:
     confidence = ""
     reason = ""
 
-    text_lower = raw.replace("**", "").replace("*", "")
-    if "看多" in text_lower:
-        direction = "bullish"
-    elif "看空" in text_lower:
-        direction = "bearish"
-    elif "震荡" in text_lower:
-        direction = "neutral"
+    cleaned = raw.replace("**", "").replace("*", "").replace("📝", "").strip()
 
-    if "置信度：高" in text_lower or "置信度:高" in text_lower:
-        confidence = "high"
-    elif "置信度：中" in text_lower or "置信度:中" in text_lower:
-        confidence = "medium"
-    elif "置信度：低" in text_lower or "置信度:低" in text_lower:
-        confidence = "low"
+    _BULLISH = ("看多", "偏多", "做多", "多头", "bullish", "中性偏多")
+    _BEARISH = ("看空", "偏空", "做空", "空头", "bearish", "中性偏空")
+    _NEUTRAL = ("震荡", "中性", "观望", "盘整", "neutral", "区间")
+
+    for kw in _BULLISH:
+        if kw in cleaned:
+            direction = "bullish"
+            break
+    if not direction:
+        for kw in _BEARISH:
+            if kw in cleaned:
+                direction = "bearish"
+                break
+    if not direction:
+        for kw in _NEUTRAL:
+            if kw in cleaned:
+                direction = "neutral"
+                break
+
+    conf_match = re.search(r"置信度[：:]\s*(高|中|低|high|medium|low)", cleaned, re.IGNORECASE)
+    if conf_match:
+        _map = {"高": "high", "中": "medium", "低": "low",
+                "high": "high", "medium": "medium", "low": "low"}
+        confidence = _map.get(conf_match.group(1).lower(), "medium")
 
     for sep in ("——", "—", "--", "：", ":"):
-        if sep in text_lower:
-            parts = text_lower.split(sep, 1)
-            if len(parts) > 1:
-                reason = parts[-1].strip()
+        idx = cleaned.find(sep)
+        if idx >= 0:
+            candidate = cleaned[idx + len(sep):].strip()
+            if candidate and len(candidate) > 3:
+                reason = candidate
                 break
 
     if not direction:
@@ -247,13 +267,15 @@ def _parse_signal_summary_from_overview(text: str) -> SignalSummary | None:
     """从市场格局总览的开头几行提取白话总结（fallback）。
 
     预期格式: 📝 **看多（置信度：高）**——理由...
-    或第一行包含"看多/看空/震荡"关键词。
+    也兼容 AI 把白话总结放在前5行任意位置的情况。
     """
     if not text:
         return None
-    for line in text.strip().split("\n")[:3]:
+    _ALL_KEYWORDS = ("看多", "看空", "震荡", "偏多", "偏空",
+                     "做多", "做空", "中性", "观望", "盘整", "📝")
+    for line in text.strip().split("\n")[:5]:
         line = line.strip().lstrip("> ")
-        if "📝" in line or ("看多" in line or "看空" in line or "震荡" in line):
+        if any(kw in line for kw in _ALL_KEYWORDS):
             result = _parse_signal_summary(line)
             if result:
                 return result
@@ -328,6 +350,82 @@ def _parse_scenarios(text: str) -> list[dict]:
     if current:
         scenarios.append(current)
     return scenarios
+
+
+def _parse_sniper_plans(text: str) -> list[SniperPlan]:
+    """从狙击方案 markdown 文本中提取结构化挂单数据。
+
+    尝试识别每个方向（多单/空单）的入场价、止损、止盈、R:R。
+    采用宽松正则匹配，兼容 AI 的各种表述变体。
+    """
+    if not text or len(text) < 20:
+        return []
+
+    plans: list[SniperPlan] = []
+    chunks = re.split(r"(?=\*\*(?:多单|空单|做多|做空|Long|Short))", text)
+
+    def _extract_price(pattern: str, block: str) -> Optional[float]:
+        m = re.search(pattern, block, re.IGNORECASE)
+        if m:
+            raw = m.group(1).replace(",", "").replace("$", "").strip()
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+        return None
+
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        direction = ""
+        lower = chunk[:80].lower()
+        if any(kw in lower for kw in ("多单", "做多", "long", "多头埋伏")):
+            direction = "long"
+        elif any(kw in lower for kw in ("空单", "做空", "short", "空头埋伏")):
+            direction = "short"
+
+        if not direction:
+            continue
+
+        entry = _extract_price(
+            r"(?:挂单价|入场|entry)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+        )
+        sl = _extract_price(
+            r"(?:止损|stop.?loss|SL)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+        )
+        tp1 = _extract_price(
+            r"(?:止盈1|TP1|目标1|take.?profit.?1)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+        )
+        tp2 = _extract_price(
+            r"(?:止盈2|TP2|目标2|take.?profit.?2)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+        )
+        rr_match = re.search(r"R[：:]\s*R\s*[=≈≥]\s*([\d.]+)", chunk, re.IGNORECASE)
+        if not rr_match:
+            rr_match = re.search(r"1[：:]([\d.]+)", chunk)
+        rr = float(rr_match.group(1)) if rr_match else None
+
+        inv_match = re.search(r"(?:失效|无效|作废)[^：:]*[：:](.+?)(?:\n|$)", chunk)
+        invalidation = inv_match.group(1).strip() if inv_match else ""
+
+        logic_match = re.search(
+            r"(?:逻辑|理由|依据|logic|reason)[^：:]*[：:](.+?)(?:\n|$)", chunk, re.IGNORECASE
+        )
+        logic = logic_match.group(1).strip() if logic_match else ""
+
+        if entry or sl or tp1:
+            plans.append(SniperPlan(
+                direction=direction,
+                entry=entry,
+                stop_loss=sl,
+                tp1=tp1,
+                tp2=tp2,
+                rr=rr,
+                logic=logic[:200],
+                invalidation=invalidation[:200],
+                raw_text=chunk.strip()[:500],
+            ))
+
+    return plans
 
 
 def create_analyzer() -> AIAnalyzer:

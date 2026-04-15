@@ -193,6 +193,9 @@ class AISnapshot(BaseModel):
     # Phase 10: 关键位状态机 (Key Level State Machine)
     key_levels: Optional[dict] = None
 
+    # 清算热力图摘要（价格-时间维度密度峰值）
+    liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
+
     # 30d 清算地图（超远距阶梯参考）
     liq_clusters_above_30d: list[dict] = []
     liq_clusters_below_30d: list[dict] = []
@@ -244,6 +247,11 @@ class AISnapshot(BaseModel):
     sniper_entries: list[dict] = []
     ladder_plans: list[dict] = []
 
+    # K 线形态检测（4H 最新）
+    candlestick_pattern_name: str = ""       # e.g. "锤子线" / "看涨吞没" / ""
+    candlestick_pattern_side: str = ""       # "support" / "resistance" / ""
+    candlestick_pattern_strength: float = 0  # 0~1
+
     # Phase 11: 净持仓 + 合约资金流 + TD序列
     net_position_trend: str = ""
     net_position_latest: Optional[float] = None
@@ -261,6 +269,19 @@ class SignalSummary(BaseModel):
     raw_line: str = ""
 
 
+class SniperPlan(BaseModel):
+    """单个狙击方案的结构化表达"""
+    direction: str = ""     # "long" / "short"
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    tp1: Optional[float] = None
+    tp2: Optional[float] = None
+    rr: Optional[float] = None
+    logic: str = ""
+    invalidation: str = ""
+    raw_text: str = ""
+
+
 class AIAnalysisResult(BaseModel):
     """AI 分析输出"""
     coin: str
@@ -272,6 +293,7 @@ class AIAnalysisResult(BaseModel):
     stop_loss_suggestion: dict
     entry_zones: list[dict]
     sniper_setup: str = ""
+    sniper_plans: list[SniperPlan] = []
     ladder_plan_text: str = ""
     risk_warnings: list[str]
     scenario_analysis: list[dict]

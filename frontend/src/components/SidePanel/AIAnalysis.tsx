@@ -107,6 +107,27 @@ export default function AIAnalysis() {
 
             {aiResult.sniper_setup && (
               <Section title="🎯 狙击挂单计划（高 R:R）">
+                {aiResult.sniper_plans && aiResult.sniper_plans.length > 0 && (
+                  <div className="flex flex-col gap-2 mb-3">
+                    {aiResult.sniper_plans.map((p, i) => (
+                      <div
+                        key={i}
+                        className={`rounded border p-2 text-xs ${
+                          p.direction === "long"
+                            ? "border-green-700/40 bg-green-950/20"
+                            : "border-red-700/40 bg-red-950/20"
+                        }`}
+                      >
+                        <span className="font-semibold">
+                          {p.direction === "long" ? "📈 多" : "📉 空"}
+                        </span>
+                        {p.entry != null && <span className="ml-2">入场 ${p.entry.toLocaleString()}</span>}
+                        {p.stop_loss != null && <span className="ml-2 text-zinc-400">止损 ${p.stop_loss.toLocaleString()}</span>}
+                        {p.rr != null && <span className="ml-2 text-amber-400">R:R 1:{p.rr.toFixed(1)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <Markdown text={aiResult.sniper_setup} />
               </Section>
             )}

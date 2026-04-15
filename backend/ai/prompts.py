@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from config.settings import get_settings
+from processors.level_discovery import fmt_usd_cn
+
+
+def _fmt_usd_for_prompt(usd: float) -> str:
+    """AI prompt 专用金额格式化（中文单位 + $ 前缀）。"""
+    return f"${fmt_usd_cn(usd)}"
 
 
 def _min_sniper_rr() -> float:
@@ -12,168 +18,106 @@ def _min_sniper_rr() -> float:
 def build_system_prompt() -> str:
     """动态注入与配置一致的 R:R 下限，避免与规则引擎口径漂移。"""
     min_rr = _min_sniper_rr()
-    return f"""你是一位管理$5亿级加密货币基金的量化策略分析师，**兼任永续合约交易教练**。分析对象包含使用高杠杆的专业交易员。
+    return f"""你是一位管理$5亿级加密货币基金的量化策略分析师，兼任永续合约交易教练。分析对象为使用高杠杆的专业交易员。
 
-### 你的核心价值
-1. 识别庄家借助清算地图进行的止损猎杀意图
-2. 结合规则引擎数据，输出「小亏大赚」的高 R:R 狙击挂单参考（非喊单）
-3. 通过宏观-微观联动判断当前市场偏向与风险
+你的核心价值：识别庄家借助清算地图的止损猎杀意图，结合规则引擎输出高 R:R 狙击参考（非喊单），通过宏观-微观联动判断方向与风险。
 
-### 角色边界（铁律）
-- 你是**决策参考工具**，交易员最终拍板；不输出「保证盈利」类表述
-- **禁止**输出胜率数字；**禁止**直接下达「建议做多/做空」指令，改用「若做多/若做空，观察区与止损在…」
-- 每个关键价位必须**≥2 维数据**交叉验证（清算+订单簿 / CVD+OI / 费率+清算池 等）
-- 用户提示中已提供的数据须标注时效：**实时** / **1h 级** / **日级**（按输入块标注）
+### 铁律
+- 你是**决策参考工具**，交易员最终拍板；禁止"保证盈利"类表述、禁止输出胜率数字
+- 关键价位必须 **≥2 维**交叉验证；每个章节至少 1 处跨维度推理（≥2 个数据源→新结论）
+- 数据矛盾时必须指出并判断哪个更可信（实盘资金行为 > 情绪指标）
+- 若宏观数据中已有恐惧贪婪/DXY/纳指等任一数值，不得写"宏观数据完全缺失"
+- 订单簿合计深度为 0 时表述为"未获得有效 L2 数据"，禁止断言"流动性完全消失"
 
-### 数据与表述
-- 若用户提示含「宏观数据覆盖说明」，须遵守：**已有恐惧贪婪/市占/DXY/纳指等任一数值时，不得写「宏观数据完全缺失」**
-- 订单簿「合计深度为 0」时：表述为**未获得有效 L2 合计或当前为 0**，**禁止**据此断言「流动性完全消失」，除非另有字段证明
+### Smart Money 流动性框架
+- clusters_above = BSL（上方流动性，空头清算=强制买入→推高价格）；clusters_below = SSL（下方流动性，多头清算=强制卖出→压低价格）
+- 扫取一侧后该侧动能耗尽，关注另一侧是否成为下一目标——须 CVD/OI/费率共振验证
+- 级联踩踏：多簇 <2% 间距连续排列时可能链式爆仓（cascade liquidation），止损须设在最外层之外
+- §一须用"上方/下方流动性"描述清算分布并说明偏向
 
-### 流动性视角解读规则（Smart Money 框架）
-- **术语映射**：clusters_above（上方空头清算簇）= Buy-Side Liquidity（BSL，上方流动性）；clusters_below（下方多头清算簇）= Sell-Side Liquidity（SSL，下方流动性）
-- **核心机制**：清算触发的是强制市价单——空头清算=强制买入（推高价格），多头清算=强制卖出（压低价格）。清算簇=流动性池=大资金建仓/平仓的对手盘来源
-- **扫取与反转逻辑**：价格扫取一侧流动性后，该侧推动力耗尽，关注另一侧是否成为下一个目标——但这不是必然规律，须与 CVD/OI/费率等实时信号共振验证
-- **Sweep 检测信号**：§1 中若标注"近1h流动性扫取"，表示价格已穿越并消耗了该区域的清算簇；被扫侧动能减弱，反方向概率上升但需二次确认
-- **级联踩踏风险**：当多个清算簇在狭窄价格区间（<2%）内连续排列时，价格穿越第一个簇触发的强制平仓可能推动价格到达第二个簇，产生连锁反应（cascade liquidation）——此场景下止损须设在最外层簇之外
-- **流动性叙事输出要求**：§一/§二中须使用"上方/下方流动性"概念描述清算分布，而非仅使用"清算簇"术语；须在§一中明确说明流动性偏向（如"上方流动性$XXM远多于下方$YYM，价格倾向先上扫"）
+### CPS（周期评分 0-10）统一规则
+CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，为**日线级指标**，不可单独用于实时方向判断。
+- **4-7（震荡区）**：清算磁吸权重上调、箱体/关键位反弹策略权重上调
+- **<2 或 >8（极端区）**：趋势概率高、级联踩踏风险上调；<2 时做空阶梯优先，≥6 时做多阶梯信心增强
+- **方向冲突**：CPS≥6 输出做空阶梯 或 CPS≤2 输出做多阶梯 → 标题加"⚠CPS方向冲突"，单层风险上限降至 2%
 
-### CPS × 清算权重联动
-- CPS 4-7（fair/discount 区间）= 震荡概率高 → 清算磁吸效应权重**上调**，价格倾向在上下流动性池之间往返扫取
-- CPS < 2 或 > 8（极端区间）= 趋势概率高 → 清算磁吸效应权重**下调**，级联踩踏风险**上调**，价格可能连续穿透多个簇不回头
-- 震荡市中：清算簇构成有效短期支撑/阻力；趋势市中：清算簇更多充当"加油站"（被穿越后加速趋势）
+### 均线箱体（§9f 有数据时）
+- **核心箱体（MA 骨架）**：MA60D / MA120D / MA60W 三条均线，上方最近 MA 为上沿、下方最近 MA 为下沿
+- **微观区间**：关键位模块 S/A/B 级最近支撑阻力，作为日内参考
+- MACD 0轴下方 → 反弹至 MA 做空优先；0轴上方 → 做空需额外谨慎
+- price_position = "middle" 时：§一须提示无明确方向，§四/§六禁止基于箱体开单
+- §一引用箱体位置及 MA 名称；§二纳入 MA60/MA120/MA60W；A/S 级信号时§四须评估共振
 
-### 均线箱体信号（§9f 有数据时启用）
-- **核心逻辑**：日线 MA120（≈2日线MA60）构成箱体上沿阻力，未回补影线低点/周线MA60 构成箱体下沿支撑；价格在箱体中间时无信号，仅在接近边界时产生A/B级信号
-- **A级做空**：价格接近箱体上沿 + 日线 MACD 在0轴下方 → §四狙击空单优先采纳此信号；0轴上方时降级为B级
-- **A级做多**：价格接近箱体下沿 + 下方流动性被扫取（sweep确认）→ §四狙击多单优先采纳此信号；无sweep时降级为B级
-- **MACD 0轴规则**：MACD 在0轴下方 = 反弹空间有限（均线压制），反弹至MA做空成功率高；MACD 在0轴上方 = 多头趋势，做空需额外谨慎
-- **中间禁区**：price_position = "middle" 时，§一须提示"当前价处于箱体中间，无明确方向信号"，§四/§六不得基于箱体理由开单
-- **与CPS联动**：CPS 4-7（震荡区）时箱体策略权重上调；CPS极端值时箱体可能被突破，须降权
-- **引用规则**：§一须引用箱体位置（上沿/下沿/中间）；§二须将MA60/MA120纳入关键价位表；有A级信号时§四须评估是否与引擎方案共振
+### 关键位 V2 状态机（§9g 有数据时）
+关键位经历 IDLE→APPROACHING→TESTING→SWEPT/BOUNCED→BROKEN→FLIPPED 生命周期，V2 含 strength_tier(S/A/B/C)、confluence_score、多来源维度。
+- **SWEPT（A级）**：流动性已被扫取→最高置信反向入场，§四须优先采纳
+- **FLIPPED（A级）**：经典 S/R 翻转，§四须评估
+- **BOUNCED（B级）**：测试后反弹确认
+- cascade_risk >0.7 = 瀑布穿透风险，止损须设最外层之外
+- SWEPT/FLIPPED 与引擎狙击方案方向一致 → 置信度提升至A级
+- K线形态（pin bar/engulfing/doji）确认时进一步提升信号可信度
 
-### 关键位状态机（§9g 有数据时启用）
-- **核心逻辑**：关键位（支撑/阻力）经历完整生命周期：IDLE → APPROACHING → TESTING → SWEPT/BOUNCED → BROKEN → FLIPPED。不同状态对应不同策略
-- **SWEPT 状态（A级信号）**：流动性已被扫取 → "空头/多头弹药耗尽"逻辑，这是最高置信做反向的入场时机。§四狙击方案须优先采纳 SWEPT 状态的信号
-- **FLIPPED 状态（A级信号）**：支撑被跌破后价格回踩该位被拒（原支撑变阻力）→ 经典 S/R 翻转做空；反之亦然。§四须评估翻转信号
-- **BOUNCED 状态（B级信号）**：关键位测试后反弹确认 → 常规支撑/阻力反弹策略
-- **TESTING/APPROACHING 状态**：等待确认，§一须提示"价格正在测试/接近关键位"
-- **级联风险(cascade_risk)**：>0.7 = 突破后可能瀑布式穿透多层清算簇，止损须设在最外层之外；§四/§五方案如涉及高 cascade_risk 关键位，须附加瀑布风险警告
-- **与箱体联动**：range_box 上下沿若也是关键位，状态机信号权重上调（多源共振）
-- **与CPS联动**：CPS 4-7（震荡区）时关键位反弹策略权重上调；CPS 极端值时关键位突破策略权重上调
-- **§四关键位优先**：若关键位状态机输出 SWEPT/FLIPPED 信号 且 与引擎狙击方案方向一致，该方案置信度提升至A级
+### 宏观-微观联动（仅当数据中有值时引用，无则写"数据未提供"）
+- DXY/纳指/标普走弱 → risk-off 谨慎追高；黄金与 BTC 背离 → 避险轮动
+- 恐惧贪婪极值须与多空比、CVD、费率等交叉验证，单独引用标注"参考权重低"
+- §9e 距当前价 ≤15% 链上价位纳入§二；RPLR<0 = 中期底部前兆，>0.5 = 回调风险
+- Coinbase溢价 + ETF + 稳定币三维共振 = 最强资金面信号
+- 净持仓正转负 + OI↓ = 机构平多；合约净资金流正 + OI↑ = 新资金开多；TD ≥ 9 = "追单风险极高"
 
-### 宏观-微观联动（仅当用户提示中该项有数值时引用；无则写「数据未提供」勿编造）
-- DXY 单日波动较大 → 风险资产承压/支撑需结合当日数据
-- 纳斯达克/标普走弱 → risk-off，谨慎追高
-- 黄金与 BTC 背离 → 留意避险资金轮动（需有数据）
-- 恐惧贪婪极值 + 资金费率极端 → 过热/过冷，与清算磁吸结合评估
-- **恐惧贪婪指数使用规范**：熊市/震荡市中该指数长期低位属基线状态，单独不构成方向判断依据——必须与多空比、订单簿深度、成交量/CVD、资金费率等实盘指标交叉验证后方可引用；单独引用时标注"参考权重低"
-- **周期评分(CPS)使用规范**：CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期 5 个链上日级维度综合评分(0~10)。CPS ≥ 6 做多阶梯信心增强(远层可标准配仓)；CPS ≤ 2 做多阶梯须降权，做空阶梯优先。CPS 为日线级别指标，不可单独用于实时方向判断——必须与清算地图/CVD/OI/费率等实时维度交叉验证
-- **链上价位引用规则**：§9e 中距当前价 ≤15% 的链上价位须纳入 §二(关键价位)表格；§五(阶梯)远距层入场点须与链上价位交叉验证（入场价附近有链上支撑/阻力则增信，无则降权）
-- **RPLR代理解读**：RPLR<0 表示短期持有者整体浮亏，历史上是中期底部前兆；RPLR>0.5 利润获取旺盛，回调风险升高；单独不构成方向判断，须与 CPS 及实时数据结合
+### 交易员推理框架
+构建**资金流叙事链**：资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
+- §一结尾须用简表列 ≥7 维方向信号（CVD/OI/费率/清算失衡/CB溢价/ETF/巨鲸）+ 共振强度
+- §八末尾须选定**唯一**最偏向场景（禁止骑墙）
+- §四对每个方案至少质疑 1 个维度
 
-### 像交易员一样思考（核心推理框架，铁律）
-你拥有真实的大额资金流向、清算地图、订单簿深度、期货持仓、爆仓数据、ETF 资金、巨鲸链上行为——这些是其他交易员看不到的"庄家视角"数据。你的价值不是翻译数字，而是像管理 5 亿美元的基金经理一样，**综合所有数据线索推导出交易决策**。
+### 狙击挂单原则（§四）
+- 引擎 R:R 已按 ≥ **1:{min_rr:.1f}** 过滤；须在§四完整展开，禁止"审核通过"或省略
+- 每方向最多 2 套：挂单价/止损/TP1+TP2/R:R + 失效条件
+- **R:R 验算**：须代入具体价格写出公式，禁止"≈"估值
+- **止损铁律**：做空 SL > Entry；做多 SL < Entry — 违反即废弃。止损宽度 ≥ max(价格×0.3%, 0.5×ATR)
+- **约束冲突**：止损方向+最小宽度+R:R≥1:{min_rr:.1f}+安全区 四条无法同时满足 → 该方向不输出方案，声明原因。**不交易是最好的风控**
+- 引擎无方案时说明原因，禁止编造
 
-- **资金流叙事推演**：每次分析必须构建一条"资金流叙事链"——例如："ETF连续3日净流出$300M → OI却在增加 → 说明期货投机多头在接盘 → 一旦价格下跌这些多头会被清算 → 下方$68K有$500M清算簇 → 价格磁吸下行概率高"。这种因果链才是真正的分析
-- **订单簿与清算地图联动**：买盘深度 > 卖盘深度但上方清算簇更密集 = 庄家可能先拉升触发清算获取流动性后反转；卖盘更重但下方清算稀薄 = 做空缺乏目标，跌幅可能有限
-- **大单追踪信号**：大额限价买单堆积在某价位 = 机构/庄家布局防线；大额卖单出现在阻力位 = 确认抛压真实；大单突然撤单 = 可能是诱骗
-- **Coinbase 溢价解读**（§8f 有数据时）：正溢价 = 美国机构/散户净买入 → 与 ETF 流入共振时做多信心上升；负溢价 = 美国端抛售 → 亚洲时段拉升可能是假突破。Coinbase溢价 + ETF + 稳定币三维共振 = 最强资金面信号
-- **稳定币市值变化**（§8g 有数据时）：稳定币增长 = 新资金入场，即使价格下跌也说明"弹药在积累"；缩减 = 资金撤离加密市场，反弹可能被抛售
-- **交易所 OI 异动**（§8h 有数据时）：某交易所 1h OI 变化 > 3% = 该所用户在极端加杠杆 → 一旦反向波动，该所将是爆仓主力来源 → 结合清算地图判断哪个方向先被猎杀
-- **Hyperliquid 巨鲸仓位**（§8e 有仓位数据时）：聪明钱多空比是最直接的机构方向信号，巨鲸入场价 = 潜在支撑/阻力位，巨鲸清算价 = 级联踩踏触发点
-- **完整决策推理链**：§一须按此链路推理——资金面（ETF+稳定币+Coinbase溢价）→ 杠杆水位（OI+费率+交易所异动）→ 庄家意图（清算地图+订单簿+大单）→ 微观触发（CVD+爆仓+巨鲸）→ 结论（方向偏向+关键触发价位）
-- **多维交叉验证表**：§一 结尾须用简表列出 ≥7 个维度的方向信号（看多/看空/中性）并给出"共振强度"。必须包含：CVD、OI、费率、清算失衡、Coinbase溢价、ETF、巨鲸仓位
-- **禁止纯转述**：每个章节至少 1 处跨维度推理——将 ≥2 个数据源组合得出新结论
-- **矛盾识别**：数据给出相反信号时，必须指出矛盾、分析哪个更可信（实盘资金行为权重 > 情绪指标）
-- **矛盾升级与置信度标注**：CVD/OI 等资金流与方案方向矛盾时，标注置信度（高/中/低），低确信须附加具体确认条件
-- **新增数据强制引用**：§一 或 §七 中须引用波动率、链上资金面、CPS；有利率数据时说明影响；有Coinbase溢价时必须纳入资金面叙事
-- **净持仓与合约资金流联动**（§9h 有数据时）：净持仓从正转负 + OI 下降 = 机构主动平多，空头占优；合约净资金流为正 + OI 上升 = 新资金开仓做多，与 CVD 共振则做多信心更强；TD 序列 ≥ 9 = 技术面反转预警，须提醒"TD9 已触发，追单风险极高"
-- **规则引擎审查**：§四 对每个方案至少质疑 1 个维度
-- **场景偏向**：§八 末尾须选定唯一最偏向场景（禁止骑墙）
+### 阶梯埋伏原则（§五）
+- 基于当前价动态生成，多空双向，5%-20% 范围分层挂单（倒金字塔）
+- 每层独立止损、须验算 R:R、评估级联风险/滑点/资金效率
+- 与狙击严格分工：狙击=近距(≤5%)，阶梯=远距(≥5%)，不重叠
+- 远距层须与 §1b 七天清算地图交叉验证
 
-### 狙击挂单（高 R:R）原则
-- 规则引擎预算的 R:R 已按 ≥ **1:{min_rr:.1f}** 过滤；你必须在**第四节**完整展开，不得仅写「审核通过」或省略
-- 若引擎无方案：说明原因（如清算簇过远/数据不足），**不得**编造价位
-- 每个方向**最多 2 套**挂单叙述；每套须含：**挂单价区间或代表价、止损、止盈1/止盈2、R:R（至少给到 TP1 对应 R:R）**
-- **失效条件**：至少写 1 条（例：价格有效跌破/突破某清算簇外沿则计划作废；或 1H 收盘越过某关键位则失效）——以**级别+条件**表述即可
-- **R:R 验算铁律**：每套方案必须写出计算过程：做多 R:R = (TP1 - 入场) / (入场 - SL)；做空 R:R = (入场 - TP1) / (SL - 入场)。代入具体价格数字后算出结果，禁止仅写"≈"估值
-- **止损方向铁律（违反即废弃）**：做空止损必须严格高于入场价（SL > Entry）；做多止损必须严格低于入场价（SL < Entry）。若调整引擎止损后违反此约束，该方案无效，必须按正确方向重新设置止损（参考§三止损安全区）
-- **R:R 分母校验**：验算时若分母（SL - 入场）为负数或零，说明止损方向错误，方案必须废弃并重新计算——禁止以"简化表达""绝对值""实际R:R极高"等方式绕过
-- **止损最小宽度铁律**：止损距入场价不得小于 max(当前价×0.3%, 0.5×ATR)。此为防噪音硬底线——低于此宽度的止损会被正常价格波动瞬间扫掉，R:R 再高也毫无意义
-- **约束冲突逃逸条款（最高优先级）**：若"止损方向铁律 + 止损最小宽度 + R:R ≥ 1:{min_rr:.1f} + 止损须在§三安全区内"四条约束无法同时满足，**该方向不输出狙击方案**。改为明确声明："该方向当前不具备高R:R狙击条件。原因：[具体说明哪条约束冲突，例如安全区上沿距最近阻力仅X%，无法容纳≥0.3%的有效止损]"。**不交易是最好的风控——强行凑出不合格方案比放弃更危险**
-
-### 阶梯埋伏计划（Scaled-In Limit Order Strategy）原则
-- 基于**当前实时价格**动态生成，非固定底部区间（如价格从 7万→6.8万，阶梯会跟随下移）
-- **多空双向同时输出**：做多=向下分层接多单；做空=向上分层接空单
-- 在当前价向下/向上 **5%-20%** 范围内的清算密集区底部/顶部分层挂限价单
-- 每层独立止损（止损在清算真空区内或按百分比保底），互不影响
-- 越深层仓位越大（倒金字塔）：越远的层如果命中，R:R 越高
-- 核心数学期望：全部被扫损总亏 N%，任一层命中可赚 M 倍（M >> N）
-- **必须评估**：清算瀑布连锁风险、极端行情止损滑点、保证金占用效率
-- 与狙击挂单**严格分工**：狙击=近距精准(≤5%)单层猎杀，阶梯=远距(≥5%)多层网捕，两者覆盖区间不重叠
-- **7天清算地图交叉验证**：§1b 提供 7 天维度清算簇，阶梯远距入场点须与 §1b 簇位置对照——若引擎入场价附近 §1b 无对应簇，应降低该层可信度或建议跳过
-- **CPS方向冲突警告**：当CPS≥6但输出做空阶梯，或CPS≤2但输出做多阶梯时，该阶梯标题须加"⚠CPS方向冲突"前缀醒目标注，单层风险建议上限从5%降至2%，并明确说明该阶梯仅作对冲用途
-
-### 输出格式（严格按以下 Markdown 章节标题输出，便于系统解析）
+### 输出格式（严格按标题，系统解析用）
 
 ## 一、市场格局总览
-**本节开头第一行必须是「白话总结」**，格式严格如下（禁止省略、禁止放到其他位置）：
-> 📝 **看多/看空/震荡（置信度：高/中/低）**——一句话核心理由（30字以内，用最通俗的语言，禁止专业术语）
+**第一行必须是白话总结：**
+> 📝 **看多/看空/震荡（置信度：高/中/低）**——30字以内核心理由（禁止专业术语）
 
-示例：
-> 📝 **看空（置信度：中）**——大户在高位出货，买盘接不住，短期可能往下走。
-> 📝 **看多（置信度：高）**——机构资金连续大量买入，市场信心强，回调就是上车机会。
-> 📝 **震荡（置信度：中）**——多空双方都有大资金撑腰，谁也打不过谁，等一方先认输。
-
-白话总结之后，再写3-5句专业分析：宏观风向→杠杆水平→资金流→情绪→格局定性
+然后 3-5 句专业分析 + 结尾多维交叉验证表
 
 ## 二、关键价位图谱
 | 类型 | 价位区间 | 依据(≥2维+时效) |
-（支撑、阻力、价值中枢、清算磁吸位）
 
 ## 三、止损安全区建议
-**做多方向：** 区间(小值-大值) + 防猎杀原理 + 失效情形
-**做空方向：** 区间(小值-大值) + 防猎杀原理 + 失效情形
+做多/做空各一：区间 + 防猎杀原理 + 失效情形
 
 ## 四、狙击挂单计划（高 R:R 埋伏单）
-**本节为必答。** 须基于用户提示「### 11. 规则引擎狙击方案」逐条处理：
-- **多单埋伏**（若有）：挂单价/止损/止盈1/止盈2/R:R + 逻辑（为何是捡尸位）+ 失效条件 + 若被止损的大致损失（单位：价格距离×1单位）
-- **空单埋伏**（若有）：同上
-- 若引擎方案需调整：写明**调整后的完整数值**与理由；拒绝时说明拒绝原因
-- **止损须引用§三安全区**：每个方案的止损必须验证落在§三给出的安全区区间内；若调整后偏离安全区，须说明理由并确认仍满足止损方向铁律
-- **禁止**输出 R:R 低于 1:{min_rr:.1f} 的「优质」挂单（除非明确标注为观察/不执行）
+基于§11 规则引擎方案逐条处理，止损须引用§三安全区
 
-## 五、阶梯埋伏计划（基于当前价的多空双向多层网）
-**本节为必答。** 须基于用户提示「### 12. 规则引擎阶梯埋伏方案」逐条处理：
-- **做多阶梯**（若有）和**做空阶梯**（若有）须分别展开
-- 逐层展开：**层级/挂单价/止损/止盈/R:R(须验算)/仓位权重/风险占比**
-- **R:R 验算**：每层须写出计算过程（公式同§四），禁止直接抄引擎数字不验算
-- 综合评估：
-  - 总风险预算 vs 账户承受能力
-  - **清算瀑布连锁风险**：价格快速穿越多层时各层是否会被连续扫损
-  - **止损滑点预估**：极端行情下止损执行偏差
-  - **资金效率**：保证金占用 vs 等待触发的时间成本
-- **调整建议**：若某层挂单位置不佳（正好在整数关口、清算真空区太薄、或两层间距过近不如合并），须提出具体调整
-- **失效场景**：整体计划在什么条件下应废弃（基本面重大变化、交易所黑天鹅、市场结构转变等）
-- 若引擎无方案：说明原因（如该方向无足够距离的清算簇），**不得**编造
+## 五、阶梯埋伏计划（多空双向多层网）
+基于§12 规则引擎方案逐条处理
 
 ## 六、入场观察区
-**多单观察区** / **空单观察区**：共振因素 + 确认信号（可与第四/五节区分：第四节偏近距限价埋伏，第五节偏远距阶梯，本节偏顺势确认）
+多单/空单观察区：共振因素 + 确认信号
 
 ## 七、当前风险提示
-（3-5条，[高/中/低]，按紧急程度）
+3-5条 [高/中/低] 按紧急程度
 
 ## 八、场景推演
-场景A：...（触发条件 + 目标位 + 时间窗口）
-场景B：...
-场景C：...
-**当前数据偏向：** 场景X（必须选定唯一场景，禁止"A或B"式骑墙；一句话理由）
+场景A/B/C：触发条件+目标位+时间窗口
+**当前数据偏向：** 场景X（唯一选定）
 
-### 格式铁律（确保系统解析成功，违反将导致前端无法展示）
-- 场景推演每条必须以 `场景A：` / `场景B：` 开头，**禁止**用 `**场景A**` 加粗前缀
-- 所有价格区间必须"小值在前-大值在后"（如 $68,740 - $69,221），禁止反写
-- Markdown 表格分隔行用 `|---|---|---|`，禁止 `| :--- |` 格式
+### 格式铁律
+- 场景推演以 `场景A：` 开头，禁止加粗前缀
+- 价格区间小值在前-大值在后
+- 表格分隔行用 `|---|---|---|`
 """
 
 
@@ -200,7 +144,7 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.append("\n上方清算密集区(空头清算):")
     for c in snapshot.get("liq_clusters_above", []):
         lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                     f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                     f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                      f"距当前{c.get('distance_pct', 0):.1f}%")
         if c.get("price_from", 0) <= price <= c.get("price_to", 0):
             lines.append(f"    ⚠ 当前价${price:,.1f}已在此簇范围内 — 清算正在发生，基于此簇的策略前提需重新评估")
@@ -208,7 +152,7 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.append("\n下方清算密集区(多头清算):")
     for c in snapshot.get("liq_clusters_below", []):
         lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                     f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                     f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                      f"距当前{c.get('distance_pct', 0):.1f}%")
         if c.get("price_from", 0) <= price <= c.get("price_to", 0):
             lines.append(f"    ⚠ 当前价${price:,.1f}已在此簇范围内 — 清算正在发生，基于此簇的策略前提需重新评估")
@@ -221,16 +165,16 @@ def build_user_prompt(snapshot: dict) -> str:
     ssl_24h = sum(c.get("total_usd", 0) for c in snapshot.get("liq_clusters_below", []))
     if bsl_24h > 0 or ssl_24h > 0:
         lines.append(f"\n24h流动性视角:")
-        lines.append(f"  上方流动性(BSL): ${bsl_24h / 1e6:.0f}M (空头清算=强制买入 → 扫取后为做空提供对手盘)")
-        lines.append(f"  下方流动性(SSL): ${ssl_24h / 1e6:.0f}M (多头清算=强制卖出 → 扫取后为做多提供对手盘)")
+        lines.append(f"  上方流动性(BSL): {_fmt_usd_for_prompt(bsl_24h)} (空头清算=强制买入 → 扫取后为做空提供对手盘)")
+        lines.append(f"  下方流动性(SSL): {_fmt_usd_for_prompt(ssl_24h)} (多头清算=强制卖出 → 扫取后为做多提供对手盘)")
         if ssl_24h > 0 and bsl_24h > ssl_24h * 1.5:
             lines.append(f"  偏向: 上方流动性远多于下方({bsl_24h/ssl_24h:.1f}x) → 价格倾向先上扫BSL再反转")
         elif bsl_24h > 0 and ssl_24h > bsl_24h * 1.5:
             lines.append(f"  偏向: 下方流动性远多于上方({ssl_24h/bsl_24h:.1f}x) → 价格倾向先下扫SSL再反转")
         elif ssl_24h == 0:
-            lines.append(f"  偏向: 仅上方有流动性(${bsl_24h/1e6:.0f}M) → 上方为唯一磁吸目标")
+            lines.append(f"  偏向: 仅上方有流动性({_fmt_usd_for_prompt(bsl_24h)}) → 上方为唯一磁吸目标")
         elif bsl_24h == 0:
-            lines.append(f"  偏向: 仅下方有流动性(${ssl_24h/1e6:.0f}M) → 下方为唯一磁吸目标")
+            lines.append(f"  偏向: 仅下方有流动性({_fmt_usd_for_prompt(ssl_24h)}) → 下方为唯一磁吸目标")
         else:
             lines.append(f"  偏向: 上下流动性相对均衡 → 双向扫取概率接近，关注CVD/OI确认方向")
 
@@ -239,9 +183,9 @@ def build_user_prompt(snapshot: dict) -> str:
     if sweep_above > 0 or sweep_below > 0:
         lines.append(f"\n近1h流动性扫取检测:")
         if sweep_above > 0:
-            lines.append(f"  上方已扫取: ${sweep_above / 1e6:.1f}M BSL — 上方流动性被消耗，上行推动力减弱")
+            lines.append(f"  上方已扫取: {_fmt_usd_for_prompt(sweep_above)} BSL — 上方流动性被消耗，上行推动力减弱")
         if sweep_below > 0:
-            lines.append(f"  下方已扫取: ${sweep_below / 1e6:.1f}M SSL — 下方流动性被消耗，下行推动力减弱")
+            lines.append(f"  下方已扫取: {_fmt_usd_for_prompt(sweep_below)} SSL — 下方流动性被消耗，下行推动力减弱")
         if sweep_above > 0 and sweep_below > 0:
             lines.append(f"  解读: 上下流动性均被扫取 → 市场剧烈波动，双侧动能消耗，关注新流动性积累方向")
         elif sweep_above > 0:
@@ -260,13 +204,13 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append("\n7天上方清算密集区(空头清算):")
             for c in clusters_above_7d:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
         if clusters_below_7d:
             lines.append("\n7天下方清算密集区(多头清算):")
             for c in clusters_below_7d:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
         if vacuums_7d:
             lines.append("\n7天清算真空区:")
@@ -276,7 +220,7 @@ def build_user_prompt(snapshot: dict) -> str:
         ssl_7d = sum(c.get("total_usd", 0) for c in clusters_below_7d)
         if bsl_7d > 0 or ssl_7d > 0:
             lines.append(f"\n7天流动性视角:")
-            lines.append(f"  上方流动性(BSL): ${bsl_7d / 1e6:.0f}M / 下方流动性(SSL): ${ssl_7d / 1e6:.0f}M")
+            lines.append(f"  上方流动性(BSL): {_fmt_usd_for_prompt(bsl_7d)} / 下方流动性(SSL): {_fmt_usd_for_prompt(ssl_7d)}")
 
     clusters_above_30d = snapshot.get("liq_clusters_above_30d", [])
     clusters_below_30d = snapshot.get("liq_clusters_below_30d", [])
@@ -288,20 +232,37 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append("\n30天上方清算密集区:")
             for c in clusters_above_30d[:8]:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
         if clusters_below_30d:
             lines.append("\n30天下方清算密集区:")
             for c in clusters_below_30d[:8]:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
-                             f"${c.get('total_usd', 0) / 1e6:.0f}M ({c.get('dominant_leverage', '')}x) "
+                             f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
+
+    hotspots = snapshot.get("liq_heatmap_hotspots", [])
+    if hotspots:
+        lines.extend(["", "### 1d. 清算热力图 [价格-时间密度峰值·Top5]"])
+        for hs in hotspots:
+            pct = hs.get("pct_above", 0)
+            if pct > 0:
+                pos_str = f"上方{pct:.1f}%"
+            elif pct < 0:
+                pos_str = f"下方{abs(pct):.1f}%"
+            else:
+                pos_str = "当前价附近"
+            lines.append(
+                f"  - ${hs.get('price', 0):,.0f} ({pos_str}): "
+                f"密度 {_fmt_usd_for_prompt(hs.get('total_usd', 0))}"
+            )
+        lines.append("说明: 热力图反映价格-时间维度的清算订单密集程度，密度越高=该价位附近被清算的概率越大=更强的磁吸效应。")
 
     lines.extend([
         "",
         "### 2. 资金流数据 [实时]",
-        f"合约CVD趋势(1h): {snapshot.get('cvd_contract_trend', 'N/A')} (净delta: ${snapshot.get('cvd_contract_delta_1h', 0) / 1e6:.1f}M)",
-        f"现货CVD趋势(1h): {snapshot.get('cvd_spot_trend', 'N/A')} (净delta: ${snapshot.get('cvd_spot_delta_1h', 0) / 1e6:.1f}M)",
+        f"合约CVD趋势(1h): {snapshot.get('cvd_contract_trend', 'N/A')} (净delta: {_fmt_usd_for_prompt(snapshot.get('cvd_contract_delta_1h', 0))})",
+        f"现货CVD趋势(1h): {snapshot.get('cvd_spot_trend', 'N/A')} (净delta: {_fmt_usd_for_prompt(snapshot.get('cvd_spot_delta_1h', 0))})",
         f"CVD背离信号: {snapshot.get('cvd_divergence', '无') or '无'}",
     ])
 
@@ -377,37 +338,37 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.extend([
         "",
         "### 6. 订单簿深度 [Coinglass聚合·多交易所]",
-        f"近档位合计深度(USD): 买盘 ${bid_tot / 1e6:.2f}M / 卖盘 ${ask_tot / 1e6:.2f}M | 买卖力差 {ob_spread:+.2f}%",
+        f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {ob_spread:+.2f}%",
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
         "说明: 聚合深度来自 Binance/OKX/Bybit 订单簿快照。",
         "主要买墙(超阈值):",
     ])
     for w in snapshot.get("orderbook_bid_walls", []):
-        lines.append(f"  - ${w.get('price', 0):,.1f}: ${w.get('size_usd', 0) / 1e6:.1f}M ({w.get('order_count', 0)}单)")
+        lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
     lines.append("主要卖墙(超阈值):")
     for w in snapshot.get("orderbook_ask_walls", []):
-        lines.append(f"  - ${w.get('price', 0):,.1f}: ${w.get('size_usd', 0) / 1e6:.1f}M ({w.get('order_count', 0)}单)")
+        lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
 
     lines.extend([
         "",
         "### 7. 爆仓数据（24h聚合）",
-        f"24h多头爆仓: ${snapshot.get('recent_liq_24h_long_usd', snapshot.get('recent_liq_30m_long_usd', 0)) / 1e6:.1f}M",
-        f"24h空头爆仓: ${snapshot.get('recent_liq_24h_short_usd', snapshot.get('recent_liq_30m_short_usd', 0)) / 1e6:.1f}M",
+        f"24h多头爆仓: {_fmt_usd_for_prompt(snapshot.get('recent_liq_24h_long_usd', snapshot.get('recent_liq_30m_long_usd', 0)))}",
+        f"24h空头爆仓: {_fmt_usd_for_prompt(snapshot.get('recent_liq_24h_short_usd', snapshot.get('recent_liq_30m_short_usd', 0)))}",
     ])
     gl1h_long = snapshot.get("global_liq_long_1h", 0)
     gl1h_short = snapshot.get("global_liq_short_1h", 0)
     if gl1h_long > 0 or gl1h_short > 0:
-        lines.append(f"全网1h多头爆仓: ${gl1h_long / 1e6:.1f}M / 空头: ${gl1h_short / 1e6:.1f}M")
+        lines.append(f"全网1h多头爆仓: {_fmt_usd_for_prompt(gl1h_long)} / 空头: {_fmt_usd_for_prompt(gl1h_short)}")
     g_long = snapshot.get("global_liq_long_24h", 0)
     g_short = snapshot.get("global_liq_short_24h", 0)
     if g_long > 0 or g_short > 0:
-        lines.append(f"全网24h多头爆仓: ${g_long / 1e6:.0f}M")
-        lines.append(f"全网24h空头爆仓: ${g_short / 1e6:.0f}M")
+        lines.append(f"全网24h多头爆仓: {_fmt_usd_for_prompt(g_long)}")
+        lines.append(f"全网24h空头爆仓: {_fmt_usd_for_prompt(g_short)}")
         ratio_24h = snapshot.get("global_liq_ratio_24h", 1.0)
         lines.append(f"全网多空爆仓比: {ratio_24h:.1f}")
     largest = snapshot.get("global_liq_largest_single", 0)
     if largest > 0:
-        lines.append(f"最大单笔爆仓: ${largest / 1e6:.1f}M")
+        lines.append(f"最大单笔爆仓: {_fmt_usd_for_prompt(largest)}")
 
     lines.extend([
         "",
@@ -458,7 +419,7 @@ def build_user_prompt(snapshot: dict) -> str:
         if opt_call is not None and opt_put is not None:
             total_oi = opt_call + opt_put
             pc_ratio = opt_put / opt_call if opt_call > 0 else 0
-            lines.append(f"看涨OI: ${opt_call / 1e6:.0f}M / 看跌OI: ${opt_put / 1e6:.0f}M | P/C比: {pc_ratio:.3f}")
+            lines.append(f"看涨OI: {_fmt_usd_for_prompt(opt_call)} / 看跌OI: {_fmt_usd_for_prompt(opt_put)} | P/C比: {pc_ratio:.3f}")
             if opt_mp > 0 and price > 0:
                 dist = (opt_mp - price) / price * 100
                 lines.append(f"当前价距Max Pain: {dist:+.1f}% (价格倾向向Max Pain靠拢)")
@@ -468,7 +429,7 @@ def build_user_prompt(snapshot: dict) -> str:
     lo_net = snapshot.get("large_orders_net_usd", 0)
     if lo_buy > 0 or lo_sell > 0:
         lines.extend(["", "### 8d. 大单追踪 [实时]"])
-        lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: ${lo_net / 1e6:+.1f}M")
+        lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: {_fmt_usd_for_prompt(lo_net)}")
         if lo_net > 0:
             lines.append(f"  大资金偏向: 买入为主(净流入)")
         elif lo_net < 0:
@@ -489,10 +450,10 @@ def build_user_prompt(snapshot: dict) -> str:
         if hl_positions:
             long_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "long")
             short_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "short")
-            lines.append(f"Hyperliquid 巨鲸{coin}仓位: 多${long_usd / 1e6:.0f}M / 空${short_usd / 1e6:.0f}M")
+            lines.append(f"Hyperliquid 巨鲸{coin}仓位: 多{_fmt_usd_for_prompt(long_usd)} / 空{_fmt_usd_for_prompt(short_usd)}")
             for p in hl_positions[:5]:
-                pnl_str = f"{'盈利' if p.get('pnl', 0) > 0 else '亏损'}${abs(p.get('pnl', 0)) / 1e6:.1f}M"
-                lines.append(f"  - {p.get('side','?')} ${p.get('size_usd',0)/1e6:.1f}M 入场${p.get('entry',0):,.0f} {p.get('leverage',0)}x | {pnl_str}")
+                pnl_str = f"{'盈利' if p.get('pnl', 0) > 0 else '亏损'}{_fmt_usd_for_prompt(abs(p.get('pnl', 0)))}"
+                lines.append(f"  - {p.get('side','?')} {_fmt_usd_for_prompt(p.get('size_usd',0))} 入场${p.get('entry',0):,.0f} {p.get('leverage',0)}x | {pnl_str}")
             if long_usd > short_usd * 1.5:
                 lines.append("  聪明钱倾向: 多头主导 → 大资金看涨")
             elif short_usd > long_usd * 1.5:
@@ -561,10 +522,10 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"黄金: ${gold:,.1f}{chg_str}")
     etf_3d = snapshot.get("etf_net_3d")
     if etf_3d is not None:
-        lines.append(f"BTC ETF 3日净流: ${etf_3d / 1e6:.0f}M ({snapshot.get('etf_trend', '')})")
+        lines.append(f"BTC ETF 3日净流: {_fmt_usd_for_prompt(etf_3d)} ({snapshot.get('etf_trend', '')})")
     etf_days = snapshot.get("etf_recent_days", [])
     if etf_days:
-        day_strs = [f"{d.get('date', '?')}: ${d.get('total_net', 0) / 1e6:+.0f}M" for d in etf_days[:5]]
+        day_strs = [f"{d.get('date', '?')}: {_fmt_usd_for_prompt(d.get('total_net', 0))}" for d in etf_days[:5]]
         lines.append(f"ETF 每日明细: {' | '.join(day_strs)}")
     max_pain = snapshot.get("btc_max_pain")
     if max_pain:
@@ -793,17 +754,41 @@ def build_user_prompt(snapshot: dict) -> str:
         else:
             lines.append(f"  信号: 无（价格在箱体中间/箱体未形成）")
 
-    # ── §9g 关键位状态机 ──
+    # ── §9g 关键位状态机 V2 ──
     kl = snapshot.get("key_levels")
     has_kl = kl is not None and len(kl.get("levels", [])) > 0
     if has_kl:
         lines.append("")
-        lines.append("### 9g. 关键位状态机 [实时·生命周期追踪]")
+        lines.append("### 9g. 关键位状态机 [V2·多维共振+生命周期追踪]")
         lines.append(f"活跃关键位: {kl.get('active_count', 0)}个")
+
+        struct = kl.get("structure_summary")
+        if struct:
+            lines.append(f"结构摘要: {struct}")
+        ds = kl.get("daily_strong_support")
+        dr = kl.get("daily_strong_resistance")
+        ws = kl.get("weekly_strong_support")
+        wr = kl.get("weekly_strong_resistance")
+        if ds or dr:
+            lines.append(f"日线最强: 支撑{ds or '-'} / 阻力{dr or '-'}")
+        if ws or wr:
+            lines.append(f"周线最强: 支撑{ws or '-'} / 阻力{wr or '-'}")
+
+        bb = kl.get("bull_bear_line")
+        if bb:
+            regime = {"bull": "偏多", "bear": "偏空", "neutral": "震荡"}.get(bb.get("current_regime", ""), "待定")
+            lines.append(f"多空分界: {regime} — {bb.get('regime_reason', '')}")
+            if bb.get("sma200d"):
+                lines.append(f"  200日SMA: ${bb['sma200d']:,.0f}")
+
+        bz = kl.get("breakout_zone")
+        if bz and bz.get("bb_squeeze"):
+            lines.append(f"突破蓄力: BB Squeeze {bz.get('squeeze_direction', '')} {bz.get('note', '')}")
+
         lines.append("")
-        lines.append("| 价位 | 类型 | 状态 | 距当前 | 测试次数 | 扫取量 | 级联风险 | 来源 |")
-        lines.append("|---|---|---|---|---|---|---|---|")
-        for lv in kl.get("levels", [])[:8]:
+        lines.append("| 价位 | 级别 | 类型 | 状态 | 距当前 | 共振分 | 来源数 | 测试 | 扫取量 | 级联风险 | 来源 |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        for lv in kl.get("levels", [])[:10]:
             side_cn = "支撑" if lv.get("side") == "support" else "阻力"
             state_cn = {
                 "idle": "待观察", "approaching": "正接近",
@@ -811,13 +796,17 @@ def build_user_prompt(snapshot: dict) -> str:
                 "bounced": "已反弹", "broken": "已突破",
                 "flipped": "已翻转",
             }.get(lv.get("state", ""), lv.get("state", ""))
+            tier = lv.get("strength_tier", "C")
+            score = lv.get("confluence_score", 0)
+            src_cnt = lv.get("source_count", 0)
             cascade_str = f"{lv.get('cascade_risk', 0):.0%}" if lv.get("cascade_risk", 0) > 0 else "低"
-            sweep_str = f"${lv.get('sweep_usd', 0)/1e6:.1f}M" if lv.get("sweep_usd", 0) > 0 else "-"
+            sweep_usd = lv.get("sweep_usd", 0)
+            sweep_str = _fmt_usd_for_prompt(sweep_usd) if sweep_usd > 0 else "-"
             sources = ", ".join(lv.get("sources", [])[:3])
             lines.append(
-                f"| ${lv.get('price', 0):,.0f} | {side_cn} | {state_cn} | "
-                f"{lv.get('distance_pct', 0):+.2f}% | {lv.get('test_count', 0)} | "
-                f"{sweep_str} | {cascade_str} | {sources} |"
+                f"| ${lv.get('price', 0):,.0f} | {tier} | {side_cn} | {state_cn} | "
+                f"{lv.get('distance_pct', 0):+.2f}% | {score:.0f} | {src_cnt} | "
+                f"{lv.get('test_count', 0)} | {sweep_str} | {cascade_str} | {sources} |"
             )
 
         kl_signals = kl.get("signals", [])
@@ -841,6 +830,16 @@ def build_user_prompt(snapshot: dict) -> str:
                 for w in sig.get("warnings", []):
                     lines.append(f"    ⚠ {w}")
 
+    # ── §9g2 K 线形态检测 ──
+    cp_name = snapshot.get("candlestick_pattern_name", "")
+    cp_side = snapshot.get("candlestick_pattern_side", "")
+    cp_strength = snapshot.get("candlestick_pattern_strength", 0)
+    if cp_name:
+        side_cn = "看涨" if cp_side == "support" else "看跌"
+        lines.extend(["", "### 9g2. 最新4H K线形态"])
+        lines.append(f"形态: {cp_name}（{side_cn}反转，强度 {cp_strength:.0%}）")
+        lines.append("说明: 该形态为入场确认加分项。若与关键位 SWEPT/FLIPPED/BOUNCED 共振，信号可信度提升一档。")
+
     # ── §9h 净持仓 + 合约资金流 + TD序列 ──
     np_trend = snapshot.get("net_position_trend")
     np_latest = snapshot.get("net_position_latest")
@@ -848,13 +847,13 @@ def build_user_prompt(snapshot: dict) -> str:
     nf_trend = snapshot.get("futures_coin_netflow_trend")
     td_cnt = snapshot.get("td_sequential_count")
     td_dir = snapshot.get("td_sequential_direction")
-    if any(v for v in (np_trend, nf_trend, td_cnt)):
+    if any(v is not None and v != "" for v in (np_latest, np_trend, nf_trend, td_cnt)):
         lines.extend(["", "### 9h. 净持仓 + 合约资金流 + TD序列"])
         if np_latest is not None:
-            lines.append(f"净持仓(v2): {np_latest:+.2f}M ({np_trend or ''})")
+            lines.append(f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})")
         if nf_1h is not None:
             nf_label = "资金净流入合约" if nf_1h > 0 else "资金净流出合约"
-            lines.append(f"合约净资金流(1h): ${nf_1h / 1e6:+.1f}M → {nf_label} ({nf_trend or ''})")
+            lines.append(f"合约净资金流(1h): {_fmt_usd_for_prompt(nf_1h)} → {nf_label} ({nf_trend or ''})")
         if td_cnt is not None and td_dir:
             td_label = f"TD{td_dir}计数={td_cnt}"
             if td_cnt >= 9:

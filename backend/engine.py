@@ -125,6 +125,13 @@ class CoinState:
         self.key_levels_v2: list = []
         self.key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None
         self._kl_v2_discovery_ts: float = 0.0
+        # §9h: 净持仓 + 合约资金流 + TD 序列
+        self.net_position_latest: Optional[float] = None
+        self.net_position_trend: str = ""
+        self.futures_coin_netflow_1h: Optional[float] = None
+        self.futures_coin_netflow_trend: str = ""
+        self.td_sequential_count: Optional[int] = None
+        self.td_sequential_direction: str = ""
 
 
 class Engine:
@@ -342,6 +349,18 @@ class Engine:
                 f"cg_candles_4h_{ccy}", self._poll_candles_4h, coin,
                 900, s + 8.0,
             )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_net_pos_{ccy}", self._poll_net_position, coin,
+                900, s + 9.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_coin_netflow_{ccy}", self._poll_futures_coin_netflow, coin,
+                900, s + 9.5,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_td_seq_{ccy}", self._poll_td_sequential, coin,
+                3600, s + 10.0,
+            )),
         ]
 
     async def stop(self):
@@ -555,6 +574,18 @@ class Engine:
     async def _poll_candles_4h(self, coin: CoinConfig):
         from polls.candles import poll_candles_4h
         await poll_candles_4h(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_net_position(self, coin: CoinConfig):
+        from polls.derivatives import poll_net_position
+        await poll_net_position(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_futures_coin_netflow(self, coin: CoinConfig):
+        from polls.derivatives import poll_futures_coin_netflow
+        await poll_futures_coin_netflow(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_td_sequential(self, coin: CoinConfig):
+        from polls.derivatives import poll_td_sequential
+        await poll_td_sequential(self._cg, coin, self._states[coin.ccy])
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Phase 4: 新维度
@@ -963,6 +994,7 @@ class Engine:
             liq_sweep_events=recent_sweeps,
             range_signal=state.range_signal,
             key_level_snapshot=state.key_level_snapshot,
+            key_level_snapshot_v2=state.key_level_snapshot_v2,
             liq_map_30d=state.liq_maps.get("30d"),
             rsi_14=state.rsi_14,
             macd_data=state.macd_data,
@@ -990,6 +1022,14 @@ class Engine:
             stablecoin_total_mcap=state.stablecoin_mcap.current_total if state.stablecoin_mcap else 0,
             stablecoin_7d_change_pct=self._calc_stablecoin_change(state.stablecoin_mcap),
             oi_exchange_rank=state.oi_exchange_rank.get("exchanges", []) if state.oi_exchange_rank else [],
+            candles_4h=state.candles_4h or None,
+            liq_heatmap=state.liq_heatmaps.get("24h") or state.liq_heatmaps.get("3d"),
+            net_position_latest=state.net_position_latest,
+            net_position_trend=state.net_position_trend,
+            futures_coin_netflow_1h=state.futures_coin_netflow_1h,
+            futures_coin_netflow_trend=state.futures_coin_netflow_trend,
+            td_sequential_count=state.td_sequential_count,
+            td_sequential_direction=state.td_sequential_direction,
         )
 
         result = await self._analyzer.analyze(snapshot)
