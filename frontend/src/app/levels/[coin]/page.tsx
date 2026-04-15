@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { API_BASE } from "@/lib/constants";
-import { formatPrice } from "@/lib/format";
+import { formatPrice, formatCnUsd } from "@/lib/format";
 import type {
   KeyLevelSnapshotV2,
   KeyLevelV2,
@@ -760,7 +760,7 @@ function CascadeRiskSection({
               </span>
               {lv.cascade_total_usd > 0 && (
                 <span className="text-xs text-slate-500 w-20 text-right">
-                  ${(lv.cascade_total_usd / 1e6).toFixed(0)}M
+                  {formatCnUsd(lv.cascade_total_usd)}
                 </span>
               )}
             </div>

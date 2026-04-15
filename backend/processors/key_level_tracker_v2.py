@@ -18,6 +18,7 @@ import time
 
 from models.key_level import KeyLevelSignal, KeyLevelSnapshotV2, KeyLevelV2
 from models.liquidation import LiquidationMap
+from processors.level_discovery import fmt_usd_cn
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +374,7 @@ def _generate_signal(
             sl = lv.price - atr * 1.5
             base.action = "snipe_long"
             base.reason = (
-                f"{side_cn}${lv.price:,.0f}下方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}下方流动性已被扫取({fmt_usd_cn(lv.sweep_usd)})，"
                 f"空头弹药耗尽 → A级做多"
             )
         else:
@@ -381,7 +382,7 @@ def _generate_signal(
             sl = lv.price + atr * 1.5
             base.action = "snipe_short"
             base.reason = (
-                f"{side_cn}${lv.price:,.0f}上方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}上方流动性已被扫取({fmt_usd_cn(lv.sweep_usd)})，"
                 f"多头弹药耗尽 → A级做空"
             )
         base.confidence = "A"

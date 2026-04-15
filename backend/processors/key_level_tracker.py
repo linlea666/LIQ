@@ -14,6 +14,7 @@ import time
 from models.key_level import KeyLevel, KeyLevelSignal, KeyLevelSnapshot
 from models.levels import LevelAnalysis, PriceLevel
 from models.liquidation import LiquidationMap
+from processors.level_discovery import fmt_usd_cn
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +421,7 @@ def _generate_signal(
             tp1 = price + atr * 3 if price > 0 else entry + atr * 3
             base.action = "snipe_long"
             base.reason = (
-                f"{side_cn}${lv.price:,.0f}下方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}下方流动性已被扫取({fmt_usd_cn(lv.sweep_usd)})，"
                 f"空头弹药耗尽 → A级做多"
             )
         else:
@@ -429,7 +430,7 @@ def _generate_signal(
             tp1 = price - atr * 3 if price > 0 else entry - atr * 3
             base.action = "snipe_short"
             base.reason = (
-                f"{side_cn}${lv.price:,.0f}上方流动性已被扫取(${lv.sweep_usd/1e6:.1f}M)，"
+                f"{side_cn}${lv.price:,.0f}上方流动性已被扫取({fmt_usd_cn(lv.sweep_usd)})，"
                 f"多头弹药耗尽 → A级做空"
             )
         base.confidence = "A"
@@ -453,7 +454,7 @@ def _generate_signal(
             if has_sweep:
                 base.reason = (
                     f"{side_cn}${lv.price:,.0f}流动性扫取后反弹确认"
-                    f"(${lv.sweep_usd/1e6:.1f}M) → A级做多"
+                    f"({fmt_usd_cn(lv.sweep_usd)}) → A级做多"
                 )
             else:
                 base.reason = f"{side_cn}${lv.price:,.0f}反弹确认(第{lv.test_count}次测试) → B级做多"
@@ -465,7 +466,7 @@ def _generate_signal(
             if has_sweep:
                 base.reason = (
                     f"{side_cn}${lv.price:,.0f}流动性扫取后受阻确认"
-                    f"(${lv.sweep_usd/1e6:.1f}M) → A级做空"
+                    f"({fmt_usd_cn(lv.sweep_usd)}) → A级做空"
                 )
             else:
                 base.reason = f"{side_cn}${lv.price:,.0f}受阻确认(第{lv.test_count}次测试) → B级做空"
