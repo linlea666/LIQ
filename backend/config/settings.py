@@ -50,6 +50,10 @@ class BinanceSourceConfig:
     use_for_ticker: bool = True
     use_for_klines: bool = True
     use_for_basis: bool = True
+    ws_enabled: bool = True
+    ws_url: str = "wss://fstream.binance.com/ws/!ticker@arr"
+    ws_reconnect_min_sec: int = 2
+    ws_reconnect_max_sec: int = 30
 
 
 @dataclass(frozen=True)
@@ -184,6 +188,10 @@ def _build_settings(raw: dict) -> Settings:
         use_for_ticker=bool(bn_raw.get("use_for_ticker", True)),
         use_for_klines=bool(bn_raw.get("use_for_klines", True)),
         use_for_basis=bool(bn_raw.get("use_for_basis", True)),
+        ws_enabled=bool(bn_raw.get("ws_enabled", True)),
+        ws_url=bn_raw.get("ws_url", "wss://fstream.binance.com/ws/!ticker@arr"),
+        ws_reconnect_min_sec=int(bn_raw.get("ws_reconnect_min_sec", 2)),
+        ws_reconnect_max_sec=int(bn_raw.get("ws_reconnect_max_sec", 30)),
     )
 
     processors = ProcessorsConfig(**raw["processors"])

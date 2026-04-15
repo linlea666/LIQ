@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
 import aiohttp
@@ -16,9 +18,15 @@ logger = logging.getLogger(__name__)
 class BinanceFuturesSource(DataSource):
     """轻量 Binance Futures 客户端，仅封装本次迁移所需接口。"""
 
-    def __init__(self, base_url: str, timeout_sec: int = 10):
+    def __init__(
+        self,
+        base_url: str,
+        timeout_sec: int = 10,
+        ws_url: str = "wss://fstream.binance.com/ws/!ticker@arr",
+    ):
         super().__init__(name="binance_futures", timeout_sec=timeout_sec, max_retries=2)
         self._base_url = base_url.rstrip("/")
+        self._ws_url = ws_url
 
     def get_poll_interval(self) -> int:
         return 1
@@ -64,6 +72,41 @@ class BinanceFuturesSource(DataSource):
         data = await self._request("/fapi/v1/premiumIndex", {"symbol": symbol})
         return data if isinstance(data, dict) else None
 
+    async def stream_tickers(
+        self, watched_symbols: set[str] | None = None,
+    ) -> AsyncIterator[list[dict]]:
+        """订阅 Binance !ticker@arr 实时流，产出简化后的 ticker 事件列表。"""
+        session = await self.get_session()
+        try:
+            async with session.ws_connect(self._ws_url, heartbeat=30) as ws:
+                logger.info("Binance WS connected | url=%s", self._ws_url)
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        payload = json.loads(msg.data)
+                        rows = payload.get("data") if isinstance(payload, dict) else payload
+                        if not isinstance(rows, list):
+                            continue
+                        events = []
+                        for item in rows:
+                            if not isinstance(item, dict):
+                                continue
+                            symbol = str(item.get("s", item.get("symbol", "")))
+                            if not symbol:
+                                continue
+                            if watched_symbols and symbol not in watched_symbols:
+                                continue
+                            events.append(item)
+                        if events:
+                            self._mark_success()
+                            yield events
+                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        self._mark_failure()
+                        break
+        except Exception:
+            self._mark_failure()
+            logger.warning("Binance WS stream failed", exc_info=True)
+            raise
+
 
 def create_binance_source() -> BinanceFuturesSource:
     from config.settings import get_settings
@@ -72,4 +115,5 @@ def create_binance_source() -> BinanceFuturesSource:
     return BinanceFuturesSource(
         base_url=cfg.base_url,
         timeout_sec=cfg.timeout_sec,
+        ws_url=cfg.ws_url,
     )

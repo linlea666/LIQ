@@ -160,6 +160,8 @@ class Engine:
 
         self._poll_cfg = self._settings.coinglass.poll_intervals
         self._logged_keys: set[str] = set()
+        self._bn_ws_last_push_ts: dict[str, float] = {}
+        self._bn_ws_min_push_interval_sec = 0.5
 
         self._data_dir = os.path.join(os.path.dirname(__file__), "data")
         self._ai_history_file = os.path.join(self._data_dir, "ai_history.json")
@@ -228,6 +230,7 @@ class Engine:
             asyncio.create_task(self._grace_check_loop()),
             asyncio.create_task(self._cache_persist_loop()),
             asyncio.create_task(self._source_observe_loop()),
+            asyncio.create_task(self._binance_ticker_ws_loop()),
         ]
 
         # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
@@ -464,6 +467,82 @@ class Engine:
                 self._cg.save_cache_to_disk()
             except Exception:
                 logger.error("Cache persist failed", exc_info=True)
+
+    async def _binance_ticker_ws_loop(self):
+        """Binance ticker 实时流：仅负责价格更新，不影响 Coinglass 轮询链路。"""
+        bn_cfg = self._settings.binance
+        if not bn_cfg.ws_enabled or not bn_cfg.use_for_ticker:
+            logger.info(
+                "Binance WS ticker disabled | ws_enabled=%s use_for_ticker=%s",
+                bn_cfg.ws_enabled, bn_cfg.use_for_ticker,
+            )
+            return
+
+        symbol_to_ccy = {
+            self._settings.get_coin(ccy).symbol_cg_pair: ccy
+            for ccy in self._settings.supported_coins
+        }
+        watched_symbols = set(symbol_to_ccy.keys())
+        backoff = max(1, bn_cfg.ws_reconnect_min_sec)
+
+        logger.info("Binance WS ticker loop started | symbols=%s", sorted(watched_symbols))
+        while self._running:
+            try:
+                async for events in self._bn.stream_tickers(watched_symbols):
+                    if not self._running:
+                        break
+                    now = time.time()
+                    backoff = max(1, bn_cfg.ws_reconnect_min_sec)
+                    for item in events:
+                        symbol = str(item.get("s", item.get("symbol", "")))
+                        ccy = symbol_to_ccy.get(symbol)
+                        if not ccy:
+                            continue
+                        state = self._states.get(ccy)
+                        if not state:
+                            continue
+                        try:
+                            price = float(item.get("c", item.get("lastPrice", 0)))
+                            if price <= 0:
+                                continue
+                            chg_pct = float(item.get("P", item.get("priceChangePercent", 0)))
+                            open_24h = price / (1 + chg_pct / 100) if chg_pct != 0 else price
+                            ticker = TickerData(
+                                coin=ccy,
+                                ts=int(item.get("E", now * 1000)),
+                                last=price,
+                                high_24h=float(item.get("h", item.get("highPrice", price))),
+                                low_24h=float(item.get("l", item.get("lowPrice", price))),
+                                vol_24h=float(item.get("q", item.get("quoteVolume", 0))),
+                                change_24h=round(price - open_24h, 2),
+                                change_pct_24h=round(chg_pct, 2),
+                            )
+                            state.ticker = ticker
+                            if "binance_ws_ticker_ready" not in state._log_once_keys:
+                                state._log_once_keys.add("binance_ws_ticker_ready")
+                                logger.info(
+                                    "Binance WS ticker 生效 | coin=%s last=%.4f chg24h=%.2f%%",
+                                    ccy, price, chg_pct,
+                                )
+                            last_push = self._bn_ws_last_push_ts.get(ccy, 0.0)
+                            if now - last_push >= self._bn_ws_min_push_interval_sec:
+                                self._bn_ws_last_push_ts[ccy] = now
+                                await push_to_coin(
+                                    ccy,
+                                    "market_update",
+                                    {"coin": ccy, "ts": int(now), "ticker": ticker.model_dump()},
+                                )
+                        except (TypeError, ValueError):
+                            continue
+                if self._running:
+                    logger.warning("Binance WS ticker stream ended, reconnecting...")
+            except Exception:
+                logger.warning("Binance WS ticker loop error", exc_info=True)
+
+            if not self._running:
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max(1, bn_cfg.ws_reconnect_max_sec))
 
     async def _source_observe_loop(self):
         """每分钟输出一次数据源与关键数据就绪心跳。"""

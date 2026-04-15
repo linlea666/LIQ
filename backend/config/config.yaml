@@ -51,6 +51,10 @@ sources:
     use_for_ticker: true
     use_for_klines: true
     use_for_basis: true
+    ws_enabled: true
+    ws_url: "wss://fstream.binance.com/ws/!ticker@arr"
+    ws_reconnect_min_sec: 2
+    ws_reconnect_max_sec: 30
 
 processors:
   cvd:
