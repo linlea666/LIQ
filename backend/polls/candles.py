@@ -156,7 +156,7 @@ async def poll_indicators(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
     """本地计算技术指标：RSI/MACD/MA/EMA/ATR/BOLL（不消耗 Coinglass 配额）。"""
-    del cg, coin, bn
+    del cg, bn
 
     if state.candles_daily and len(state.candles_daily) >= 30:
         closes_1d = [c.close for c in state.candles_daily]
