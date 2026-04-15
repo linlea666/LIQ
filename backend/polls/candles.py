@@ -211,19 +211,29 @@ async def poll_indicators(
         if boll_4h:
             state.boll_4h_data = boll_4h
 
+    if state.rsi_14 is not None and state.macd_data and state.boll_data:
+        if "local_indicators_ready" not in state._log_once_keys:
+            state._log_once_keys.add("local_indicators_ready")
+            logger.info(
+                "Binance技术指标-本地计算生效 | coin=%s rsi=%.2f macd_hist=%.4f atr=%.4f ma60=%.2f ma120=%.2f",
+                coin.ccy,
+                state.rsi_14 or 0.0,
+                float(state.macd_data.get("histogram", 0.0)),
+                state.atr or 0.0,
+                state.ma60_daily_cg or 0.0,
+                state.ma120_daily_cg or 0.0,
+            )
+
 
 async def poll_candles_4h(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
     """获取 4H K 线用于 Swing 检测 / 中期 Fibonacci / Pivot Points。"""
-    data = None
-    if bn:
-        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="4h", limit=200)
-    if not data:
-        data = await cg.fetch_price_history(
-            coin.exchange_primary, coin.symbol_cg_pair,
-            interval="4h", limit=200,
-        )
+    del cg
+    if not bn:
+        logger.warning("Binance K线源未注入 | coin=%s interval=4h", coin.ccy)
+        return
+    data = await bn.fetch_klines(coin.symbol_cg_pair, interval="4h", limit=200)
     if not data:
         return
     raw = parse_candles(data)
@@ -233,20 +243,20 @@ async def poll_candles_4h(
                        l=c["l"], c=c["c"], vol=c["vol"])
             for c in raw
         ]
+        if "binance_klines_4h_ready" not in state._log_once_keys:
+            state._log_once_keys.add("binance_klines_4h_ready")
+            logger.info("Binance K线生效 | coin=%s interval=4h bars=%d", coin.ccy, len(state.candles_4h))
 
 
 async def poll_candles_1h(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
     """获取 1H K线用于 Volume Profile / ATR 计算。"""
-    data = None
-    if bn:
-        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1h", limit=200)
-    if not data:
-        data = await cg.fetch_price_history(
-            coin.exchange_primary, coin.symbol_cg_pair,
-            interval="1h", limit=200,
-        )
+    del cg
+    if not bn:
+        logger.warning("Binance K线源未注入 | coin=%s interval=1h", coin.ccy)
+        return
+    data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1h", limit=200)
     if not data:
         return
     raw = parse_candles(data)
@@ -262,6 +272,9 @@ async def poll_candles_1h(
         for c in raw
     ]
     state.candles_1h = candle_models
+    if "binance_klines_1h_ready" not in state._log_once_keys:
+        state._log_once_keys.add("binance_klines_1h_ready")
+        logger.info("Binance K线生效 | coin=%s interval=1h bars=%d", coin.ccy, len(state.candles_1h))
     vp = calc_volume_profile(candle_models, coin=coin.ccy)
     if vp:
         state.vp = vp
@@ -277,14 +290,11 @@ async def poll_candles_daily(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
     """获取日线 K线用于 range_signal 箱体检测。"""
-    data = None
-    if bn:
-        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1d", limit=150)
-    if not data:
-        data = await cg.fetch_price_history(
-            coin.exchange_primary, coin.symbol_cg_pair,
-            interval="1d", limit=150,
-        )
+    del cg
+    if not bn:
+        logger.warning("Binance K线源未注入 | coin=%s interval=1d", coin.ccy)
+        return
+    data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1d", limit=150)
     if not data:
         return
     raw = parse_candles(data)
@@ -294,20 +304,20 @@ async def poll_candles_daily(
                        l=c["l"], c=c["c"], vol=c["vol"])
             for c in raw
         ]
+        if "binance_klines_1d_ready" not in state._log_once_keys:
+            state._log_once_keys.add("binance_klines_1d_ready")
+            logger.info("Binance K线生效 | coin=%s interval=1d bars=%d", coin.ccy, len(state.candles_daily))
 
 
 async def poll_candles_weekly(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
     """获取周线 K线用于 range_signal 周线 MA60。"""
-    data = None
-    if bn:
-        data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1w", limit=70)
-    if not data:
-        data = await cg.fetch_price_history(
-            coin.exchange_primary, coin.symbol_cg_pair,
-            interval="1w", limit=70,
-        )
+    del cg
+    if not bn:
+        logger.warning("Binance K线源未注入 | coin=%s interval=1w", coin.ccy)
+        return
+    data = await bn.fetch_klines(coin.symbol_cg_pair, interval="1w", limit=70)
     if not data:
         return
     raw = parse_candles(data)
@@ -317,3 +327,6 @@ async def poll_candles_weekly(
                        l=c["l"], c=c["c"], vol=c["vol"])
             for c in raw
         ]
+        if "binance_klines_1w_ready" not in state._log_once_keys:
+            state._log_once_keys.add("binance_klines_1w_ready")
+            logger.info("Binance K线生效 | coin=%s interval=1w bars=%d", coin.ccy, len(state.candles_weekly))

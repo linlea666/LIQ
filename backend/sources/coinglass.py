@@ -70,6 +70,13 @@ class CoinglassSource(DataSource):
     })
 
     _MIN_CACHE_TTL = 300
+    _LONG_CACHE_PREFIXES: tuple[str, ...] = (
+        "/api/etf/",
+        "/api/index/",
+        "/api/hyperliquid/",
+        "/api/option/",
+        "/api/chain/",
+    )
 
     def __init__(self, base_url: str, api_key: str, timeout_sec: int = 15,
                  rate_per_min: int = 10):
@@ -158,6 +165,8 @@ class CoinglassSource(DataSource):
             cache_ttl = max(cache_ttl, self._MIN_CACHE_TTL)
         elif cache_ttl <= 0:
             cache_ttl = 30
+        if path.startswith(self._LONG_CACHE_PREFIXES):
+            cache_ttl = max(cache_ttl, 900)
 
         if cache_ttl > 0:
             ck = self._cache_key(path, params)

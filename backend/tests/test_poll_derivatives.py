@@ -106,15 +106,14 @@ class TestPollLSRatio:
 
 class TestPollBasis:
 
-    SAMPLE = [
-        {"time": 1700000000, "close_basis": 0.15, "annualized_basis": 5.5},
-    ]
+    SAMPLE = {"markPrice": "65000", "indexPrice": "64900"}
 
     @pytest.mark.asyncio
     async def test_basis_parsed(self, cg, btc_state):
-        cg.fetch_basis_history = AsyncMock(return_value=self.SAMPLE)
+        bn = MagicMock()
+        bn.fetch_premium_index = AsyncMock(return_value=self.SAMPLE)
         coin = _make_coin()
-        await poll_basis(cg, coin, btc_state)
+        await poll_basis(cg, coin, btc_state, bn=bn)
 
         assert btc_state.basis is not None
-        assert btc_state.basis.basis_pct == 0.15
+        assert btc_state.basis.basis_pct == pytest.approx(round((65000 - 64900) / 64900 * 100, 4), abs=1e-4)

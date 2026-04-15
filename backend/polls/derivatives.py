@@ -53,12 +53,12 @@ async def poll_ticker_all(
     logged_keys: set[str],
     bn: BinanceFuturesSource | None = None,
 ) -> None:
-    """coins-markets 一次获取全币种行情。"""
-    data = None
-    if bn:
-        data = await bn.fetch_tickers_24h()
-    if not data:
-        data = await cg.fetch_coins_markets()
+    """coins-markets 一次获取全币种行情（纯 Binance，不回退 Coinglass）。"""
+    del cg
+    if not bn:
+        logger.warning("Binance ticker 源未注入，ticker 跳过")
+        return
+    data = await bn.fetch_tickers_24h()
     if not data:
         return
     log_api_fields_once("ticker-markets", data, logged_keys)
@@ -104,6 +104,12 @@ async def poll_ticker_all(
                 )
                 state.oi_history.append(snapshot)
                 percentile.push(ccy, "oi", oi_usd)
+            if "binance_ticker_ready" not in state._log_once_keys:
+                state._log_once_keys.add("binance_ticker_ready")
+                logger.info(
+                    "Binance ticker 生效 | coin=%s last=%.4f chg24h=%.2f%%",
+                    ccy, price, chg_pct,
+                )
         except (ValueError, KeyError):
             continue
 
@@ -300,48 +306,37 @@ async def poll_basis(
     state: CoinState,
     bn: BinanceFuturesSource | None = None,
 ) -> None:
-    """获取期现溢价：优先 Binance premiumIndex，本地计算 basis；失败回退 Coinglass。"""
-    if bn:
-        try:
-            premium = await bn.fetch_premium_index(coin.symbol_cg_pair)
-            if premium:
-                mark_price = float(premium.get("markPrice", 0))
-                index_price = float(premium.get("indexPrice", 0))
-                if mark_price > 0 and index_price > 0:
-                    basis_pct = (mark_price - index_price) / index_price * 100
-                    interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
-                    state.basis = BasisData(
-                        coin=coin.ccy,
-                        ts=int(time.time()),
-                        mark_price=mark_price,
-                        index_price=index_price,
-                        basis_pct=round(basis_pct, 4),
-                        interpretation=interp,
-                    )
-                    return
-        except Exception:
-            logger.debug("poll_basis from binance failed, fallback coinglass", exc_info=True)
-
-    data = await cg.fetch_basis_history(
-        coin.exchange_primary, coin.symbol_cg_pair,
-        interval="5m", limit=1,
-    )
-    if not data:
+    """获取期现溢价：纯 Binance premiumIndex 本地计算（不回退 Coinglass）。"""
+    del cg
+    if not bn:
+        logger.warning("Binance basis 源未注入 | coin=%s", coin.ccy)
         return
     try:
-        last = data[-1]
-        basis_pct = float(last.get("close_basis", last.get("basisRate", last.get("basis", 0))))
-        price = state.ticker.last if state.ticker else 0
+        premium = await bn.fetch_premium_index(coin.symbol_cg_pair)
+        if not premium:
+            return
+        mark_price = float(premium.get("markPrice", 0))
+        index_price = float(premium.get("indexPrice", 0))
+        if mark_price <= 0 or index_price <= 0:
+            return
+        basis_pct = (mark_price - index_price) / index_price * 100
         interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
         state.basis = BasisData(
-            coin=coin.ccy, ts=int(time.time()),
-            mark_price=price * (1 + basis_pct / 200),
-            index_price=price * (1 - basis_pct / 200),
+            coin=coin.ccy,
+            ts=int(time.time()),
+            mark_price=mark_price,
+            index_price=index_price,
             basis_pct=round(basis_pct, 4),
             interpretation=interp,
         )
-    except (ValueError, KeyError, IndexError):
-        pass
+        if "binance_basis_ready" not in state._log_once_keys:
+            state._log_once_keys.add("binance_basis_ready")
+            logger.info(
+                "Binance basis 生效 | coin=%s basis_pct=%.4f mark=%.2f index=%.2f",
+                coin.ccy, basis_pct, mark_price, index_price,
+            )
+    except Exception:
+        logger.warning("poll_basis (binance) failed | coin=%s", coin.ccy, exc_info=True)
 
 
 async def poll_oi_exchange_rank(
@@ -387,13 +382,19 @@ async def poll_net_position(
     """拉取净持仓 v2 (1h)，取最新值与趋势。"""
     try:
         rows = await cg.fetch_net_position_v2_history(
-            exchange="Binance", symbol=coin.symbol_cg, interval="1h", limit=24,
+            exchange="Binance", symbol=coin.symbol_cg_pair, interval="1h", limit=24,
         )
         if not rows:
             return
         vals = []
         for r in rows:
+            if not isinstance(r, dict):
+                continue
             v = r.get("netPosition", r.get("net_position"))
+            if v is None:
+                v = r.get("netPositionChangeCum", r.get("net_position_change_cum"))
+            if v is None:
+                v = r.get("netPositionChange", r.get("net_position_change"))
             if v is not None:
                 vals.append(float(v))
         if not vals:
@@ -422,12 +423,28 @@ async def poll_futures_coin_netflow(
     """拉取合约币种净资金流 (1h)，取最近 1h 净值与趋势。"""
     try:
         rows = await cg.fetch_futures_coin_netflow(
-            symbol=coin.symbol_cg, interval="1h", limit=24,
+            symbol=coin.symbol_cg_pair, interval="1h", limit=24,
         )
         if not rows:
             return
+        if isinstance(rows, dict):
+            v1h = rows.get("net_flow_usd_1h", rows.get("netFlowUsd1h"))
+            if v1h is not None:
+                state.futures_coin_netflow_1h = float(v1h)
+            v15m = rows.get("net_flow_usd_15m", rows.get("netFlowUsd15m"))
+            v4h = rows.get("net_flow_usd_4h", rows.get("netFlowUsd4h"))
+            trend_votes = [x for x in (v15m, v1h, v4h) if x is not None]
+            if trend_votes:
+                pos = sum(1 for x in trend_votes if float(x) > 0)
+                state.futures_coin_netflow_trend = "持续流入" if pos >= 2 else "持续流出"
+            state.poll_failures.pop("coin_netflow", None)
+            return
+        if not isinstance(rows, list):
+            return
         vals = []
         for r in rows:
+            if not isinstance(r, dict):
+                continue
             v = r.get("netflow", r.get("netFlow", r.get("value")))
             if v is not None:
                 vals.append(float(v))
@@ -442,6 +459,7 @@ async def poll_futures_coin_netflow(
                 state.futures_coin_netflow_trend = "持续流出"
             else:
                 state.futures_coin_netflow_trend = "交替"
+        state.poll_failures.pop("coin_netflow", None)
     except Exception:
         logger.warning("poll_futures_coin_netflow failed", exc_info=True)
         state.poll_failures["coin_netflow"] = "API调用失败"
@@ -453,11 +471,11 @@ async def poll_td_sequential(
     """拉取 TD 序列 (1d)，取最新计数与方向。"""
     try:
         rows = await cg.fetch_td_sequential(
-            exchange="Binance", symbol=coin.symbol_cg, interval="1d", limit=10,
+            exchange="Binance", symbol=coin.symbol_cg_pair, interval="1d", limit=10,
         )
         if not rows:
             return
-        latest = rows[-1] if isinstance(rows, list) else None
+        latest = rows[-1] if isinstance(rows, list) and rows else None
         if not latest:
             return
         count = latest.get("td_count", latest.get("tdCount", latest.get("count")))
@@ -467,6 +485,7 @@ async def poll_td_sequential(
             state.td_sequential_count = int(count)
         if direction:
             state.td_sequential_direction = str(direction)
+        state.poll_failures.pop("td_sequential", None)
     except Exception:
         logger.warning("poll_td_sequential failed", exc_info=True)
         state.poll_failures["td_sequential"] = "API调用失败"

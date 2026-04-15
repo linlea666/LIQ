@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 import aiohttp
@@ -28,14 +29,19 @@ class BinanceFuturesSource(DataSource):
     async def _request(self, path: str, params: Optional[dict] = None) -> Optional[Any]:
         session = await self.get_session()
         url = f"{self._base_url}{path}"
+        t0 = time.time()
         try:
             async with session.get(url, params=params) as resp:
                 resp.raise_for_status()
-                return await resp.json()
+                data = await resp.json()
+                self._mark_success((time.time() - t0) * 1000)
+                return data
         except aiohttp.ClientResponseError:
+            self._mark_failure()
             logger.error("Binance HTTP error | path=%s", path, exc_info=True)
             return None
         except Exception:
+            self._mark_failure()
             logger.error("Binance request failed | path=%s", path, exc_info=True)
             return None
 
