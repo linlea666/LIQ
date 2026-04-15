@@ -18,6 +18,8 @@ import time
 
 from models.key_level import KeyLevelSignal, KeyLevelSnapshotV2, KeyLevelV2
 from models.liquidation import LiquidationMap
+from models.market import CandleData
+from processors.candlestick_patterns import PatternResult, detect_reversal_pattern
 from processors.level_discovery import fmt_usd_cn
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ def run_tracker_v2(
     taker_sell_vol: float = 0,
     oi_change_pct_1h: float = 0,
     temperature_score: float = 50,
+    candles_4h: list[CandleData] | None = None,
     cfg: dict | None = None,
 ) -> KeyLevelSnapshotV2:
     """在 confluence_scoring 产出的快照基础上，运行状态机 + 信号生成。"""
@@ -75,7 +78,7 @@ def run_tracker_v2(
     signals: list[KeyLevelSignal] = []
     opposite_levels = snapshot.levels
     for lv in snapshot.levels:
-        sig = _generate_signal(lv, price, atr, opposite_levels, temperature_score, cfg, now)
+        sig = _generate_signal(lv, price, atr, opposite_levels, temperature_score, candles_4h, cfg, now)
         if sig:
             signals.append(sig)
 
@@ -318,6 +321,7 @@ def _generate_signal(
     atr: float,
     all_levels: list[KeyLevelV2],
     temperature: float,
+    candles_4h: list[CandleData] | None,
     cfg: dict,
     now: int,
 ) -> KeyLevelSignal | None:
@@ -398,24 +402,40 @@ def _generate_signal(
 
     if lv.state == "bounced":
         has_sweep = lv.sweep_usd > 0
+        pattern = detect_reversal_pattern(candles_4h, lv.side)
         tp1_price = _find_opposite_target(lv, price, all_levels, atr)
+        direction = "做多" if is_support else "做空"
+
         if is_support:
             entry = lv.price + atr * 0.2
             sl = lv.price - atr * 1.2
             base.action = "snipe_long"
-            if has_sweep:
-                base.reason = f"{side_cn}${lv.price:,.0f}流动性扫取后反弹确认 → A级做多"
-            else:
-                base.reason = f"{side_cn}${lv.price:,.0f}反弹确认(第{lv.test_count}次测试) → B级做多"
         else:
             entry = lv.price - atr * 0.2
             sl = lv.price + atr * 1.2
             base.action = "snipe_short"
-            if has_sweep:
-                base.reason = f"{side_cn}${lv.price:,.0f}流动性扫取后受阻确认 → A级做空"
-            else:
-                base.reason = f"{side_cn}${lv.price:,.0f}受阻确认(第{lv.test_count}次测试) → B级做空"
-        base.confidence = "A" if has_sweep else "B"
+
+        if has_sweep and pattern.found:
+            base.confidence = "A"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}流动性扫取+{pattern.name}双重确认"
+                f" → A级{direction}"
+            )
+        elif has_sweep:
+            base.confidence = "A"
+            cn = "反弹确认" if is_support else "受阻确认"
+            base.reason = f"{side_cn}${lv.price:,.0f}流动性扫取后{cn} → A级{direction}"
+        elif pattern.found:
+            base.confidence = "A"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}{pattern.name}反转确认"
+                f"(第{lv.test_count}次测试) → A级{direction}"
+            )
+        else:
+            base.confidence = "B"
+            cn = "反弹确认" if is_support else "受阻确认"
+            base.reason = f"{side_cn}${lv.price:,.0f}{cn}(第{lv.test_count}次测试) → B级{direction}"
+
         base.entry_price = round(entry, 2)
         base.stop_loss = round(sl, 2)
         base.tp1 = round(tp1_price, 2)
@@ -432,17 +452,25 @@ def _generate_signal(
         return base
 
     if lv.state == "flipped":
+        pattern = detect_reversal_pattern(candles_4h, lv.side)
         tp1_price = _find_opposite_target(lv, price, all_levels, atr)
+        pat_tag = f"+{pattern.name}" if pattern.found else ""
         if lv.side == "resistance":
             entry = lv.price - atr * 0.1
             sl = lv.price + atr * 1.2
             base.action = "flip_short"
-            base.reason = f"原支撑${lv.price:,.0f}已翻转为阻力，价格回踩被拒 → A级翻转做空"
+            base.reason = (
+                f"原支撑${lv.price:,.0f}已翻转为阻力，回踩被拒{pat_tag}"
+                f" → A级翻转做空"
+            )
         else:
             entry = lv.price + atr * 0.1
             sl = lv.price - atr * 1.2
             base.action = "flip_long"
-            base.reason = f"原阻力${lv.price:,.0f}已翻转为支撑，价格回踩获撑 → A级翻转做多"
+            base.reason = (
+                f"原阻力${lv.price:,.0f}已翻转为支撑，回踩获撑{pat_tag}"
+                f" → A级翻转做多"
+            )
         base.confidence = "A"
         base.entry_price = round(entry, 2)
         base.stop_loss = round(sl, 2)

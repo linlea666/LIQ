@@ -724,6 +724,7 @@ class Engine:
             taker_sell_vol=taker_sell,
             oi_change_pct_1h=oi_change_1h,
             temperature_score=temp_score,
+            candles_4h=state.candles_4h or None,
             cfg=kl_cfg if kl_cfg else None,
         )
 
