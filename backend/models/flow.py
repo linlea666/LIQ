@@ -247,7 +247,7 @@ class RangeSignalData(BaseModel):
     """箱体信号 V2 — 基于关键位多维共振 + 状态机 + 突破概率"""
     ts: int
 
-    # ── 箱体边界（来自关键位 V2 的强支撑/阻力）──
+    # ── 核心箱体边界（结构性关键位：swing/VP/MA/Fib 优先，宽度 ≥ 2.5%）──
     range_upper: Optional[float] = None
     range_upper_source: str = ""
     range_upper_tier: str = ""          # "S"/"A"/"B"
@@ -258,6 +258,15 @@ class RangeSignalData(BaseModel):
     range_lower_tier: str = ""
     range_lower_score: float = 0
     range_lower_test_count: int = 0
+
+    # ── 微观区间（最近的 S/A/B 级关键位，短期交易参考）──
+    micro_upper: Optional[float] = None
+    micro_upper_source: str = ""
+    micro_upper_tier: str = ""
+    micro_lower: Optional[float] = None
+    micro_lower_source: str = ""
+    micro_lower_tier: str = ""
+    micro_width_pct: float = 0
 
     # ── 价格位置 ──
     price_position: str = "middle"      # "near_upper" / "near_lower" / "middle" / "above" / "below"

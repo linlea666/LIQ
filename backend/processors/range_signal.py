@@ -29,10 +29,20 @@ _ST_BREAKING_UP = "breaking_up"
 _ST_BREAKING_DOWN = "breaking_down"
 _ST_BROKEN = "broken"
 
-_MIN_BOX_WIDTH_PCT = 1.0   # 箱体最小宽度 1%
-_MAX_BOX_WIDTH_PCT = 15.0  # 箱体最大宽度 15%
+_MIN_BOX_WIDTH_PCT = 2.5   # 核心箱体最小宽度 2.5%
+_MAX_BOX_WIDTH_PCT = 15.0  # 核心箱体最大宽度 15%
 _MIN_BOUNDARY_SCORE = 15   # 边界最小共振分
 _MATURE_HOURS = 72         # 72h 后进入 mature
+
+_CAPITAL_KEYWORDS = ("清算", "liq", "orderbook", "挂单", "大额")
+
+def _is_structural_source(sources: list[str]) -> bool:
+    """判断 level 来源是否包含结构性维度（非纯资金/清算）。"""
+    for s in sources:
+        s_lower = s.lower()
+        if not any(kw in s_lower for kw in _CAPITAL_KEYWORDS):
+            return True
+    return False
 
 def calculate_range_signal(
     kl_snapshot: KeyLevelSnapshotV2 | None,
@@ -68,11 +78,15 @@ def calculate_range_signal(
     near_pct = cfg.get("near_boundary_pct", 1.5)
     now_ts = int(time.time())
 
-    # ── 1. 从关键位提取箱体边界 ──
-    upper_lv, lower_lv = _extract_box_boundaries(kl_snapshot, current_price)
+    # ── 1. 从关键位提取双层箱体边界 ──
+    (upper_lv, lower_lv), (micro_up_lv, micro_dn_lv) = _extract_dual_boundaries(
+        kl_snapshot, current_price,
+    )
 
     range_upper = upper_lv.price if upper_lv else None
     range_lower = lower_lv.price if lower_lv else None
+    micro_upper = micro_up_lv.price if micro_up_lv else None
+    micro_lower = micro_dn_lv.price if micro_dn_lv else None
 
     # ── 2. MA 计算（保留洪七公参考）──
     ma60_daily = ma120_daily = ma60_weekly = None
@@ -175,6 +189,10 @@ def calculate_range_signal(
         breakout_prob, breakout_bias,
     )
 
+    micro_width = 0.0
+    if micro_upper and micro_lower and micro_upper > micro_lower:
+        micro_width = (micro_upper - micro_lower) / current_price * 100
+
     return RangeSignalData(
         ts=now_ts,
         range_upper=_round_opt(range_upper),
@@ -187,6 +205,13 @@ def calculate_range_signal(
         range_lower_tier=lower_lv.strength_tier if lower_lv else "",
         range_lower_score=lower_lv.confluence_score if lower_lv else 0,
         range_lower_test_count=lower_lv.test_count if lower_lv else 0,
+        micro_upper=_round_opt(micro_upper),
+        micro_upper_source=_build_source_str(micro_up_lv),
+        micro_upper_tier=micro_up_lv.strength_tier if micro_up_lv else "",
+        micro_lower=_round_opt(micro_lower),
+        micro_lower_source=_build_source_str(micro_dn_lv),
+        micro_lower_tier=micro_dn_lv.strength_tier if micro_dn_lv else "",
+        micro_width_pct=round(micro_width, 2),
         price_position=price_pos,
         price_position_pct=round(pos_pct, 1),
         box_state=box_state,
@@ -228,20 +253,25 @@ def calculate_range_signal(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def _extract_box_boundaries(
-    snapshot: KeyLevelSnapshotV2 | None,
+_BoundaryPair = tuple[Optional[KeyLevelV2], Optional[KeyLevelV2]]
+
+
+def _extract_dual_boundaries(
+    snapshot: Optional[KeyLevelSnapshotV2],
     price: float,
-) -> tuple[KeyLevelV2 | None, KeyLevelV2 | None]:
-    """从关键位快照中提取箱体上下沿：当前价附近最近的强支撑/阻力。
+) -> tuple[_BoundaryPair, _BoundaryPair]:
+    """提取双层箱体边界：核心箱体(结构性) + 微观区间(最近)。
 
-    排序策略：距离优先 + tier 加权。
-    先按「距离分段」（0-3% / 3-6% / 6-10%）分桶，同桶内再按 tier 排。
-    超过 10% 距离的 level 不参与箱体边界选择。
+    核心箱体：优先选结构性来源（swing/VP/MA/Fib），宽度 ≥ 2.5%。
+    微观区间：最近的 S/A/B 级 level（不限来源），作为短期参考。
+
+    返回 ((core_upper, core_lower), (micro_upper, micro_lower))
     """
+    empty: _BoundaryPair = (None, None)
     if not snapshot or not snapshot.levels:
-        return None, None
+        return empty, empty
 
-    _MAX_BOUNDARY_DIST_PCT = 10.0
+    _MAX_DIST = 15.0
     tier_rank = {"S": 0, "A": 1, "B": 2, "C": 3}
 
     def _dist_bucket(dist_pct: float) -> int:
@@ -251,33 +281,47 @@ def _extract_box_boundaries(
             return 1
         return 2
 
-    above = [
+    sab = [
         lv for lv in snapshot.levels
-        if lv.price > price
-        and lv.strength_tier in ("S", "A", "B")
-        and (lv.price - price) / max(price, 1) * 100 <= _MAX_BOUNDARY_DIST_PCT
-    ]
-    below = [
-        lv for lv in snapshot.levels
-        if lv.price < price
-        and lv.strength_tier in ("S", "A", "B")
-        and (price - lv.price) / max(price, 1) * 100 <= _MAX_BOUNDARY_DIST_PCT
+        if lv.strength_tier in ("S", "A", "B")
+        and abs(lv.price - price) / max(price, 1) * 100 <= _MAX_DIST
     ]
 
-    above.sort(key=lambda l: (
-        _dist_bucket((l.price - price) / max(price, 1) * 100),
-        tier_rank.get(l.strength_tier, 9),
-        l.price - price,
-    ))
-    below.sort(key=lambda l: (
-        _dist_bucket((price - l.price) / max(price, 1) * 100),
-        tier_rank.get(l.strength_tier, 9),
-        price - l.price,
-    ))
+    above_all = [lv for lv in sab if lv.price > price]
+    below_all = [lv for lv in sab if lv.price < price]
 
-    upper = above[0] if above else None
-    lower = below[0] if below else None
-    return upper, lower
+    def _sort_key(lv: KeyLevelV2, sign: float = 1.0):
+        dist = abs(lv.price - price) / max(price, 1) * 100
+        return (_dist_bucket(dist), tier_rank.get(lv.strength_tier, 9), sign * (lv.price - price))
+
+    above_all.sort(key=lambda l: _sort_key(l, 1.0))
+    below_all.sort(key=lambda l: _sort_key(l, -1.0))
+
+    micro_upper = above_all[0] if above_all else None
+    micro_lower = below_all[0] if below_all else None
+
+    above_struct = [lv for lv in above_all if _is_structural_source(lv.sources)]
+    below_struct = [lv for lv in below_all if _is_structural_source(lv.sources)]
+
+    core_upper, core_lower = _pick_core_pair(
+        above_struct or above_all, below_struct or below_all, price,
+    )
+
+    return (core_upper, core_lower), (micro_upper, micro_lower)
+
+
+def _pick_core_pair(
+    above: list[KeyLevelV2],
+    below: list[KeyLevelV2],
+    price: float,
+) -> _BoundaryPair:
+    """从候选中选出宽度 ≥ _MIN_BOX_WIDTH_PCT 的最优核心箱体对。"""
+    for u in above:
+        for l in below:
+            width = (u.price - l.price) / max(price, 1) * 100
+            if _MIN_BOX_WIDTH_PCT <= width <= _MAX_BOX_WIDTH_PCT:
+                return u, l
+    return (above[0] if above else None, below[0] if below else None)
 
 
 def _build_source_str(lv: KeyLevelV2 | None) -> str:

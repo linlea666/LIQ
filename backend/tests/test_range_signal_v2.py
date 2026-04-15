@@ -6,7 +6,9 @@ from models.key_level import KeyLevelV2, KeyLevelSnapshotV2
 from models.flow import RangeSignalData
 from processors.range_signal import (
     calculate_range_signal,
-    _extract_box_boundaries,
+    _extract_dual_boundaries,
+    _is_structural_source,
+    _pick_core_pair,
     _calc_price_position,
     _transition_box_state,
     _calc_box_quality,
@@ -45,64 +47,90 @@ def _make_prev_range(box_state="confirmed", upper=86000, lower=83000, ts=None):
 # 边界提取
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestExtractBoundaries:
-    def test_basic(self):
+class TestDualBoundaries:
+    def test_basic_core_and_micro(self):
         levels = [
-            _make_level(83000, "A", "support"),
-            _make_level(86000, "A", "resistance"),
-            _make_level(80000, "B", "support"),
-            _make_level(90000, "B", "resistance"),
+            _make_level(83000, "A", "support", sources=["Swing Low 1D"]),
+            _make_level(86000, "A", "resistance", sources=["Swing High 1D"]),
+            _make_level(80000, "B", "support", sources=["Fib 0.618"]),
+            _make_level(90000, "B", "resistance", sources=["200日SMA"]),
         ]
         snap = _make_snapshot(levels)
-        upper, lower = _extract_box_boundaries(snap, 85000)
-        assert upper.price == 86000
-        assert lower.price == 83000
+        (core_u, core_l), (micro_u, micro_l) = _extract_dual_boundaries(snap, 85000)
+        assert core_u.price == 86000
+        assert core_l.price == 83000
+        assert micro_u.price == 86000
+        assert micro_l.price == 83000
 
-    def test_prefers_stronger_tier(self):
+    def test_structural_over_capital_for_core(self):
+        """纯清算 level 很近但核心箱体应选结构性 level"""
         levels = [
-            _make_level(85500, "B", "resistance"),
-            _make_level(86000, "S", "resistance"),
+            _make_level(85200, "S", "resistance", sources=["25x空头清算5千万"]),
+            _make_level(84800, "S", "support", sources=["10x多头清算8千万"]),
+            _make_level(87000, "A", "resistance", sources=["Swing High 1D", "VP HVN"]),
+            _make_level(82000, "A", "support", sources=["Swing Low 1D", "Fib 0.618"]),
         ]
         snap = _make_snapshot(levels)
-        upper, lower = _extract_box_boundaries(snap, 85000)
-        assert upper.price == 86000
+        (core_u, core_l), (micro_u, micro_l) = _extract_dual_boundaries(snap, 85000)
+        assert core_u.price == 87000
+        assert core_l.price == 82000
+        assert micro_u.price == 85200
+        assert micro_l.price == 84800
 
-    def test_near_a_beats_far_s(self):
-        """距离 1.8% 的 A 级应优先于距离 11.8% 的 S 级（超过 10% 阈值被过滤）"""
+    def test_core_width_minimum(self):
+        """核心箱体宽度 < 2.5% 时跳过该 pair，找更宽的组合"""
         levels = [
-            _make_level(95000, "S", "resistance", score=60),  # +11.8%
-            _make_level(86500, "A", "resistance", score=35),  # +1.8%
+            _make_level(85500, "A", "resistance", sources=["Swing High"]),
+            _make_level(85000, "A", "support", sources=["Swing Low"]),
+            _make_level(88000, "B", "resistance", sources=["VP HVN"]),
+            _make_level(82000, "B", "support", sources=["Fib 0.382"]),
         ]
-        snap = _make_snapshot(levels, price=85000)
-        upper, _ = _extract_box_boundaries(snap, 85000)
-        assert upper.price == 86500
+        snap = _make_snapshot(levels, price=85200)
+        (core_u, core_l), _ = _extract_dual_boundaries(snap, 85200)
+        width = (core_u.price - core_l.price) / 85200 * 100
+        assert width >= 2.5
+        assert core_u.price == 85500
+        assert core_l.price == 82000
 
     def test_same_bucket_prefers_tier(self):
-        """同距离桶内（都在 0-3%）仍优选更强 tier"""
+        """同距离桶内仍优选更强 tier"""
         levels = [
-            _make_level(86000, "B", "resistance", score=20),  # +1.2%
-            _make_level(87000, "S", "resistance", score=50),  # +2.4%
+            _make_level(86000, "B", "resistance", score=20, sources=["MA60"]),
+            _make_level(87000, "S", "resistance", score=50, sources=["VP POC"]),
         ]
         snap = _make_snapshot(levels, price=85000)
-        upper, _ = _extract_box_boundaries(snap, 85000)
-        assert upper.price == 87000
+        _, (micro_u, _) = _extract_dual_boundaries(snap, 85000)
+        assert micro_u.price == 87000
 
     def test_none_when_no_levels(self):
         snap = _make_snapshot([])
-        upper, lower = _extract_box_boundaries(snap, 85000)
-        assert upper is None
-        assert lower is None
+        (cu, cl), (mu, ml) = _extract_dual_boundaries(snap, 85000)
+        assert cu is None and cl is None
+        assert mu is None and ml is None
 
     def test_excludes_c_tier(self):
         levels = [_make_level(86000, "C", "resistance")]
         snap = _make_snapshot(levels)
-        upper, lower = _extract_box_boundaries(snap, 85000)
-        assert upper is None
+        _, (micro_u, _) = _extract_dual_boundaries(snap, 85000)
+        assert micro_u is None
 
     def test_none_snapshot(self):
-        upper, lower = _extract_box_boundaries(None, 85000)
-        assert upper is None
-        assert lower is None
+        (cu, cl), (mu, ml) = _extract_dual_boundaries(None, 85000)
+        assert cu is None and cl is None
+
+
+class TestIsStructuralSource:
+    def test_pure_structural(self):
+        assert _is_structural_source(["Swing High 1D", "VP POC"]) is True
+
+    def test_pure_capital(self):
+        assert _is_structural_source(["25x空头清算5千万", "10x多头清算8千万"]) is False
+
+    def test_mixed(self):
+        assert _is_structural_source(["25x空头清算5千万", "Swing High 1D"]) is True
+
+    def test_orderbook(self):
+        assert _is_structural_source(["orderbook买挂单"]) is False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -355,8 +383,8 @@ class TestVolumeDeclining:
 class TestCalculateRangeSignal:
     def test_with_valid_snapshot(self):
         levels = [
-            _make_level(86000, "A", "resistance", score=30),
-            _make_level(83000, "A", "support", score=25),
+            _make_level(86000, "A", "resistance", score=30, sources=["Swing High 1D"]),
+            _make_level(83000, "A", "support", score=25, sources=["Swing Low 1D"]),
         ]
         snap = _make_snapshot(levels, price=84500)
         result = calculate_range_signal(
@@ -368,6 +396,8 @@ class TestCalculateRangeSignal:
         assert result.range_upper == 86000
         assert result.range_lower == 83000
         assert result.box_state == "forming"
+        assert result.micro_upper == 86000
+        assert result.micro_lower == 83000
 
     def test_no_snapshot(self):
         result = calculate_range_signal(

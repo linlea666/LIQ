@@ -731,9 +731,12 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append("### 9f. 箱体信号 [多维共振箱体+状态机+突破概率]")
 
         if rs.get("range_upper") and rs.get("range_lower"):
-            lines.append(f"  箱体范围: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')},{rs.get('range_lower_tier','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')},{rs.get('range_upper_tier','')})")
+            lines.append(f"  核心箱体: ${rs['range_lower']:,.0f}({rs.get('range_lower_source','')},{rs.get('range_lower_tier','')}) — ${rs['range_upper']:,.0f}({rs.get('range_upper_source','')},{rs.get('range_upper_tier','')})")
             lines.append(f"  价格位置: {rs.get('price_position', 'middle')} ({rs.get('price_position_pct', 50):.0f}%)")
             lines.append(f"  箱体宽度: {rs.get('box_width_pct', 0):.1f}%")
+
+        if rs.get("micro_upper") and rs.get("micro_lower"):
+            lines.append(f"  微观区间: ${rs['micro_lower']:,.0f}({rs.get('micro_lower_tier','')}) — ${rs['micro_upper']:,.0f}({rs.get('micro_upper_tier','')}) 宽{rs.get('micro_width_pct', 0):.1f}%")
 
         box_state = rs.get("box_state", "none")
         state_map = {"none": "未形成", "forming": "形成中", "confirmed": "已确认",

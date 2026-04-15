@@ -235,6 +235,13 @@ export interface RangeSignalData {
   range_lower_tier: string;
   range_lower_score: number;
   range_lower_test_count: number;
+  micro_upper: number | null;
+  micro_upper_source: string;
+  micro_upper_tier: string;
+  micro_lower: number | null;
+  micro_lower_source: string;
+  micro_lower_tier: string;
+  micro_width_pct: number;
   price_position: string;
   price_position_pct: number;
   box_state: string;

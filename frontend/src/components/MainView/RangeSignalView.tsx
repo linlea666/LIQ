@@ -58,7 +58,7 @@ export default function RangeSignalView() {
       {hasBox && (
         <Card>
           <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-            📦 箱体区间
+            📦 核心箱体 <span className="text-[10px] text-slate-500 font-normal">结构性支撑/阻力</span>
           </h3>
           <BoxVisualization
             upper={rs.range_upper!}
@@ -72,6 +72,47 @@ export default function RangeSignalView() {
             positionLabel={rs.price_position}
             coin={coin}
           />
+        </Card>
+      )}
+
+      {rs.micro_upper != null && rs.micro_lower != null && rs.micro_upper > rs.micro_lower && (
+        <Card>
+          <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            🔍 微观区间 <span className="text-[10px] text-slate-500 font-normal">短期交易参考</span>
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-800/60 rounded-lg p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-red-400 text-[10px] font-bold">▲ 上沿</span>
+                {rs.micro_upper_tier && (
+                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold ${
+                    rs.micro_upper_tier === "S" ? "bg-amber-500/20 text-amber-400" :
+                    rs.micro_upper_tier === "A" ? "bg-orange-500/20 text-orange-400" :
+                    "bg-blue-500/20 text-blue-400"
+                  }`}>{rs.micro_upper_tier}</span>
+                )}
+              </div>
+              <div className="text-sm text-white font-medium">{formatPrice(rs.micro_upper, coin)}</div>
+              <div className="text-[10px] text-slate-600 mt-0.5 truncate">{rs.micro_upper_source}</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-green-400 text-[10px] font-bold">▼ 下沿</span>
+                {rs.micro_lower_tier && (
+                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold ${
+                    rs.micro_lower_tier === "S" ? "bg-amber-500/20 text-amber-400" :
+                    rs.micro_lower_tier === "A" ? "bg-orange-500/20 text-orange-400" :
+                    "bg-blue-500/20 text-blue-400"
+                  }`}>{rs.micro_lower_tier}</span>
+                )}
+              </div>
+              <div className="text-sm text-white font-medium">{formatPrice(rs.micro_lower, coin)}</div>
+              <div className="text-[10px] text-slate-600 mt-0.5 truncate">{rs.micro_lower_source}</div>
+            </div>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-700/50 text-[10px] text-slate-500">
+            微观区间宽度: {rs.micro_width_pct.toFixed(1)}%（清算/挂单密集区，适合日内参考）
+          </div>
         </Card>
       )}
 

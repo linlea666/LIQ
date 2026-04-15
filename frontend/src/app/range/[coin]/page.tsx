@@ -100,15 +100,17 @@ export default function RangeDetailPage() {
           {data.box_age_hours > 0 && (
             <p className="text-xs text-slate-500 mt-1">
               存续时长: {data.box_age_hours >= 24 ? `${(data.box_age_hours / 24).toFixed(1)} 天` : `${data.box_age_hours.toFixed(0)} 小时`}
-              {data.box_width_pct > 0 && ` · 宽度: ${data.box_width_pct.toFixed(1)}%`}
+              {data.box_width_pct > 0 && ` · 核心箱体宽度: ${data.box_width_pct.toFixed(1)}%`}
+              {data.micro_width_pct > 0 && ` · 微观区间: ${data.micro_width_pct.toFixed(1)}%`}
             </p>
           )}
         </div>
 
-        {/* Box Boundaries */}
+        {/* Core Box Boundaries */}
         {hasBox && (
           <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-5">
-            <h2 className="text-sm font-bold text-white mb-4">箱体边界</h2>
+            <h2 className="text-sm font-bold text-white mb-1">核心箱体</h2>
+            <p className="text-[10px] text-slate-500 mb-4">基于结构性关键位（swing/VP/MA/Fib），宽度 ≥ 2.5%，适合波段操作</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <BoundaryCard
                 side="上沿 (阻力)"
@@ -129,6 +131,38 @@ export default function RangeDetailPage() {
                 testCount={data.range_lower_test_count}
                 coin={coin}
                 sideColor="text-green-400"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Micro Range */}
+        {data.micro_upper != null && data.micro_lower != null && data.micro_upper > data.micro_lower && (
+          <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-5">
+            <h2 className="text-sm font-bold text-white mb-1">微观区间</h2>
+            <p className="text-[10px] text-slate-500 mb-4">最近的清算/挂单密集区，宽度 {data.micro_width_pct.toFixed(1)}%，适合日内交易参考</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <BoundaryCard
+                side="上沿"
+                price={data.micro_upper}
+                source={data.micro_upper_source}
+                tier={data.micro_upper_tier}
+                score={0}
+                testCount={0}
+                coin={coin}
+                sideColor="text-red-400"
+                compact
+              />
+              <BoundaryCard
+                side="下沿"
+                price={data.micro_lower}
+                source={data.micro_lower_source}
+                tier={data.micro_lower_tier}
+                score={0}
+                testCount={0}
+                coin={coin}
+                sideColor="text-green-400"
+                compact
               />
             </div>
           </div>
@@ -299,9 +333,9 @@ function MiniStat({ label, value, color = "text-white" }: { label: string; value
   );
 }
 
-function BoundaryCard({ side, price, source, tier, score, testCount, coin, sideColor }: {
+function BoundaryCard({ side, price, source, tier, score, testCount, coin, sideColor, compact }: {
   side: string; price: number; source: string; tier: string; score: number;
-  testCount: number; coin: string; sideColor: string;
+  testCount: number; coin: string; sideColor: string; compact?: boolean;
 }) {
   return (
     <div className="bg-slate-800/60 rounded-lg p-4">
@@ -318,8 +352,8 @@ function BoundaryCard({ side, price, source, tier, score, testCount, coin, sideC
       <div className="text-lg font-bold text-white font-mono mb-2">{formatPrice(price, coin)}</div>
       <div className="space-y-1 text-xs text-slate-400">
         <div>来源: {source || "—"}</div>
-        <div>共振分: {score.toFixed(0)}</div>
-        <div>测试次数: {testCount}</div>
+        {!compact && <div>共振分: {score.toFixed(0)}</div>}
+        {!compact && <div>测试次数: {testCount}</div>}
       </div>
     </div>
   );
