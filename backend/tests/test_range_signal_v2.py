@@ -67,6 +67,26 @@ class TestExtractBoundaries:
         upper, lower = _extract_box_boundaries(snap, 85000)
         assert upper.price == 86000
 
+    def test_near_a_beats_far_s(self):
+        """距离 1.8% 的 A 级应优先于距离 11.8% 的 S 级（超过 10% 阈值被过滤）"""
+        levels = [
+            _make_level(95000, "S", "resistance", score=60),  # +11.8%
+            _make_level(86500, "A", "resistance", score=35),  # +1.8%
+        ]
+        snap = _make_snapshot(levels, price=85000)
+        upper, _ = _extract_box_boundaries(snap, 85000)
+        assert upper.price == 86500
+
+    def test_same_bucket_prefers_tier(self):
+        """同距离桶内（都在 0-3%）仍优选更强 tier"""
+        levels = [
+            _make_level(86000, "B", "resistance", score=20),  # +1.2%
+            _make_level(87000, "S", "resistance", score=50),  # +2.4%
+        ]
+        snap = _make_snapshot(levels, price=85000)
+        upper, _ = _extract_box_boundaries(snap, 85000)
+        assert upper.price == 87000
+
     def test_none_when_no_levels(self):
         snap = _make_snapshot([])
         upper, lower = _extract_box_boundaries(snap, 85000)

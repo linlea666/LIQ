@@ -33,8 +33,6 @@ _MIN_BOX_WIDTH_PCT = 1.0   # 箱体最小宽度 1%
 _MAX_BOX_WIDTH_PCT = 15.0  # 箱体最大宽度 15%
 _MIN_BOUNDARY_SCORE = 15   # 边界最小共振分
 _MATURE_HOURS = 72         # 72h 后进入 mature
-_SQUEEZE_BB_REQUIRED = True
-
 
 def calculate_range_signal(
     kl_snapshot: KeyLevelSnapshotV2 | None,
@@ -234,22 +232,48 @@ def _extract_box_boundaries(
     snapshot: KeyLevelSnapshotV2 | None,
     price: float,
 ) -> tuple[KeyLevelV2 | None, KeyLevelV2 | None]:
-    """从关键位快照中提取箱体上下沿：当前价上方最近的强阻力 + 下方最近的强支撑。"""
+    """从关键位快照中提取箱体上下沿：当前价附近最近的强支撑/阻力。
+
+    排序策略：距离优先 + tier 加权。
+    先按「距离分段」（0-3% / 3-6% / 6-10%）分桶，同桶内再按 tier 排。
+    超过 10% 距离的 level 不参与箱体边界选择。
+    """
     if not snapshot or not snapshot.levels:
         return None, None
 
+    _MAX_BOUNDARY_DIST_PCT = 10.0
     tier_rank = {"S": 0, "A": 1, "B": 2, "C": 3}
+
+    def _dist_bucket(dist_pct: float) -> int:
+        if dist_pct <= 3.0:
+            return 0
+        if dist_pct <= 6.0:
+            return 1
+        return 2
+
     above = [
         lv for lv in snapshot.levels
-        if lv.price > price and lv.strength_tier in ("S", "A", "B")
+        if lv.price > price
+        and lv.strength_tier in ("S", "A", "B")
+        and (lv.price - price) / max(price, 1) * 100 <= _MAX_BOUNDARY_DIST_PCT
     ]
     below = [
         lv for lv in snapshot.levels
-        if lv.price < price and lv.strength_tier in ("S", "A", "B")
+        if lv.price < price
+        and lv.strength_tier in ("S", "A", "B")
+        and (price - lv.price) / max(price, 1) * 100 <= _MAX_BOUNDARY_DIST_PCT
     ]
 
-    above.sort(key=lambda l: (tier_rank.get(l.strength_tier, 9), l.price - price))
-    below.sort(key=lambda l: (tier_rank.get(l.strength_tier, 9), price - l.price))
+    above.sort(key=lambda l: (
+        _dist_bucket((l.price - price) / max(price, 1) * 100),
+        tier_rank.get(l.strength_tier, 9),
+        l.price - price,
+    ))
+    below.sort(key=lambda l: (
+        _dist_bucket((price - l.price) / max(price, 1) * 100),
+        tier_rank.get(l.strength_tier, 9),
+        price - l.price,
+    ))
 
     upper = above[0] if above else None
     lower = below[0] if below else None

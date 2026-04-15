@@ -68,7 +68,7 @@ def recompute_range_signal(
 
     bb_squeeze = False
     if state.boll_data and hasattr(state, "boll_4h_data"):
-        from processors.ta_core import detect_bb_squeeze, calc_keltner
+        from processors.ta_core import detect_bb_squeeze
         if state.candles_4h and len(state.candles_4h) >= 20:
             closes = [c.close for c in state.candles_4h]
             highs = [c.high for c in state.candles_4h]
