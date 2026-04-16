@@ -84,6 +84,7 @@ class AIConfig:
     max_retries: int
     cooldown_sec: int
     max_history: int
+    auto_interval_sec: int = 0
     api_key: str = ""
     api_base: str = ""
     providers: dict = field(default_factory=dict)
@@ -223,6 +224,7 @@ def _build_settings(raw: dict) -> Settings:
         max_retries=ai_raw["max_retries"],
         cooldown_sec=ai_raw["cooldown_sec"],
         max_history=ai_raw["max_history"],
+        auto_interval_sec=ai_raw.get("auto_interval_sec", 0),
         api_key=api_key,
         api_base=active.api_base,
         providers=providers,

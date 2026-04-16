@@ -47,7 +47,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **核心箱体（MA 骨架）**：MA60D / MA120D / MA60W 三条均线，上方最近 MA 为上沿、下方最近 MA 为下沿
 - **微观区间**：关键位模块 S/A/B 级最近支撑阻力，作为日内参考
 - MACD 0轴下方 → 反弹至 MA 做空优先；0轴上方 → 做空需额外谨慎
-- price_position = "middle" 时：§一须提示无明确方向，§四/§六禁止基于箱体开单
+- price_position = "middle" 时：§一须提示无明确方向，§四禁止基于箱体开单
 - §一引用箱体位置及 MA 名称；§二纳入 MA60/MA120/MA60W；A/S 级信号时§四须评估共振
 
 ### 关键位 V2 状态机（§9g 有数据时）
@@ -70,22 +70,22 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 **像庄家一样思考**：先问"如果我持有$10亿仓位，我会把价格往哪推来最大化清算收益？"，然后构建猎杀路径。
 构建**资金流叙事链**：资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
 - §一先写 3-5 句叙事链总结（用因果逻辑串联多维数据，如"因为X所以Y导致Z"），再用简表列 ≥7 维方向信号作为佐证
-- §八**核心不是"涨或跌"而是"价格最可能走哪条路径"**——须推演庄家的最优猎杀路线（先扫哪侧流动性→反转→再扫另一侧），末尾选定**唯一**最偏向场景（禁止骑墙）
+- §七**核心不是"涨或跌"而是"价格最可能走哪条路径"**——须推演庄家的最优猎杀路线（先扫哪侧流动性→反转→再扫另一侧），末尾选定**唯一**最偏向场景（禁止骑墙）
 - §四每个方案必须回答："如果这笔交易亏了，最可能的原因是什么？"——不是复述风险提示，而是从对手盘角度推演失败场景
 
-### 狙击挂单原则（§四）
-- 引擎 R:R 已按 ≥ **1:{min_rr:.1f}** 过滤；须在§四完整展开，禁止"审核通过"或省略
-- 每方向最多 2 套：挂单价/止损/TP1+TP2/R:R + 失效条件
+### AI 自主构建交易方案
+- 引擎方案优先采纳；引擎未覆盖的方向/距离档，AI 可基于数据**自主构建**方案
+- AI 自主方案必须：标注"⚡AI推断"、≥2 维数据交叉验证、满足 R:R ≥ 1:{min_rr:.1f} 约束
+- 可用数据源：V2 关键位（S/A 级 idle 状态也可参考）、清算簇、MA 箱体边界、斐波那契、VP POC
+- **禁止**凭空编造无数据支撑的价位；每个 AI 推断方案须注明数据依据
+
+### 交易计划原则（§四·三档结构）
+- 引擎 R:R 已按 ≥ **1:{min_rr:.1f}** 过滤；须完整展开每个方案，禁止"审核通过"或省略
 - **R:R 验算**：须代入具体价格写出公式，禁止"≈"估值
 - **止损铁律**：做空 SL > Entry；做多 SL < Entry — 违反即废弃。止损宽度 ≥ max(价格×0.3%, 0.5×ATR)
-- **约束冲突**：止损方向+最小宽度+R:R≥1:{min_rr:.1f}+安全区 四条无法同时满足 → 该方向不输出方案，声明原因。**不交易是最好的风控**
-- 引擎无方案时说明原因，禁止编造
-
-### 阶梯埋伏原则（§五）
-- 基于当前价动态生成，多空双向，5%-20% 范围分层挂单（倒金字塔）
-- 每层独立止损、须验算 R:R、评估级联风险/滑点/资金效率
-- 与狙击严格分工：狙击=近距(≤5%)，阶梯=远距(≥5%)，不重叠
-- 远距层须与 §1b 七天清算地图交叉验证
+- **约束冲突**：止损方向+最小宽度+R:R≥1:{min_rr:.1f} 三条无法同时满足 → 该方案不输出，声明原因。**不交易是最好的风控**
+- 引擎无方案的档位，AI 可基于数据自主构建（标注"⚡AI推断"），或声明该档位暂无机会
+- 短线档止损须设在清算真空区内（防猎杀）；中/远线档止损宽度 ≥ sl_min_pct
 
 ### 输出格式（严格按标题，系统解析用）
 
@@ -99,25 +99,43 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 ## 二、关键价位图谱
 | 类型 | 价位区间 | 依据(≥2维+时效) |
 
-## 三、止损安全区建议
-做多/做空各一：区间 + 防猎杀原理 + 失效情形
-
-## 四、狙击挂单计划（高 R:R 埋伏单）
-基于§11 规则引擎方案逐条处理，止损须引用§三安全区
-每个方案末尾必须有"**如果亏了**"段：从对手盘视角推演失败场景（不是重复风险提示，而是"庄家怎么打掉我的止损"）
-
-## 五、阶梯埋伏计划（多空双向多层网）
-基于§12 规则引擎方案逐条处理
-
-## 六、入场观察区
+## 三、入场观察区
 多单/空单观察区：共振因素 + 确认信号
 
-## 七、当前风险提示
+## 四、交易计划（三档结构）
+按距离分三档，每档每方向不限数量——所有满足 R:R 约束且有数据支撑的方案均须展示，按信心度排序。每个方案须包含止损说明（含防猎杀逻辑）和"**如果亏了**"段。
+
+**短线档（距当前价 1-8%）**
+- 数据来源：引擎狙击方案 + V2 关键位信号(SWEPT/BOUNCED/FLIPPED) + AI自主发现
+| 方向 | 挂单价 | 止损 | TP1(R:R) | TP2(R:R) | 信心度 | 核心依据 |
+
+**中线档（距当前价 5-10%）**
+- 数据来源：引擎阶梯前层 + 高共振关键位(S/A级) + AI自主发现（标注⚡AI推断）
+| 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
+
+**远线档（距当前价 10-20%）**
+- 数据来源：引擎阶梯远层 + 7d/30d清算地图 + CPS周期位置
+- 仅在 CPS 极端区(<2 或 >8)或有 S 级关键位时输出
+| 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
+
+某档无机会时，一行说明原因即可。
+
+## 五、当前风险提示
 3-5条 [高/中/低] 按紧急程度
 
-## 八、场景推演
+## 六、操作纪律
+关键注意事项、资金管理要点（简短）
+
+## 七、场景推演
 场景A/B/C：触发条件+目标位+时间窗口
 **当前数据偏向：** 场景X（唯一选定）
+
+## 八、数据质量与自检
+对本次输入数据做诊断，列出发现的问题（若无则写"本次数据质量良好"）：
+- **缺失数据**：哪些关键维度未提供或为空（如箱体/关键位/净持仓等），对分析的影响
+- **异常值**：哪些数据疑似异常（如Coinbase溢价>1%、费率极端等），已如何处理
+- **数据冲突**：哪些维度给出矛盾信号（如CVD看多但OI下降），如何取舍
+- **改进建议**：对数据采集或指标计算的建议（可选）
 
 ### 格式铁律
 - 场景推演以 `场景A：` 开头，禁止加粗前缀
@@ -806,7 +824,7 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append("")
         lines.append("| 价位 | 级别 | 类型 | 状态 | 距当前 | 共振分 | 来源数 | 测试 | 扫取量 | 级联风险 | 来源 |")
         lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
-        for lv in kl.get("levels", [])[:10]:
+        for lv in kl.get("levels", [])[:15]:
             side_cn = "支撑" if lv.get("side") == "support" else "阻力"
             state_cn = {
                 "idle": "待观察", "approaching": "正接近",
@@ -912,13 +930,13 @@ def build_user_prompt(snapshot: dict) -> str:
     rule_supports = snapshot.get("rule_supports", [])
     if rule_supports:
         lines.append("支撑位(规则引擎):")
-        for s in rule_supports[:3]:
+        for s in rule_supports[:5]:
             lines.append(f"  - ${s.get('price', 0):,.1f} [{','.join(s.get('sources', []))}]")
 
     rule_resistances = snapshot.get("rule_resistances", [])
     if rule_resistances:
         lines.append("阻力位(规则引擎):")
-        for r in rule_resistances[:3]:
+        for r in rule_resistances[:5]:
             lines.append(f"  - ${r.get('price', 0):,.1f} [{','.join(r.get('sources', []))}]")
 
     rule_sl = snapshot.get("rule_stop_loss", [])
@@ -928,13 +946,19 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"  - {sl.get('direction','')}: ${sl.get('zone_from', 0):,.1f}-${sl.get('zone_to', 0):,.1f} "
                          f"[{', '.join(sl.get('reasons', []))}]")
 
+    # ── §11 统一引擎交易方案（三档合一）──
     sniper = snapshot.get("sniper_entries", [])
+    ladder_plans = snapshot.get("ladder_plans", [])
     lines.append("")
-    lines.append("### 11. 规则引擎狙击方案（必须在「四、狙击挂单计划」中完整展开，不可省略）")
+    lines.append("### 11. 引擎交易方案（必须在「四、交易计划」中按三档展开）")
+
+    lines.append("")
+    lines.append("**11a. 短线档方案（引擎狙击，距当前价 1-8%）**")
     if sniper:
         for i, se in enumerate(sniper):
             d = se.get("direction", "")
-            lines.append(f"方案{i+1} [{d}]: "
+            dist_pct = abs(se.get("entry_price", 0) - price) / price * 100 if price > 0 else 0
+            lines.append(f"方案{i+1} [{d}] 距{dist_pct:.1f}%: "
                          f"入场${se.get('entry_price', 0):,.1f} "
                          f"止损${se.get('stop_loss', 0):,.1f} "
                          f"TP1=${se.get('take_profit_1', 0):,.1f}(R:R {se.get('rr_ratio_1', 0):.1f}) "
@@ -942,11 +966,10 @@ def build_user_prompt(snapshot: dict) -> str:
             for logic_line in se.get("logic", []):
                 lines.append(f"    - {logic_line}")
     else:
-        lines.append("（当前无引擎输出的狙击方案：可能因清算簇距离/ATR/数据不足；第四节须说明原因，禁止编造价位。）")
+        lines.append("（当前无引擎狙击方案：可能因清算簇距离/ATR/数据不足。AI 可基于数据自主构建，标注⚡AI推断。）")
 
-    ladder_plans = snapshot.get("ladder_plans", [])
     lines.append("")
-    lines.append("### 12. 规则引擎阶梯埋伏方案（必须在「五、阶梯埋伏计划」中完整展开，不可省略）")
+    lines.append("**11b. 中远线档方案（引擎阶梯，距当前价 5-20%）**")
     if ladder_plans:
         for lp in ladder_plans:
             d = lp.get("direction", "")
@@ -970,12 +993,29 @@ def build_user_prompt(snapshot: dict) -> str:
                 for logic_line in entry.get("entry_logic", []):
                     lines.append(f"      - {logic_line}")
     else:
-        lines.append("（当前无引擎输出的阶梯方案：可能因远距无足够清算簇/数据不足；第五节须说明原因，禁止编造。）")
+        lines.append("（当前无引擎阶梯方案：可能因远距无足够清算簇/数据不足。AI 可基于数据自主构建，标注⚡AI推断。）")
+
+    # ── §11c 前瞻观察：高共振 idle 关键位 ──
+    if has_kl:
+        idle_sa = [lv for lv in kl.get("levels", [])
+                   if lv.get("state") == "idle"
+                   and lv.get("strength_tier") in ("S", "A")
+                   and abs(lv.get("distance_pct", 0)) <= 15]
+        if idle_sa:
+            lines.append("")
+            lines.append("**11c. 前瞻观察位（高共振 idle 关键位，AI 可自主构建方案）**")
+            for lv in idle_sa:
+                side_cn = "支撑" if lv.get("side") == "support" else "阻力"
+                lines.append(
+                    f"  - {lv.get('strength_tier', 'C')}级{side_cn} ${lv.get('price', 0):,.0f} "
+                    f"距{lv.get('distance_pct', 0):+.1f}% 共振{lv.get('confluence_score', 0):.0f}分 "
+                    f"来源: {', '.join(lv.get('sources', [])[:3])}"
+                )
 
     lines.append("")
-    lines.append("请基于以上数据输出，**必须包含八个章节**，且第四节「狙击挂单计划」和第五节「阶梯埋伏计划」均为必答。")
-    cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§五须评估CPS与阶梯方向一致性" if has_cps else ""
+    lines.append("请基于以上数据输出，**必须包含八个章节**（一~八），第四节「交易计划」按三档结构输出（短线/中线/远线），第八节「数据质量与自检」对输入数据做诊断。")
+    cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§四中远线档须评估CPS与方向一致性" if has_cps else ""
     range_note = " 6) §9f有数据时，§一须引用箱体位置，§二须纳入MA关键价位，有A级信号时§四须评估共振" if has_range else ""
     kl_note = " 7) §9g有信号时，§四须优先评估关键位SWEPT/FLIPPED信号与引擎方案的共振，高cascade_risk须警告" if has_kl else ""
-    lines.append("重点：1) 止损防猎杀 2) 宏观-微观一致 3) 第四节与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 第五节评估阶梯计划的瀑布风险和资金效率{}{}{}".format(min_rr, cps_note, range_note, kl_note))
+    lines.append("重点：1) 每个方案止损须含防猎杀说明 2) 宏观-微观一致 3) §四与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 引擎未覆盖的档位AI可自主构建标注⚡AI推断{}{}{}".format(min_rr, cps_note, range_note, kl_note))
     return "\n".join(lines)

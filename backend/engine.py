@@ -58,8 +58,9 @@ logger = logging.getLogger(__name__)
 class CoinState:
     """单个币种的完整数据状态"""
 
-    def __init__(self, coin: str):
+    def __init__(self, coin: str, max_history: int = 500):
         self.coin = coin
+        self._max_history = max_history
         self.ticker: Optional[TickerData] = None
         self.liq_maps: dict[str, LiquidationMap] = {}
         self.cvd_contract: Optional[CVDData] = None
@@ -79,7 +80,7 @@ class CoinState:
         self.candle_ts: list[int] = []
         self.candles_1h: list = []
         self.oi_history: deque = deque(maxlen=720)
-        self.ai_history: deque[AIAnalysisResult] = deque(maxlen=50)
+        self.ai_history: deque[AIAnalysisResult] = deque(maxlen=max_history)
         self.last_ai_ts: float = 0
         self.multi_funding: Optional[MultiFundingRateData] = None
         self.ls_ratio: Optional[LongShortRatioData] = None
@@ -126,6 +127,7 @@ class CoinState:
         self.boll_4h_data: Optional[dict] = None
         self.key_levels_v2: list = []
         self.key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None
+        self.kl_history: deque[KeyLevelSnapshotV2] = deque(maxlen=max_history)
         self._kl_v2_discovery_ts: float = 0.0
         # §9h: 净持仓 + 合约资金流 + TD 序列
         self.net_position_latest: Optional[float] = None
@@ -165,11 +167,14 @@ class Engine:
 
         self._data_dir = os.path.join(os.path.dirname(__file__), "data")
         self._ai_history_file = os.path.join(self._data_dir, "ai_history.json")
+        self._kl_history_file = os.path.join(self._data_dir, "kl_history.json")
 
+        max_hist = self._settings.ai.max_history
         for ccy in self._settings.supported_coins:
-            self._states[ccy] = CoinState(ccy)
+            self._states[ccy] = CoinState(ccy, max_history=max_hist)
 
         self._load_ai_history()
+        self._load_kl_history()
 
         # S 级信号邮件通知
         from notifications.signal_monitor import AlertDedup
@@ -217,6 +222,45 @@ class Engine:
             logger.debug("AI history saved to disk | coins=%d", len(data))
         except (OSError, TypeError) as e:
             logger.warning("Failed to save AI history: %s", e)
+
+    def _load_kl_history(self):
+        if not os.path.exists(self._kl_history_file):
+            logger.info("No KL history file found, starting fresh")
+            return
+        try:
+            with open(self._kl_history_file, "r", encoding="utf-8") as f:
+                raw: dict = json.load(f)
+            total = 0
+            for ccy, items in raw.items():
+                if ccy not in self._states:
+                    continue
+                for item in items:
+                    try:
+                        self._states[ccy].kl_history.append(KeyLevelSnapshotV2(**item))
+                        total += 1
+                    except Exception:
+                        continue
+            logger.info("KL history loaded from disk | entries=%d", total)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load KL history: %s", e)
+
+    def _save_kl_history(self):
+        try:
+            os.makedirs(self._data_dir, exist_ok=True)
+            data: dict[str, list] = {}
+            for ccy, state in self._states.items():
+                if state.kl_history:
+                    data[ccy] = [h.model_dump() for h in state.kl_history]
+            tmp_path = self._kl_history_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, self._kl_history_file)
+            logger.debug("KL history saved to disk | coins=%d", len(data))
+        except (OSError, TypeError) as e:
+            logger.warning("Failed to save KL history: %s", e)
+
+    def get_kl_history(self, ccy: str) -> list[KeyLevelSnapshotV2]:
+        return list(self._states.get(ccy, CoinState(ccy)).kl_history)
 
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
@@ -288,6 +332,14 @@ class Engine:
 
             if ccy == self._default_coin:
                 tasks.extend(self._create_full_poll_tasks(coin, stagger))
+
+        auto_ai_sec = self._settings.ai.auto_interval_sec
+        if auto_ai_sec > 0 and self.ai_available:
+            tasks.append(asyncio.create_task(self._auto_ai_loop(auto_ai_sec)))
+
+        kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
+        if kl_snap_sec > 0:
+            tasks.append(asyncio.create_task(self._auto_kl_snapshot_loop(kl_snap_sec)))
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -412,6 +464,11 @@ class Engine:
             logger.info("AI history saved to disk before shutdown")
         except Exception:
             logger.error("Failed to save AI history on shutdown", exc_info=True)
+        try:
+            self._save_kl_history()
+            logger.info("KL history saved to disk before shutdown")
+        except Exception:
+            logger.error("Failed to save KL history on shutdown", exc_info=True)
         await self._cg.close()
         await self._bn.close()
         logger.info("Engine stopped")
@@ -795,6 +852,13 @@ class Engine:
         if state.temperature:
             state.waterfall = build_waterfall(state.temperature, _factor_scores)
 
+        # V2 关键位先行：独立于 calculate_levels，产出信号供后者桥接
+        self._recompute_key_levels_v2(ccy)
+
+        kl_signals = None
+        if state.key_level_snapshot_v2:
+            kl_signals = state.key_level_snapshot_v2.signals or None
+
         vwap = state.vp.vwap if state.vp else 0
         liq_map_7d = state.liq_maps.get("7d")
         hist_vol = state.market_index.btc_hist_vol if state.market_index else None
@@ -804,9 +868,10 @@ class Engine:
             atr=state.atr, vwap=vwap,
             liq_map_7d=liq_map_7d, btc_hist_vol=hist_vol,
             cycle_position=state.cycle_position,
+            kl_signals=kl_signals,
         )
 
-        self._recompute_key_levels(ccy)
+        self._recompute_key_levels_v1(ccy)
 
         self._recompute_range_signal(ccy)
 
@@ -842,7 +907,7 @@ class Engine:
         except Exception:
             logger.debug("_check_alerts error", exc_info=True)
 
-    def _recompute_key_levels(self, ccy: str):
+    def _recompute_key_levels_v1(self, ccy: str):
         state = self._states[ccy]
         price = state.ticker.last if state.ticker else 0
         if price <= 0:
@@ -875,9 +940,6 @@ class Engine:
 
         state.key_levels = snapshot.levels
         state.key_level_snapshot = snapshot
-
-        # V2 关键位系统
-        self._recompute_key_levels_v2(ccy)
 
     _KL_V2_DISCOVERY_INTERVAL = 60
 
@@ -1115,6 +1177,49 @@ class Engine:
 
     def is_ai_running(self, ccy: str) -> bool:
         return ccy in self._ai_running
+
+    async def _auto_ai_loop(self, interval_sec: int) -> None:
+        """定时自动触发 AI 分析（所有支持的币种）。"""
+        await asyncio.sleep(60)
+        logger.info("Auto AI analysis loop started | interval=%ds", interval_sec)
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                if ccy in self._ai_running:
+                    continue
+                state = self._states.get(ccy)
+                if not state or not state.ticker:
+                    continue
+                elapsed = time.time() - state.last_ai_ts if state.last_ai_ts else float("inf")
+                if elapsed < interval_sec:
+                    continue
+                try:
+                    await self.fire_ai_analysis(ccy)
+                    logger.info("Auto AI analysis triggered | coin=%s", ccy)
+                except Exception:
+                    logger.error("Auto AI trigger failed | coin=%s", ccy, exc_info=True)
+                await asyncio.sleep(5)
+            await asyncio.sleep(60)
+
+    async def _auto_kl_snapshot_loop(self, interval_sec: int) -> None:
+        """定时保存关键位快照到历史。"""
+        await asyncio.sleep(120)
+        logger.info("Auto KL snapshot loop started | interval=%ds", interval_sec)
+        _last_snap_ts: dict[str, float] = {}
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                state = self._states.get(ccy)
+                if not state or not state.key_level_snapshot_v2:
+                    continue
+                last = _last_snap_ts.get(ccy, 0)
+                if time.time() - last < interval_sec:
+                    continue
+                snap = state.key_level_snapshot_v2
+                if snap.ts > 0:
+                    state.kl_history.append(snap)
+                    _last_snap_ts[ccy] = time.time()
+                    self._save_kl_history()
+                    logger.info("KL snapshot saved | coin=%s levels=%d", ccy, len(snap.levels))
+            await asyncio.sleep(60)
 
     async def fire_ai_analysis(self, ccy: str) -> None:
         if ccy in self._ai_running:

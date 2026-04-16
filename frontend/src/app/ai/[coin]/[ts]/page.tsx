@@ -176,15 +176,53 @@ export default function AIDetailPage() {
           </Card>
         )}
 
-        {/* Stop Loss */}
-        {data.stop_loss_suggestion?.raw && (
+        {/* Trading Plan (new merged format) */}
+        {data.trading_plan && (
+          <Card title="📋 交易计划（三档结构）">
+            {data.trading_plan_entries && data.trading_plan_entries.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                {data.trading_plan_entries.map((p, i) => {
+                  const tierLabel = p.tier === "short" ? "短线" : p.tier === "mid" ? "中线" : "远线";
+                  const tierColor = p.tier === "short" ? "text-blue-400" : p.tier === "mid" ? "text-purple-400" : "text-orange-400";
+                  return (
+                    <div
+                      key={i}
+                      className={`rounded-lg border p-3 text-sm ${
+                        p.direction === "long"
+                          ? "border-green-700/40 bg-green-950/20"
+                          : "border-red-700/40 bg-red-950/20"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-semibold mb-1">
+                        <span className={tierColor}>[{tierLabel}]</span>
+                        {p.direction === "long" ? "📈 做多" : "📉 做空"}
+                        {p.source === "ai_inferred" && <span className="text-yellow-400 text-xs">⚡AI</span>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-zinc-300">
+                        {p.entry != null && <div>入场: <span className="text-white">${p.entry.toLocaleString()}</span></div>}
+                        {p.stop_loss != null && <div>止损: <span className="text-white">${p.stop_loss.toLocaleString()}</span></div>}
+                        {p.tp1 != null && <div>止盈1: <span className="text-white">${p.tp1.toLocaleString()}</span></div>}
+                        {p.tp2 != null && <div>止盈2: <span className="text-white">${p.tp2.toLocaleString()}</span></div>}
+                        {p.rr != null && <div className="col-span-2">R:R = <span className="text-amber-400 font-semibold">1:{p.rr.toFixed(1)}</span></div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <RichMarkdown text={data.trading_plan} />
+          </Card>
+        )}
+
+        {/* Legacy: Stop Loss (old reports only) */}
+        {!data.trading_plan && data.stop_loss_suggestion?.raw && (
           <Card title="🛡️ 止损安全区建议">
             <RichMarkdown text={data.stop_loss_suggestion.raw} />
           </Card>
         )}
 
-        {/* Sniper */}
-        {data.sniper_setup && (
+        {/* Legacy: Sniper (old reports only) */}
+        {!data.trading_plan && data.sniper_setup && (
           <Card title="🎯 狙击挂单计划（高 R:R）">
             {data.sniper_plans && data.sniper_plans.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -218,8 +256,8 @@ export default function AIDetailPage() {
           </Card>
         )}
 
-        {/* Ladder */}
-        {data.ladder_plan_text && (
+        {/* Legacy: Ladder (old reports only) */}
+        {!data.trading_plan && data.ladder_plan_text && (
           <Card title="🪜 阶梯埋伏计划（远距多层网）">
             <RichMarkdown text={data.ladder_plan_text} />
           </Card>
@@ -259,6 +297,13 @@ export default function AIDetailPage() {
                 <div className="text-sm text-slate-400 leading-relaxed">{s.description}</div>
               </div>
             ))}
+          </Card>
+        )}
+
+        {/* Data Quality Feedback */}
+        {data.data_quality_feedback && (
+          <Card title="🔍 数据质量与自检">
+            <RichMarkdown text={data.data_quality_feedback} />
           </Card>
         )}
 

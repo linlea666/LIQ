@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { API_BASE } from "@/lib/constants";
 import { formatPrice, formatCnUsd } from "@/lib/format";
 import type {
@@ -58,6 +59,7 @@ export default function KeyLevelDetailPage() {
   const [data, setData] = useState<KeyLevelSnapshotV2 | null>(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [historyList, setHistoryList] = useState<{ ts: number; levels_count: number }[]>([]);
 
   const load = () => {
     setRefreshing(true);
@@ -74,8 +76,25 @@ export default function KeyLevelDetailPage() {
       .finally(() => setRefreshing(false));
   };
 
+  const loadHistory = () => {
+    fetch(`${API_BASE}/api/key-levels/history/${coin}?limit=5`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.snapshots) {
+          setHistoryList(
+            d.snapshots.map((s: KeyLevelSnapshotV2) => ({
+              ts: s.ts,
+              levels_count: s.levels?.length ?? 0,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     load();
+    loadHistory();
     const interval = setInterval(load, 30000);
     return () => clearInterval(interval);
   }, [coin]);
@@ -151,6 +170,24 @@ export default function KeyLevelDetailPage() {
           </div>
         </div>
       </header>
+
+      {/* History Links */}
+      {historyList.length > 0 && (
+        <div className="max-w-5xl mx-auto px-6 pt-4">
+          <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+            <span>历史快照:</span>
+            {historyList.map((h) => (
+              <Link
+                key={h.ts}
+                href={`/levels/${coin}/${h.ts}`}
+                className="px-2 py-0.5 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-300 transition"
+              >
+                {formatFullTime(h.ts)} ({h.levels_count}位)
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <main className="max-w-5xl mx-auto px-6 py-6 space-y-6">
         {/* Overview */}

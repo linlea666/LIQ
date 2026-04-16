@@ -227,8 +227,21 @@ export interface AIAnalysisResult {
     raw_text: string;
   }[];
   ladder_plan_text?: string;
+  trading_plan?: string;
+  trading_plan_entries?: {
+    tier: string;
+    direction: string;
+    entry: number | null;
+    stop_loss: number | null;
+    tp1: number | null;
+    tp2: number | null;
+    rr: number | null;
+    source: string;
+    logic: string;
+  }[];
   risk_warnings: string[];
   scenario_analysis: { label: string; description: string }[];
+  data_quality_feedback?: string;
   raw_text: string;
   user_prompt?: string;
   signal_summary?: SignalSummary | null;

@@ -325,7 +325,24 @@ def _generate_signal(
     cfg: dict,
     now: int,
 ) -> KeyLevelSignal | None:
-    if lv.state == "idle" or atr <= 0:
+    if atr <= 0:
+        return None
+
+    if lv.state == "idle":
+        if lv.strength_tier in ("S", "A") and abs(lv.distance_pct) <= 15:
+            is_support = lv.side == "support"
+            direction = "做多" if is_support else "做空"
+            return KeyLevelSignal(
+                level_price=lv.price, side=lv.side, state=lv.state,
+                action="wait_approach",
+                confidence="C",
+                reason=(
+                    f"前瞻观察: {lv.strength_tier}级"
+                    f"{_SIDE_CN.get(lv.side, lv.side)}${lv.price:,.0f}"
+                    f"({lv.source_count}维共振, 距{abs(lv.distance_pct):.1f}%), "
+                    f"价格接近时关注{direction}机会"
+                ),
+            )
         return None
 
     # 信号过期检查

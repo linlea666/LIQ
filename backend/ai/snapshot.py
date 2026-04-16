@@ -113,8 +113,8 @@ def build_ai_snapshot(
     imbalance = 0.0
 
     if liq_map:
-        clusters_above = [c.model_dump() for c in liq_map.clusters_above[:5]]
-        clusters_below = [c.model_dump() for c in liq_map.clusters_below[:5]]
+        clusters_above = [c.model_dump() for c in liq_map.clusters_above[:8]]
+        clusters_below = [c.model_dump() for c in liq_map.clusters_below[:8]]
         vacuum_zones = [v.model_dump() for v in liq_map.vacuum_zones[:5]]
         imbalance = liq_map.imbalance_ratio
 
@@ -235,11 +235,11 @@ def build_ai_snapshot(
     ladder_plans = []
     if levels:
         rule_supports = [{"price": s.price, "sources": s.sources, "strength": s.strength}
-                         for s in levels.supports[:3]]
+                         for s in levels.supports[:5]]
         rule_resistances = [{"price": r.price, "sources": r.sources, "strength": r.strength}
-                            for r in levels.resistances[:3]]
+                            for r in levels.resistances[:5]]
         rule_stop_loss = [sl.model_dump() for sl in levels.stop_loss_zones]
-        sniper_entries = [se.model_dump() for se in levels.sniper_entries[:4]]
+        sniper_entries = [se.model_dump() for se in levels.sniper_entries[:6]]
         ladder_plans = [lp.model_dump() for lp in levels.ladder_plans]
 
     # 清算热力图摘要：提取 Top-5 密度峰值

@@ -99,11 +99,12 @@ processors:
     break_confirm_sec: 300
     break_depth_pct: 0.3
     flip_zone_pct: 0.5
-    max_tracked_levels: 8
+    max_tracked_levels: 12
     level_expire_sec: 86400
     sweep_proximity_pct: 2.0
     cascade_weight_cap_m: 20
     cascade_norm: 200
+    snapshot_interval_sec: 7200
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100
@@ -120,7 +121,8 @@ ai:
   timeout_sec: 300
   max_retries: 2
   cooldown_sec: 30
-  max_history: 50
+  max_history: 500
+  auto_interval_sec: 7200
   providers:
     openai:
       model: "gpt-4o"

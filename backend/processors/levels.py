@@ -7,6 +7,7 @@ from typing import Optional
 
 from config.settings import get_settings
 from models.flow import CyclePositionData
+from models.key_level import KeyLevelSignal
 from models.levels import (
     EntryZone,
     LadderEntry,
@@ -34,6 +35,7 @@ def calculate_levels(
     liq_map_7d: Optional[LiquidationMap] = None,
     btc_hist_vol: Optional[float] = None,
     cycle_position: Optional[CyclePositionData] = None,
+    kl_signals: Optional[list[KeyLevelSignal]] = None,
 ) -> LevelAnalysis:
     """
     综合多维数据计算全部关键价位。
@@ -121,6 +123,11 @@ def calculate_levels(
     sniper_entries = _calc_sniper_entries(
         current_price, liq_map, atr, supports, resistances, vp,
     )
+
+    if kl_signals:
+        sniper_entries = _merge_kl_signals_into_sniper(
+            sniper_entries, kl_signals, current_price,
+        )
 
     ladder_plans = _calc_ladder_plans(
         current_price, liq_map, atr, supports, resistances, vp,
@@ -384,8 +391,8 @@ def _calc_sniper_entries(
     min_rr = float(get_settings().processors.levels.get("min_sniper_rr", 2.5))
 
     sniper_below = sorted(liq_map.clusters_below, key=lambda c: c.total_usd, reverse=True)
-    for cluster in sniper_below[:3]:
-        if cluster.distance_pct > 5 or cluster.distance_pct < 0.3:
+    for cluster in sniper_below[:5]:
+        if cluster.distance_pct > 8 or cluster.distance_pct < 0.3:
             continue
         entry = cluster.price_from + atr * 0.1
         entry = _avoid_round_number(entry, current_price)
@@ -441,8 +448,8 @@ def _calc_sniper_entries(
         ))
 
     sniper_above = sorted(liq_map.clusters_above, key=lambda c: c.total_usd, reverse=True)
-    for cluster in sniper_above[:3]:
-        if cluster.distance_pct > 5 or cluster.distance_pct < 0.3:
+    for cluster in sniper_above[:5]:
+        if cluster.distance_pct > 8 or cluster.distance_pct < 0.3:
             continue
         entry = cluster.price_to - atr * 0.1
         entry = _avoid_round_number(entry, current_price)
@@ -498,7 +505,75 @@ def _calc_sniper_entries(
         ))
 
     entries.sort(key=lambda e: e.rr_ratio_1, reverse=True)
-    return entries[:4]
+    return entries[:6]
+
+
+def _merge_kl_signals_into_sniper(
+    existing: list[SniperEntry],
+    kl_signals: list[KeyLevelSignal],
+    current_price: float,
+) -> list[SniperEntry]:
+    """将 V2 关键位信号 (SWEPT/BOUNCED/FLIPPED) 桥接为 SniperEntry 合入候选池。
+
+    去重规则：与已有 sniper entry 挂单价在 0.5% 以内且方向相同时，保留 R:R 更高的。
+    """
+    _ACTION_DIR = {
+        "snipe_long": "long", "snipe_short": "short",
+        "flip_long": "long", "flip_short": "short",
+    }
+    merged = list(existing)
+
+    for sig in kl_signals:
+        direction = _ACTION_DIR.get(sig.action)
+        if not direction:
+            continue
+        if sig.confidence not in ("A", "B"):
+            continue
+        if sig.entry_price is None or sig.stop_loss is None or sig.tp1 is None:
+            continue
+
+        risk = abs(sig.entry_price - sig.stop_loss)
+        if risk <= 0:
+            continue
+        reward1 = abs(sig.tp1 - sig.entry_price)
+        rr1 = round(reward1 / risk, 1)
+
+        tp2 = sig.tp2 if sig.tp2 is not None else sig.tp1
+        reward2 = abs(tp2 - sig.entry_price)
+        rr2 = round(reward2 / risk, 1) if reward2 > 0 else rr1
+
+        new_entry = SniperEntry(
+            direction=direction,
+            entry_price=round(sig.entry_price, 2),
+            stop_loss=round(sig.stop_loss, 2),
+            take_profit_1=round(sig.tp1, 2),
+            take_profit_2=round(tp2, 2),
+            rr_ratio_1=rr1,
+            rr_ratio_2=rr2,
+            risk_usd_per_unit=round(risk, 2),
+            cluster_usd=0,
+            logic=[
+                f"V2关键位{sig.state}信号@${sig.level_price:,.0f}({sig.confidence}级)",
+                sig.reason,
+            ],
+        )
+
+        dup_idx = None
+        for i, ex in enumerate(merged):
+            if ex.direction != direction:
+                continue
+            if current_price > 0 and abs(ex.entry_price - new_entry.entry_price) / current_price < 0.005:
+                dup_idx = i
+                break
+
+        if dup_idx is not None:
+            if new_entry.rr_ratio_1 > merged[dup_idx].rr_ratio_1:
+                merged[dup_idx] = new_entry
+        else:
+            merged.append(new_entry)
+
+    merged.sort(key=lambda e: e.rr_ratio_1, reverse=True)
+    return merged[:6]
 
 
 def _merge_clusters_7d(

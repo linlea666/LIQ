@@ -283,6 +283,19 @@ class SniperPlan(BaseModel):
     raw_text: str = ""
 
 
+class TradingPlanEntry(BaseModel):
+    """回测可用的结构化交易计划条目"""
+    tier: str = ""          # "short" | "mid" | "long"
+    direction: str = ""     # "long" | "short"
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    tp1: Optional[float] = None
+    tp2: Optional[float] = None
+    rr: Optional[float] = None
+    source: str = ""        # "engine" | "ai_inferred"
+    logic: str = ""
+
+
 class AIAnalysisResult(BaseModel):
     """AI 分析输出"""
     coin: str
@@ -296,7 +309,10 @@ class AIAnalysisResult(BaseModel):
     sniper_setup: str = ""
     sniper_plans: list[SniperPlan] = []
     ladder_plan_text: str = ""
+    trading_plan: str = ""
+    trading_plan_entries: list[TradingPlanEntry] = []
     risk_warnings: list[str]
     scenario_analysis: list[dict]
+    data_quality_feedback: str = ""
     raw_text: str
     user_prompt: str = ""

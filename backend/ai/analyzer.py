@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 
 from ai.prompts import build_system_prompt, build_user_prompt
 from config.settings import get_settings
-from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary, SniperPlan
+from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary, SniperPlan, TradingPlanEntry
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,16 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         signal = _parse_signal_summary_from_overview(raw_text)
 
     sniper_text = _find_sniper_section()
+    trading_plan_text = _find_section("交易计划", "Trading Plan")
+
+    trading_plan_entries = _parse_trading_plan_entries(trading_plan_text)
+    if not trading_plan_entries and sniper_text:
+        for sp in _parse_sniper_plans(sniper_text):
+            trading_plan_entries.append(TradingPlanEntry(
+                tier="short", direction=sp.direction, entry=sp.entry,
+                stop_loss=sp.stop_loss, tp1=sp.tp1, tp2=sp.tp2,
+                rr=sp.rr, source="engine", logic=sp.logic,
+            ))
 
     return AIAnalysisResult(
         coin=snapshot.coin,
@@ -197,8 +207,11 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         sniper_setup=sniper_text,
         sniper_plans=_parse_sniper_plans(sniper_text),
         ladder_plan_text=_find_ladder_section(),
+        trading_plan=trading_plan_text,
+        trading_plan_entries=trading_plan_entries,
         risk_warnings=_parse_list(_find_section("风险提示", "Risk")),
         scenario_analysis=_parse_scenarios(_find_section("场景", "推演", "Scenario")),
+        data_quality_feedback=_find_section("数据质量", "自检", "Data Quality"),
         raw_text=raw_text,
         user_prompt=user_prompt,
     )
@@ -350,6 +363,142 @@ def _parse_scenarios(text: str) -> list[dict]:
     if current:
         scenarios.append(current)
     return scenarios
+
+
+def _parse_trading_plan_entries(text: str) -> list[TradingPlanEntry]:
+    """从新版"交易计划（三档结构）"章节提取回测可用的结构化条目。
+
+    按档位（短线/中线/远线）分段，从 markdown 表格行或自由文本中提取
+    方向、入场价、止损、止盈、R:R。
+    """
+    if not text or len(text) < 30:
+        return []
+
+    entries: list[TradingPlanEntry] = []
+    current_tier = ""
+
+    _TIER_MAP = {
+        "短线": "short", "short": "short",
+        "中线": "mid", "mid": "mid",
+        "远线": "long", "long": "long",
+    }
+
+    def _detect_tier(line: str) -> str:
+        lower = line.lower()
+        for kw, tier in _TIER_MAP.items():
+            if kw in lower:
+                return tier
+        return ""
+
+    def _extract_price(pattern: str, block: str) -> Optional[float]:
+        m = re.search(pattern, block, re.IGNORECASE)
+        if m:
+            raw = m.group(1).replace(",", "").replace("$", "").replace(" ", "").strip()
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+        return None
+
+    def _detect_direction(text_block: str) -> str:
+        lower = text_block[:100].lower()
+        if any(kw in lower for kw in ("多单", "做多", "long", "多头")):
+            return "long"
+        if any(kw in lower for kw in ("空单", "做空", "short", "空头")):
+            return "short"
+        return ""
+
+    def _detect_source(text_block: str) -> str:
+        if "AI推断" in text_block or "⚡" in text_block:
+            return "ai_inferred"
+        return "engine"
+
+    table_row_re = re.compile(
+        r"\|\s*(?P<dir>[^|]+)\s*\|\s*\$?(?P<entry>[\d,.]+)\s*\|\s*\$?(?P<sl>[\d,.]+)\s*\|"
+        r"\s*\$?(?P<tp1>[\d,.]+)\s*(?:\(.*?(?P<rr1>[\d.]+)\))?\s*\|"
+        r"(?:\s*\$?(?P<tp2>[\d,.]+)\s*(?:\(.*?(?P<rr2>[\d.]+)\))?\s*\|)?"
+    )
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        new_tier = _detect_tier(stripped)
+        if new_tier and ("**" in stripped or "###" in stripped or "档" in stripped):
+            current_tier = new_tier
+            continue
+
+        if stripped.startswith("|") and "---" not in stripped and "方向" not in stripped and "类型" not in stripped:
+            m = table_row_re.match(stripped)
+            if m:
+                direction = _detect_direction(m.group("dir"))
+                if not direction:
+                    continue
+                def _safe_float(s: str | None) -> Optional[float]:
+                    if not s:
+                        return None
+                    try:
+                        return float(s.replace(",", "").replace("$", "").strip())
+                    except (ValueError, AttributeError):
+                        return None
+                entry_val = _safe_float(m.group("entry"))
+                sl_val = _safe_float(m.group("sl"))
+                tp1_val = _safe_float(m.group("tp1"))
+                tp2_val = _safe_float(m.group("tp2"))
+                rr_val = _safe_float(m.group("rr1"))
+                source = _detect_source(stripped)
+                if entry_val or sl_val or tp1_val:
+                    entries.append(TradingPlanEntry(
+                        tier=current_tier or "short",
+                        direction=direction, entry=entry_val,
+                        stop_loss=sl_val, tp1=tp1_val, tp2=tp2_val,
+                        rr=rr_val, source=source,
+                    ))
+                continue
+
+    if not entries:
+        chunks = re.split(
+            r"(?=\*\*(?:多单|空单|做多|做空|Long|Short|多头|空头))", text
+        )
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            direction = _detect_direction(chunk)
+            if not direction:
+                continue
+            tier = current_tier
+            for ln in chunk.split("\n")[:3]:
+                t = _detect_tier(ln)
+                if t:
+                    tier = t
+                    break
+            entry_val = _extract_price(
+                r"(?:挂单价|入场|entry)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+            )
+            sl_val = _extract_price(
+                r"(?:止损|stop.?loss|SL)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+            )
+            tp1_val = _extract_price(
+                r"(?:止盈1|TP1|目标1|take.?profit.?1)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+            )
+            tp2_val = _extract_price(
+                r"(?:止盈2|TP2|目标2|take.?profit.?2)[^$\d]*\$?([\d,]+\.?\d*)", chunk
+            )
+            rr_match = re.search(r"R[：:]\s*R\s*[=≈≥]\s*([\d.]+)", chunk, re.IGNORECASE)
+            if not rr_match:
+                rr_match = re.search(r"1[：:]([\d.]+)", chunk)
+            rr_val = float(rr_match.group(1)) if rr_match else None
+            source = _detect_source(chunk)
+
+            if entry_val or sl_val or tp1_val:
+                entries.append(TradingPlanEntry(
+                    tier=tier or "short", direction=direction, entry=entry_val,
+                    stop_loss=sl_val, tp1=tp1_val, tp2=tp2_val,
+                    rr=rr_val, source=source,
+                ))
+
+    return entries
 
 
 def _parse_sniper_plans(text: str) -> list[SniperPlan]:

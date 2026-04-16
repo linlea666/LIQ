@@ -172,6 +172,29 @@ async def get_key_levels_v2(coin: str):
     return state.key_level_snapshot_v2.model_dump()
 
 
+@router.get("/key-levels/history/{coin}")
+async def get_kl_history(coin: str, limit: int = Query(5, ge=1, le=50)):
+    """获取关键位历史快照（按时间倒序，默认最近 5 条）"""
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    history = _engine.get_kl_history(coin)
+    history.sort(key=lambda h: h.ts, reverse=True)
+    return {"coin": coin, "snapshots": [h.model_dump() for h in history[:limit]]}
+
+
+@router.get("/key-levels/detail/{coin}/{ts}")
+async def get_kl_detail(coin: str, ts: int):
+    """按时间戳精确查询单条关键位快照"""
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    for h in _engine.get_kl_history(coin):
+        if h.ts == ts:
+            return h.model_dump()
+    raise HTTPException(404, f"KL snapshot not found: {coin}/{ts}")
+
+
 @router.get("/range-signal/{coin}")
 async def get_range_signal(coin: str):
     """获取箱体信号完整数据（详情页）"""
