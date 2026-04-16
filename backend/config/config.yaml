@@ -108,7 +108,7 @@ processors:
     level_expire_sec: 86400
     sweep_proximity_pct: 2.0
     cascade_weight_cap_m: 20
-    cascade_norm: 200
+    cascade_norm: 600
     snapshot_interval_sec: 7200
   orderbook:
     whale_threshold_btc: 10

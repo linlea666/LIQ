@@ -1320,18 +1320,40 @@ class Engine:
     def is_ai_running(self, ccy: str) -> bool:
         return ccy in self._ai_running
 
+    def _is_coin_data_ready(self, ccy: str) -> bool:
+        """判断某币种核心数据是否已就绪（ticker + K线 + 指标 + 清算）。"""
+        state = self._states.get(ccy)
+        if not state or not state.ticker:
+            return False
+        if not state.candles_1h:
+            return False
+        if state.rsi_14 is None:
+            return False
+        if not state.liq_maps.get("1d") and not state.liq_maps.get("24h"):
+            return False
+        return True
+
     async def _auto_ai_loop(self, interval_sec: int) -> None:
         """定时自动触发 AI 分析（所有支持的币种）。"""
-        await asyncio.sleep(60)
-        logger.info("Auto AI analysis loop started | interval=%ds", interval_sec)
+        await asyncio.sleep(30)
+        max_wait = 300
+        waited = 30
+        default = self._default_coin
+        while self._running and waited < max_wait:
+            if self._is_coin_data_ready(default):
+                break
+            logger.info("Auto AI waiting for data readiness | coin=%s waited=%ds", default, waited)
+            await asyncio.sleep(15)
+            waited += 15
+        logger.info("Auto AI analysis loop started | interval=%ds data_ready=%s waited=%ds",
+                     interval_sec, self._is_coin_data_ready(default), waited)
         while self._running:
             for ccy in self._settings.supported_coins:
                 if ccy in self._ai_running:
                     continue
-                state = self._states.get(ccy)
-                if not state or not state.ticker:
+                if not self._is_coin_data_ready(ccy):
                     continue
-                elapsed = time.time() - state.last_ai_ts if state.last_ai_ts else float("inf")
+                elapsed = time.time() - self._states[ccy].last_ai_ts if self._states[ccy].last_ai_ts else float("inf")
                 if elapsed < interval_sec:
                     continue
                 try:
