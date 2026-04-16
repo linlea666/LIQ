@@ -1,7 +1,7 @@
 """链上周期位置评分 (Cycle Position Score, CPS)
 
 CPS 综合 5 个链上日级维度对 BTC 所处周期位置进行 0~10 分评分：
-  MVRV Z-Score | Ahr999 | 价格/200W SMA | 价格 vs STH 成本 | Pi 周期比值
+  MVRV Ratio | Ahr999 | 价格/200W SMA | 价格 vs STH 成本 | Pi 周期比值
 
 评分作为全局状态机广播到所有币种（ETH/SOL 等跟随 BTC 周期判断）。
 """
@@ -26,10 +26,22 @@ def calculate_cycle_position(
 
     total = 0.0
 
-    # ── MVRV Z-Score ──
+    # ── MVRV Ratio（优先）/ MVRV-Z（兼容） ──
     mvrv_z = raw.mvrv_z
+    mvrv_ratio = raw.mvrv_ratio
     mvrv_contrib = 0.0
-    if mvrv_z is not None:
+    if mvrv_ratio is not None and mvrv_ratio > 0:
+        if mvrv_ratio < 1.0:
+            mvrv_contrib = 3.0
+        elif mvrv_ratio < 1.5:
+            mvrv_contrib = 2.0
+        elif mvrv_ratio < 2.5:
+            mvrv_contrib = 1.0
+        elif mvrv_ratio < 3.5:
+            mvrv_contrib = 0.0
+        else:
+            mvrv_contrib = -2.0
+    elif mvrv_z is not None:
         if mvrv_z < 0:
             mvrv_contrib = 3.0
         elif mvrv_z < 2:
@@ -117,11 +129,12 @@ def calculate_cycle_position(
     # ── BTC 日线 RSI(14) ──
     rsi = _calc_rsi(raw.btc_daily_prices, 14) if len(raw.btc_daily_prices) >= 15 else None
 
+    mvrv_display = mvrv_ratio if mvrv_ratio is not None and mvrv_ratio > 0 else mvrv_z
     result = CyclePositionData(
         ts=raw.ts,
         cps=round(cps, 1),
         cps_label=label,
-        mvrv_z_score=mvrv_z,
+        mvrv_z_score=mvrv_display,
         mvrv_z_contribution=mvrv_contrib,
         ahr999_value=ahr999,
         ahr999_contribution=ahr_contrib,
@@ -143,10 +156,11 @@ def calculate_cycle_position(
         cvdd=raw.cvdd,
     )
 
+    mvrv_src = "ratio" if mvrv_ratio is not None and mvrv_ratio > 0 else "z"
     logger.info(
-        "CPS calculated | cps=%.1f label=%s mvrv_z=%s ahr999=%s sma_ratio=%s pi_ratio=%s rplr=%s rsi=%s",
-        result.cps, result.cps_label,
-        f"{mvrv_z:.2f}" if mvrv_z is not None else "N/A",
+        "CPS calculated | cps=%.1f label=%s mvrv(%s)=%s ahr999=%s sma_ratio=%s pi_ratio=%s rplr=%s rsi=%s",
+        result.cps, result.cps_label, mvrv_src,
+        f"{mvrv_display:.3f}" if mvrv_display is not None else "N/A",
         f"{ahr999:.4f}" if ahr999 is not None else "N/A",
         f"{sma_ratio:.2f}" if sma_ratio is not None else "N/A",
         f"{pi_ratio:.3f}" if pi_ratio is not None else "N/A",

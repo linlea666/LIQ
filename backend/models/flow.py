@@ -201,6 +201,7 @@ class OnchainCycleData(BaseModel):
     ts: int
     sma_200w: Optional[float] = None
     mvrv_z: Optional[float] = None
+    mvrv_ratio: Optional[float] = None
     mvrv_market_cap: Optional[float] = None
     mvrv_realized_cap: Optional[float] = None
     sth_cost_1d: Optional[float] = None

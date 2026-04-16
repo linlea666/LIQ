@@ -761,6 +761,8 @@ class Engine:
                         "liq_1d": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
                         "kline_1h": bool(st.candles_1h),
                         "indicators": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
+                        "oi": st.oi is not None,
+                        "funding": st.funding is not None,
                     })
                 bbx_h = self._bbx.health() if self._bbx else {}
                 logger.info(
@@ -1331,7 +1333,7 @@ class Engine:
         return ccy in self._ai_running
 
     def _is_coin_data_ready(self, ccy: str) -> bool:
-        """判断某币种核心数据是否已就绪（ticker + K线 + 指标 + 清算）。"""
+        """判断某币种核心数据是否已就绪（ticker + K线 + 指标 + 清算 + OI + 资金费率）。"""
         state = self._states.get(ccy)
         if not state or not state.ticker:
             return False
@@ -1340,6 +1342,10 @@ class Engine:
         if state.rsi_14 is None:
             return False
         if not state.liq_maps.get("1d") and not state.liq_maps.get("24h"):
+            return False
+        if state.oi is None:
+            return False
+        if state.funding is None:
             return False
         return True
 

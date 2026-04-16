@@ -219,6 +219,10 @@ async def poll_onchain_cycle(
 
     btc_state = states.get("BTC")
     btc_price = btc_state.ticker.last if btc_state and btc_state.ticker else 0
+    if btc_state and btc_state.market_index:
+        mi_mvrv = btc_state.market_index.btc_mvrv
+        if mi_mvrv is not None and mi_mvrv > 0:
+            raw.mvrv_ratio = mi_mvrv
     cycle_pos = calculate_cycle_position(raw, btc_price) if btc_price > 0 else None
 
     for ccy in supported_coins:
