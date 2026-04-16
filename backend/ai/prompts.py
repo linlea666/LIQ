@@ -92,7 +92,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **止损铁律**：做空 SL > Entry；做多 SL < Entry — 违反即废弃。止损宽度 ≥ max(价格×0.3%, 0.5×ATR)
 - **约束冲突**：止损方向+最小宽度+R:R≥1:{min_rr:.1f} 三条无法同时满足 → 该方案不输出，声明原因。**不交易是最好的风控**
 - 引擎无方案的档位，AI **应当主动**基于数据自主构建（标注"⚡AI推断"），而非简单放弃；确实无机会时再声明原因
-- 短线档止损须设在清算真空区内（防猎杀）；中/远线档止损宽度 ≥ sl_min_pct
+- 止损优先设在清算真空区内（防猎杀）；中/远线档止损宽度 ≥ sl_min_pct
 
 ### 输出格式（严格按标题，系统解析用）
 
@@ -119,22 +119,17 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 按距离分三档，每档每方向不限数量——所有满足 R:R 约束且有数据支撑的方案均须展示，按信心度排序。每个方案须包含止损说明（含防猎杀逻辑）和"**如果亏了**"段。
 
 **短线档（距当前价 1-8%）**
-- 清算数据：**§1 24h清算地图**（当前持仓结构，反映"此刻谁会被收割"）
-- 其他来源：引擎狙击方案 + V2 关键位信号(SWEPT/BOUNCED/FLIPPED) + AI自主发现
-- 止损选址：优先使用 **24h清算真空区**（§1中的vacuum zones），防止被精确猎杀
+- 可用数据：§1 24h/7d/30d三维度清算地图 + 引擎狙击方案 + V2关键位信号(SWEPT/BOUNCED/FLIPPED) + AI自主发现
+- 止损选址：优先在清算真空区（vacuum zones）内，防止被精确猎杀
 | 方向 | 挂单价 | 止损 | TP1(R:R) | TP2(R:R) | 信心度 | 核心依据 |
 
 **中线档（距当前价 5-10%）**
-- 清算数据：**§1b 7d清算地图**（一周累积杠杆结构，覆盖±3-15%，匹配中线距离）
-- 其他来源：引擎阶梯前层 + 高共振关键位(S/A级) + MA箱体边界 + AI自主发现
-- 止损选址：优先使用 **7d清算真空区**（§1b中的vacuum zones），比24h更稳定
-- **AI必须在引擎方案之外**，主动扫描中线距离内的7d清算密集区、S/A级关键位聚合、MA箱体边界，如发现合理机会则标注"⚡AI推断"输出
+- 可用数据：§1 24h/7d/30d清算地图 + 引擎阶梯方案 + 高共振关键位(S/A级) + MA箱体边界 + AI自主发现
+- **AI必须在引擎方案之外**，主动扫描中线距离内的清算密集区、S/A级关键位聚合、MA箱体边界，如发现合理机会则标注"⚡AI推断"输出
 | 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
 
 **远线档（距当前价 10-20%）**
-- 清算数据：**§1c 30d清算地图**（月级结构性清算位，覆盖±5-25%，匹配远线距离）
-- 其他来源：引擎阶梯远层 + CPS周期位置 + S/A级关键位 + AI自主发现
-- 止损选址：30d清算真空区或结构性支撑/阻力外侧
+- 可用数据：§1 24h/7d/30d清算地图 + 引擎阶梯远层 + CPS周期位置 + S/A级关键位 + AI自主发现
 - CPS 极端区(<2 或 >8)或有 S 级关键位时优先输出；即使 CPS 非极端，若发现 ≥2 维数据支撑的高 R:R 机会，AI 同样应自主构建方案（标注"⚡AI推断"）
 | 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
 
@@ -184,7 +179,7 @@ def build_user_prompt(snapshot: dict) -> str:
         "",
         f"【引擎约束】规则引擎狙击方案仅保留 R:R ≥ 1:{min_rr:.1f} 的条目；第四节须与之一致或明确调整理由。",
         "",
-        "### 1. 清算地图数据 [24h·短线档核心]",
+        "### 1. 清算地图数据 [24h]",
         f"多空失衡比: {snapshot.get('liq_imbalance_ratio', 0):.2f} (>1=空头清算多/看多磁吸, <1=多头清算多/看空磁吸)",
     ]
 
@@ -245,7 +240,7 @@ def build_user_prompt(snapshot: dict) -> str:
     vacuums_7d = snapshot.get("vacuum_zones_7d", [])
     imb_7d = snapshot.get("liq_imbalance_ratio_7d", 0)
     if clusters_above_7d or clusters_below_7d:
-        lines.extend(["", "### 1b. 清算地图数据 [7天·中线档核心]"])
+        lines.extend(["", "### 1b. 清算地图数据 [7天]"])
         lines.append(f"7天多空失衡比: {imb_7d:.2f}")
         if clusters_above_7d:
             lines.append("\n7天上方清算密集区(空头清算):")
@@ -273,7 +268,7 @@ def build_user_prompt(snapshot: dict) -> str:
     clusters_below_30d = snapshot.get("liq_clusters_below_30d", [])
     imb_30d = snapshot.get("liq_imbalance_ratio_30d", 0)
     if clusters_above_30d or clusters_below_30d:
-        lines.extend(["", "### 1c. 清算地图数据 [30天·远线档核心]"])
+        lines.extend(["", "### 1c. 清算地图数据 [30天]"])
         lines.append(f"30天多空失衡比: {imb_30d:.2f}")
         if clusters_above_30d:
             lines.append("\n30天上方清算密集区:")
@@ -472,7 +467,7 @@ def build_user_prompt(snapshot: dict) -> str:
     opt_expiry = snapshot.get("option_nearest_expiry", "")
     opt_call = snapshot.get("option_call_oi")
     opt_put = snapshot.get("option_put_oi")
-    if opt_mp is not None:
+    if opt_mp is not None and opt_mp > 0:
         lines.extend(["", "### 8c. 期权数据 [Coinglass]"])
         lines.append(f"最近到期 Max Pain: ${opt_mp:,.0f} ({opt_expiry})")
         if opt_call is not None and opt_put is not None:

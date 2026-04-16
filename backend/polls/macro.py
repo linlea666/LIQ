@@ -126,9 +126,17 @@ async def poll_stablecoin_mcap(
             usdt = float(item.get("USDT", 0))
             usdc = float(item.get("USDC", 0))
             total = sum(float(v) for v in item.values() if isinstance(v, (int, float)))
+            if total < 1e9:
+                continue
             history.append(StablecoinMcapPoint(ts=ts, total_mcap=total, usdt_mcap=usdt, usdc_mcap=usdc))
         latest = history[-1] if history else None
         if latest:
+            pct = 0.0
+            if len(history) >= 2 and history[0].total_mcap > 1e9:
+                pct = (latest.total_mcap - history[0].total_mcap) / history[0].total_mcap * 100
+                if abs(pct) > 50:
+                    logger.warning("stablecoin 7d change abnormal: %.2f%%, clamped", pct)
+                    pct = max(-50, min(50, pct))
             sc_data = StablecoinMcapData(
                 ts=latest.ts,
                 current_total=latest.total_mcap,
@@ -184,7 +192,10 @@ async def poll_onchain_cycle(
 
     ahr_data = await cg.fetch_ahr999()
     if ahr_data and len(ahr_data) > 0:
-        raw.ahr999 = float(ahr_data[-1].get("value", ahr_data[-1].get("ahr999", 0)))
+        last_ahr = ahr_data[-1]
+        raw.ahr999 = float(last_ahr.get("ahr999_value",
+                           last_ahr.get("value",
+                           last_ahr.get("ahr999", 0))))
 
     pi_data = await cg.fetch_pi_cycle()
     if pi_data and len(pi_data) > 0:
@@ -302,11 +313,14 @@ async def poll_options(
                 expiries = []
                 for item in max_pain:
                     try:
+                        mp = item.get("max_pain_price", item.get("maxPain", item.get("price", 0)))
+                        c_oi = item.get("call_open_interest", item.get("callOI", 0))
+                        p_oi = item.get("put_open_interest", item.get("putOI", 0))
                         expiries.append(OptionMaxPainExpiry(
-                            expiry_date=item.get("expiryDate", item.get("date", "")),
-                            max_pain_price=float(item.get("maxPain", item.get("price", 0))),
-                            call_oi=float(item.get("callOI", 0)),
-                            put_oi=float(item.get("putOI", 0)),
+                            expiry_date=item.get("date", item.get("expiryDate", "")),
+                            max_pain_price=float(mp),
+                            call_oi=float(c_oi),
+                            put_oi=float(p_oi),
                         ))
                     except (ValueError, KeyError):
                         continue
@@ -320,19 +334,23 @@ async def poll_options(
                         nearest_expiry=nearest.expiry_date if nearest else "",
                     )
         except Exception:
-            logger.debug("options: max_pain %s failed", symbol, exc_info=True)
+            logger.warning("options: max_pain %s failed", symbol, exc_info=True)
 
         try:
             info = await cg.fetch_option_info(symbol)
-            if info and isinstance(info, dict) and symbol in states:
-                state = states[symbol]
-                state.option_info = OptionInfoData(
-                    symbol=symbol, ts=int(time.time()),
-                    total_oi_usd=float(info.get("totalOI", 0)),
-                    total_vol_24h_usd=float(info.get("totalVol24h", 0)),
-                    put_call_oi_ratio=float(info.get("putCallOIRatio", 0)),
-                    put_call_vol_ratio=float(info.get("putCallVolRatio", 0)),
-                )
+            if info and symbol in states:
+                agg = info
+                if isinstance(info, list):
+                    agg = next((x for x in info if x.get("exchange_name") == "All"), info[0] if info else None)
+                if agg and isinstance(agg, dict):
+                    state = states[symbol]
+                    state.option_info = OptionInfoData(
+                        symbol=symbol, ts=int(time.time()),
+                        total_oi_usd=float(agg.get("open_interest_usd", agg.get("totalOI", 0))),
+                        total_vol_24h_usd=float(agg.get("volume_usd_24h", agg.get("totalVol24h", 0))),
+                        put_call_oi_ratio=float(agg.get("putCallOIRatio", 0)),
+                        put_call_vol_ratio=float(agg.get("putCallVolRatio", 0)),
+                    )
         except Exception:
             logger.debug("options: info %s failed", symbol, exc_info=True)
 

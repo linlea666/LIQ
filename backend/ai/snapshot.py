@@ -286,7 +286,7 @@ def build_ai_snapshot(
         btc_iv_skew_1m=mi.btc_iv_skew_1m if mi else None,
         exchange_btc_total=mi_exchange_btc_total,
         exchange_btc_change_pct=mi_exchange_btc_change_pct,
-        ahr999=cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value is not None else (mi.ahr999 if mi else None),
+        ahr999=(cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value and cycle_position.ahr999_value > 0 else (mi.ahr999 if mi else None)),
         stablecoin_dominance=mi.stablecoin_dominance if mi else None,
         coinbase_btc_premium=mi.coinbase_btc_premium if mi else None,
         usdt_otc_premium=mi.usdt_otc_premium if mi else None,

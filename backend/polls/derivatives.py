@@ -484,13 +484,21 @@ async def poll_td_sequential(
         latest = rows[-1] if isinstance(rows, list) and rows else None
         if not latest:
             return
-        count = latest.get("td_count", latest.get("tdCount", latest.get("count")))
-        direction = latest.get("td_direction", latest.get("tdDirection",
-                               latest.get("direction", "")))
-        if count is not None:
-            state.td_sequential_count = int(count)
-        if direction:
-            state.td_sequential_direction = str(direction)
+        buy_c = latest.get("td_buy_count", latest.get("tdBuyCount"))
+        sell_c = latest.get("td_sell_count", latest.get("tdSellCount"))
+        old_count = latest.get("td_count", latest.get("tdCount", latest.get("count")))
+        old_dir = latest.get("td_direction", latest.get("tdDirection",
+                             latest.get("direction", "")))
+        if buy_c is not None and int(buy_c) > 0:
+            state.td_sequential_count = int(buy_c)
+            state.td_sequential_direction = "buy"
+        elif sell_c is not None and int(sell_c) > 0:
+            state.td_sequential_count = int(sell_c)
+            state.td_sequential_direction = "sell"
+        elif old_count is not None:
+            state.td_sequential_count = int(old_count)
+            if old_dir:
+                state.td_sequential_direction = str(old_dir)
         state.poll_failures.pop("td_sequential", None)
     except Exception:
         logger.warning("poll_td_sequential failed", exc_info=True)
