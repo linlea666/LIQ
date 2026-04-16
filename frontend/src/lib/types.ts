@@ -326,6 +326,7 @@ export interface KeyLevelSignal {
   entry_price?: number;
   stop_loss?: number;
   tp1?: number;
+  tp2?: number;
   rr_ratio?: number;
   reason: string;
   warnings: string[];
