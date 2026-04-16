@@ -915,11 +915,12 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"TD序列: ⚠ 采集失败（{pf['td_sequential']}），本次分析不含此维度")
 
     has_crypto_sent = fgi is not None or dom is not None
+    has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     lines.extend([
         "",
         "【宏观数据覆盖说明】（请严格按此表述，避免与上文矛盾）",
         f"- 加密侧情绪/结构: {'已提供（恐惧贪婪/市占等）' if has_crypto_sent else '未提供'}",
-        f"- 传统外盘(DXY/纳指/标普/黄金): 当前系统未接入此数据源，请勿编造或推测具体数值",
+        f"- 传统外盘(DXY/纳指/标普/黄金): {'已提供（见§9数值）' if has_trad else '当前未提供，请勿编造或推测具体数值'}",
         "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
         f"- 均线箱体: " + (f"已提供(信号={rs.get('signal_grade', '无')}级)" if has_range else "未提供"),
         f"- 关键位状态机: " + (f"已提供(活跃{kl.get('active_count', 0)}个)" if has_kl else "未提供"),

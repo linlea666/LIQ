@@ -752,10 +752,12 @@ class Engine:
                         "kline_1h": bool(st.candles_1h),
                         "indicators": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
                     })
+                bbx_h = self._bbx.health() if self._bbx else {}
                 logger.info(
-                    "Source heartbeat | coinglass=%s binance=%s ready=%s",
+                    "Source heartbeat | coinglass=%s binance=%s bbx=%s ready=%s",
                     self._cg.health().status,
                     self._bn.health().status,
+                    bbx_h.get("status", "n/a"),
                     ready,
                 )
             except Exception:
@@ -1529,7 +1531,7 @@ class Engine:
         daily = self._cg.daily_request_count
         limit = self._settings.coinglass.daily_limit
         usage_pct = round(daily / limit * 100, 1) if limit > 0 else 0
-        return [
+        sources = [
             self._cg.health().model_dump(),
             self._bn.health().model_dump(),
             {
@@ -1540,18 +1542,21 @@ class Engine:
                 "usage_pct": usage_pct,
                 "latency_ms": 0,
             },
-            {
-                "name": "market_readiness",
-                "status": "connected",
-                "coins": [
-                    {
-                        "coin": ccy,
-                        "ticker_ready": bool(st.ticker),
-                        "liquidation_ready": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
-                        "kline_1h_ready": bool(st.candles_1h),
-                        "indicators_ready": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
-                    }
-                    for ccy, st in self._states.items()
-                ],
-            },
         ]
+        if self._bbx:
+            sources.append(self._bbx.health())
+        sources.append({
+            "name": "market_readiness",
+            "status": "connected",
+            "coins": [
+                {
+                    "coin": ccy,
+                    "ticker_ready": bool(st.ticker),
+                    "liquidation_ready": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
+                    "kline_1h_ready": bool(st.candles_1h),
+                    "indicators_ready": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
+                }
+                for ccy, st in self._states.items()
+            ],
+        })
+        return sources

@@ -23,6 +23,9 @@ export default function StatusFooter() {
             {s.daily_requests !== undefined && (
               <span className="text-slate-600"> ({s.daily_requests}/{s.daily_limit} {s.usage_pct}%)</span>
             )}
+            {s.cached_indices !== undefined && (
+              <span className="text-slate-600"> ({s.cached_indices} indices)</span>
+            )}
           </span>
         ))
       ) : (

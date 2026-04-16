@@ -63,6 +63,7 @@ export default function KeyLevelView() {
     <div className="space-y-4 max-w-4xl">
       <StructureSummary kl={kl} price={price} coin={coin} />
       <BacktestStatsCard coin={coin} />
+      <KLHistoryLinks coin={coin} />
       {kl.bull_bear_line && (
         <BullBearCard bb={kl.bull_bear_line} price={price} coin={coin} />
       )}
@@ -681,6 +682,52 @@ function LevelRow({
 }
 
 
+function KLHistoryLinks({ coin }: { coin: string }) {
+  const [list, setList] = useState<{ ts: number; levels_count: number; price: number }[]>([]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/key-levels/history/${coin}?limit=5`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const snaps = d?.snapshots;
+        if (Array.isArray(snaps)) {
+          setList(
+            snaps.map((s: any) => ({
+              ts: s.ts,
+              levels_count: Array.isArray(s.levels) ? s.levels.length : 0,
+              price: s.current_price || 0,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+  }, [coin]);
+
+  if (list.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+      <span className="text-slate-400">历史快照:</span>
+      {list.map((item) => (
+        <Link
+          key={item.ts}
+          href={`/levels/${coin}/${item.ts}`}
+          target="_blank"
+          className="hover:text-blue-400 transition-colors"
+        >
+          {new Date(item.ts * 1000).toLocaleString("zh-CN", {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}{" "}
+          ({item.levels_count}位)
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 interface BtStats {
   total_signals: number;
   triggered: number;
@@ -694,20 +741,33 @@ interface BtStats {
 
 function BacktestStatsCard({ coin }: { coin: string }) {
   const [stats, setStats] = useState<BtStats | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const load = () => {
       fetch(`${API_BASE}/api/backtest/stats/${coin}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d && d.total_signals > 0 && setStats(d))
-        .catch(() => {});
+        .then((d) => {
+          if (d) setStats(d);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
     };
     load();
     const t = setInterval(load, 120000);
     return () => clearInterval(t);
   }, [coin]);
 
-  if (!stats) return null;
+  if (!loaded) return null;
+
+  if (!stats || stats.total_signals === 0) {
+    return (
+      <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-300">📊 信号回测统计</h3>
+        <span className="text-[10px] text-slate-500">数据积累中，AI自动分析后将展示统计结果...</span>
+      </div>
+    );
+  }
 
   const resolved = stats.tp1_hit + stats.sl_hit;
 
