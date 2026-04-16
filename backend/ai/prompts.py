@@ -59,8 +59,14 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - SWEPT/FLIPPED 与引擎狙击方案方向一致 → 置信度提升至A级
 - K线形态（pin bar/engulfing/doji）确认时进一步提升信号可信度
 
-### 宏观-微观联动（仅当数据中有值时引用，无则写"数据未提供"）
-- DXY/纳指/标普走弱 → risk-off 谨慎追高；黄金与 BTC 背离 → 避险轮动
+### 宏观-微观联动（§一叙事链+维度表必须覆盖，无数据写"未提供"）
+- **DXY**：走强→risk-off压制BTC，走弱→risk-on利好BTC；DXY拐点常领先BTC 1-3天
+- **纳指/标普**：BTC与科技股相关性0.5-0.8，纳指大跌当日BTC大概率跟跌；纳指上涨但BTC滞涨→资金未轮入加密
+- **黄金**：黄金与BTC同涨=避险叙事共振；黄金涨BTC跌=资金选择传统避险而非加密
+- **美债收益率**：10Y>4.5%→高利率压制风险资产；<3.5%→释放流动性利好BTC；联邦基金利率拐点=宏观转折
+- **IV-HV波动率结构**：IV>HV→期权市场预期大波动将至（方向未定但振幅增大）；IV Skew负值→看跌保护需求高
+- **MVRV**：<1全网浮亏（中期底部），1-2.5估值中性，>3泡沫区——远线档方向判断的锚
+- **交易所BTC余额**：持续流出=屯币看涨，持续流入=准备抛售看跌——中线级信号
 - 恐惧贪婪极值须与多空比、CVD、费率等交叉验证，单独引用标注"参考权重低"
 - §9e 距当前价 ≤15% 链上价位纳入§二；RPLR<0 = 中期底部前兆，>0.5 = 回调风险
 - Coinbase溢价 + ETF + 稳定币三维共振 = 最强资金面信号
@@ -68,8 +74,8 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 
 ### 交易员推理框架
 **像庄家一样思考**：先问"如果我持有$10亿仓位，我会把价格往哪推来最大化清算收益？"，然后构建猎杀路径。
-构建**资金流叙事链**：资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
-- §一先写 3-5 句叙事链总结（用因果逻辑串联多维数据，如"因为X所以Y导致Z"），再用简表列 ≥7 维方向信号作为佐证
+构建**资金流叙事链**：宏观环境(DXY/美股/利率)→资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
+- §一先写 3-5 句叙事链总结（**必须包含宏观联动判断**，如"DXY走弱+纳指上涨→risk-on环境利好BTC"），再用简表列维度方向信号作为佐证
 - §七**核心不是"涨或跌"而是"价格最可能走哪条路径"**——须推演庄家的最优猎杀路线（先扫哪侧流动性→反转→再扫另一侧），末尾选定**唯一**最偏向场景（禁止骑墙）
 - §四每个方案必须回答："如果这笔交易亏了，最可能的原因是什么？"——不是复述风险提示，而是从对手盘角度推演失败场景
 
@@ -94,8 +100,14 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 **第一行必须是白话总结：**
 > 📝 **看多/看空/震荡（置信度：高/中/低）**——30字以内核心理由（禁止专业术语）
 
-然后用 3-5 句**因果叙事链**串联核心矛盾（如"ETF资金持续流入→推高OI→但价格卡在关键阻力→说明多头在堆仓但还没突破"），让交易员一读就知道"现在是什么局面、谁在主导、关键变量是什么"。
-结尾附简表（≥7 维方向信号 + 共振强度），作为叙事链的量化佐证。
+然后用 3-5 句**因果叙事链**串联核心矛盾（**必须从宏观讲到微观**，如"DXY走弱+纳指反弹→risk-on→ETF资金流入→推高OI→但价格卡在关键阻力"），让交易员一读就知道"现在是什么局面、谁在主导、关键变量是什么"。
+
+结尾附**四板块信号简表**（每板块至少选 2 维，共 ≥10 维），作为叙事链的量化佐证：
+| 板块 | 维度 | 信号 | 方向 | 共振强度 |
+- **A. 宏观联动**（必选≥2维）：DXY/美元强弱、纳指/标普走势、黄金联动、美债收益率/利率环境、IV-HV波动率结构——无数据时写"未提供"
+- **B. 资金面与链上**（必选≥2维）：ETF净流/CB溢价/稳定币变化、MVRV/Ahr999估值、交易所BTC余额变化——反映中期资金意图
+- **C. 衍生品与杠杆**（必选≥3维）：清算地图、资金费率、OI/多空比、CVD/Taker、订单簿——反映短期博弈力量
+- **D. 技术面与结构**（必选≥2维）：价格位置(MA箱体)、关键位状态机、RSI/MACD、K线形态、恐惧贪婪——反映技术面确认
 
 ## 二、关键价位图谱
 | 类型 | 价位区间 | 依据(≥2维+时效) |
@@ -607,10 +619,9 @@ def build_user_prompt(snapshot: dict) -> str:
     ahr = snapshot.get("ahr999")
     ex_btc = snapshot.get("exchange_btc_total")
     ex_chg = snapshot.get("exchange_btc_change_pct")
-    sc_dom = snapshot.get("stablecoin_dominance")
     cb_prem = snapshot.get("coinbase_btc_premium")
     usdt_prem = snapshot.get("usdt_otc_premium")
-    if any(v is not None for v in (mvrv, ahr, ex_btc, sc_dom)):
+    if any(v is not None for v in (mvrv, ahr, ex_btc, cb_prem)):
         lines.append("")
         lines.append("### 9c. 链上与资金面")
         if mvrv is not None:
@@ -626,18 +637,10 @@ def build_user_prompt(snapshot: dict) -> str:
                 lines.append("  → 余额下降=BTC 被提走屯币，看涨信号")
             elif ex_chg is not None and ex_chg > 0.5:
                 lines.append("  → 余额上升=BTC 充入准备卖出，看跌信号")
-        if sc_dom is not None:
-            lines.append(f"稳定币市占率: {sc_dom:.2f}% (高=干火药多/观望资金多)")
         if cb_prem is not None:
             lines.append(f"Coinbase BTC 溢价: {cb_prem:.4%} ({'正溢价=美国买盘活跃' if cb_prem > 0 else '负溢价=美国买盘弱'})")
         if usdt_prem is not None:
             lines.append(f"USDT 场外溢价: {usdt_prem:.3f} ({'>1=场外买盘活跃' if usdt_prem > 1 else '<1=场外卖盘'})")
-        usdt_mcap = snapshot.get("usdt_market_cap")
-        if usdt_mcap is not None:
-            lines.append(f"USDT 市值: ${usdt_mcap / 1e9:.1f}B")
-        hashrate = snapshot.get("btc_hashrate")
-        if hashrate is not None:
-            lines.append(f"BTC 全网算力: {hashrate:.1f} EH/s")
 
     us_10y = snapshot.get("us_10y_yield")
     fed_r = snapshot.get("fed_rate")

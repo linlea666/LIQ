@@ -34,17 +34,14 @@ _DIRECT_MAP: list[tuple[str, str]] = [
     ("i:btcopt1mimpvolskew:okex",   "btc_iv_skew_1m"),
     ("i:btcusdvolatility:deribit",  "btc_dvol"),
     ("i:btcoptposlsratio:okex",     "btc_put_call_oi"),
-    ("i:ehashrate:bitcoin",         "btc_hashrate"),
     ("i:usty10y:nybot",             "us_10y_yield"),
     ("i:fedeffr:fed",               "fed_rate"),
-    ("i:usdtissue:tether",          "usdt_market_cap"),
-    ("i:stablesuprp:aicoin",        "stablecoin_dominance"),
-    ("i:lsprbtc:okex",              "okx_ls_ratio_btc"),
-    ("i:lsprbtcswapusdt:binance",   "binance_ls_ratio_btc"),
     ("i:bnbbtchold:arkm",           "binance_btc_balance"),
     ("i:okxbtchold:arkm",           "okx_btc_balance"),
     ("i:bitfbtchold:arkm",          "bitfinex_btc_balance"),
     ("i:coinbtchold:arkm",          "coinbase_btc_balance"),
+    # 已移除：btc_hashrate(低频无用)、usdt_market_cap(冗余)、stablecoin_dominance(冗余)
+    # 已移除：okx_ls_ratio_btc、binance_ls_ratio_btc（使用Coinglass数据源）
 ]
 
 _CHANGE_PCT_MAP: list[tuple[str, str]] = [
