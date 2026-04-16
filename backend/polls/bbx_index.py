@@ -45,9 +45,10 @@ _DIRECT_MAP: list[tuple[str, str]] = [
 ]
 
 _CHANGE_PCT_MAP: list[tuple[str, str]] = [
-    ("i:ndx:nasdaq", "nasdaq_change_pct"),
-    ("i:inx:sp",     "sp500_change_pct"),
-    ("i:xauusd:liffe","gold_change_pct"),
+    ("i:diniw:ice",   "dxy_change_pct"),
+    ("i:ndx:nasdaq",  "nasdaq_change_pct"),
+    ("i:inx:sp",      "sp500_change_pct"),
+    ("i:xauusd:liffe", "gold_change_pct"),
 ]
 
 
@@ -73,11 +74,23 @@ async def poll_bbx_index(
         if val is not None:
             setattr(mi, mi_field, val)
 
+    _EX_BAL_KEYS = [
+        "i:bnbbtchold:arkm", "i:okxbtchold:arkm",
+        "i:bitfbtchold:arkm", "i:coinbtchold:arkm",
+    ]
+    chg_parts = [bbx.get_change(k) for k in _EX_BAL_KEYS]
+    chg_valid = [c for c in chg_parts if c is not None]
+    if chg_valid:
+        mi.exchange_btc_change_24h = sum(chg_valid)
+
     populated = sum(1 for f in mi.__fields__ if getattr(mi, f) is not None and f != "ts")
     logger.info("BBX → MarketIndexData | %d/%d fields populated", populated, len(mi.__fields__) - 1)
 
     for ccy in supported_coins:
-        states[ccy].market_index = mi
+        st = states[ccy]
+        if mi.fear_greed is not None and st.market_index and st.market_index.fear_greed is not None:
+            st.fear_greed_prev = int(st.market_index.fear_greed)
+        st.market_index = mi
 
     _update_coinbase_premium(bbx, states, supported_coins)
 

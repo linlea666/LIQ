@@ -164,6 +164,18 @@ async def poll_oi(
             trend=trend,
         )
 
+    oi_1h = await cg.fetch_oi_aggregated_history(
+        coin.symbol_cg, interval="1h", limit=24,
+    )
+    if oi_1h and isinstance(oi_1h, list) and len(oi_1h) >= 2:
+        try:
+            first_val = float(oi_1h[0].get("close", oi_1h[0].get("openInterest", 0)))
+            last_val = float(oi_1h[-1].get("close", oi_1h[-1].get("openInterest", 0)))
+            if first_val > 0:
+                state.oi_change_24h_pct = round((last_val - first_val) / first_val * 100, 2)
+        except (ValueError, KeyError, TypeError):
+            pass
+
 
 async def poll_funding_all(
     cg: CoinglassSource,
@@ -254,7 +266,7 @@ async def poll_ls_ratio(
     exchange = coin.exchange_primary
 
     global_data = await cg.fetch_global_ls_ratio_history(
-        exchange, coin.symbol_cg_pair, interval="1h", limit=1,
+        exchange, coin.symbol_cg_pair, interval="1h", limit=24,
     )
     log_api_fields_once("ls-ratio-global", global_data, logged_keys)
     if global_data and isinstance(global_data, list) and len(global_data) > 0:
@@ -270,9 +282,16 @@ async def poll_ls_ratio(
             )],
             avg_ratio=ratio,
         )
+        state.ls_ratio_long_pct = long_pct
+        state.ls_ratio_short_pct = short_pct
+        if len(global_data) >= 2:
+            first = global_data[0]
+            first_ratio = float(first.get("global_account_long_short_ratio",
+                           float(first.get("longAccount", 50)) / max(float(first.get("shortAccount", 50)), 0.01)))
+            state.ls_ratio_change_24h = round(ratio - first_ratio, 4)
 
     top_acct_data = await cg.fetch_top_ls_account_ratio_history(
-        exchange, coin.symbol_cg_pair, interval="1h", limit=1,
+        exchange, coin.symbol_cg_pair, interval="1h", limit=24,
     )
     if top_acct_data and isinstance(top_acct_data, list) and len(top_acct_data) > 0:
         item = top_acct_data[-1]
@@ -287,6 +306,13 @@ async def poll_ls_ratio(
             )],
             avg_ratio=ratio,
         )
+        state.ls_top_acct_long_pct = long_pct
+        state.ls_top_acct_short_pct = short_pct
+        if len(top_acct_data) >= 2:
+            first = top_acct_data[0]
+            first_ratio = float(first.get("top_account_long_short_ratio",
+                           float(first.get("longAccount", 50)) / max(float(first.get("shortAccount", 50)), 0.01)))
+            state.ls_top_acct_change_24h = round(ratio - first_ratio, 4)
 
     top_pos_data = await cg.fetch_top_ls_position_ratio_history(
         exchange, coin.symbol_cg_pair, interval="1h", limit=1,
@@ -406,6 +432,8 @@ async def poll_net_position(
         if not vals:
             return
         state.net_position_latest = vals[-1]
+        if len(vals) >= 2:
+            state.net_position_change_24h = vals[-1] - vals[0]
         if len(vals) >= 4:
             recent_avg = sum(vals[-4:]) / 4
             older_avg = sum(vals[:4]) / 4

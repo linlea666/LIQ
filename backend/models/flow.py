@@ -168,6 +168,7 @@ class MarketIndexData(BaseModel):
     btc_put_call_oi: Optional[float] = None
     btc_mvrv: Optional[float] = None
     dxy: Optional[float] = None
+    dxy_change_pct: Optional[float] = None
     nasdaq: Optional[float] = None
     nasdaq_change_pct: Optional[float] = None
     sp500: Optional[float] = None
@@ -183,6 +184,7 @@ class MarketIndexData(BaseModel):
     okx_btc_balance: Optional[float] = None
     bitfinex_btc_balance: Optional[float] = None
     coinbase_btc_balance: Optional[float] = None
+    exchange_btc_change_24h: Optional[float] = None
     ahr999: Optional[float] = None
     usdt_market_cap: Optional[float] = None
     stablecoin_dominance: Optional[float] = None

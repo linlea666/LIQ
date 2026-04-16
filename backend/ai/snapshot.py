@@ -86,6 +86,14 @@ def build_ai_snapshot(
     large_orders_net_usd: float = 0,
     ls_ratio_top_account: Optional[float] = None,
     ls_ratio_top_position: Optional[float] = None,
+    ls_ratio_long_pct: Optional[float] = None,
+    ls_ratio_short_pct: Optional[float] = None,
+    ls_ratio_change_24h: Optional[float] = None,
+    ls_top_acct_long_pct: Optional[float] = None,
+    ls_top_acct_short_pct: Optional[float] = None,
+    ls_top_acct_change_24h: Optional[float] = None,
+    oi_change_24h_pct: Optional[float] = None,
+    fear_greed_prev: Optional[int] = None,
     whale_hl_alerts_count: int = 0,
     whale_transfers_count: int = 0,
     whale_net_direction: str = "",
@@ -164,6 +172,11 @@ def build_ai_snapshot(
                      if b is not None]
         if bal_parts:
             mi_exchange_btc_total = sum(bal_parts)
+            chg = mi.exchange_btc_change_24h
+            if chg is not None and mi_exchange_btc_total > 0:
+                prev = mi_exchange_btc_total - chg
+                if prev > 0:
+                    mi_exchange_btc_change_pct = round(chg / prev * 100, 2)
 
     ob_bid_total = 0.0
     ob_ask_total = 0.0
@@ -271,6 +284,7 @@ def build_ai_snapshot(
         btc_max_pain=mi.btc_max_pain if mi else None,
         btc_dvol=mi.btc_dvol if mi else None,
         dxy=mi.dxy if mi else None,
+        dxy_change_pct=mi.dxy_change_pct if mi else None,
         btc_dominance=mi.btc_dominance if mi else None,
         taker_buy_ratio=taker_flow.buy_ratio if taker_flow else None,
         taker_dominant=taker_flow.dominant if taker_flow else "",
@@ -285,6 +299,7 @@ def build_ai_snapshot(
         btc_implied_vol=mi.btc_implied_vol if mi else None,
         btc_iv_skew_1m=mi.btc_iv_skew_1m if mi else None,
         exchange_btc_total=mi_exchange_btc_total,
+        exchange_btc_change_24h=mi.exchange_btc_change_24h if mi else None,
         exchange_btc_change_pct=mi_exchange_btc_change_pct,
         ahr999=(mi.ahr999 if mi and mi.ahr999 and mi.ahr999 > 0 else (cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value and cycle_position.ahr999_value > 0 else None)),
         stablecoin_dominance=mi.stablecoin_dominance if mi else None,
@@ -332,6 +347,14 @@ def build_ai_snapshot(
         large_orders_net_usd=large_orders_net_usd,
         ls_ratio_top_account=ls_ratio_top_account,
         ls_ratio_top_position=ls_ratio_top_position,
+        ls_ratio_long_pct=ls_ratio_long_pct,
+        ls_ratio_short_pct=ls_ratio_short_pct,
+        ls_ratio_change_24h=ls_ratio_change_24h,
+        ls_top_acct_long_pct=ls_top_acct_long_pct,
+        ls_top_acct_short_pct=ls_top_acct_short_pct,
+        ls_top_acct_change_24h=ls_top_acct_change_24h,
+        oi_change_24h_pct=oi_change_24h_pct,
+        fear_greed_prev=fear_greed_prev,
         whale_hl_alerts_count=whale_hl_alerts_count,
         whale_transfers_count=whale_transfers_count,
         whale_net_direction=whale_net_direction,

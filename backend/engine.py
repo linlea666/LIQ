@@ -133,12 +133,22 @@ class CoinState:
         # §9h: 净持仓 + 合约资金流 + TD 序列
         self.net_position_latest: Optional[float] = None
         self.net_position_trend: str = ""
+        self.net_position_change_24h: Optional[float] = None
         self.futures_coin_netflow_1h: Optional[float] = None
         self.futures_coin_netflow_trend: str = ""
         self.td_sequential_count: Optional[int] = None
         self.td_sequential_direction: str = ""
         self.poll_failures: dict[str, str] = {}
         self._log_once_keys: set[str] = set()
+        # 历史对比字段
+        self.ls_ratio_change_24h: Optional[float] = None
+        self.ls_ratio_long_pct: Optional[float] = None
+        self.ls_ratio_short_pct: Optional[float] = None
+        self.ls_top_acct_long_pct: Optional[float] = None
+        self.ls_top_acct_short_pct: Optional[float] = None
+        self.ls_top_acct_change_24h: Optional[float] = None
+        self.oi_change_24h_pct: Optional[float] = None
+        self.fear_greed_prev: Optional[int] = None
 
 
 class Engine:
@@ -1503,6 +1513,14 @@ class Engine:
             ) if lo else 0,
             ls_ratio_top_account=state.ls_ratio_top_account.avg_ratio if state.ls_ratio_top_account else None,
             ls_ratio_top_position=state.ls_ratio_top_position.avg_ratio if state.ls_ratio_top_position else None,
+            ls_ratio_long_pct=state.ls_ratio_long_pct,
+            ls_ratio_short_pct=state.ls_ratio_short_pct,
+            ls_ratio_change_24h=state.ls_ratio_change_24h,
+            ls_top_acct_long_pct=state.ls_top_acct_long_pct,
+            ls_top_acct_short_pct=state.ls_top_acct_short_pct,
+            ls_top_acct_change_24h=state.ls_top_acct_change_24h,
+            oi_change_24h_pct=state.oi_change_24h_pct,
+            fear_greed_prev=state.fear_greed_prev,
             whale_hl_alerts_count=len(state.whale_data.hl_alerts) if state.whale_data else 0,
             whale_transfers_count=len(state.whale_data.transfers) if state.whale_data else 0,
             whale_net_direction=self._calc_whale_direction(state.whale_data) if state.whale_data else "",
@@ -1516,6 +1534,7 @@ class Engine:
             liq_heatmap=state.liq_heatmaps.get("24h") or state.liq_heatmaps.get("3d"),
             net_position_latest=state.net_position_latest,
             net_position_trend=state.net_position_trend,
+            net_position_change_24h=state.net_position_change_24h,
             futures_coin_netflow_1h=state.futures_coin_netflow_1h,
             futures_coin_netflow_trend=state.futures_coin_netflow_trend,
             td_sequential_count=state.td_sequential_count,

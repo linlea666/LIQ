@@ -6,9 +6,10 @@ from config.settings import get_settings
 from processors.level_discovery import fmt_usd_cn
 
 
-def _fmt_usd_for_prompt(usd: float) -> str:
+def _fmt_usd_for_prompt(usd: float, signed: bool = False) -> str:
     """AI prompt 专用金额格式化（中文单位 + $ 前缀）。"""
-    return f"${fmt_usd_cn(usd)}"
+    prefix = ("+" if usd > 0 else "") if signed else ""
+    return f"{prefix}${fmt_usd_cn(usd)}"
 
 
 def _min_sniper_rr() -> float:
@@ -103,11 +104,12 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 然后用 3-5 句**因果叙事链**串联核心矛盾（**必须从宏观讲到微观**，如"DXY走弱+纳指反弹→risk-on→ETF资金流入→推高OI→但价格卡在关键阻力"），让交易员一读就知道"现在是什么局面、谁在主导、关键变量是什么"。
 
 结尾附**四板块信号简表**（每板块至少选 2 维，共 ≥10 维），作为叙事链的量化佐证：
-| 板块 | 维度 | 信号 | 方向 | 共振强度 |
-- **A. 宏观联动**（必选≥2维）：DXY/美元强弱、纳指/标普走势、黄金联动、美债收益率/利率环境、IV-HV波动率结构——无数据时写"未提供"
-- **B. 资金面与链上**（必选≥2维）：ETF净流/CB溢价/稳定币变化、MVRV/Ahr999估值、交易所BTC余额变化——反映中期资金意图
+| 板块 | 维度 | 数值/变化 | 信号 | 方向 | 共振强度 |
+- **A. 宏观联动**（必选≥2维）：DXY/美元强弱、纳指/标普走势、黄金联动、美债收益率/利率环境、IV-HV波动率结构——取§9各节数据填写，无数据时写"未提供"
+- **B. 资金面与链上**（必选≥2维）：ETF净流/CB溢价/稳定币变化、MVRV/Ahr999估值、交易所BTC余额变化(§9c)——反映中期资金意图
 - **C. 衍生品与杠杆**（必选≥3维）：清算地图(24h/7d/30d三维度)、资金费率、OI/多空比、CVD/Taker、订单簿——反映多时间框架博弈力量
 - **D. 技术面与结构**（必选≥2维）：价格位置(MA箱体)、关键位状态机、RSI/MACD、K线形态、恐惧贪婪——反映技术面确认
+**重要**：§一信号简表的"数值/变化"列必须引用后续章节的具体数值（如 §9c 交易所余额、§9 宏观数值），不能因为数值出现在后面章节就写"未提供"。
 
 ## 二、关键价位图谱
 | 类型 | 价位区间 | 依据(≥2维+时效) |
@@ -316,6 +318,7 @@ def build_user_prompt(snapshot: dict) -> str:
         "",
         "### 3. 持仓与杠杆 [核心·实时]",
         f"OI总量: ${snapshot.get('oi_current_usd', 0) / 1e9:.2f}B",
+        f"OI变化(24h): {snapshot.get('oi_change_24h_pct', 0):+.2f}%" if snapshot.get('oi_change_24h_pct') is not None else "OI变化(24h): 暂缺",
         f"OI变化(1h): {snapshot.get('oi_change_1h_pct', 0):+.2f}%",
         f"OI变化(5m): {snapshot.get('oi_change_5m_pct', 0):+.2f}%",
         f"OI趋势: {snapshot.get('oi_trend', 'N/A')}",
@@ -361,15 +364,25 @@ def build_user_prompt(snapshot: dict) -> str:
         "### 5. 多空比 [各交易所]",
     ])
     ls = snapshot.get("ls_ratio")
+    ls_long = snapshot.get("ls_ratio_long_pct")
+    ls_short = snapshot.get("ls_ratio_short_pct")
+    ls_chg24 = snapshot.get("ls_ratio_change_24h")
     if ls is not None:
-        lines.append(f"全局账户多空比: {ls:.2f} ({snapshot.get('ls_ratio_interpretation', '')})")
+        pct_str = f" (多{ls_long:.1f}%/空{ls_short:.1f}%)" if ls_long is not None else ""
+        chg_str = f" | 24h变化: {ls_chg24:+.4f}" if ls_chg24 is not None else ""
+        lines.append(f"全局账户多空比: {ls:.2f}{pct_str}{chg_str} ({snapshot.get('ls_ratio_interpretation', '')})")
     else:
         lines.append("全局账户多空比: 数据暂缺")
     ls_ta = snapshot.get("ls_ratio_top_account")
     ls_tp = snapshot.get("ls_ratio_top_position")
+    ta_long = snapshot.get("ls_top_acct_long_pct")
+    ta_short = snapshot.get("ls_top_acct_short_pct")
+    ta_chg24 = snapshot.get("ls_top_acct_change_24h")
     if ls_ta is not None:
         ta_label = "大户偏多" if ls_ta > 1.1 else ("大户偏空" if ls_ta < 0.9 else "大户中性")
-        lines.append(f"大户账户多空比: {ls_ta:.2f} → {ta_label}")
+        pct_str = f" (多{ta_long:.1f}%/空{ta_short:.1f}%)" if ta_long is not None else ""
+        chg_str = f" | 24h变化: {ta_chg24:+.4f}" if ta_chg24 is not None else ""
+        lines.append(f"大户账户多空比: {ls_ta:.2f}{pct_str}{chg_str} → {ta_label}")
     if ls_tp is not None:
         tp_label = "大户持仓偏多" if ls_tp > 1.1 else ("大户持仓偏空" if ls_tp < 0.9 else "大户持仓中性")
         lines.append(f"大户持仓多空比: {ls_tp:.2f} → {tp_label}")
@@ -557,10 +570,19 @@ def build_user_prompt(snapshot: dict) -> str:
     ])
     fgi = snapshot.get("fear_greed_index")
     if fgi is not None:
-        lines.append(f"恐惧贪婪指数: {int(fgi)} (0=极度恐惧, 100=极度贪婪)")
+        fgi_int = int(fgi)
+        fgi_prev = snapshot.get("fear_greed_prev")
+        if fgi_prev is not None:
+            delta = fgi_int - fgi_prev
+            trend = "↑回暖" if delta > 0 else ("↓恶化" if delta < 0 else "→持平")
+            lines.append(f"恐惧贪婪指数: {fgi_int} (前值{fgi_prev}, {delta:+d}{trend}) (0=极度恐惧, 100=极度贪婪)")
+        else:
+            lines.append(f"恐惧贪婪指数: {fgi_int} (0=极度恐惧, 100=极度贪婪)")
     dxy = snapshot.get("dxy")
     if dxy:
-        lines.append(f"美元指数(DXY): {dxy:.1f}")
+        dxy_chg = snapshot.get("dxy_change_pct")
+        dxy_chg_str = f" ({dxy_chg:+.2f}%)" if dxy_chg is not None else ""
+        lines.append(f"美元指数(DXY): {dxy:.2f}{dxy_chg_str}")
     nasdaq = snapshot.get("nasdaq")
     if nasdaq:
         nasdaq_chg = snapshot.get("nasdaq_change_pct")
@@ -620,11 +642,12 @@ def build_user_prompt(snapshot: dict) -> str:
     ahr = snapshot.get("ahr999")
     ex_btc = snapshot.get("exchange_btc_total")
     ex_chg = snapshot.get("exchange_btc_change_pct")
+    ex_chg_abs = snapshot.get("exchange_btc_change_24h")
     cb_prem = snapshot.get("coinbase_btc_premium")
     usdt_prem = snapshot.get("usdt_otc_premium")
     if any(v is not None for v in (mvrv, ahr, ex_btc, cb_prem)):
         lines.append("")
-        lines.append("### 9c. 链上与资金面")
+        lines.append("### 9c. 链上与资金面（§一信号简表B板块应引用本节数值）")
         if mvrv is not None:
             mvrv_label = "全网浮亏(底部区域)" if mvrv < 1 else ("估值中性" if mvrv < 2.5 else "估值过热")
             lines.append(f"MVRV 比率: {mvrv:.3f} → {mvrv_label}")
@@ -632,8 +655,12 @@ def build_user_prompt(snapshot: dict) -> str:
             ahr_label = "适合抄底" if ahr < 0.45 else ("适合定投" if ahr < 1.2 else "估值偏高")
             lines.append(f"ahr999 囤币指数: {ahr:.4f} → {ahr_label}")
         if ex_btc is not None:
-            chg_str = f" ({ex_chg:+.2f}%)" if ex_chg is not None else ""
-            lines.append(f"主要交易所 BTC 余额合计: {ex_btc:,.0f} BTC{chg_str}")
+            parts = [f"主要交易所 BTC 余额合计: {ex_btc:,.0f} BTC"]
+            if ex_chg_abs is not None:
+                parts.append(f"24h变化: {ex_chg_abs:+,.0f} BTC")
+            if ex_chg is not None:
+                parts.append(f"({ex_chg:+.2f}%)")
+            lines.append(" | ".join(parts))
             if ex_chg is not None and ex_chg < -0.5:
                 lines.append("  → 余额下降=BTC 被提走屯币，看涨信号")
             elif ex_chg is not None and ex_chg > 0.5:
@@ -900,7 +927,11 @@ def build_user_prompt(snapshot: dict) -> str:
     if has_9h_data or has_9h_failures:
         lines.extend(["", "### 9h. 净持仓 + 合约资金流 + TD序列"])
         if np_latest is not None:
-            lines.append(f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})")
+            np_chg_24h = snapshot.get("net_position_change_24h")
+            np_str = f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})"
+            if np_chg_24h is not None:
+                np_str += f" | 24h变化: {_fmt_usd_for_prompt(np_chg_24h, signed=True)}"
+            lines.append(np_str)
         elif "net_position" in pf:
             lines.append(f"净持仓(v2): ⚠ 采集失败（{pf['net_position']}），本次分析不含此维度")
         if nf_1h is not None:

@@ -146,6 +146,7 @@ class AISnapshot(BaseModel):
     btc_max_pain: Optional[float] = None
     btc_dvol: Optional[float] = None
     dxy: Optional[float] = None
+    dxy_change_pct: Optional[float] = None
     btc_dominance: Optional[float] = None
     taker_buy_ratio: Optional[float] = None
     taker_dominant: str = ""
@@ -164,6 +165,7 @@ class AISnapshot(BaseModel):
     btc_implied_vol: Optional[float] = None
     btc_iv_skew_1m: Optional[float] = None
     exchange_btc_total: Optional[float] = None
+    exchange_btc_change_24h: Optional[float] = None
     exchange_btc_change_pct: Optional[float] = None
     ahr999: Optional[float] = None
     stablecoin_dominance: Optional[float] = None
@@ -226,6 +228,14 @@ class AISnapshot(BaseModel):
     # 3 维多空比
     ls_ratio_top_account: Optional[float] = None
     ls_ratio_top_position: Optional[float] = None
+    ls_ratio_long_pct: Optional[float] = None
+    ls_ratio_short_pct: Optional[float] = None
+    ls_ratio_change_24h: Optional[float] = None
+    ls_top_acct_long_pct: Optional[float] = None
+    ls_top_acct_short_pct: Optional[float] = None
+    ls_top_acct_change_24h: Optional[float] = None
+    oi_change_24h_pct: Optional[float] = None
+    fear_greed_prev: Optional[int] = None
 
     # 巨鲸追踪
     whale_hl_alerts_count: int = 0
@@ -255,6 +265,7 @@ class AISnapshot(BaseModel):
     # Phase 11: 净持仓 + 合约资金流 + TD序列
     net_position_trend: str = ""
     net_position_latest: Optional[float] = None
+    net_position_change_24h: Optional[float] = None
     futures_coin_netflow_1h: Optional[float] = None
     futures_coin_netflow_trend: str = ""
     td_sequential_count: Optional[int] = None

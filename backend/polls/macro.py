@@ -200,17 +200,22 @@ async def poll_onchain_cycle(
     pi_data = await cg.fetch_pi_cycle()
     if pi_data and len(pi_data) > 0:
         last = pi_data[-1]
-        raw.pi_111dma_x2 = float(last.get("sma111X2", last.get("ma111x2", 0)))
-        raw.pi_350dma = float(last.get("sma350", last.get("ma350", 0)))
+        raw.pi_111dma_x2 = float(last.get("ma_110",
+                            last.get("sma111X2", last.get("ma111x2", 0))))
+        raw.pi_350dma = float(last.get("ma_350_mu_2",
+                         last.get("sma350", last.get("ma350", 0))))
 
     ma_200w_data = await cg.fetch_200w_ma_heatmap()
     if ma_200w_data and len(ma_200w_data) > 0:
         last = ma_200w_data[-1]
-        raw.sma_200w = float(last.get("sma", last.get("ma200w", 0)))
+        raw.sma_200w = float(last.get("moving_average_1440",
+                        last.get("sma", last.get("ma200w", 0))))
 
     sth_data = await cg.fetch_sth_realized_price()
     if sth_data and len(sth_data) > 0:
-        raw.sth_cost_1d = float(sth_data[-1].get("value", sth_data[-1].get("price", 0)))
+        last_sth = sth_data[-1]
+        raw.sth_cost_1d = float(last_sth.get("sth_realized_price",
+                           last_sth.get("value", last_sth.get("price", 0))))
 
     btc_state = states.get("BTC")
     btc_price = btc_state.ticker.last if btc_state and btc_state.ticker else 0
