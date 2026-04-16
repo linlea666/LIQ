@@ -99,42 +99,85 @@ export default function AIAnalysis() {
               </Section>
             )}
 
-            {aiResult.stop_loss_suggestion?.raw && (
-              <Section title="🛡️ 止损安全区">
-                <Markdown text={aiResult.stop_loss_suggestion.raw} />
-              </Section>
-            )}
-
-            {aiResult.sniper_setup && (
-              <Section title="🎯 狙击挂单计划（高 R:R）">
-                {aiResult.sniper_plans && aiResult.sniper_plans.length > 0 && (
+            {/* New format: trading_plan with structured entries */}
+            {aiResult.trading_plan ? (
+              <Section title="📋 交易计划">
+                {aiResult.trading_plan_entries && aiResult.trading_plan_entries.length > 0 && (
                   <div className="flex flex-col gap-2 mb-3">
-                    {aiResult.sniper_plans.map((p, i) => (
-                      <div
-                        key={i}
-                        className={`rounded border p-2 text-xs ${
-                          p.direction === "long"
-                            ? "border-green-700/40 bg-green-950/20"
-                            : "border-red-700/40 bg-red-950/20"
-                        }`}
-                      >
-                        <span className="font-semibold">
-                          {p.direction === "long" ? "📈 多" : "📉 空"}
-                        </span>
-                        {p.entry != null && <span className="ml-2">入场 ${p.entry.toLocaleString()}</span>}
-                        {p.stop_loss != null && <span className="ml-2 text-zinc-400">止损 ${p.stop_loss.toLocaleString()}</span>}
-                        {p.rr != null && <span className="ml-2 text-amber-400">R:R 1:{p.rr.toFixed(1)}</span>}
-                      </div>
-                    ))}
+                    {aiResult.trading_plan_entries.map((p, i) => {
+                      const tierLabel = p.tier === "short" ? "短线" : p.tier === "mid" ? "中线" : "远线";
+                      return (
+                        <div
+                          key={i}
+                          className={`rounded border p-2 text-xs ${
+                            p.direction === "long"
+                              ? "border-green-700/40 bg-green-950/20"
+                              : "border-red-700/40 bg-red-950/20"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-semibold mb-1">
+                            <span className="text-slate-400">[{tierLabel}]</span>
+                            {p.direction === "long" ? "📈 多" : "📉 空"}
+                            {p.source === "ai_inferred" && <span className="text-yellow-400">⚡AI</span>}
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-zinc-400">
+                            {p.entry != null && <span>入场 <span className="text-white">${p.entry.toLocaleString()}</span></span>}
+                            {p.stop_loss != null && <span>止损 <span className="text-white">${p.stop_loss.toLocaleString()}</span></span>}
+                            {p.tp1 != null && <span>TP1 <span className="text-white">${p.tp1.toLocaleString()}</span></span>}
+                            {p.rr != null && <span className="text-amber-400 font-semibold">R:R 1:{p.rr.toFixed(1)}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-                <Markdown text={aiResult.sniper_setup} />
               </Section>
+            ) : (
+              <>
+                {aiResult.stop_loss_suggestion?.raw && (
+                  <Section title="🛡️ 止损安全区">
+                    <Markdown text={aiResult.stop_loss_suggestion.raw} />
+                  </Section>
+                )}
+
+                {aiResult.sniper_setup && (
+                  <Section title="🎯 狙击挂单计划（高 R:R）">
+                    {aiResult.sniper_plans && aiResult.sniper_plans.length > 0 && (
+                      <div className="flex flex-col gap-2 mb-3">
+                        {aiResult.sniper_plans.map((p, i) => (
+                          <div
+                            key={i}
+                            className={`rounded border p-2 text-xs ${
+                              p.direction === "long"
+                                ? "border-green-700/40 bg-green-950/20"
+                                : "border-red-700/40 bg-red-950/20"
+                            }`}
+                          >
+                            <span className="font-semibold">
+                              {p.direction === "long" ? "📈 多" : "📉 空"}
+                            </span>
+                            {p.entry != null && <span className="ml-2">入场 ${p.entry.toLocaleString()}</span>}
+                            {p.stop_loss != null && <span className="ml-2 text-zinc-400">止损 ${p.stop_loss.toLocaleString()}</span>}
+                            {p.rr != null && <span className="ml-2 text-amber-400">R:R 1:{p.rr.toFixed(1)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <Markdown text={aiResult.sniper_setup} />
+                  </Section>
+                )}
+
+                {aiResult.ladder_plan_text && (
+                  <Section title="🪜 阶梯埋伏计划（远距多层网）">
+                    <Markdown text={aiResult.ladder_plan_text} />
+                  </Section>
+                )}
+              </>
             )}
 
-            {aiResult.ladder_plan_text && (
-              <Section title="🪜 阶梯埋伏计划（远距多层网）">
-                <Markdown text={aiResult.ladder_plan_text} />
+            {aiResult.data_quality_feedback && (
+              <Section title="🔍 数据质量自检">
+                <Markdown text={aiResult.data_quality_feedback} />
               </Section>
             )}
 

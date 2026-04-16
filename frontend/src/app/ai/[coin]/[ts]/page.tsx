@@ -178,40 +178,53 @@ export default function AIDetailPage() {
 
         {/* Trading Plan (new merged format) */}
         {data.trading_plan && (
-          <Card title="📋 交易计划（三档结构）">
-            {data.trading_plan_entries && data.trading_plan_entries.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-                {data.trading_plan_entries.map((p, i) => {
-                  const tierLabel = p.tier === "short" ? "短线" : p.tier === "mid" ? "中线" : "远线";
-                  const tierColor = p.tier === "short" ? "text-blue-400" : p.tier === "mid" ? "text-purple-400" : "text-orange-400";
-                  return (
-                    <div
-                      key={i}
-                      className={`rounded-lg border p-3 text-sm ${
-                        p.direction === "long"
-                          ? "border-green-700/40 bg-green-950/20"
-                          : "border-red-700/40 bg-red-950/20"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 font-semibold mb-1">
-                        <span className={tierColor}>[{tierLabel}]</span>
-                        {p.direction === "long" ? "📈 做多" : "📉 做空"}
-                        {p.source === "ai_inferred" && <span className="text-yellow-400 text-xs">⚡AI</span>}
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-zinc-300">
-                        {p.entry != null && <div>入场: <span className="text-white">${p.entry.toLocaleString()}</span></div>}
-                        {p.stop_loss != null && <div>止损: <span className="text-white">${p.stop_loss.toLocaleString()}</span></div>}
-                        {p.tp1 != null && <div>止盈1: <span className="text-white">${p.tp1.toLocaleString()}</span></div>}
-                        {p.tp2 != null && <div>止盈2: <span className="text-white">${p.tp2.toLocaleString()}</span></div>}
-                        {p.rr != null && <div className="col-span-2">R:R = <span className="text-amber-400 font-semibold">1:{p.rr.toFixed(1)}</span></div>}
-                      </div>
+          <>
+            {data.trading_plan_entries && data.trading_plan_entries.length > 0 && (() => {
+              const tiers = [
+                { key: "short", label: "短线档", color: "blue", border: "border-blue-700/30" },
+                { key: "mid", label: "中线档", color: "purple", border: "border-purple-700/30" },
+                { key: "long", label: "远线档", color: "orange", border: "border-orange-700/30" },
+              ];
+              return tiers.map(({ key, label, color, border }) => {
+                const items = data.trading_plan_entries!.filter(p => p.tier === key);
+                if (items.length === 0) return null;
+                return (
+                  <Card key={key} title={`📋 ${label}`}>
+                    <div className="space-y-2.5">
+                      {items.map((p, i) => (
+                        <div
+                          key={i}
+                          className={`rounded-lg border p-3 ${
+                            p.direction === "long"
+                              ? "border-green-700/40 bg-green-950/20"
+                              : "border-red-700/40 bg-red-950/20"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-sm mb-2">
+                            {p.direction === "long" ? <span className="text-green-400">📈 做多</span> : <span className="text-red-400">📉 做空</span>}
+                            {p.source === "ai_inferred" && <span className="text-yellow-400 text-xs border border-yellow-700/50 rounded px-1.5 py-0.5">⚡AI推断</span>}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs">
+                            {p.entry != null && <div className="text-zinc-400">入场 <span className="text-white font-medium">${p.entry.toLocaleString()}</span></div>}
+                            {p.stop_loss != null && <div className="text-zinc-400">止损 <span className="text-white font-medium">${p.stop_loss.toLocaleString()}</span></div>}
+                            {p.tp1 != null && <div className="text-zinc-400">TP1 <span className="text-white font-medium">${p.tp1.toLocaleString()}</span></div>}
+                            {p.tp2 != null && <div className="text-zinc-400">TP2 <span className="text-white font-medium">${p.tp2.toLocaleString()}</span></div>}
+                          </div>
+                          {p.rr != null && (
+                            <div className="mt-1.5 text-xs">R:R = <span className="text-amber-400 font-bold text-sm">1:{p.rr.toFixed(1)}</span></div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-            <RichMarkdown text={data.trading_plan} />
-          </Card>
+                  </Card>
+                );
+              });
+            })()}
+
+            <Card title="📝 交易计划详细分析">
+              <RichMarkdown text={data.trading_plan} />
+            </Card>
+          </>
         )}
 
         {/* Legacy: Stop Loss (old reports only) */}
@@ -340,12 +353,12 @@ function RichMarkdown({ text }: { text: string }) {
     const header = tableRows[0];
     const body = tableRows.slice(1);
     elements.push(
-      <div key={`table-${elements.length}`} className="overflow-x-auto my-3">
-        <table className="w-full text-sm border-collapse">
+      <div key={`table-${elements.length}`} className="overflow-x-auto my-3 rounded-lg border border-slate-700/50">
+        <table className="min-w-full text-sm border-collapse">
           <thead>
-            <tr className="border-b border-slate-600">
+            <tr className="bg-slate-800/60">
               {header.map((cell, ci) => (
-                <th key={ci} className="text-left py-1.5 px-2 text-slate-300 text-xs font-semibold">
+                <th key={ci} className="text-left py-2 px-3 text-slate-300 text-xs font-semibold whitespace-nowrap">
                   {cell.replace(/\*\*/g, "")}
                 </th>
               ))}
@@ -353,9 +366,9 @@ function RichMarkdown({ text }: { text: string }) {
           </thead>
           <tbody>
             {body.map((row, ri) => (
-              <tr key={ri} className="border-b border-slate-800/50">
+              <tr key={ri} className={`border-t border-slate-800/40 ${ri % 2 === 0 ? "bg-slate-900/30" : ""}`}>
                 {row.map((cell, ci) => (
-                  <td key={ci} className="py-1.5 px-2 text-xs">
+                  <td key={ci} className="py-2 px-3 text-xs leading-relaxed align-top">
                     <InlineFormat text={cell} />
                   </td>
                 ))}

@@ -148,76 +148,22 @@ def build_ai_snapshot(
         funding_exchanges = [e.model_dump() for e in multi_funding.exchanges]
         funding_avg_7d = multi_funding.avg_7d
 
-    # 宏观数据（涨跌幅：优先按数值对齐 raw_items，其次 key/name 子串）
-    nasdaq_val = None
-    nasdaq_chg = None
-    gold_val = None
-    gold_chg = None
-    sp500_val = None
-    sp500_chg = None
-    # Phase 5 新增
-    mi_btc_mvrv = None
-    mi_btc_hist_vol = None
-    mi_btc_implied_vol = None
-    mi_btc_iv_skew_1m = None
+    # MI 字段现在由 BBX 数据源填充（DXY/纳指/黄金/MVRV/波动率等）
+    mi = market_index
+    mi_nasdaq = mi.nasdaq if mi else None
+    mi_nasdaq_chg = mi.nasdaq_change_pct if mi else None
+    mi_gold = mi.gold if mi else None
+    mi_gold_chg = mi.gold_change_pct if mi else None
+    mi_sp500 = mi.sp500 if mi else None
+    mi_sp500_chg = mi.sp500_change_pct if mi else None
     mi_exchange_btc_total = None
     mi_exchange_btc_change_pct = None
-    mi_ahr999 = None
-    mi_stablecoin_dominance = None
-    mi_coinbase_btc_premium = None
-    mi_usdt_otc_premium = None
-    mi_us_10y_yield = None
-    mi_fed_rate = None
-    mi_btc_put_call_oi = None
-    mi_usdt_market_cap = None
-    mi_btc_hashrate = None
-    mi_okx_ls_ratio = None
-    mi_binance_ls_ratio = None
-
-    if market_index:
-        nasdaq_val = market_index.nasdaq
-        gold_val = market_index.gold
-        sp500_val = market_index.sp500
-        items = market_index.raw_items
-        nasdaq_chg = _macro_change_pct(items, nasdaq_val, ("nasdaq", "ndx", "qqq", "纳斯达克"))
-        gold_chg = _macro_change_pct(items, gold_val, ("gold", "xau", "黄金"))
-        sp500_chg = _macro_change_pct(items, sp500_val, ("spx", "sp500", "标普", "s&p"))
-
-        mi_btc_mvrv = market_index.btc_mvrv
-        mi_btc_hist_vol = market_index.btc_hist_vol
-        mi_btc_implied_vol = market_index.btc_implied_vol
-        mi_btc_iv_skew_1m = market_index.btc_iv_skew_1m
-        mi_ahr999 = market_index.ahr999
-        mi_stablecoin_dominance = market_index.stablecoin_dominance
-        mi_coinbase_btc_premium = market_index.coinbase_btc_premium
-        mi_usdt_otc_premium = market_index.usdt_otc_premium
-        mi_us_10y_yield = market_index.us_10y_yield
-        mi_fed_rate = market_index.fed_rate
-        mi_btc_put_call_oi = market_index.btc_put_call_oi
-        mi_usdt_market_cap = market_index.usdt_market_cap
-        mi_btc_hashrate = market_index.btc_hashrate
-        mi_okx_ls_ratio = market_index.okx_ls_ratio_btc
-        mi_binance_ls_ratio = market_index.binance_ls_ratio_btc
-
-        bnb_bal = market_index.binance_btc_balance
-        okx_bal = market_index.okx_btc_balance
-        bf_bal = market_index.bitfinex_btc_balance
-        cb_bal = market_index.coinbase_btc_balance
-        bal_parts = [b for b in (bnb_bal, okx_bal, bf_bal, cb_bal) if b is not None]
+    if mi:
+        bal_parts = [b for b in (mi.binance_btc_balance, mi.okx_btc_balance,
+                                  mi.bitfinex_btc_balance, mi.coinbase_btc_balance)
+                     if b is not None]
         if bal_parts:
             mi_exchange_btc_total = sum(bal_parts)
-            chg_parts = []
-            for bal_val, subs in (
-                (bnb_bal, ("binancebtcbalance",)),
-                (okx_bal, ("okexbtcbalance",)),
-                (bf_bal, ("bitfinexbtcbalance",)),
-                (cb_bal, ("coinbtchold",)),
-            ):
-                c = _macro_change_pct(items, bal_val, subs)
-                if c is not None:
-                    chg_parts.append(c)
-            if chg_parts:
-                mi_exchange_btc_change_pct = sum(chg_parts) / len(chg_parts)
 
     ob_bid_total = 0.0
     ob_ask_total = 0.0
@@ -322,35 +268,35 @@ def build_ai_snapshot(
         global_liq_short_1h=global_liq.short_1h_usd if global_liq else 0,
         global_liq_ratio_24h=global_liq.ratio_24h if global_liq else 1.0,
         global_liq_largest_single=global_liq.largest_single_usd if global_liq else 0,
-        btc_max_pain=market_index.btc_max_pain if market_index else None,
-        btc_dvol=market_index.btc_dvol if market_index else None,
-        dxy=market_index.dxy if market_index else None,
-        btc_dominance=market_index.btc_dominance if market_index else None,
+        btc_max_pain=mi.btc_max_pain if mi else None,
+        btc_dvol=mi.btc_dvol if mi else None,
+        dxy=mi.dxy if mi else None,
+        btc_dominance=mi.btc_dominance if mi else None,
         taker_buy_ratio=taker_flow.buy_ratio if taker_flow else None,
         taker_dominant=taker_flow.dominant if taker_flow else "",
-        nasdaq=nasdaq_val,
-        nasdaq_change_pct=nasdaq_chg,
-        gold=gold_val,
-        gold_change_pct=gold_chg,
-        sp500=sp500_val,
-        sp500_change_pct=sp500_chg,
-        btc_mvrv=mi_btc_mvrv,
-        btc_hist_vol=mi_btc_hist_vol,
-        btc_implied_vol=mi_btc_implied_vol,
-        btc_iv_skew_1m=mi_btc_iv_skew_1m,
+        nasdaq=mi_nasdaq,
+        nasdaq_change_pct=mi_nasdaq_chg,
+        gold=mi_gold,
+        gold_change_pct=mi_gold_chg,
+        sp500=mi_sp500,
+        sp500_change_pct=mi_sp500_chg,
+        btc_mvrv=mi.btc_mvrv if mi else None,
+        btc_hist_vol=mi.btc_hist_vol if mi else None,
+        btc_implied_vol=mi.btc_implied_vol if mi else None,
+        btc_iv_skew_1m=mi.btc_iv_skew_1m if mi else None,
         exchange_btc_total=mi_exchange_btc_total,
         exchange_btc_change_pct=mi_exchange_btc_change_pct,
-        ahr999=cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value is not None else mi_ahr999,
-        stablecoin_dominance=mi_stablecoin_dominance,
-        coinbase_btc_premium=mi_coinbase_btc_premium,
-        usdt_otc_premium=mi_usdt_otc_premium,
-        us_10y_yield=mi_us_10y_yield,
-        fed_rate=mi_fed_rate,
-        btc_put_call_oi=mi_btc_put_call_oi,
-        usdt_market_cap=mi_usdt_market_cap,
-        btc_hashrate=mi_btc_hashrate,
-        okx_ls_ratio_btc=mi_okx_ls_ratio,
-        binance_ls_ratio_btc=mi_binance_ls_ratio,
+        ahr999=cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value is not None else (mi.ahr999 if mi else None),
+        stablecoin_dominance=mi.stablecoin_dominance if mi else None,
+        coinbase_btc_premium=mi.coinbase_btc_premium if mi else None,
+        usdt_otc_premium=mi.usdt_otc_premium if mi else None,
+        us_10y_yield=mi.us_10y_yield if mi else None,
+        fed_rate=mi.fed_rate if mi else None,
+        btc_put_call_oi=mi.btc_put_call_oi if mi else None,
+        usdt_market_cap=mi.usdt_market_cap if mi else None,
+        btc_hashrate=mi.btc_hashrate if mi else None,
+        okx_ls_ratio_btc=mi.okx_ls_ratio_btc if mi else None,
+        binance_ls_ratio_btc=mi.binance_ls_ratio_btc if mi else None,
         cycle_position=cycle_position.model_dump() if cycle_position else None,
         liq_sweep_above_usd_1h=sum(
             e.get("usd", 0) for e in (liq_sweep_events or []) if e.get("side") == "above"

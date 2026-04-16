@@ -296,6 +296,23 @@ class TradingPlanEntry(BaseModel):
     logic: str = ""
 
 
+class BacktestStats(BaseModel):
+    """轻量级回测统计摘要"""
+    coin: str = ""
+    ts: int = 0
+    total_signals: int = 0
+    triggered: int = 0
+    tp1_hit: int = 0
+    sl_hit: int = 0
+    pending: int = 0
+    win_rate: float = 0
+    avg_rr: float = 0
+    by_tier: dict = {}
+    by_direction: dict = {}
+    by_source: dict = {}
+    recent_signals: list[dict] = []
+
+
 class AIAnalysisResult(BaseModel):
     """AI 分析输出"""
     coin: str

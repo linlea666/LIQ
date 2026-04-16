@@ -2,6 +2,7 @@
 
 import { useMarketStore } from "@/stores/marketStore";
 import { formatPrice } from "@/lib/format";
+import { API_BASE } from "@/lib/constants";
 import type {
   KeyLevelV2,
   KeyLevelSignal,
@@ -10,6 +11,7 @@ import type {
   BreakoutZone,
 } from "@/lib/types";
 import Link from "next/link";
+import { useState, useEffect } from "react";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -60,6 +62,7 @@ export default function KeyLevelView() {
   return (
     <div className="space-y-4 max-w-4xl">
       <StructureSummary kl={kl} price={price} coin={coin} />
+      <BacktestStatsCard coin={coin} />
       {kl.bull_bear_line && (
         <BullBearCard bb={kl.bull_bear_line} price={price} coin={coin} />
       )}
@@ -674,5 +677,88 @@ function LevelRow({
         </span>
       </td>
     </tr>
+  );
+}
+
+
+interface BtStats {
+  total_signals: number;
+  triggered: number;
+  tp1_hit: number;
+  sl_hit: number;
+  pending: number;
+  win_rate: number;
+  avg_rr: number;
+  by_source: Record<string, { total: number; tp1: number; sl: number }>;
+}
+
+function BacktestStatsCard({ coin }: { coin: string }) {
+  const [stats, setStats] = useState<BtStats | null>(null);
+
+  useEffect(() => {
+    const load = () => {
+      fetch(`${API_BASE}/api/backtest/stats/${coin}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && d.total_signals > 0 && setStats(d))
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 120000);
+    return () => clearInterval(t);
+  }, [coin]);
+
+  if (!stats) return null;
+
+  const resolved = stats.tp1_hit + stats.sl_hit;
+
+  return (
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-slate-300">📊 信号回测统计</h3>
+        <span className="text-[10px] text-slate-600">基于AI历史报告</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCell label="总信号" value={String(stats.total_signals)} />
+        <StatCell label="已触发" value={String(stats.triggered)} />
+        <StatCell
+          label="胜率"
+          value={resolved > 0 ? `${stats.win_rate}%` : "-"}
+          color={stats.win_rate >= 50 ? "text-green-400" : stats.win_rate > 0 ? "text-red-400" : "text-slate-400"}
+        />
+        <StatCell label="平均R:R" value={stats.avg_rr > 0 ? `1:${stats.avg_rr}` : "-"} color="text-amber-400" />
+      </div>
+      {resolved > 0 && (
+        <div className="mt-3 flex items-center gap-2">
+          <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-green-500 rounded-full"
+              style={{ width: `${stats.win_rate}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-slate-500 shrink-0">
+            {stats.tp1_hit}胜 / {stats.sl_hit}负 / {stats.pending}待定
+          </span>
+        </div>
+      )}
+      {stats.by_source && Object.keys(stats.by_source).length > 1 && (
+        <div className="mt-2 flex gap-3 text-[10px] text-slate-500">
+          {Object.entries(stats.by_source).map(([src, s]) => (
+            <span key={src}>
+              {src === "ai_inferred" ? "⚡AI" : "引擎"}: {s.total}个
+              {s.tp1 + s.sl > 0 && ` (胜率${s.tp1 + s.sl > 0 ? Math.round(s.tp1 / (s.tp1 + s.sl) * 100) : 0}%)`}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCell({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="text-center">
+      <div className={`text-lg font-bold ${color || "text-white"}`}>{value}</div>
+      <div className="text-[10px] text-slate-500">{label}</div>
+    </div>
   );
 }

@@ -45,6 +45,11 @@ sources:
       macro_index: 600
       whale: 600
       news: 1800
+  bbx:
+    url: "https://bbx.com/api/pc?module=v1/market/index"
+    cache_ttl: 120            # 两次实际请求间最小间隔（秒）
+    timeout_sec: 15
+    poll_interval: 120        # engine 轮询间隔（秒）
   binance:
     base_url: "https://fapi.binance.com"
     timeout_sec: 10
@@ -152,6 +157,8 @@ notifications:
     cooldown_minutes: 30
     include_range: true        # 箱体S级信号
     include_key_levels: true   # 关键位S级信号
+    digest_hour_utc: 0         # 日报发送时间（UTC），0=北京8点
+    digest_enabled: true       # 启用日报/周报
 
 server:
   host: "0.0.0.0"

@@ -113,9 +113,16 @@ async def poll_stablecoin_mcap(
         time_list = data.get("time_list", [])
         if not data_list or not time_list:
             return
+
+        n = min(len(data_list), len(time_list))
+        tail = 10
+        start_idx = max(0, n - tail)
+
         history = []
-        for i, item in enumerate(data_list):
-            ts = int(time_list[i]) if i < len(time_list) else 0
+        for i in range(start_idx, n):
+            item = data_list[i]
+            raw_ts = time_list[i]
+            ts = int(raw_ts) // 1000 if int(raw_ts) > 1e12 else int(raw_ts)
             usdt = float(item.get("USDT", 0))
             usdc = float(item.get("USDC", 0))
             total = sum(float(v) for v in item.values() if isinstance(v, (int, float)))

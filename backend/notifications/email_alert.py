@@ -1,4 +1,4 @@
-"""异步邮件发送 + 卡片式 HTML 模板。"""
+"""异步邮件发送 + 卡片式 HTML 模板 + 回测日报。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from datetime import datetime, timezone, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from config.settings import EmailNotificationConfig
@@ -176,4 +176,95 @@ async def send_alert_email(
     result = await loop.run_in_executor(None, _send)
     if result:
         logger.info("Alert email sent | %s | %s", event.coin, subject)
+    return result
+
+
+def _build_digest_html(stats_map: dict[str, Any], period: str = "日报") -> str:
+    """生成回测统计摘要邮件 HTML。"""
+    ts_str = datetime.now(tz=_BJ_TZ).strftime("%Y-%m-%d %H:%M")
+    rows_html = ""
+    for coin, st in stats_map.items():
+        total = st.get("total_signals", 0)
+        tp1 = st.get("tp1_hit", 0)
+        sl = st.get("sl_hit", 0)
+        wr = st.get("win_rate", 0)
+        avg_rr = st.get("avg_rr", 0)
+        triggered = st.get("triggered", 0)
+        wr_color = "#16a34a" if wr >= 50 else "#dc2626" if wr > 0 else "#6b7280"
+        rows_html += f"""
+        <tr style="border-bottom:1px solid #e5e7eb;">
+            <td style="padding:10px 12px;font-weight:600;">{coin}</td>
+            <td style="padding:10px 12px;text-align:center;">{total}</td>
+            <td style="padding:10px 12px;text-align:center;">{triggered}</td>
+            <td style="padding:10px 12px;text-align:center;color:{wr_color};font-weight:700;">{wr}%</td>
+            <td style="padding:10px 12px;text-align:center;">{tp1}胜 / {sl}负</td>
+            <td style="padding:10px 12px;text-align:center;color:#d97706;">1:{avg_rr}</td>
+        </tr>"""
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
+<tr><td align="center">
+<table width="520" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+    <tr><td style="background:#1e40af;padding:20px 24px;">
+        <div style="color:#fff;font-size:20px;font-weight:700;">📊 LIQ 信号回测{period}</div>
+        <div style="color:rgba(255,255,255,0.8);font-size:12px;margin-top:4px;">{ts_str}</div>
+    </td></tr>
+    <tr><td style="padding:16px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+            <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                <th style="padding:8px 12px;text-align:left;">币种</th>
+                <th style="padding:8px 12px;text-align:center;">信号数</th>
+                <th style="padding:8px 12px;text-align:center;">触发</th>
+                <th style="padding:8px 12px;text-align:center;">胜率</th>
+                <th style="padding:8px 12px;text-align:center;">战绩</th>
+                <th style="padding:8px 12px;text-align:center;">Avg R:R</th>
+            </tr>
+            {rows_html}
+        </table>
+    </td></tr>
+    <tr><td style="padding:12px 16px;background:#f9fafb;border-top:1px solid #e5e7eb;">
+        <div style="color:#9ca3af;font-size:11px;text-align:center;">此为系统自动生成的回测统计，仅供参考</div>
+    </td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
+async def send_backtest_digest(
+    stats_map: dict[str, Any],
+    config: "EmailNotificationConfig",
+    period: str = "日报",
+) -> bool:
+    """发送回测统计摘要邮件。"""
+    if not config.to or not config.smtp_user:
+        return False
+    if not stats_map:
+        return False
+
+    subject = f"[LIQ] 信号回测{period} - {datetime.now(tz=_BJ_TZ).strftime('%Y-%m-%d')}"
+    html = _build_digest_html(stats_map, period)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = formataddr((str(Header(config.from_name, "utf-8")), config.smtp_user))
+    msg["To"] = ", ".join(config.to)
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    def _send():
+        try:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(config.smtp_host, config.smtp_port, context=ctx, timeout=15) as server:
+                server.login(config.smtp_user, config.smtp_pass)
+                server.sendmail(config.smtp_user, config.to, msg.as_string())
+            return True
+        except Exception:
+            logger.error("Failed to send digest email", exc_info=True)
+            return False
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, _send)
+    if result:
+        logger.info("Backtest digest sent | period=%s coins=%s", period, list(stats_map.keys()))
     return result

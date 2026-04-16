@@ -43,6 +43,15 @@ class CoinglassSourceConfig:
 
 
 @dataclass(frozen=True)
+class BBXSourceConfig:
+    """BBX 市场指数数据源配置"""
+    url: str = "https://bbx.com/api/pc?module=v1/market/index"
+    cache_ttl: int = 120
+    timeout_sec: int = 15
+    poll_interval: int = 120
+
+
+@dataclass(frozen=True)
 class BinanceSourceConfig:
     """Binance Futures 公共数据源配置"""
     base_url: str
@@ -137,6 +146,7 @@ class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
     binance: BinanceSourceConfig
+    bbx: BBXSourceConfig
     processors: ProcessorsConfig
     ai: AIConfig
     push: PushConfig
@@ -182,6 +192,13 @@ def _build_settings(raw: dict) -> Settings:
 
     src = raw["sources"]
     coinglass = CoinglassSourceConfig(**src["coinglass"])
+    bbx_raw = src.get("bbx", {})
+    bbx = BBXSourceConfig(
+        url=bbx_raw.get("url", "https://bbx.com/api/pc?module=v1/market/index"),
+        cache_ttl=int(bbx_raw.get("cache_ttl", 120)),
+        timeout_sec=int(bbx_raw.get("timeout_sec", 15)),
+        poll_interval=int(bbx_raw.get("poll_interval", 120)),
+    )
     bn_raw = src.get("binance", {})
     binance = BinanceSourceConfig(
         base_url=bn_raw.get("base_url", "https://fapi.binance.com"),
@@ -260,6 +277,7 @@ def _build_settings(raw: dict) -> Settings:
         coins=coins,
         coinglass=coinglass,
         binance=binance,
+        bbx=bbx,
         processors=processors,
         ai=ai,
         push=push,

@@ -198,6 +198,7 @@ async def poll_funding_all(
         bn_rate = None
 
         margin_list = item.get("stablecoin_margin_list", item.get("uMarginList", []))
+        all_rates: list[float] = []
         for ex_item in margin_list:
             ex_name = ex_item.get("exchange", ex_item.get("exchangeName", ""))
             rate = ex_item.get("funding_rate", ex_item.get("rate"))
@@ -206,20 +207,25 @@ async def poll_funding_all(
                 exchanges.append(ExchangeFundingRate(
                     exchange=ex_name, current=rate,
                 ))
-                avg_current += rate
+                all_rates.append(rate)
                 count += 1
                 if "okx" in ex_name.lower() or "okex" in ex_name.lower():
                     okx_rate = rate
                 elif "binance" in ex_name.lower():
                     bn_rate = rate
 
-        if count > 0:
-            avg_current /= count
+        if len(all_rates) >= 3:
+            sorted_rates = sorted(all_rates)
+            median = sorted_rates[len(sorted_rates) // 2]
+            filtered = [r for r in all_rates if abs(r - median) < 10 * max(abs(median), 0.0005)]
+            avg_current = sum(filtered) / len(filtered) if filtered else 0
+        elif all_rates:
+            avg_current = sum(all_rates) / len(all_rates)
 
         interp = "中性"
-        if avg_current > 0.01:
+        if avg_current > 0.0005:
             interp = "多头拥挤"
-        elif avg_current < -0.01:
+        elif avg_current < -0.0005:
             interp = "空头拥挤"
 
         state.multi_funding = MultiFundingRateData(

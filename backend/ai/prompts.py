@@ -74,7 +74,8 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - §四每个方案必须回答："如果这笔交易亏了，最可能的原因是什么？"——不是复述风险提示，而是从对手盘角度推演失败场景
 
 ### AI 自主构建交易方案
-- 引擎方案优先采纳；引擎未覆盖的方向/距离档，AI 可基于数据**自主构建**方案
+- 引擎方案优先采纳；但 AI **必须在每个档位**独立扫描是否存在引擎遗漏的机会
+- 三档均须独立评估 AI 自主推断——不要只在短线档做推断，中线和远线同样重要
 - AI 自主方案必须：标注"⚡AI推断"、≥2 维数据交叉验证、满足 R:R ≥ 1:{min_rr:.1f} 约束
 - 可用数据源：V2 关键位（S/A 级 idle 状态也可参考）、清算簇、MA 箱体边界、斐波那契、VP POC
 - **禁止**凭空编造无数据支撑的价位；每个 AI 推断方案须注明数据依据
@@ -84,7 +85,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **R:R 验算**：须代入具体价格写出公式，禁止"≈"估值
 - **止损铁律**：做空 SL > Entry；做多 SL < Entry — 违反即废弃。止损宽度 ≥ max(价格×0.3%, 0.5×ATR)
 - **约束冲突**：止损方向+最小宽度+R:R≥1:{min_rr:.1f} 三条无法同时满足 → 该方案不输出，声明原因。**不交易是最好的风控**
-- 引擎无方案的档位，AI 可基于数据自主构建（标注"⚡AI推断"），或声明该档位暂无机会
+- 引擎无方案的档位，AI **应当主动**基于数据自主构建（标注"⚡AI推断"），而非简单放弃；确实无机会时再声明原因
 - 短线档止损须设在清算真空区内（防猎杀）；中/远线档止损宽度 ≥ sl_min_pct
 
 ### 输出格式（严格按标题，系统解析用）
@@ -110,15 +111,16 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 | 方向 | 挂单价 | 止损 | TP1(R:R) | TP2(R:R) | 信心度 | 核心依据 |
 
 **中线档（距当前价 5-10%）**
-- 数据来源：引擎阶梯前层 + 高共振关键位(S/A级) + AI自主发现（标注⚡AI推断）
+- 数据来源：引擎阶梯前层 + 高共振关键位(S/A级) + MA箱体边界 + 清算真空区/密集区 + AI自主发现
+- **AI必须在引擎方案之外**，主动扫描中线距离内的高价值区域（S/A级关键位聚合、清算密集区、MA箱体边界），如发现合理机会则标注"⚡AI推断"输出
 | 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
 
 **远线档（距当前价 10-20%）**
-- 数据来源：引擎阶梯远层 + 7d/30d清算地图 + CPS周期位置
-- 仅在 CPS 极端区(<2 或 >8)或有 S 级关键位时输出
+- 数据来源：引擎阶梯远层 + 7d/30d清算地图 + CPS周期位置 + S/A级关键位 + AI自主发现
+- CPS 极端区(<2 或 >8)或有 S 级关键位时优先输出；即使 CPS 非极端，若发现 ≥2 维数据支撑的高 R:R 机会，AI 同样应自主构建方案（标注"⚡AI推断"）
 | 方向 | 挂单价 | 止损 | TP(R:R) | 信心度 | 核心依据 |
 
-某档无机会时，一行说明原因即可。
+某档确实无机会时，一行说明原因即可。
 
 ## 五、当前风险提示
 3-5条 [高/中/低] 按紧急程度
@@ -326,14 +328,19 @@ def build_user_prompt(snapshot: dict) -> str:
     lines.append(f"费率解读: {snapshot.get('funding_interpretation', 'N/A')}")
     lines.append("  (提醒: 正费率=多头付钱=多头拥挤; 负费率=空头付钱=空头拥挤，不可写反)")
     avg7d = snapshot.get("funding_avg_7d")
-    if avg7d is not None:
+    if avg7d is not None and avg7d != 0:
         lines.append(f"7d均值: {avg7d*100:.4f}%")
     if funding_exchanges:
         extreme_fr = [fe for fe in funding_exchanges
-                      if fe.get("current") is not None and abs(fe["current"]) > 0.001]
+                      if fe.get("current") is not None and abs(fe["current"]) > 0.0005]
         if extreme_fr:
             names = ", ".join(fe.get("exchange", "") for fe in extreme_fr)
-            lines.append(f"  ⚠ {names} 费率绝对值>0.1%，属于极端水平，需警惕轧空/轧多风险")
+            lines.append(f"  ⚠ {names} 费率绝对值>0.05%，属于极端水平，需警惕轧空/轧多风险")
+        outlier_fr = [fe for fe in funding_exchanges
+                      if fe.get("current") is not None and abs(fe["current"]) > 0.01]
+        if outlier_fr:
+            names = ", ".join(fe.get("exchange", "") for fe in outlier_fr)
+            lines.append(f"  ⚠⚠ {names} 费率绝对值>1%，疑似数据异常/小所流动性不足，已从平均值中剔除，请降低权重")
 
     lines.extend([
         f"期现溢价: {snapshot.get('basis_pct', 0):+.4f}%",
@@ -907,13 +914,12 @@ def build_user_prompt(snapshot: dict) -> str:
         elif "td_sequential" in pf:
             lines.append(f"TD序列: ⚠ 采集失败（{pf['td_sequential']}），本次分析不含此维度")
 
-    has_trad = any(snapshot.get(k) for k in ("dxy", "nasdaq", "sp500", "gold"))
     has_crypto_sent = fgi is not None or dom is not None
     lines.extend([
         "",
         "【宏观数据覆盖说明】（请严格按此表述，避免与上文矛盾）",
         f"- 加密侧情绪/结构: {'已提供（恐惧贪婪/市占等）' if has_crypto_sent else '未提供'}",
-        f"- 传统外盘(DXY/纳指/标普/黄金): {'已提供部分或全部数值' if has_trad else '本条目中未解析到有效数值（若恐惧贪婪已提供，不得写宏观完全缺失）'}",
+        f"- 传统外盘(DXY/纳指/标普/黄金): 当前系统未接入此数据源，请勿编造或推测具体数值",
         "- 链上周期(CPS): " + (f"已提供(CPS={cp['cps']:.1f})" if has_cps else "未提供"),
         f"- 均线箱体: " + (f"已提供(信号={rs.get('signal_grade', '无')}级)" if has_range else "未提供"),
         f"- 关键位状态机: " + (f"已提供(活跃{kl.get('active_count', 0)}个)" if has_kl else "未提供"),

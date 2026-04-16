@@ -409,7 +409,7 @@ def _parse_trading_plan_entries(text: str) -> list[TradingPlanEntry]:
         return ""
 
     def _detect_source(text_block: str) -> str:
-        if "AI推断" in text_block or "⚡" in text_block:
+        if any(kw in text_block for kw in ("AI推断", "⚡", "自主构建", "AI自主")):
             return "ai_inferred"
         return "engine"
 
@@ -419,6 +419,8 @@ def _parse_trading_plan_entries(text: str) -> list[TradingPlanEntry]:
         r"(?:\s*\$?(?P<tp2>[\d,.]+)\s*(?:\(.*?(?P<rr2>[\d.]+)\))?\s*\|)?"
     )
 
+    _next_is_ai = False
+
     for line in text.split("\n"):
         stripped = line.strip()
         if not stripped:
@@ -427,9 +429,13 @@ def _parse_trading_plan_entries(text: str) -> list[TradingPlanEntry]:
         new_tier = _detect_tier(stripped)
         if new_tier and ("**" in stripped or "###" in stripped or "档" in stripped):
             current_tier = new_tier
+            _next_is_ai = False
             continue
 
         if stripped.startswith("|") and "---" not in stripped and "方向" not in stripped and "类型" not in stripped:
+            if ("AI推断" in stripped or "⚡" in stripped) and not re.search(r"\$[\d,]+", stripped):
+                _next_is_ai = True
+                continue
             m = table_row_re.match(stripped)
             if m:
                 direction = _detect_direction(m.group("dir"))
@@ -447,7 +453,8 @@ def _parse_trading_plan_entries(text: str) -> list[TradingPlanEntry]:
                 tp1_val = _safe_float(m.group("tp1"))
                 tp2_val = _safe_float(m.group("tp2"))
                 rr_val = _safe_float(m.group("rr1"))
-                source = _detect_source(stripped)
+                source = "ai_inferred" if _next_is_ai else _detect_source(stripped)
+                _next_is_ai = False
                 if entry_val or sl_val or tp1_val:
                     entries.append(TradingPlanEntry(
                         tier=current_tier or "short",

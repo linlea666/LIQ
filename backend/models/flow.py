@@ -169,8 +169,11 @@ class MarketIndexData(BaseModel):
     btc_mvrv: Optional[float] = None
     dxy: Optional[float] = None
     nasdaq: Optional[float] = None
+    nasdaq_change_pct: Optional[float] = None
     sp500: Optional[float] = None
+    sp500_change_pct: Optional[float] = None
     gold: Optional[float] = None
+    gold_change_pct: Optional[float] = None
     binance_btc_balance: Optional[float] = None
     okx_ls_ratio_btc: Optional[float] = None
     binance_ls_ratio_btc: Optional[float] = None

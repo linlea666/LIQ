@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from collections import deque
+from datetime import datetime
 from typing import Any, Optional
 
 from ai.analyzer import AIAnalyzer, create_analyzer
@@ -147,6 +148,11 @@ class Engine:
         self._settings = get_settings()
         self._cg: CoinglassSource = create_coinglass_source()
         self._bn: BinanceFuturesSource = create_binance_source()
+        from sources.bbx import BBXSource
+        self._bbx = BBXSource(
+            cache_ttl=self._settings.bbx.cache_ttl,
+            timeout_sec=self._settings.bbx.timeout_sec,
+        )
         self._analyzer = create_analyzer()
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
@@ -262,6 +268,134 @@ class Engine:
     def get_kl_history(self, ccy: str) -> list[KeyLevelSnapshotV2]:
         return list(self._states.get(ccy, CoinState(ccy)).kl_history)
 
+    def compute_backtest_stats(self, ccy: str) -> dict:
+        """从 AI 历史计算轻量级回测统计。"""
+        from models.snapshot import BacktestStats
+        state = self._states.get(ccy)
+        if not state:
+            return BacktestStats(coin=ccy).model_dump()
+
+        history = list(state.ai_history)
+        if len(history) < 2:
+            return BacktestStats(coin=ccy, ts=int(time.time())).model_dump()
+
+        history.sort(key=lambda h: h.ts)
+
+        price_highs: list[float] = []
+        price_lows: list[float] = []
+        for h in history:
+            price_highs.append(h.price_at_analysis)
+            price_lows.append(h.price_at_analysis)
+
+        total = triggered = tp1_hit = sl_hit = pending = 0
+        rr_sum = 0.0
+        rr_count = 0
+        tier_stats: dict[str, dict] = {}
+        dir_stats: dict[str, dict] = {}
+        src_stats: dict[str, dict] = {}
+        recent: list[dict] = []
+
+        for idx, report in enumerate(history[:-1]):
+            if not report.trading_plan_entries:
+                continue
+            future_prices = [h.price_at_analysis for h in history[idx + 1:]]
+            if not future_prices:
+                continue
+            future_high = max(future_prices)
+            future_low = min(future_prices)
+
+            for entry in report.trading_plan_entries:
+                if not entry.entry or not entry.direction:
+                    continue
+                total += 1
+                tier = entry.tier or "short"
+                direction = entry.direction
+                source = entry.source or "engine"
+
+                for bucket_key, bucket_val, stats_dict in [
+                    ("tier", tier, tier_stats),
+                    ("direction", direction, dir_stats),
+                    ("source", source, src_stats),
+                ]:
+                    if bucket_val not in stats_dict:
+                        stats_dict[bucket_val] = {"total": 0, "triggered": 0, "tp1": 0, "sl": 0}
+                    stats_dict[bucket_val]["total"] += 1
+
+                entry_triggered = False
+                if direction == "long":
+                    entry_triggered = future_low <= entry.entry
+                else:
+                    entry_triggered = future_high >= entry.entry
+
+                if not entry_triggered:
+                    pending += 1
+                    continue
+                triggered += 1
+                for stats_dict in (tier_stats, dir_stats, src_stats):
+                    for k, v in [(tier, tier_stats), (direction, dir_stats), (source, src_stats)]:
+                        if k in stats_dict:
+                            stats_dict[k]["triggered"] += 1
+                            break
+
+                outcome = "pending"
+                if direction == "long":
+                    if entry.stop_loss and future_low <= entry.stop_loss:
+                        if entry.tp1 and future_high >= entry.tp1:
+                            outcome = "tp1"
+                        else:
+                            outcome = "sl"
+                    elif entry.tp1 and future_high >= entry.tp1:
+                        outcome = "tp1"
+                else:
+                    if entry.stop_loss and future_high >= entry.stop_loss:
+                        if entry.tp1 and future_low <= entry.tp1:
+                            outcome = "tp1"
+                        else:
+                            outcome = "sl"
+                    elif entry.tp1 and future_low <= entry.tp1:
+                        outcome = "tp1"
+
+                if outcome == "tp1":
+                    tp1_hit += 1
+                elif outcome == "sl":
+                    sl_hit += 1
+
+                if entry.rr:
+                    rr_sum += entry.rr
+                    rr_count += 1
+
+                if len(recent) < 20:
+                    recent.append({
+                        "ts": report.ts,
+                        "price": report.price_at_analysis,
+                        "direction": direction,
+                        "tier": tier,
+                        "entry": entry.entry,
+                        "tp1": entry.tp1,
+                        "sl": entry.stop_loss,
+                        "rr": entry.rr,
+                        "source": source,
+                        "outcome": outcome,
+                    })
+
+        resolved = tp1_hit + sl_hit
+        stats = BacktestStats(
+            coin=ccy,
+            ts=int(time.time()),
+            total_signals=total,
+            triggered=triggered,
+            tp1_hit=tp1_hit,
+            sl_hit=sl_hit,
+            pending=pending,
+            win_rate=round(tp1_hit / resolved * 100, 1) if resolved > 0 else 0,
+            avg_rr=round(rr_sum / rr_count, 2) if rr_count > 0 else 0,
+            by_tier=tier_stats,
+            by_direction=dir_stats,
+            by_source=src_stats,
+            recent_signals=recent,
+        )
+        return stats.model_dump()
+
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
         self._running = True
@@ -297,8 +431,8 @@ class Engine:
                 self._poll_cfg.get("liquidation_map", 60), 0.9,
             )),
             asyncio.create_task(self._poll_loop(
-                "cg_macro", self._poll_macro_index, btc_coin,
-                self._poll_cfg.get("macro_index", 900), 18,
+                "bbx_index", self._poll_bbx_index, btc_coin,
+                self._settings.bbx.poll_interval, 18,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_etf", self._poll_etf_flow, btc_coin,
@@ -308,10 +442,7 @@ class Engine:
                 "cg_whale", self._poll_whale_data, btc_coin,
                 self._poll_cfg.get("whale", 900), 24,
             )),
-            asyncio.create_task(self._poll_loop(
-                "cg_cb_premium", self._poll_coinbase_premium, btc_coin,
-                180, 27,
-            )),
+            # cg_cb_premium 已被 BBX 替代（i:btcdpi:aicoin），节省 Coinglass 配额
             asyncio.create_task(self._poll_loop(
                 "cg_options", self._poll_options, btc_coin,
                 self._poll_cfg.get("options", 1200), 30,
@@ -340,6 +471,10 @@ class Engine:
         kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
         if kl_snap_sec > 0:
             tasks.append(asyncio.create_task(self._auto_kl_snapshot_loop(kl_snap_sec)))
+
+        email_cfg = getattr(self._settings.notifications, 'email', None)
+        if email_cfg and getattr(email_cfg, 'to', None):
+            tasks.append(asyncio.create_task(self._digest_email_loop()))
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -471,6 +606,7 @@ class Engine:
             logger.error("Failed to save KL history on shutdown", exc_info=True)
         await self._cg.close()
         await self._bn.close()
+        await self._bbx.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──
@@ -823,6 +959,10 @@ class Engine:
     async def _poll_macro_index(self, _coin: CoinConfig):
         from polls.macro import poll_macro_index
         await poll_macro_index(self._cg, self._states, self._settings.supported_coins)
+
+    async def _poll_bbx_index(self, _coin: CoinConfig):
+        from polls.bbx_index import poll_bbx_index
+        await poll_bbx_index(self._bbx, self._states, self._settings.supported_coins)
 
     async def _poll_onchain_cycle(self, _coin: CoinConfig):
         from polls.macro import poll_onchain_cycle
@@ -1215,11 +1355,47 @@ class Engine:
                     continue
                 snap = state.key_level_snapshot_v2
                 if snap.ts > 0:
-                    state.kl_history.append(snap)
+                    state.kl_history.append(snap.model_copy(deep=True))
                     _last_snap_ts[ccy] = time.time()
                     self._save_kl_history()
                     logger.info("KL snapshot saved | coin=%s levels=%d", ccy, len(snap.levels))
             await asyncio.sleep(60)
+
+    async def _digest_email_loop(self) -> None:
+        """每日发送回测统计邮件。"""
+        from notifications.email_alert import send_backtest_digest
+        await asyncio.sleep(300)
+        logger.info("Digest email loop started")
+        _last_daily = 0
+        _last_weekly = 0
+        while self._running:
+            now = time.time()
+            hour_utc = int(datetime.utcfromtimestamp(now).hour)
+            digest_hour = getattr(self._settings, '_digest_hour_utc', 0)
+
+            if now - _last_daily > 82800 and hour_utc == digest_hour:
+                stats_map = {}
+                for ccy in self._settings.supported_coins:
+                    st = self.compute_backtest_stats(ccy)
+                    if st.get("total_signals", 0) > 0:
+                        stats_map[ccy] = st
+                if stats_map:
+                    try:
+                        await send_backtest_digest(stats_map, self._settings.notifications.email, "日报")
+                    except Exception:
+                        logger.error("Digest email failed", exc_info=True)
+                _last_daily = now
+
+                weekday = datetime.utcfromtimestamp(now).weekday()
+                if weekday == 0 and now - _last_weekly > 600000:
+                    if stats_map:
+                        try:
+                            await send_backtest_digest(stats_map, self._settings.notifications.email, "周报")
+                        except Exception:
+                            logger.error("Weekly digest failed", exc_info=True)
+                    _last_weekly = now
+
+            await asyncio.sleep(600)
 
     async def fire_ai_analysis(self, ccy: str) -> None:
         if ccy in self._ai_running:
@@ -1252,13 +1428,26 @@ class Engine:
 
         opt = state.option_max_pain
         lo = state.large_orders
+
+        ob_for_ai = state.orderbook
+        if ob_for_ai and lo and lo.orders and not ob_for_ai.bid_walls and not ob_for_ai.ask_walls:
+            from models.market import WallInfo
+            bid_walls, ask_walls = [], []
+            for o in sorted(lo.orders, key=lambda x: x.size_usd, reverse=True)[:10]:
+                wall = WallInfo(price=o.price, size=0, size_usd=o.size_usd)
+                if o.side == "bid":
+                    bid_walls.append(wall)
+                else:
+                    ask_walls.append(wall)
+            ob_for_ai = ob_for_ai.model_copy(update={"bid_walls": bid_walls[:5], "ask_walls": ask_walls[:5]})
+
         snapshot = build_ai_snapshot(
             coin=ccy, price=state.ticker.last,
             high_24h=state.ticker.high_24h, low_24h=state.ticker.low_24h,
             liq_map=state.liq_maps.get("1d") or state.liq_maps.get("24h"),
             cvd_contract=state.cvd_contract,
             cvd_spot=state.cvd_spot, oi=state.oi, funding=state.funding,
-            basis=state.basis, orderbook=state.orderbook, liq_stats=state.liq_stats,
+            basis=state.basis, orderbook=ob_for_ai, liq_stats=state.liq_stats,
             vp=state.vp, atr=state.atr,
             market_temp_score=state.temperature.score if state.temperature else 50,
             pin_risk_level=state.temperature.pin_risk_level if state.temperature else "low",
