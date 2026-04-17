@@ -17,6 +17,7 @@ from typing import Optional
 from models.flow import RangeSignalData
 from models.key_level import KeyLevelSnapshotV2, KeyLevelV2
 from models.market import CandleData
+from models.market_structure import MarketStructure
 from processors.ta_core import calc_macd, calc_sma, last_valid
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ def calculate_range_signal(
     orderbook_bid_total: float = 0,
     orderbook_ask_total: float = 0,
     cfg: dict | None = None,
+    market_structure: MarketStructure | None = None,
 ) -> RangeSignalData | None:
     """洪七公 MA 骨架箱体信号。
 
@@ -173,6 +175,11 @@ def calculate_range_signal(
         breakout_prob, breakout_bias,
     )
 
+    # ── 12. 市场结构对齐（Commit 3）──
+    ms_alignment = _compute_ms_alignment(direction, market_structure)
+    if reason and ms_alignment in ("aligned", "conflict"):
+        reason = _append_ms_hint(reason, ms_alignment)
+
     micro_width = 0.0
     if micro_upper and micro_lower and micro_upper > micro_lower:
         micro_width = (micro_upper - micro_lower) / current_price * 100
@@ -229,12 +236,54 @@ def calculate_range_signal(
         funding_extreme=funding_extreme,
         orderbook_imbalance=ob_imbalance,
         confluence_count=confluence_count,
+        ms_direction=market_structure.direction if market_structure else None,
+        ms_event=(market_structure.last_event or None) if market_structure else None,
+        ms_bias=market_structure.operate_bias if market_structure else None,
+        ms_confidence=market_structure.confidence if market_structure else 0.0,
+        ms_alignment=ms_alignment,
     )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 内部函数
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _compute_ms_alignment(
+    signal_direction: str | None,
+    ms: MarketStructure | None,
+) -> str:
+    """计算箱体信号方向与市场结构的对齐度。
+
+    返回：
+        aligned   — 箱体方向与结构偏置一致（both_ok 视为一致）
+        conflict  — 箱体方向与结构偏置相反，或结构要求 stand_aside
+        neutral   — 结构方向明确但无箱体方向 / 反之
+        unknown   — 任一信息缺失
+    """
+    if ms is None or not signal_direction:
+        return "unknown"
+    bias = ms.operate_bias
+    if not bias:
+        return "unknown"
+    if bias == "stand_aside":
+        return "conflict"
+    if bias == "both_ok":
+        return "aligned"
+    if bias == "long_only":
+        return "aligned" if signal_direction == "long" else "conflict"
+    if bias == "short_only":
+        return "aligned" if signal_direction == "short" else "conflict"
+    return "neutral"
+
+
+def _append_ms_hint(reason: str, alignment: str) -> str:
+    """把结构对齐度提示拼到 reason 尾部（不改分级/方向）。"""
+    if alignment == "aligned":
+        return f"{reason}（✅ 结构方向一致）"
+    if alignment == "conflict":
+        return f"{reason}（⚠️ 与结构方向冲突，谨慎）"
+    return reason
 
 
 _MA_LABELS = {

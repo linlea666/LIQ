@@ -14,7 +14,10 @@ from processors.range_signal import (
     _calc_breakout_probability,
     _grade_signal_v2,
     _check_volume_declining,
+    _compute_ms_alignment,
+    _append_ms_hint,
 )
+from models.market_structure import MarketStructure
 
 
 # ── helpers ──
@@ -412,3 +415,111 @@ class TestCalculateRangeSignal:
         assert result.range_upper is None
         assert result.range_lower is None
         assert result.box_state == "none"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Commit 3：市场结构对齐（_compute_ms_alignment + _append_ms_hint）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _make_ms(direction="bullish", bias="long_only", event="BOS_up", conf=0.9):
+    return MarketStructure(
+        timeframe="1h",
+        direction=direction,
+        operate_bias=bias,
+        last_event=event,
+        confidence=conf,
+    )
+
+
+class TestMsAlignment:
+    def test_aligned_long_with_long_only(self):
+        assert _compute_ms_alignment("long", _make_ms(bias="long_only")) == "aligned"
+
+    def test_aligned_short_with_short_only(self):
+        assert _compute_ms_alignment(
+            "short", _make_ms(direction="bearish", bias="short_only"),
+        ) == "aligned"
+
+    def test_conflict_long_with_short_only(self):
+        assert _compute_ms_alignment(
+            "long", _make_ms(direction="bearish", bias="short_only"),
+        ) == "conflict"
+
+    def test_conflict_stand_aside_always(self):
+        """stand_aside 对任何箱体方向都是冲突（提醒观望）。"""
+        ms = _make_ms(direction="transitioning", bias="stand_aside")
+        assert _compute_ms_alignment("long", ms) == "conflict"
+        assert _compute_ms_alignment("short", ms) == "conflict"
+
+    def test_both_ok_always_aligned(self):
+        ms = _make_ms(direction="ranging", bias="both_ok")
+        assert _compute_ms_alignment("long", ms) == "aligned"
+        assert _compute_ms_alignment("short", ms) == "aligned"
+
+    def test_unknown_when_no_ms(self):
+        assert _compute_ms_alignment("long", None) == "unknown"
+
+    def test_unknown_when_no_signal_direction(self):
+        assert _compute_ms_alignment(None, _make_ms()) == "unknown"
+
+
+class TestMsHintAppend:
+    def test_aligned_hint(self):
+        out = _append_ms_hint("入场点到达MA60(85000)", "aligned")
+        assert "✅" in out and "结构方向一致" in out
+
+    def test_conflict_hint(self):
+        out = _append_ms_hint("入场点到达MA60(85000)", "conflict")
+        assert "⚠️" in out and "结构方向冲突" in out
+
+    def test_neutral_no_change(self):
+        original = "入场点到达MA60(85000)"
+        assert _append_ms_hint(original, "neutral") == original
+        assert _append_ms_hint(original, "unknown") == original
+        assert _append_ms_hint(original, "") == original
+
+
+class TestRangeSignalMsIntegration:
+    """端到端：calculate_range_signal 接收 ms 参数并填充字段。"""
+
+    def test_ms_fields_populated(self):
+        ms = _make_ms(direction="bullish", bias="long_only",
+                     event="BOS_up", conf=0.85)
+        result = calculate_range_signal(
+            kl_snapshot=None,
+            current_price=85000,
+            atr=500,
+            market_structure=ms,
+        )
+        assert result is not None
+        assert result.ms_direction == "bullish"
+        assert result.ms_event == "BOS_up"
+        assert result.ms_bias == "long_only"
+        assert result.ms_confidence == 0.85
+        # 没有 signal direction 时 alignment 应为 unknown
+        assert result.ms_alignment == "unknown"
+
+    def test_backward_compat_no_ms(self):
+        """不传 ms 时所有字段默认值，保持向后兼容。"""
+        result = calculate_range_signal(
+            kl_snapshot=None,
+            current_price=85000,
+            atr=500,
+        )
+        assert result is not None
+        assert result.ms_direction is None
+        assert result.ms_event is None
+        assert result.ms_bias is None
+        assert result.ms_confidence == 0.0
+        assert result.ms_alignment == "unknown"
+
+    def test_empty_event_stored_as_none(self):
+        ms = _make_ms(event="")
+        result = calculate_range_signal(
+            kl_snapshot=None,
+            current_price=85000,
+            atr=500,
+            market_structure=ms,
+        )
+        assert result is not None
+        assert result.ms_event is None

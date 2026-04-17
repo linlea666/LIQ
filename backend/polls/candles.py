@@ -120,6 +120,7 @@ def recompute_range_signal(
         orderbook_bid_total=ob_bid,
         orderbook_ask_total=ob_ask,
         cfg=settings_range,
+        market_structure=state.market_structure,
     )
 
 

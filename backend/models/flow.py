@@ -322,6 +322,13 @@ class RangeSignalData(BaseModel):
     orderbook_imbalance: str = ""       # "bid_heavy" / "ask_heavy" / ""
     confluence_count: int = 0           # 共振因子总数
 
+    # ── 市场结构共振（Commit 3：与 1h MarketStructure 的对齐度）──
+    ms_direction: Optional[str] = None      # bullish/bearish/ranging/transitioning
+    ms_event: Optional[str] = None          # BOS_up/down · CHoCH_up/down
+    ms_bias: Optional[str] = None           # long_only/short_only/both_ok/stand_aside
+    ms_confidence: float = 0.0
+    ms_alignment: str = ""                  # aligned/conflict/neutral/unknown
+
 
 # ── 新增数据模型 ──
 
