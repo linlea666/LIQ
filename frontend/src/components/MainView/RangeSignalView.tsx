@@ -3,6 +3,7 @@
 import { useMarketStore } from "@/stores/marketStore";
 import { formatPrice } from "@/lib/format";
 import type { RangeSignalData } from "@/lib/types";
+import { alignmentBrief } from "@/lib/structureBrief";
 import Link from "next/link";
 
 const BOX_STATE_MAP: Record<string, { label: string; color: string }> = {
@@ -327,6 +328,7 @@ function PlainSummary({ rs, price, coin, hasBox }: { rs: RangeSignalData; price:
 
 function SignalHero({ rs, coin }: { rs: RangeSignalData; coin: string }) {
   const isLong = rs.signal_direction === "long";
+  const alignment = alignmentBrief(rs.ms_alignment);
   const gradeColors: Record<string, string> = {
     S: "from-amber-500/20 to-amber-600/5 border-amber-500/50",
     A: "from-orange-500/20 to-orange-600/5 border-orange-600/40",
@@ -348,11 +350,19 @@ function SignalHero({ rs, coin }: { rs: RangeSignalData; coin: string }) {
               {grade}
             </span>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm">{isLong ? "🟢" : "🔴"}</span>
                 <span className={`text-lg font-bold ${isLong ? "text-green-400" : "text-red-400"}`}>
                   {isLong ? "做多" : "做空"}信号
                 </span>
+                {alignment && (
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] cursor-help ${alignment.bg ?? ""} ${alignment.color}`}
+                    title={alignment.hint}
+                  >
+                    {alignment.label}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-slate-400 mt-0.5 max-w-lg">{rs.signal_reason}</div>
             </div>

@@ -13,6 +13,7 @@ import type {
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import StrongLevelsCard from "./StrongLevelsCard";
+import MarketStructureBadge from "./MarketStructureBadge";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -66,6 +67,7 @@ export default function KeyLevelView() {
 
   return (
     <div className="space-y-4 max-w-4xl">
+      <MarketStructureBadge />
       <StructureSummary kl={kl} price={price} coin={coin} />
       <BacktestStatsCard coin={coin} />
       <KLHistoryLinks coin={coin} />

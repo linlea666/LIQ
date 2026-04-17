@@ -3,6 +3,10 @@
 import { useMemo, useState } from "react";
 import { formatPrice } from "@/lib/format";
 import { summarizeSources } from "@/lib/sourceBrief";
+import {
+  bounceQualityBrief,
+  breakoutStageBrief,
+} from "@/lib/structureBrief";
 import type { KeyLevelV2 } from "@/lib/types";
 
 /**
@@ -474,11 +478,29 @@ function LevelBlock({
       {/* 当前状态（仅非 idle 展示） */}
       {stateInfo && (() => {
         const cascade = cascadeBrief(level);
+        const bounce = bounceQualityBrief(level.bounce_quality);
+        const stage = breakoutStageBrief(level.breakout_stage);
         return (
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[10px] text-slate-500 shrink-0">⚡ 当前状态：</span>
             <span className={`text-xs ${stateInfo.color}`}>{stateInfo.text}</span>
             {relTime && <span className="text-[10px] text-slate-500">· {relTime}</span>}
+            {bounce && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] cursor-help ${bounce.bg ?? ""} ${bounce.color}`}
+                title={bounce.hint}
+              >
+                {bounce.label}
+              </span>
+            )}
+            {stage && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] cursor-help ${stage.bg ?? ""} ${stage.color}`}
+                title={stage.hint}
+              >
+                {stage.label}
+              </span>
+            )}
             {cascade && (
               <span
                 className={`text-[11px] ml-2 cursor-help ${cascade.color}`}

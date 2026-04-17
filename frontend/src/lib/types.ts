@@ -299,6 +299,13 @@ export interface RangeSignalData {
   funding_extreme: boolean;
   orderbook_imbalance: string;
   confluence_count: number;
+
+  // Commit 3: 市场结构对齐度（与 1h MarketStructure 的关系）
+  ms_direction?: "bullish" | "bearish" | "ranging" | "transitioning" | null;
+  ms_event?: "BOS_up" | "BOS_down" | "CHoCH_up" | "CHoCH_down" | null;
+  ms_bias?: "long_only" | "short_only" | "both_ok" | "stand_aside" | null;
+  ms_confidence?: number;
+  ms_alignment?: "aligned" | "conflict" | "neutral" | "unknown" | "";
 }
 
 export interface KeyLevelSignal {
