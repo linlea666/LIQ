@@ -25,7 +25,7 @@ from models.flow import (
     LongShortRatioExchange, MarketIndexData, MultiFundingRateData,
     ExchangeFundingRate, OIData, OISnapshot, RangeSignalData, TakerFlowData,
 )
-from models.key_level import KeyLevel, KeyLevelSnapshot, KeyLevelSnapshotV2
+from models.key_level import KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
 from models.liquidation import (
     HeatmapData, LiqHistoryData, LiqMaxPainData,
@@ -48,7 +48,6 @@ from processors.market_temp import build_waterfall, calc_market_temperature
 from processors.percentile import PercentileTracker
 from processors.volume_profile import calc_volume_profile
 from processors.cycle import calculate_cycle_position
-from processors.key_level_tracker import update_key_levels
 from processors.range_signal import calculate_range_signal
 from sources.coinglass import CoinglassSource, create_coinglass_source
 from sources.binance_futures import BinanceFuturesSource, create_binance_source
@@ -80,6 +79,7 @@ class CoinState:
         self.candle_prices: list[float] = []
         self.candle_ts: list[int] = []
         self.candles_1h: list = []
+        self.candles_15m: list = []
         self.oi_history: deque = deque(maxlen=720)
         self.ai_history: deque[AIAnalysisResult] = deque(maxlen=max_history)
         self.last_ai_ts: float = 0
@@ -94,8 +94,6 @@ class CoinState:
         self.candles_daily: list = []
         self.candles_weekly: list = []
         self.range_signal: Optional[RangeSignalData] = None
-        self.key_levels: list[KeyLevel] = []
-        self.key_level_snapshot: Optional[KeyLevelSnapshot] = None
         self._prev_liq_map_24h: Optional[LiquidationMap] = None
         self._prev_price_at_liq_poll: float = 0
         self.liq_sweep_events: deque = deque(maxlen=120)
@@ -507,6 +505,7 @@ class Engine:
         candles_1d_interval = 600
         candles_1w_interval = 3600
         candles_4h_interval = 900
+        candles_15m_interval = 60
         oi_rank_interval = 300
         net_pos_interval = 900
         netflow_interval = 900
@@ -578,6 +577,10 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_4h_{ccy}", self._poll_candles_4h, coin,
                 candles_4h_interval, s + 5.2,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_15m_{ccy}", self._poll_candles_15m, coin,
+                candles_15m_interval, s + 5.6,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_net_pos_{ccy}", self._poll_net_position, coin,
@@ -902,6 +905,11 @@ class Engine:
     # K 线数据（VP / ATR / range_signal 依赖）
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+    async def _poll_candles_15m(self, coin: CoinConfig):
+        from polls.candles import poll_candles_15m
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_candles_15m(self._cg, coin, self._states[coin.ccy], bn)
+
     async def _poll_candles_1h(self, coin: CoinConfig):
         from polls.candles import poll_candles_1h
         bn = self._bn if self._settings.binance.use_for_klines else None
@@ -1025,8 +1033,6 @@ class Engine:
             kl_signals=kl_signals,
         )
 
-        self._recompute_key_levels_v1(ccy)
-
         self._recompute_range_signal(ccy)
 
         if self._notif_cfg.enabled:
@@ -1053,47 +1059,31 @@ class Engine:
                 include_range=self._notif_cfg.include_range,
             )
 
+            sent = 0
+            cooled = 0
             for event in events:
                 if self._alert_dedup.should_send(event.dedup_key):
-                    await send_alert_email(event, self._notif_cfg)
+                    ok = await send_alert_email(event, self._notif_cfg)
+                    if ok:
+                        sent += 1
+                else:
+                    cooled += 1
+
+            # 诊断日志：每次触发都打印扫描结果，便于排查"为什么没收到邮件"
+            if events or sent:
+                logger.info(
+                    "[alert] ccy=%s min_tier=%s scanned_signals=%d matched=%d cooled=%d sent=%d",
+                    ccy,
+                    self._notif_cfg.min_signal_tier,
+                    len(state.key_level_snapshot_v2.signals) if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.signals else 0,
+                    len(events),
+                    cooled,
+                    sent,
+                )
 
             self._alert_dedup.cleanup()
         except Exception:
             logger.debug("_check_alerts error", exc_info=True)
-
-    def _recompute_key_levels_v1(self, ccy: str):
-        state = self._states[ccy]
-        price = state.ticker.last if state.ticker else 0
-        if price <= 0:
-            return
-
-        cutoff = int(time.time()) - 3600
-        recent_sweeps = [
-            e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
-        ]
-
-        range_upper = None
-        range_lower = None
-        if state.range_signal:
-            range_upper = state.range_signal.range_upper
-            range_lower = state.range_signal.range_lower
-
-        kl_cfg = self._settings.processors.key_level_tracker
-
-        snapshot = update_key_levels(
-            prev_levels=state.key_levels,
-            current_price=price,
-            levels=state.levels,
-            liq_map=state.liq_maps.get("1d") or state.liq_maps.get("24h"),
-            range_upper=range_upper,
-            range_lower=range_lower,
-            sweep_events_1h=recent_sweeps,
-            atr=state.atr,
-            cfg=kl_cfg if kl_cfg else None,
-        )
-
-        state.key_levels = snapshot.levels
-        state.key_level_snapshot = snapshot
 
     _KL_V2_DISCOVERY_INTERVAL = 60
 
@@ -1144,6 +1134,7 @@ class Engine:
             oi_change_pct_1h=oi_change_1h,
             temperature_score=temp_score,
             candles_4h=state.candles_4h or None,
+            candles_15m=state.candles_15m or None,
             cfg=kl_cfg if kl_cfg else None,
         )
 
@@ -1260,8 +1251,6 @@ class Engine:
             payload["ladder_plans"] = [lp.model_dump() for lp in state.levels.ladder_plans]
         if state.range_signal:
             payload["range_signal"] = state.range_signal.model_dump()
-        if state.key_level_snapshot and state.key_level_snapshot.levels:
-            payload["key_levels"] = state.key_level_snapshot.model_dump()
         if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.levels:
             payload["key_levels_v2"] = state.key_level_snapshot_v2.model_dump()
 
@@ -1499,7 +1488,6 @@ class Engine:
             cycle_position=state.cycle_position,
             liq_sweep_events=recent_sweeps,
             range_signal=state.range_signal,
-            key_level_snapshot=state.key_level_snapshot,
             key_level_snapshot_v2=state.key_level_snapshot_v2,
             liq_map_30d=state.liq_maps.get("30d"),
             rsi_14=state.rsi_14,

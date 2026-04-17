@@ -10,7 +10,7 @@ from models.flow import (
     GlobalLiquidationData, LongShortRatioData, MarketIndexData,
     MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
 )
-from models.key_level import KeyLevelSnapshot, KeyLevelSnapshotV2
+from models.key_level import KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
 from models.liquidation import HeatmapData, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
@@ -68,7 +68,6 @@ def build_ai_snapshot(
     cycle_position: Optional[CyclePositionData] = None,
     liq_sweep_events: list[dict] | None = None,
     range_signal: Optional[RangeSignalData] = None,
-    key_level_snapshot: Optional[KeyLevelSnapshot] = None,
     key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None,
     liq_map_30d: Optional[LiquidationMap] = None,
     rsi_14: Optional[float] = None,
@@ -322,11 +321,7 @@ def build_ai_snapshot(
         ),
         liq_sweep_events=liq_sweep_events or [],
         range_signal=range_signal.model_dump() if range_signal else None,
-        key_levels=(
-            key_level_snapshot_v2.model_dump() if key_level_snapshot_v2
-            else key_level_snapshot.model_dump() if key_level_snapshot
-            else None
-        ),
+        key_levels=key_level_snapshot_v2.model_dump() if key_level_snapshot_v2 else None,
         liq_clusters_above_30d=clusters_above_30d,
         liq_clusters_below_30d=clusters_below_30d,
         liq_imbalance_ratio_30d=imbalance_30d,

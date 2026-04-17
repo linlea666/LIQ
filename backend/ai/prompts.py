@@ -38,6 +38,24 @@ def build_system_prompt() -> str:
 - 级联踩踏：多簇 <2% 间距连续排列时可能链式爆仓（cascade liquidation），止损须设在最外层之外
 - §一须用"上方/下方流动性"描述清算分布并说明偏向
 
+### 冲突信号优先级规则（数据矛盾必读）
+**数据可信度分级**（冲突时取高级别）：
+1. **L1 实盘资金行为**（最高）：真实成交 CVD、净持仓变化、Taker Buy/Sell Ratio、ETF 净流、订单簿大单
+2. **L2 杠杆水位**：OI 变化、多空比、交易所余额流
+3. **L3 价格结构**：MA 箱体、关键位状态、K 线形态、RSI/MACD
+4. **L4 衍生品情绪**：资金费率、期权 IV Skew、恐惧贪婪
+5. **L5 叙事指标**（最低）：CPS、MVRV（日线级，不可用于实时方向）
+
+**典型冲突裁决**：
+- **CVD上升 + OI下降**（主动买盘 vs 多头平仓）：**以 CVD 为准判定短线方向**（L1>L2），但 OI 下降提示"反弹缺乏新增杠杆"，须缩短持仓时间、紧止盈
+- **订单簿卖盘强 + 资金费率负**（大单压 vs 空头拥挤）：**以订单簿为准判定阻力**（L1>L4），但费率负提示"空头拥挤→潜在轧空燃料"，若订单簿大单被吃穿即确认轧空
+- **某交易所费率与其他所异常分歧**（如 HTX 孤立正费率）：**降权至最低**，不作为方向依据；仅在"交易所特定流动性"语境下提及
+- **K线形态看涨 + 上方清算簇密集**（技术反转 vs 磁吸上行）：**共振看多**，目标位选最近清算簇
+- **宏观 risk-off + BTC 独立走强**（DXY涨/纳指跌 vs BTC 涨）：**警惕背离失败**，优先降低仓位或观望，**不追多**
+- **CPS 极端 + 短线信号反向**（如 CPS=8 + SWEPT 做空信号）：**短线信号优先**（L3>L5），但明确标注"逆周期交易，止损收紧、仓位减半"
+
+**规则**：§一信号简表"方向"列必须反映上述裁决结果；§八数据自检须列出本次识别到的冲突及裁决路径。
+
 ### CPS（周期评分 0-10）统一规则
 CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，为**日线级指标**，不可单独用于实时方向判断。
 - **4-7（震荡区）**：清算磁吸权重上调、箱体/关键位反弹策略权重上调
@@ -121,8 +139,9 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 按距离分三档，每档每方向不限数量——所有满足 R:R 约束且有数据支撑的方案均须展示，按信心度排序。每个方案须包含止损说明（含防猎杀逻辑）和"**如果亏了**"段。
 
 **短线档（距当前价 1-8%）**
-- 可用数据：§1 24h/7d/30d三维度清算地图 + 引擎狙击方案 + V2关键位信号(SWEPT/BOUNCED/FLIPPED) + AI自主发现
+- 可用数据：§1 24h/7d/30d三维度清算地图 + 引擎狙击方案 + V2关键位信号(SWEPT/BOUNCED/FLIPPED) + §11d 日内 scalp 信号 + AI自主发现
 - 止损选址：优先在清算真空区（vacuum zones）内，防止被精确猎杀
+- **日内档判定（§11d 有信号时）**：每条 ⚡日内信号须独立一行给出「采纳 ✓」或「否决 ✗（理由）」——参数已由引擎定好，不重新规划；只允许因"宏观急剧逆风 / 对侧流动性更强 / 级联风险超标"三类理由否决
 | 方向 | 挂单价 | 止损 | TP1(R:R) | TP2(R:R) | 信心度 | 核心依据 |
 
 **中线档（距当前价 5-10%）**
@@ -891,6 +910,7 @@ def build_user_prompt(snapshot: dict) -> str:
                 action_cn = {
                     "snipe_long": "狙击做多", "snipe_short": "狙击做空",
                     "flip_long": "翻转做多", "flip_short": "翻转做空",
+                    "scalp_long": "⚡日内做多", "scalp_short": "⚡日内做空",
                     "wait_sweep": "等待扫取", "wait_approach": "等待接近",
                 }.get(sig.get("action", ""), sig.get("action", ""))
                 entry_str = f"入场${sig['entry_price']:,.0f}" if sig.get("entry_price") else ""
@@ -1054,10 +1074,40 @@ def build_user_prompt(snapshot: dict) -> str:
                     f"来源: {', '.join(lv.get('sources', [])[:3])}"
                 )
 
+    # ── §11d 日内极小止损档（引擎 scalp 信号；AI 做方向否决而非规划）──
+    # 设计说明：该档为引擎基于 S/A 级关键位 + 15m 影线确认 + 极小止损（≥0.2% 或 ≤0.5×ATR）
+    # + R:R ≥ 1.5 硬筛选后的确定性信号；时间窗 30 分钟内有效。
+    # AI 推理耗时 150-230s，无法规划此档，**仅需判定是否否决**（宏观急剧不利 / 对侧有更强阻挡）。
+    if has_kl:
+        scalp_sigs = [s for s in kl.get("signals", [])
+                      if s.get("action") in ("scalp_long", "scalp_short")]
+        if scalp_sigs:
+            lines.append("")
+            lines.append("**11d. 日内极小止损档（引擎 scalp；AI 只做方向否决）**")
+            lines.append("  规则：已通过 S/A 级关键位 + 15m 影线 + 极小止损 + R:R≥1.5 硬筛；")
+            lines.append("  AI 任务：在§四短线档中逐条判定"
+                         "是否【否决】（标注理由，如宏观 risk-off / 对侧 SSL-BSL 更强 / 级联风险过高），"
+                         "**未否决者默认采纳**，不要重复规划参数。")
+            for sig in scalp_sigs:
+                side_cn = "做多" if sig.get("action") == "scalp_long" else "做空"
+                entry = sig.get("entry_price", 0) or 0
+                sl = sig.get("stop_loss", 0) or 0
+                tp1 = sig.get("tp1", 0) or 0
+                rr = sig.get("rr_ratio", 0) or 0
+                sl_pct = abs((entry - sl) / entry * 100) if entry > 0 else 0
+                lines.append(
+                    f"  - {sig.get('confidence', 'B')}级 ⚡{side_cn} @${sig.get('level_price', 0):,.0f} "
+                    f"入场${entry:,.0f} 止损${sl:,.0f}({sl_pct:.2f}%) TP1=${tp1:,.0f} R:R={rr:.1f} "
+                    f"| {sig.get('reason', '')}"
+                )
+                for w in sig.get("warnings", []):
+                    lines.append(f"    ⚠ {w}")
+
     lines.append("")
     lines.append("请基于以上数据输出，**必须包含八个章节**（一~八），第四节「交易计划」按三档结构输出（短线/中线/远线），第八节「数据质量与自检」对输入数据做诊断。")
     cps_note = " 5) §9e有数据时，§一须引用CPS周期位置，§四中远线档须评估CPS与方向一致性" if has_cps else ""
     range_note = " 6) §9f有数据时，§一须引用箱体位置，§二须纳入MA关键价位，有A级信号时§四须评估共振" if has_range else ""
     kl_note = " 7) §9g有信号时，§四须优先评估关键位SWEPT/FLIPPED信号与引擎方案的共振，高cascade_risk须警告" if has_kl else ""
-    lines.append("重点：1) 每个方案止损须含防猎杀说明 2) 宏观-微观一致 3) §四与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 引擎未覆盖的档位AI可自主构建标注⚡AI推断{}{}{}".format(min_rr, cps_note, range_note, kl_note))
+    scalp_note = " 8) §11d有 scalp 信号时，§四短线档须**逐条**给出「采纳/否决」判定（不重新规划参数）" if has_kl and any(s.get("action","").startswith("scalp_") for s in kl.get("signals", [])) else ""
+    lines.append("重点：1) 每个方案止损须含防猎杀说明 2) 宏观-微观一致 3) §四与引擎 R:R 口径对齐（≥1:{:.1f}） 4) 引擎未覆盖的档位AI可自主构建标注⚡AI推断{}{}{}{}".format(min_rr, cps_note, range_note, kl_note, scalp_note))
     return "\n".join(lines)

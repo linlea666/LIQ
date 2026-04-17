@@ -248,6 +248,33 @@ async def poll_candles_4h(
             logger.info("Binance K线生效 | coin=%s interval=4h bars=%d", coin.ccy, len(state.candles_4h))
 
 
+async def poll_candles_15m(
+    cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
+    """获取 15m K 线用于日内 scalp 信号的影线确认（pin bar / engulfing）。
+
+    注：Coinglass 配额紧张，优先走 Binance；取近 100 根（~25 小时）已足够覆盖
+    scalp 信号的"最近 1-2 根"确认窗口，更长历史交给 1h/4h 线。
+    """
+    del cg
+    if not bn:
+        logger.warning("Binance K线源未注入 | coin=%s interval=15m", coin.ccy)
+        return
+    data = await bn.fetch_klines(coin.symbol_cg_pair, interval="15m", limit=100)
+    if not data:
+        return
+    raw = parse_candles(data)
+    if raw:
+        state.candles_15m = [
+            CandleData(coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                       l=c["l"], c=c["c"], vol=c["vol"])
+            for c in raw
+        ]
+        if "binance_klines_15m_ready" not in state._log_once_keys:
+            state._log_once_keys.add("binance_klines_15m_ready")
+            logger.info("Binance K线生效 | coin=%s interval=15m bars=%d", coin.ccy, len(state.candles_15m))
+
+
 async def poll_candles_1h(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:

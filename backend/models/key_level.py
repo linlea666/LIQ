@@ -104,6 +104,10 @@ class KeyLevelV2(BaseModel):
     last_confirmed_ts: int = 0
     note: str = ""                 # 白话说明
 
+    # K 线形态确认（AI 自检建议：暴露 pin bar / engulfing / doji 结构化信号给 AI）
+    pattern_detected: str = ""     # "锤子线" / "射击之星" / "看涨吞没" / "看跌吞没" / "十字星" / ""
+    pattern_strength: float = 0.0  # 0~1，形态强度（detect_reversal_pattern 输出）
+
 
 class BullBearLine(BaseModel):
     """多空分界线（独立展示区域）"""

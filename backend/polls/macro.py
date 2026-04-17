@@ -223,6 +223,11 @@ async def poll_onchain_cycle(
         mi_mvrv = btc_state.market_index.btc_mvrv
         if mi_mvrv is not None and mi_mvrv > 0:
             raw.mvrv_ratio = mi_mvrv
+
+    # ── BTC 日线收盘价（供 cycle.py 计算 Wilder RSI(14)；需 ≥15 根）──
+    if btc_state and btc_state.candles_daily:
+        raw.btc_daily_prices = [c.close for c in btc_state.candles_daily[-60:]]
+
     cycle_pos = calculate_cycle_position(raw, btc_price) if btc_price > 0 else None
 
     for ccy in supported_coins:

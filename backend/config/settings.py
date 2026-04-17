@@ -130,8 +130,8 @@ class EmailNotificationConfig:
     smtp_pass: str = ""
     from_name: str = "LIQ监控"
     to: list[str] = field(default_factory=list)
-    min_signal_tier: str = "S"
-    cooldown_minutes: int = 30
+    min_signal_tier: str = "A"
+    cooldown_minutes: int = 45
     include_range: bool = True
     include_key_levels: bool = True
 
@@ -266,8 +266,8 @@ def _build_settings(raw: dict) -> Settings:
         smtp_pass=os.getenv("SMTP_PASS", email_raw.get("smtp_pass", "")),
         from_name=email_raw.get("from_name", "LIQ监控"),
         to=email_raw.get("to", []),
-        min_signal_tier=email_raw.get("min_signal_tier", "S"),
-        cooldown_minutes=email_raw.get("cooldown_minutes", 30),
+        min_signal_tier=email_raw.get("min_signal_tier", "A"),
+        cooldown_minutes=email_raw.get("cooldown_minutes", 45),
         include_range=email_raw.get("include_range", True),
         include_key_levels=email_raw.get("include_key_levels", True),
     )

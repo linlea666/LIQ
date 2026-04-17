@@ -35,9 +35,13 @@ const ACTION_LABELS: Record<string, string> = {
   snipe_short: "狙击做空",
   flip_long: "翻转做多",
   flip_short: "翻转做空",
+  scalp_long: "⚡日内做多",
+  scalp_short: "⚡日内做空",
   wait_sweep: "等待扫取",
   wait_approach: "等待接近",
 };
+
+const SCALP_ACTIONS = new Set(["scalp_long", "scalp_short"]);
 
 export default function KeyLevelView() {
   const coin = useMarketStore((s) => s.coin);
@@ -424,10 +428,13 @@ function SignalCards({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {signals.map((sig, i) => {
-        const isLong =
-          sig.action === "snipe_long" || sig.action === "flip_long";
-        const borderColor =
-          sig.confidence === "A"
+        const isLong = sig.action.includes("long");
+        const isScalp = SCALP_ACTIONS.has(sig.action);
+        const borderColor = isScalp
+          ? isLong
+            ? "border-violet-500/70"
+            : "border-orange-500/70"
+          : sig.confidence === "A"
             ? isLong
               ? "border-green-500/60"
               : "border-red-500/60"
@@ -441,6 +448,14 @@ function SignalCards({
             className={`${bgColor} border ${borderColor} rounded-lg p-3`}
           >
             <div className="flex items-center gap-2 mb-2">
+              {isScalp && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-500/20 text-violet-300"
+                  title="日内极小止损档（15m 影线确认 + R:R≥1.5，30 分钟有效）"
+                >
+                  日内⚡
+                </span>
+              )}
               <span
                 className={`px-1.5 py-0.5 rounded text-xs font-bold ${
                   sig.confidence === "A"
@@ -452,7 +467,13 @@ function SignalCards({
               </span>
               <span
                 className={`text-sm font-medium ${
-                  isLong ? "text-green-400" : "text-red-400"
+                  isScalp
+                    ? isLong
+                      ? "text-violet-300"
+                      : "text-orange-400"
+                    : isLong
+                      ? "text-green-400"
+                      : "text-red-400"
                 }`}
               >
                 {ACTION_LABELS[sig.action] ?? sig.action}

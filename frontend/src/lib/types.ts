@@ -301,22 +301,6 @@ export interface RangeSignalData {
   confluence_count: number;
 }
 
-export interface KeyLevel {
-  price: number;
-  side: "support" | "resistance";
-  sources: string[];
-  strength: number;
-  state: "idle" | "approaching" | "testing" | "swept" | "bounced" | "broken" | "flipped";
-  state_ts: number;
-  prev_state: string;
-  test_count: number;
-  sweep_usd: number;
-  cascade_risk: number;
-  cascade_layers: number;
-  cascade_total_usd: number;
-  distance_pct: number;
-}
-
 export interface KeyLevelSignal {
   level_price: number;
   side: string;
@@ -332,15 +316,8 @@ export interface KeyLevelSignal {
   warnings: string[];
 }
 
-export interface KeyLevelSnapshot {
-  ts: number;
-  levels: KeyLevel[];
-  signals: KeyLevelSignal[];
-  active_count: number;
-}
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// V2 关键位系统
+// V2 关键位系统（V1 KeyLevelSnapshot 已于 Commit 2 下线，payload 不再产出）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface KeyLevelV2 {
@@ -447,7 +424,6 @@ export interface MarketUpdate {
   sniper_entries?: Record<string, unknown>[];
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
-  key_levels?: KeyLevelSnapshot;
   key_levels_v2?: KeyLevelSnapshotV2;
   option_max_pain?: Record<string, unknown>;
   option_info?: Record<string, unknown>;

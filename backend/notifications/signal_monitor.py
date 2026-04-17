@@ -14,8 +14,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ACTIONABLE_ACTIONS = frozenset({
-    "snipe_long", "snipe_short", "flip_long", "flip_short",
+    "snipe_long", "snipe_short",
+    "flip_long", "flip_short",
+    "scalp_long", "scalp_short",   # 日内极小止损档
 })
+
+# 兜底：scalp 信号用 signal.confidence 映射到 tier（scalp 不依赖 level.strength_tier 的 S/A 阈值，
+# 因为 scalp 在引擎层已经做了 S/A 过滤，这里若 _find_level 因浮点误差失败则不应丢信号）
+_SCALP_ACTIONS = frozenset({"scalp_long", "scalp_short"})
 
 
 @dataclass
@@ -26,6 +32,7 @@ class AlertEvent:
     direction: str           # "long" | "short"
     signal_tier: str         # "S" | "A"
     price: float             # 当前价
+    action: str = ""         # "snipe_long" / "scalp_long" / "flip_short" / "" (range 信号)
     entry: Optional[float] = None
     stop_loss: Optional[float] = None
     tp1: Optional[float] = None
@@ -38,9 +45,15 @@ class AlertEvent:
     ts: float = field(default_factory=time.time)
 
     @property
+    def is_scalp(self) -> bool:
+        return self.action in _SCALP_ACTIONS
+
+    @property
     def dedup_key(self) -> str:
         if self.source == "key_level":
-            return f"{self.coin}:kl:{self.level_price}:{self.level_state}:{self.direction}"
+            # scalp 与 snipe/flip 即使关键位相同也应分别去重（时间尺度不同）
+            kind = "scalp" if self.is_scalp else "kl"
+            return f"{self.coin}:{kind}:{self.level_price}:{self.level_state}:{self.direction}"
         return f"{self.coin}:range:{self.signal_tier}:{self.direction}"
 
 
@@ -67,8 +80,12 @@ class AlertDedup:
             del self._sent[k]
 
 
-def _find_level(price: float, levels: list) -> Optional[KeyLevelV2]:
-    """从 V2 关键位列表中找到与信号价格匹配的 level。"""
+def _find_level(price: float, levels: list, max_dist_pct: float = 0.008) -> Optional[KeyLevelV2]:
+    """从 V2 关键位列表中找到与信号价格匹配的 level。
+
+    容差从 0.5% 放宽到 0.8%，避免浮点误差 / 动态重算导致 level_price 与 snapshot 中
+    对应 level 微小偏差时反查失败而静默丢信号。
+    """
     best = None
     best_dist = float("inf")
     for lv in levels:
@@ -76,7 +93,7 @@ def _find_level(price: float, levels: list) -> Optional[KeyLevelV2]:
         if dist < best_dist:
             best_dist = dist
             best = lv
-    if best and best_dist / max(price, 1) < 0.005:
+    if best and best_dist / max(price, 1) < max_dist_pct:
         return best
     return None
 
@@ -86,7 +103,7 @@ def scan_alerts(
     price: float,
     kl_snapshot: Optional[KeyLevelSnapshotV2],
     range_signal: Optional[RangeSignalData],
-    min_tier: str = "S",
+    min_tier: str = "A",
     include_key_levels: bool = True,
     include_range: bool = True,
 ) -> list[AlertEvent]:
@@ -99,17 +116,35 @@ def scan_alerts(
             if sig.action not in ACTIONABLE_ACTIONS:
                 continue
             level = _find_level(sig.level_price, kl_snapshot.levels)
-            if not level:
+
+            # tier 判定：
+            #  - scalp：一律以 sig.confidence 为准。scalp 的置信度是生成器按
+            #    "S级 level + 强形态(≥0.8) → A，其余 → B" 精算出来的；
+            #    若用 level.strength_tier 会夸大强度（如 S 级 level + 弱吞没本应 B，
+            #    却被误报为 S），邮件标题就会误导交易员。
+            #  - snipe/flip：以 level.strength_tier 为准（保留原语义）。
+            if sig.action in _SCALP_ACTIONS:
+                if not (sig.entry_price and sig.stop_loss and sig.tp1):
+                    continue  # scalp 参数不全，跳过
+                tier = sig.confidence if sig.confidence in ("S", "A", "B") else "B"
+                cascade = level.cascade_risk if level else 0.0
+            elif level:
+                tier = level.strength_tier
+                cascade = level.cascade_risk
+            else:
+                continue  # 非 scalp 且找不到 level，放弃以免发错价
+
+            if tier not in allowed_tiers:
                 continue
-            if level.strength_tier not in allowed_tiers:
-                continue
+
             direction = "long" if "long" in sig.action else "short"
             events.append(AlertEvent(
                 coin=coin,
                 source="key_level",
                 direction=direction,
-                signal_tier=level.strength_tier,
+                signal_tier=tier,
                 price=price,
+                action=sig.action,
                 entry=sig.entry_price,
                 stop_loss=sig.stop_loss,
                 tp1=sig.tp1,
@@ -117,7 +152,7 @@ def scan_alerts(
                 reason=sig.reason,
                 level_price=sig.level_price,
                 level_state=sig.state,
-                cascade_risk=level.cascade_risk,
+                cascade_risk=cascade,
                 warnings=sig.warnings,
             ))
 

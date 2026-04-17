@@ -38,6 +38,15 @@ _DEFAULT_CFG: dict = {
     "cascade_weight_cap_m": 20.0,
     "cascade_norm": 50.0,
     "signal_expire_sec": 14400,  # 4H
+    # ── Scalp 日内极小止损档参数（仅 S/A 级关键位 + 15m 影线确认时生效）──
+    "scalp_max_distance_pct": 0.8,    # 关键位与现价最大偏离
+    "scalp_sl_min_pct": 0.2,          # 止损下限（价格百分比）
+    "scalp_sl_max_atr_mult": 0.5,     # 止损上限（ATR 倍数）
+    "scalp_tp_min_atr_mult": 0.5,     # TP 距 price 的最小 ATR 倍数（传给 _find_opposite_target）
+    "scalp_min_rr": 1.5,              # 最小 R:R
+    "scalp_max_cascade": 0.5,         # 级联风险上限
+    "scalp_min_pattern_strength": 0.6, # 15m 反转形态最小强度（pin bar=0.85 / engulf=0.80 / doji=0.50）
+    "scalp_signal_expire_sec": 1800,  # 关键位进入可 scalp 状态后的最长窗口（30 分钟）
 }
 
 
@@ -50,6 +59,7 @@ def run_tracker_v2(
     oi_change_pct_1h: float = 0,
     temperature_score: float = 50,
     candles_4h: list[CandleData] | None = None,
+    candles_15m: list[CandleData] | None = None,
     cfg: dict | None = None,
 ) -> KeyLevelSnapshotV2:
     """在 confluence_scoring 产出的快照基础上，运行状态机 + 信号生成。"""
@@ -81,17 +91,23 @@ def run_tracker_v2(
         sig = _generate_signal(lv, price, atr, opposite_levels, temperature_score, candles_4h, cfg, now)
         if sig:
             signals.append(sig)
+        # ── Scalp 日内极小止损档：仅 S/A 级 + 15m 影线确认时叠加产出，与上方信号并存 ──
+        scalp = _generate_scalp_signal(lv, price, atr, opposite_levels, candles_15m, cfg, now)
+        if scalp:
+            signals.append(scalp)
 
-    # 冲突解决：同时有多空 A 级时，按温度计方向保留主信号
+    # 冲突解决：同时有多空 A 级时，按温度计方向保留主信号（涵盖 snipe/flip/scalp）
+    _LONG_ACTIONS = ("snipe_long", "flip_long", "scalp_long")
+    _SHORT_ACTIONS = ("snipe_short", "flip_short", "scalp_short")
     a_signals = [s for s in signals if s.confidence == "A"]
     if len(a_signals) >= 2:
-        has_long = any(s.action in ("snipe_long", "flip_long") for s in a_signals)
-        has_short = any(s.action in ("snipe_short", "flip_short") for s in a_signals)
+        has_long = any(s.action in _LONG_ACTIONS for s in a_signals)
+        has_short = any(s.action in _SHORT_ACTIONS for s in a_signals)
         if has_long and has_short:
             # 逆向思维：市场过冷(<40)优先做多，过热(>=40)优先做空
             prefer_long = temperature_score < 40
             for s in a_signals:
-                is_long = s.action in ("snipe_long", "flip_long")
+                is_long = s.action in _LONG_ACTIONS
                 if (prefer_long and not is_long) or (not prefer_long and is_long):
                     s.confidence = "B"
                     s.warnings.append("存在反向A级信号，已降级为B级")
@@ -420,6 +436,9 @@ def _generate_signal(
     if lv.state == "bounced":
         has_sweep = lv.sweep_usd > 0
         pattern = detect_reversal_pattern(candles_4h, lv.side)
+        if pattern.found:
+            lv.pattern_detected = pattern.name
+            lv.pattern_strength = round(pattern.strength, 2)
         tp1_price = _find_opposite_target(lv, price, all_levels, atr)
         direction = "做多" if is_support else "做空"
 
@@ -470,6 +489,9 @@ def _generate_signal(
 
     if lv.state == "flipped":
         pattern = detect_reversal_pattern(candles_4h, lv.side)
+        if pattern.found:
+            lv.pattern_detected = pattern.name
+            lv.pattern_strength = round(pattern.strength, 2)
         tp1_price = _find_opposite_target(lv, price, all_levels, atr)
         pat_tag = f"+{pattern.name}" if pattern.found else ""
         if lv.side == "resistance":
@@ -500,13 +522,139 @@ def _generate_signal(
     return None
 
 
+def _generate_scalp_signal(
+    lv: KeyLevelV2,
+    price: float,
+    atr: float,
+    all_levels: list[KeyLevelV2],
+    candles_15m: list[CandleData] | None,
+    cfg: dict,
+    now: int,
+) -> KeyLevelSignal | None:
+    """日内极小止损档（scalp）信号生成器。
+
+    核心逻辑：贴近 S/A 级关键位 + 15m K 线拒绝影线（pin bar / engulfing） + 极小止损
+    (≤ max(0.2%, 0.4×ATR)，上限 0.5×ATR) → 高 R:R 日内机会。
+
+    与 snipe/flip 信号**并存而非替代**：snipe 面向中线(SL ~1.5 ATR)，scalp 面向
+    日内(SL <0.5 ATR)，两者时间尺度和仓位管理不同。
+
+    触发条件全部满足才产出：
+      1. 关键位 strength_tier ∈ {S, A}
+      2. state ∈ {testing, swept, bounced, flipped}（idle/approaching/broken 跳过）
+      3. 距 state_ts 在 scalp_signal_expire_sec 以内（默认 30 分钟窗口）
+      4. |distance_pct| ≤ scalp_max_distance_pct
+      5. cascade_risk < scalp_max_cascade
+      6. 15m K 线反转形态 strength ≥ scalp_min_pattern_strength
+      7. 最终 R:R ≥ scalp_min_rr
+
+    无 15m K 线数据、ATR 异常、不符合条件 → 返回 None。
+    """
+    if atr <= 0 or price <= 0:
+        return None
+    if lv.strength_tier not in ("S", "A"):
+        return None
+    if lv.state not in ("testing", "swept", "bounced", "flipped"):
+        return None
+
+    # 时间过期：scalp 是日内策略，状态进入超过 scalp_signal_expire_sec 即失效
+    # （防止关键位长期停留在 testing 状态仍反复产出 scalp 信号）
+    scalp_expire = cfg.get("scalp_signal_expire_sec", 1800)
+    if lv.state_ts > 0 and (now - lv.state_ts) > scalp_expire:
+        return None
+
+    max_distance = cfg.get("scalp_max_distance_pct", 0.8)
+    if abs(lv.distance_pct) > max_distance:
+        return None
+
+    max_cascade = cfg.get("scalp_max_cascade", 0.5)
+    if (lv.cascade_risk or 0) >= max_cascade:
+        return None
+
+    if not candles_15m or len(candles_15m) < 2:
+        return None
+
+    pattern = detect_reversal_pattern(candles_15m, lv.side)
+    min_strength = cfg.get("scalp_min_pattern_strength", 0.6)
+    if not pattern.found or pattern.strength < min_strength:
+        return None
+
+    is_support = lv.side == "support"
+    side_cn = _SIDE_CN.get(lv.side, lv.side)
+
+    # 止损宽度：max(0.2% of price, 0.4×ATR)，上限 0.5×ATR（极小）
+    sl_min_pct = cfg.get("scalp_sl_min_pct", 0.2)
+    sl_max_atr_mult = cfg.get("scalp_sl_max_atr_mult", 0.5)
+    sl_width = max(lv.price * sl_min_pct / 100, atr * 0.4)
+    sl_width = min(sl_width, atr * sl_max_atr_mult)
+    if sl_width <= 0:
+        return None
+
+    # 入场紧贴关键位（0.1×ATR 缓冲，避免成交价正好在关键位失败）
+    entry_buffer = min(atr * 0.1, lv.price * 0.0015)
+    if is_support:
+        entry = lv.price + entry_buffer
+        sl = lv.price - sl_width
+    else:
+        entry = lv.price - entry_buffer
+        sl = lv.price + sl_width
+
+    # TP：复用对侧关键位扫描，但传更小的 ATR 下限（0.5×ATR）
+    # scalp 的 SL 被限制在 ≤0.5×ATR，若沿用默认 2×ATR 下限会让 R:R 最低恒为 4，
+    # 反而让 scalp_min_rr 阈值失效；传 0.5 允许 TP1 贴近最近对侧 level。
+    tp_atr_mult = cfg.get("scalp_tp_min_atr_mult", 0.5)
+    tp1_price = _find_opposite_target(lv, price, all_levels, atr, min_rr_atr_mult=tp_atr_mult)
+
+    risk = abs(entry - sl)
+    reward = abs(tp1_price - entry)
+    if risk <= 0:
+        return None
+    rr = reward / risk
+
+    min_rr = cfg.get("scalp_min_rr", 1.5)
+    if rr < min_rr:
+        return None
+
+    # 置信度：S 级 + 强形态(>=0.8) → A，其余 → B
+    confidence = "A" if (lv.strength_tier == "S" and pattern.strength >= 0.8) else "B"
+    direction = "做多" if is_support else "做空"
+    action = "scalp_long" if is_support else "scalp_short"
+
+    sig = KeyLevelSignal(
+        level_price=lv.price,
+        side=lv.side,
+        state=lv.state,
+        action=action,
+        confidence=confidence,
+        entry_price=round(entry, 2),
+        stop_loss=round(sl, 2),
+        tp1=round(tp1_price, 2),
+        rr_ratio=round(rr, 2),
+        reason=(
+            f"⚡日内: {lv.strength_tier}级{side_cn}${lv.price:,.0f}"
+            f" + 15m{pattern.name}({pattern.strength:.2f})"
+            f" → 极小止损{direction}(SL≈${risk:.1f}, 约{risk/price*100:.2f}%)"
+        ),
+    )
+    if lv.cascade_risk and lv.cascade_risk > 0.3:
+        sig.warnings.append(f"级联风险{lv.cascade_risk:.0%}，务必硬止损")
+    return sig
+
+
 def _find_opposite_target(
     lv: KeyLevelV2,
     price: float,
     all_levels: list[KeyLevelV2],
     atr: float,
+    min_rr_atr_mult: float = 2.0,
 ) -> float:
-    """智能 TP：指向最近的对侧关键位，而非固定 ATR 倍数。"""
+    """智能 TP：指向最近的对侧关键位，而非固定 ATR 倍数。
+
+    min_rr_atr_mult：TP 距离 price 的最小 ATR 倍数兜底。
+      - snipe/flip 默认 2.0（中线档期望足够 R:R 空间）
+      - scalp 应传 0.5（日内档贴近最近对侧 level，不强行抬高 TP；
+        否则 min_rr 过滤阈值形同虚设，且 TP1 常态无法达到）
+    """
     is_support = lv.side == "support"
     fallback = price + atr * 3 if is_support else price - atr * 3
 
@@ -522,10 +670,10 @@ def _find_opposite_target(
     if targets:
         target = targets[0].price
         if is_support:
-            min_rr_target = price + atr * 2
+            min_rr_target = price + atr * min_rr_atr_mult
             return max(target, min_rr_target)
         else:
-            min_rr_target = price - atr * 2
+            min_rr_target = price - atr * min_rr_atr_mult
             return min(target, min_rr_target)
 
     return fallback

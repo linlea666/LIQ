@@ -153,8 +153,8 @@ notifications:
     from_name: "LIQ监控"
     to:
       - "466460082@qq.com"
-    min_signal_tier: "S"       # S=仅S级, A=S+A级都通知
-    cooldown_minutes: 30
+    min_signal_tier: "A"       # S=仅S级, A=S+A级都通知（A 级信号频次适中，与实盘节奏匹配）
+    cooldown_minutes: 45
     include_range: true        # 箱体S级信号
     include_key_levels: true   # 关键位S级信号
     digest_hour_utc: 0         # 日报发送时间（UTC），0=北京8点

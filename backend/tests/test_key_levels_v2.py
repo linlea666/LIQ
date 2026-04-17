@@ -33,6 +33,7 @@ from processors.level_discovery import (
 from processors.key_level_tracker_v2 import (
     run_tracker_v2, _calc_atr_factor, _is_broken,
     _volume_confirms_break, _oi_confirms_break, _find_opposite_target,
+    _generate_scalp_signal, _DEFAULT_CFG,
 )
 
 
@@ -385,6 +386,221 @@ class TestTrackerV2:
         assert len(a_signals) == 1
         assert len(b_signals) >= 1
         assert a_signals[0].action in ("snipe_long", "flip_long")
+
+    def test_find_opposite_target_respects_min_rr_atr_mult(self):
+        """P0-1 回归：scalp 场景应能传 min_rr_atr_mult=0.5 让 TP 贴近最近对侧 level。"""
+        lv = KeyLevelV2(price=100_000, side="support")
+        nearby_resistance = [KeyLevelV2(price=100_300, side="resistance")]
+        # 默认 mult=2.0 → TP 被抬到 price+2×ATR = 101_000（忽略 100_300 这个最近对侧）
+        tp_default = _find_opposite_target(lv, 100_000, nearby_resistance, atr=500)
+        assert tp_default == 101_000
+        # mult=0.5 → TP 贴近最近对侧 level = 100_300（max(100_300, 100_250)）
+        tp_scalp = _find_opposite_target(
+            lv, 100_000, nearby_resistance, atr=500, min_rr_atr_mult=0.5,
+        )
+        assert tp_scalp == 100_300
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _generate_scalp_signal（日内极小止损档）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _hammer_candles(base_price: float) -> list[CandleData]:
+    """构造带锤子线形态的 15m K 线（看涨反转，strength=0.85）。
+
+    最后一根：实体小、下影线长（≥2 倍实体）、上影线短。
+    """
+    prev = CandleData(coin="BTC", ts=1700000000, o=base_price + 50,
+                      h=base_price + 80, l=base_price, c=base_price + 20, vol=100)
+    hammer = CandleData(coin="BTC", ts=1700000900,
+                        o=base_price, h=base_price + 60,
+                        l=base_price - 200, c=base_price + 50, vol=150)
+    return [prev, hammer]
+
+
+def _engulfing_candles(base_price: float) -> list[CandleData]:
+    """构造看涨吞没形态的 15m K 线（strength=0.80）。"""
+    prev = CandleData(coin="BTC", ts=1700000000, o=base_price + 100,
+                      h=base_price + 110, l=base_price + 80, c=base_price + 90, vol=100)
+    bull = CandleData(coin="BTC", ts=1700000900, o=base_price + 80,
+                      h=base_price + 220, l=base_price + 70, c=base_price + 200, vol=200)
+    return [prev, bull]
+
+
+def _doji_candles(base_price: float) -> list[CandleData]:
+    """构造十字星（strength=0.50，<scalp_min_pattern_strength=0.6 应被过滤）。"""
+    prev = CandleData(coin="BTC", ts=1700000000, o=base_price + 50,
+                      h=base_price + 80, l=base_price, c=base_price + 20, vol=100)
+    doji = CandleData(coin="BTC", ts=1700000900, o=base_price + 50,
+                      h=base_price + 250, l=base_price - 200, c=base_price + 52, vol=120)
+    return [prev, doji]
+
+
+def _fresh_level(price: float, side: str, tier: str, state: str,
+                 cascade: float = 0.0, state_ts: int | None = None) -> KeyLevelV2:
+    if state_ts is None:
+        state_ts = int(time.time()) - 60
+    return KeyLevelV2(
+        price=price, side=side, strength_tier=tier, state=state,
+        state_ts=state_ts, cascade_risk=cascade, distance_pct=0.0,
+    )
+
+
+class TestScalpSignal:
+    """日内极小止损档（scalp）信号生成器单元测试。"""
+
+    def test_s_tier_hammer_produces_a_level_long(self):
+        """S 级支撑位 + 锤子线(0.85) → A 级 scalp_long。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        # opposite 需足够远保证 R:R ≥ 1.5（SL 宽度约 0.2%×价格=200，entry buffer 50，risk=250 → TP 距 entry ≥ 375）
+        opposite = [KeyLevelV2(price=100_600, side="resistance")]
+        candles = _hammer_candles(100_000)
+
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv, *opposite],
+            candles_15m=candles, cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is not None
+        assert sig.action == "scalp_long"
+        assert sig.confidence == "A"
+        assert sig.entry_price > lv.price  # 支撑位多头入场略高于 level
+        assert sig.stop_loss < lv.price    # 止损在 level 下方
+        assert sig.tp1 > sig.entry_price
+        assert sig.rr_ratio >= 1.5
+
+    def test_a_tier_engulfing_produces_b_level(self):
+        """A 级阻力位 + 看跌吞没(0.80) → B 级 scalp_short。
+
+        说明：scalp 的 A 级要求 S 级 level **且** pattern_strength≥0.8；
+        A 级 level + 吞没(0.80) 满足 >=0.8，但 level 不是 S 级 → B 级。
+        """
+        lv = _fresh_level(100_000, "resistance", "A", "flipped")
+        opposite = [KeyLevelV2(price=99_400, side="support")]
+        # 构造看跌吞没：prev 阳线被 curr 阴线实体完全包裹
+        prev = CandleData(coin="BTC", ts=1700000000, o=99_900, h=99_960,
+                          l=99_890, c=99_950, vol=100)
+        bear = CandleData(coin="BTC", ts=1700000900, o=100_000, h=100_050,
+                          l=99_850, c=99_870, vol=200)
+
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv, *opposite],
+            candles_15m=[prev, bear], cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is not None
+        assert sig.action == "scalp_short"
+        assert sig.confidence == "B"
+
+    def test_doji_filtered_by_min_pattern_strength(self):
+        """十字星 strength=0.50 < scalp_min_pattern_strength=0.6 → 不产出。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        opposite = [KeyLevelV2(price=100_300, side="resistance")]
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv, *opposite],
+            candles_15m=_doji_candles(100_000), cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_b_tier_level_filtered(self):
+        """B 级 level → 不产出（scalp 要求 S/A 级）。"""
+        lv = _fresh_level(100_000, "support", "B", "bounced")
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_idle_state_filtered(self):
+        """idle/approaching/broken 状态 → 不产出。"""
+        lv = _fresh_level(100_000, "support", "S", "idle")
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_distance_too_far_filtered(self):
+        """距当前价 > scalp_max_distance_pct (0.8%) → 不产出。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        lv.distance_pct = -1.5  # 偏离 1.5%
+        sig = _generate_scalp_signal(
+            lv, price=101_500, atr=500, all_levels=[lv],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_cascade_risk_filtered(self):
+        """cascade_risk >= scalp_max_cascade (0.5) → 不产出（级联踩踏区禁止 scalp）。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced", cascade=0.6)
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_no_15m_candles_returns_none(self):
+        """candles_15m 为空或过短 → 不产出。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        for candles in (None, [], _hammer_candles(100_000)[:1]):
+            sig = _generate_scalp_signal(
+                lv, price=100_000, atr=500, all_levels=[lv],
+                candles_15m=candles, cfg=_DEFAULT_CFG, now=int(time.time()),
+            )
+            assert sig is None
+
+    def test_atr_zero_returns_none(self):
+        """ATR=0 → 不产出（防止除零 / 异常止损）。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=0, all_levels=[lv],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is None
+
+    def test_expired_state_filtered(self):
+        """state_ts 超过 scalp_signal_expire_sec (30 分钟) → 不产出（P1-1 回归）。"""
+        now = int(time.time())
+        lv = _fresh_level(100_000, "support", "S", "bounced",
+                          state_ts=now - 3600)  # 60 分钟前进入状态
+        opposite = [KeyLevelV2(price=100_300, side="resistance")]
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv, *opposite],
+            candles_15m=_hammer_candles(100_000), cfg=_DEFAULT_CFG, now=now,
+        )
+        assert sig is None
+
+    def test_sl_is_tiny_and_rr_uses_nearby_target(self):
+        """P0-1 回归：SL 应极小 (≤0.5×ATR)，TP 应贴近最近对侧 level 而非被抬到 2×ATR。"""
+        lv = _fresh_level(100_000, "support", "S", "bounced")
+        nearby_res = KeyLevelV2(price=100_600, side="resistance")
+        sig = _generate_scalp_signal(
+            lv, price=100_000, atr=500, all_levels=[lv, nearby_res],
+            candles_15m=_hammer_candles(100_000),
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+        assert sig is not None
+        sl_width = abs(sig.entry_price - sig.stop_loss)
+        assert sl_width <= 500 * 0.5 + 1   # SL ≤ 0.5×ATR + 浮点余量
+        # TP 不应被 2×ATR=1000 抬到 101_000，应贴近最近对侧 100_600
+        assert sig.tp1 <= 100_700, f"TP {sig.tp1} should stay near opposite level 100_600, not be raised to price+2×ATR=101_000"
+
+    def test_integration_via_run_tracker_v2(self):
+        """黑盒集成测试：run_tracker_v2 能正确调用 scalp 生成器并输出信号。"""
+        now = int(time.time())
+        lv = _fresh_level(100_000, "support", "S", "bounced", state_ts=now - 60)
+        res = KeyLevelV2(price=100_600, side="resistance", state="idle")
+        snap = _make_snapshot([lv, res], price=100_050, atr=500)
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            candles_15m=_hammer_candles(100_000),
+        )
+        scalp_sigs = [s for s in snap.signals if s.action == "scalp_long"]
+        assert len(scalp_sigs) == 1
+        assert scalp_sigs[0].confidence == "A"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

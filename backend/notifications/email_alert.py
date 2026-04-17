@@ -21,14 +21,26 @@ logger = logging.getLogger(__name__)
 
 _BJ_TZ = timezone(timedelta(hours=8))
 
+# 避免 "Email notification skipped" 每 tick 刷屏：配置缺失仅首次告警一次
+_warned_missing_config = False
+
 
 def _build_html(event: "AlertEvent") -> str:
     """生成卡片式 HTML 邮件正文。"""
     is_long = event.direction == "long"
-    color = "#16a34a" if is_long else "#dc2626"
-    bg_light = "#f0fdf4" if is_long else "#fef2f2"
+    is_scalp = event.is_scalp
+    # scalp 用更醒目的紫/橙色带，与 snipe/flip 区分
+    if is_scalp:
+        color = "#7c3aed" if is_long else "#ea580c"
+        bg_light = "#f5f3ff" if is_long else "#fff7ed"
+    else:
+        color = "#16a34a" if is_long else "#dc2626"
+        bg_light = "#f0fdf4" if is_long else "#fef2f2"
     dir_cn = "做多" if is_long else "做空"
-    source_cn = "关键位" if event.source == "key_level" else "箱体"
+    if event.source == "key_level":
+        source_cn = "日内⚡" if is_scalp else "关键位"
+    else:
+        source_cn = "箱体"
 
     entry_str = f"${event.entry:,.1f}" if event.entry else "—"
     sl_str = f"${event.stop_loss:,.1f}" if event.stop_loss else "—"
@@ -139,7 +151,10 @@ def _build_html(event: "AlertEvent") -> str:
 
 def _build_subject(event: "AlertEvent") -> str:
     dir_cn = "做多" if event.direction == "long" else "做空"
-    source_cn = "关键位" if event.source == "key_level" else "箱体"
+    if event.source == "key_level":
+        source_cn = "日内⚡" if event.is_scalp else "关键位"
+    else:
+        source_cn = "箱体"
     return f"[{event.signal_tier}级{dir_cn}] {event.coin} {source_cn}信号 ${event.price:,.0f}"
 
 
@@ -148,9 +163,14 @@ async def send_alert_email(
     config: "EmailNotificationConfig",
 ) -> bool:
     """异步发送信号通知邮件。在线程池中执行 SMTP 操作，不阻塞事件循环。"""
+    global _warned_missing_config
     if not config.to or not config.smtp_user:
-        logger.warning("Email notification skipped: no recipients or smtp_user configured")
+        if not _warned_missing_config:
+            logger.warning("Email notification skipped: no recipients or smtp_user configured (suppressing further warnings)")
+            _warned_missing_config = True
         return False
+    # 配置已恢复，重置抑制标志，确保未来再次丢失时能提醒
+    _warned_missing_config = False
 
     subject = _build_subject(event)
     html = _build_html(event)
