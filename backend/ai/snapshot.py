@@ -14,6 +14,7 @@ from models.key_level import KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
 from models.liquidation import HeatmapData, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
+from models.market_structure import MarketStructure
 from models.snapshot import AISnapshot
 
 
@@ -112,6 +113,7 @@ def build_ai_snapshot(
     td_sequential_direction: str = "",
     liq_heatmap: Optional[HeatmapData] = None,
     poll_failures: dict[str, str] | None = None,
+    market_structure: Optional[MarketStructure] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -322,6 +324,7 @@ def build_ai_snapshot(
         liq_sweep_events=liq_sweep_events or [],
         range_signal=range_signal.model_dump() if range_signal else None,
         key_levels=key_level_snapshot_v2.model_dump() if key_level_snapshot_v2 else None,
+        market_structure=market_structure.model_dump() if market_structure else None,
         liq_clusters_above_30d=clusters_above_30d,
         liq_clusters_below_30d=clusters_below_30d,
         liq_imbalance_ratio_30d=imbalance_30d,

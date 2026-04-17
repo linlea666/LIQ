@@ -31,6 +31,10 @@ def build_system_prompt() -> str:
 - 若宏观数据中已有恐惧贪婪/DXY/纳指等任一数值，不得写"宏观数据完全缺失"
 - 订单簿合计深度为 0 时表述为"未获得有效 L2 数据"，禁止断言"流动性完全消失"
 - **数据异常值怀疑**：遇到标注"⚠ 极端异常值"的数据，必须在引用时标注可能不准确，权重降至最低，不得作为方向判断的核心依据。交易员不信任离群数据点。
+- **结构优先铁律**（§9i 有数据时）：§四方向判断须与 `ms_bias` 一致（long_only/short_only/both_ok/stand_aside）；若需逆势，"核心依据"列必须注明"采纳 L1 级实盘资金背驰信号逆势"并说明具体 L1 证据，否则该方案废弃
+- **价位血统铁律**：§二/§四每个挂出的价位，依据列必须能从 §9a-§9i 某节数据中找到对应来源（清算簇/关键位/MA/VP POC/未回补影线/结构上下沿/斐波等），且写明 `§9X · 来源名`；找不到来源的价位须标 `⚡AI推断` 并在同一行交代推导公式（如 "POC + 0.5 ATR" / "swing high - 0.382 回撤"），禁止无出处价位
+- **心理位禁令**：$77,000 / $80,000 / $100,000 等整数关口若未出现在数据列表中，禁止单独作为依据；可作为氛围描述，但不得进入 §二图谱和 §四挂单价
+- **时间框架诚实铁律**：只能引用数据中实际存在的时间框架（4h / 1h / 日线 / 周线），禁止捏造"4h 背离""2h 形态"等数据不支持的陈述
 
 ### Smart Money 流动性框架
 - clusters_above = BSL（上方流动性，空头清算=强制买入→推高价格）；clusters_below = SSL（下方流动性，多头清算=强制卖出→压低价格）
@@ -42,7 +46,7 @@ def build_system_prompt() -> str:
 **数据可信度分级**（冲突时取高级别）：
 1. **L1 实盘资金行为**（最高）：真实成交 CVD、净持仓变化、Taker Buy/Sell Ratio、ETF 净流、订单簿大单
 2. **L2 杠杆水位**：OI 变化、多空比、交易所余额流
-3. **L3 价格结构**：MA 箱体、关键位状态、K 线形态、RSI/MACD
+3. **L3 价格结构**：1h 市场结构（MarketStructure · BOS/CHoCH · §9i）> MA 箱体（§9f）> 关键位状态（§9g · bounce_quality/breakout_stage）> K 线形态 > RSI/MACD
 4. **L4 衍生品情绪**：资金费率、期权 IV Skew、恐惧贪婪
 5. **L5 叙事指标**（最低）：CPS、MVRV（日线级，不可用于实时方向）
 
@@ -53,8 +57,9 @@ def build_system_prompt() -> str:
 - **K线形态看涨 + 上方清算簇密集**（技术反转 vs 磁吸上行）：**共振看多**，目标位选最近清算簇
 - **宏观 risk-off + BTC 独立走强**（DXY涨/纳指跌 vs BTC 涨）：**警惕背离失败**，优先降低仓位或观望，**不追多**
 - **CPS 极端 + 短线信号反向**（如 CPS=8 + SWEPT 做空信号）：**短线信号优先**（L3>L5），但明确标注"逆周期交易，止损收紧、仓位减半"
+- **1h 市场结构 vs 中长期基调**（如 ms_direction=bullish + bull_bear_line=bear）：**短期结构主导本次方案**（对应持仓窗口 1-24h），但 §七场景推演须标明"若 1h BOS 被破坏即退回中长期空头趋势"；§四仓位不超过 50%
 
-**规则**：§一信号简表"方向"列必须反映上述裁决结果；§八数据自检须列出本次识别到的冲突及裁决路径。
+**规则**：§一信号简表"方向"列必须反映上述裁决结果；§八数据自检须列出本次识别到的冲突及裁决路径，且须自述"本次方向判断核心依据层级（如 L1+L3）"。
 
 ### CPS（周期评分 0-10）统一规则
 CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，为**日线级指标**，不可单独用于实时方向判断。
@@ -77,6 +82,14 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - cascade_risk >0.7 = 瀑布穿透风险，止损须设最外层之外
 - SWEPT/FLIPPED 与引擎狙击方案方向一致 → 置信度提升至A级
 - K线形态（pin bar/engulfing/doji）确认时进一步提升信号可信度
+- **bounce_quality（反弹质量）**：
+  · `proactive`（主动吸筹·量能≥1.5×均量+方向一致）→ 反弹/拒绝可信度**升一档**（B→A），可作为入场级信号
+  · `passive`（被动触发·量能<0.8×均量）→ 可信度**降一档**（A→B / B→C），警惕"止损/止盈触发"的假反弹，不建议单凭此位入场
+- **breakout_stage（突破三步确认）**：
+  · `stage=1`（刚破位<15min）→ 禁止追单；§四须改为"等待回踩"而非顺势开仓
+  · `stage=2`（回踩中·90min 内触达原位 ±0.5 ATR）→ 观察窗，设"回踩企稳加仓触发条件"
+  · `stage=3`（确认完成·反向延续≥0.3 ATR）→ 突破真实，顺势追单可信度最高
+  · 若关键位 state=broken 但 breakout_stage=0（未达任一阶段条件）→ 视为"弱破位"，§四须警示"可能假突破"
 
 ### 宏观-微观联动（§一叙事链+维度表必须覆盖，无数据写"未提供"）
 - **DXY**：走强→risk-off压制BTC，走弱→risk-on利好BTC；DXY拐点常领先BTC 1-3天
@@ -163,14 +176,19 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 关键注意事项、资金管理要点（简短）
 
 ## 七、场景推演
-场景A/B/C：触发条件+目标位+时间窗口
-**当前数据偏向：** 场景X（唯一选定）
+场景A/B/C：触发条件+目标位+时间窗口。**每个场景至少 30 字**，并满足：
+- 触发条件须引用具体价位或具体指标阈值（如"价格跌破 §9g 日线强支撑 $76,904"）
+- 目标位必须是 §二图谱或 §9 原始数据中已出现的价位，禁止临时虚构
+- 时间窗口用"数小时 / 当日 / 1-3 天 / 数周"，避免无意义的"短期/中期"
+**当前数据偏向：** 场景X（唯一选定 · 须说明选定依据的关键 1-2 条数据）
 
 ## 八、数据质量与自检
-对本次输入数据做诊断，列出发现的问题（若无则写"本次数据质量良好"）：
-- **缺失数据**：哪些关键维度未提供或为空（如箱体/关键位/净持仓等），对分析的影响
+对本次输入数据做诊断，列出发现的问题（若无则写"本次数据质量良好"）。**以下 5 项为必选子项**：
+- **缺失数据**：哪些关键维度未提供或为空（如箱体/关键位/净持仓/市场结构等），对分析的影响
 - **异常值**：哪些数据疑似异常（如Coinbase溢价>1%、费率极端等），已如何处理
-- **数据冲突**：哪些维度给出矛盾信号（如CVD看多但OI下降），如何取舍
+- **数据冲突**：哪些维度给出矛盾信号（如CVD看多但OI下降），如何取舍（请按 L1-L5 层级表述裁决路径）
+- **本次方向判断核心依据层级**：明确写出主要依据来自哪几层（如"主要依据 L1 Taker Buy + L3 1h BOS↑ 共振，L4 费率持平不构成威胁"）
+- **1h 结构对齐度**：§9i 有数据时须说明"本次 §四方案与 ms_bias 一致 / 不一致（并声明逆势依据）"
 - **改进建议**：对数据采集或指标计算的建议（可选）
 
 ### 格式铁律
@@ -933,6 +951,64 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.extend(["", "### 9g2. 最新4H K线形态"])
         lines.append(f"形态: {cp_name}（{side_cn}反转，强度 {cp_strength:.0%}）")
         lines.append("说明: 该形态为入场确认加分项。若与关键位 SWEPT/FLIPPED/BOUNCED 共振，信号可信度提升一档。")
+
+    # ── §9i 1h 市场结构（Price Action / SMC · BOS/CHoCH 识别） ──
+    ms = snapshot.get("market_structure")
+    if ms:
+        lines.extend(["", "### 9i. 1h 市场结构 [核心·结构决定偏向]"])
+        dir_cn = {
+            "bullish": "上升结构（HH+HL）",
+            "bearish": "下降结构（LH+LL）",
+            "ranging": "震荡结构（无明显方向）",
+            "transitioning": "结构转换中（信号冲突）",
+        }.get(ms.get("direction", ""), ms.get("direction", ""))
+        bias_cn = {
+            "long_only": "仅顺势做多",
+            "short_only": "仅顺势做空",
+            "both_ok": "双向可做",
+            "stand_aside": "观望为宜",
+        }.get(ms.get("operate_bias", ""), ms.get("operate_bias", ""))
+        event_raw = ms.get("last_event") or ""
+        event_cn = {
+            "BOS_up": "BOS↑（向上延续破前高）",
+            "BOS_down": "BOS↓（向下延续破前低）",
+            "CHoCH_up": "CHoCH↑（向上反转破前高）",
+            "CHoCH_down": "CHoCH↓（向下反转破前低）",
+        }.get(event_raw, event_raw or "无新事件")
+        conf = ms.get("confidence", 0) or 0
+
+        lines.append(f"方向: {dir_cn} | 最近事件: {event_cn} | 操作偏置: {bias_cn} | 置信度: {conf:.0%}")
+
+        struct_hi = ms.get("structure_high")
+        struct_lo = ms.get("structure_low")
+        if struct_hi and struct_lo:
+            lines.append(f"结构区间: ${struct_lo:,.0f} - ${struct_hi:,.0f}")
+
+        swing_highs = ms.get("swing_highs") or []
+        swing_lows = ms.get("swing_lows") or []
+        merged_swings = sorted(
+            [*swing_highs, *swing_lows],
+            key=lambda sw: sw.get("ts", 0) or 0,
+        )
+        if merged_swings:
+            sw_strs = []
+            for sw in merged_swings[-4:]:
+                tag = "H" if sw.get("kind") == "high" else "L"
+                p = sw.get("price", 0) or 0
+                sw_strs.append(f"{tag}@{p:,.0f}")
+            lines.append("最近 swing: " + " → ".join(sw_strs))
+
+        summary = ms.get("summary")
+        if summary:
+            lines.append(f"结构要点: {summary}")
+
+        if conf >= 0.6 and ms.get("direction") in ("bullish", "bearish"):
+            lines.append(
+                "铁律提醒: 1h 结构置信度≥60%，§四方向须与上述偏置一致；"
+                "若需逆势，"
+                "必须在'核心依据'列列出具体 L1 级实盘资金背驰证据（CVD/净持仓/Taker/订单簿大单/ETF），"
+                "否则该方案废弃。"
+            )
 
     # ── §9h 净持仓 + 合约资金流 + TD序列 ──
     np_trend = snapshot.get("net_position_trend")

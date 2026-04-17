@@ -84,6 +84,39 @@ def _build_html(event: "AlertEvent") -> str:
             </td>
         </tr>"""
 
+    # Commit 6: 1h 市场结构 + 对齐度条（与前端顶部徽章等效）
+    structure_bar = ""
+    ms_dir = (event.ms_direction or "").lower()
+    ms_align = (event.ms_alignment or "").lower()
+    if ms_dir:
+        dir_map = {
+            "bullish": ("🟢 上升结构", "#16a34a", "#f0fdf4"),
+            "bearish": ("🔴 下降结构", "#dc2626", "#fef2f2"),
+            "ranging": ("⚪ 震荡结构", "#6b7280", "#f3f4f6"),
+            "transitioning": ("🟡 结构转换中", "#ca8a04", "#fefce8"),
+        }
+        label, chip_fg, chip_bg = dir_map.get(ms_dir, ("", "#6b7280", "#f3f4f6"))
+        if label:
+            align_chip = ""
+            if ms_align == "aligned":
+                align_chip = (
+                    '<span style="display:inline-block;margin-left:8px;padding:2px 10px;'
+                    'border-radius:10px;background:#dcfce7;color:#15803d;'
+                    'font-size:11px;font-weight:600;">✓ 顺势</span>'
+                )
+            elif ms_align == "conflict":
+                align_chip = (
+                    '<span style="display:inline-block;margin-left:8px;padding:2px 10px;'
+                    'border-radius:10px;background:#fef3c7;color:#92400e;'
+                    'font-size:11px;font-weight:600;">⚠ 逆势</span>'
+                )
+            structure_bar = f"""
+    <tr><td style="background:#ffffff;padding:10px 24px;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;font-size:11px;">1h 结构</span>
+        <span style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:10px;background:{chip_bg};color:{chip_fg};font-size:11px;font-weight:600;">{label}</span>
+        {align_chip}
+    </td></tr>"""
+
     ts_str = datetime.fromtimestamp(event.ts, tz=_BJ_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     return f"""<!DOCTYPE html>
@@ -104,7 +137,7 @@ def _build_html(event: "AlertEvent") -> str:
         <span style="color:#6b7280;font-size:12px;">当前价</span>
         <span style="float:right;font-size:18px;font-weight:700;color:#111827;">{price_str}</span>
     </td></tr>
-
+    {structure_bar}
     <!-- 交易参数 -->
     <tr><td style="padding:0;">
     <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -155,7 +188,23 @@ def _build_subject(event: "AlertEvent") -> str:
         source_cn = "日内⚡" if event.is_scalp else "关键位"
     else:
         source_cn = "箱体"
-    return f"[{event.signal_tier}级{dir_cn}] {event.coin} {source_cn}信号 ${event.price:,.0f}"
+
+    # Commit 6: 结构对齐度写进标题，让交易员一眼看出"顺势/逆势"
+    #   aligned  → ✓顺势（1h 结构方向一致）
+    #   conflict → ⚠逆势（与 1h 结构冲突，须额外警惕）
+    #   neutral/unknown/"" → 不加标签（结构不明时不打扰）
+    align = (event.ms_alignment or "").lower()
+    if align == "aligned":
+        align_tag = " ✓顺势"
+    elif align == "conflict":
+        align_tag = " ⚠逆势"
+    else:
+        align_tag = ""
+
+    return (
+        f"[{event.signal_tier}级{dir_cn}{align_tag}] "
+        f"{event.coin} {source_cn}信号 ${event.price:,.0f}"
+    )
 
 
 async def send_alert_email(

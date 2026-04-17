@@ -43,6 +43,10 @@ class AlertEvent:
     cascade_risk: float = 0
     warnings: list[str] = field(default_factory=list)
     ts: float = field(default_factory=time.time)
+    # 1h 市场结构上下文（Commit 6 · 邮件 metadata）
+    # 从 RangeSignalData.ms_* 派生，用于邮件标题一眼看出"顺势/逆势"判断
+    ms_direction: str = ""     # "bullish" / "bearish" / "ranging" / "transitioning"
+    ms_alignment: str = ""     # "aligned" / "conflict" / "neutral" / "unknown"
 
     @property
     def is_scalp(self) -> bool:
@@ -120,6 +124,10 @@ def scan_alerts(
     allowed_tiers = {"S"} if min_tier == "S" else {"S", "A"}
     events: list[AlertEvent] = []
 
+    # 所有事件共享同一个 1h 市场结构上下文（来自 RangeSignalData）
+    ms_direction = range_signal.ms_direction if range_signal else ""
+    ms_alignment = range_signal.ms_alignment if range_signal else ""
+
     if include_key_levels and kl_snapshot and kl_snapshot.signals:
         for sig in kl_snapshot.signals:
             if sig.action not in ACTIONABLE_ACTIONS:
@@ -147,6 +155,14 @@ def scan_alerts(
                 continue
 
             direction = "long" if "long" in sig.action else "short"
+            # key_level 信号的结构对齐度独立计算：以 direction 对比 ms_direction
+            if ms_direction == "bullish":
+                kl_alignment = "aligned" if direction == "long" else "conflict"
+            elif ms_direction == "bearish":
+                kl_alignment = "aligned" if direction == "short" else "conflict"
+            else:
+                kl_alignment = "neutral" if ms_direction else ""
+
             events.append(AlertEvent(
                 coin=coin,
                 source="key_level",
@@ -163,6 +179,8 @@ def scan_alerts(
                 level_state=sig.state,
                 cascade_risk=cascade,
                 warnings=sig.warnings,
+                ms_direction=ms_direction or "",
+                ms_alignment=kl_alignment,
             ))
 
     if include_range and range_signal and range_signal.signal_grade:
@@ -179,6 +197,8 @@ def scan_alerts(
                 tp1=range_signal.signal_tp1,
                 rr_ratio=range_signal.signal_rr_ratio,
                 reason=range_signal.signal_reason,
+                ms_direction=ms_direction or "",
+                ms_alignment=ms_alignment or "",
             ))
 
     return events

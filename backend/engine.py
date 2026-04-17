@@ -1546,6 +1546,7 @@ class Engine:
             td_sequential_count=state.td_sequential_count,
             td_sequential_direction=state.td_sequential_direction,
             poll_failures=dict(state.poll_failures),
+            market_structure=state.market_structure,
         )
 
         result = await self._analyzer.analyze(snapshot)

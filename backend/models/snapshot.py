@@ -195,6 +195,10 @@ class AISnapshot(BaseModel):
     # Phase 10: 关键位状态机 (Key Level State Machine)
     key_levels: Optional[dict] = None
 
+    # Phase 11: 1h 市场结构（Price Action / SMC · BOS/CHoCH 识别）
+    # 顶层独立注入，让 AI 能在 §一/§四 阶段优先对齐结构方向，避免逆势误判
+    market_structure: Optional[dict] = None
+
     # 清算热力图摘要（价格-时间维度密度峰值）
     liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
 
