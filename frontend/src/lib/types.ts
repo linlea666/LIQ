@@ -343,6 +343,13 @@ export interface KeyLevelV2 {
   first_seen_ts: number;
   last_confirmed_ts: number;
   note: string;
+  pattern_detected?: string;
+  pattern_strength?: number;
+  // Phase 2: 历史验证 + 屏障 + 最终打分
+  bounce_count?: number;
+  historical_validity?: number;
+  barrier_score?: number;
+  final_score?: number;
 }
 
 export interface BullBearLine {

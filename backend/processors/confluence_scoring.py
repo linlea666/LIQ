@@ -80,20 +80,24 @@ def score_and_build_snapshot(
             continue
         scored_levels.append(level)
 
-    # 3. 合并已有追踪状态
+    # 3. 合并已有追踪状态（bounce_count / test_count / sweep_usd 从 prev 继承）
     if prev_levels:
         scored_levels = _merge_with_prev(scored_levels, prev_levels, current_price, atr)
 
-    # 4. 分类标签
+    # 4. Phase 2：历史验证 + 屏障 + 时间衰减 → final_score → tier
+    #    必须放在合并状态之后，因为 historical_validity 依赖 bounce_count / test_count
     for lv in scored_levels:
-        lv.strength_tier = _calc_tier(lv.confluence_score)
+        lv.historical_validity = _calc_historical_validity(lv)
+        lv.barrier_score = _calc_barrier_score(lv, now)
+        lv.final_score = _calc_final_score(lv, now)
+        lv.strength_tier = _calc_tier(lv.final_score)
         lv.category = _classify(lv)
         _update_distance(lv, current_price)
 
-    # 5. 排序：非 idle 优先 → 强度高 → 距离近
+    # 5. 排序：非 idle 优先 → final_score 高 → 距离近
     scored_levels.sort(key=lambda lv: (
         0 if lv.state != "idle" else 1,
-        -lv.confluence_score,
+        -lv.final_score,
         abs(lv.distance_pct),
     ))
 
@@ -239,6 +243,81 @@ def _calc_tier(score: float) -> str:
     return "C"
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Phase 2：历史验证 + 结构屏障 + 时间衰减 → final_score
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _calc_historical_validity(lv: KeyLevelV2) -> float:
+    """0~1：基于 bounce_count / test_count / sweep_usd 组合得出历史有效性。
+
+    设计：
+      - 每次成功反弹 +0.3（最大 3 次累计 0.9）
+      - 被测试的"存在感" +0.08/次（封顶 5 次即 0.4）
+      - sweep_usd 达 $10M +0.2（证明被真实挂单阻击）
+      - 若当前状态为 broken —— 历史有效性打 50% 折扣（被破过，可信度下调）
+      - 若 flipped 状态 —— 再加 0.1（翻转位通常变为反向强位）
+    返回值 clamp 到 [0, 1]。
+    """
+    base = 0.0
+    base += min(lv.bounce_count, 3) * 0.30
+    base += min(lv.test_count, 5) * 0.08
+    if lv.sweep_usd > 0:
+        base += min(lv.sweep_usd / 1e7, 1.0) * 0.20
+
+    if lv.state == "broken":
+        base *= 0.5
+    elif lv.state == "flipped":
+        base += 0.10
+
+    return round(max(0.0, min(1.0, base)), 3)
+
+
+def _calc_barrier_score(lv: KeyLevelV2, now: int) -> float:
+    """0~20：结构屏障加分。
+
+    两部分：
+      A. 级联屏障 = cascade_layers * 2.5（封顶 12）：前方有多层清算簇，被扫取需更多资金
+      B. 存活时间  = min(age_days / 30, 1) * 8（封顶 8）：老关键位更被市场认可
+    """
+    barrier = min(lv.cascade_layers * 2.5, 12.0)
+
+    if lv.first_seen_ts > 0:
+        age_days = max(0, (now - lv.first_seen_ts) / 86400.0)
+        barrier += min(age_days / 30.0, 1.0) * 8.0
+
+    return round(barrier, 2)
+
+
+def _final_time_decay_multiplier(lv: KeyLevelV2, now: int) -> float:
+    """0.5~1.0：基于 last_confirmed_ts 的软衰减（不同于 _time_decay 作用于原始 cand）。"""
+    if lv.last_confirmed_ts <= 0:
+        return 1.0
+    age_hours = max(0.0, (now - lv.last_confirmed_ts) / 3600.0)
+    if age_hours <= 24:
+        return 1.0
+    if age_hours <= 72:
+        return 0.9
+    if age_hours <= 168:
+        return 0.75
+    return 0.5
+
+
+def _calc_final_score(lv: KeyLevelV2, now: int) -> float:
+    """final_score = clip( confluence × 时间衰减 × (1 + validity×0.3) + barrier, 0, 100 )
+
+    设计意图：
+      - 新增信号不"白得分"：仍以 confluence_score 为主干，barrier / validity 只是修饰
+      - 历史验证多次 → 最多 +30% 乘数加成
+      - barrier 在高冷门位（但清算层很多）可提升到 B 档，但不足以冲到 S
+      - broken 位通过 historical_validity 自动降权（已在 _calc_historical_validity 里）
+    """
+    time_mult = _final_time_decay_multiplier(lv, now)
+    validity_mult = 1.0 + lv.historical_validity * 0.3
+    core = lv.confluence_score * time_mult * validity_mult
+    total = core + lv.barrier_score
+    return round(max(0.0, min(100.0, total)), 1)
+
+
 def _classify(lv: KeyLevelV2) -> str:
     is_sma200 = any("200日SMA" in s or "sma_200" in s for s in lv.sources)
     is_bmsa = any("牛市支撑带" in s or "bmsa" in s for s in lv.sources)
@@ -303,6 +382,8 @@ def _merge_with_prev(
                 lv.cascade_layers = prev.cascade_layers
                 lv.cascade_total_usd = prev.cascade_total_usd
                 lv.first_seen_ts = prev.first_seen_ts
+                # Phase 2：bounce_count 从状态机累计，必须从 prev 继承
+                lv.bounce_count = prev.bounce_count
                 matched.add(i)
                 break
 

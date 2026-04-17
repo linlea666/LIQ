@@ -108,6 +108,12 @@ class KeyLevelV2(BaseModel):
     pattern_detected: str = ""     # "锤子线" / "射击之星" / "看涨吞没" / "看跌吞没" / "十字星" / ""
     pattern_strength: float = 0.0  # 0~1，形态强度（detect_reversal_pattern 输出）
 
+    # Phase 2：历史验证 + 结构屏障 + 最终打分（供"强位卡片"与 tier 评定使用）
+    bounce_count: int = 0               # 历史成功反弹/拒绝次数（状态机进入 bounced 累加）
+    historical_validity: float = 0.0    # 0~1，由 bounce_count / test_count / sweep_usd 组合得出
+    barrier_score: float = 0.0          # 0~20，结构屏障加分（多个清算簇前置、时间存活等）
+    final_score: float = 0.0            # 0~100，= confluence_score × 时间衰减 + 历史验证 + 屏障加分
+
 
 class BullBearLine(BaseModel):
     """多空分界线（独立展示区域）"""

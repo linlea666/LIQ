@@ -26,6 +26,8 @@ from processors.ta_core import (
 )
 from processors.confluence_scoring import (
     score_and_build_snapshot, _cluster_candidates, _calc_tier,
+    _calc_historical_validity, _calc_barrier_score, _calc_final_score,
+    _final_time_decay_multiplier,
 )
 from processors.level_discovery import (
     RawCandidate, DiscoveryResult, detect_oi_surge_zones,
@@ -644,3 +646,191 @@ class TestOISurgeZones:
     def test_empty_input(self):
         assert detect_oi_surge_zones([], None) == []
         assert detect_oi_surge_zones(None, []) == []
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Phase 2 — 历史验证 / 屏障 / final_score
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _mk_level(**kw) -> KeyLevelV2:
+    """构造测试用 KeyLevelV2（带合理默认）"""
+    base = dict(
+        price=100.0, side="support", confluence_score=50.0,
+        state="idle", state_ts=0, bounce_count=0, test_count=0,
+        sweep_usd=0.0, cascade_layers=0, first_seen_ts=0,
+        last_confirmed_ts=0,
+    )
+    base.update(kw)
+    return KeyLevelV2(**base)
+
+
+class TestHistoricalValidity:
+    def test_zero_when_no_history(self):
+        lv = _mk_level()
+        assert _calc_historical_validity(lv) == 0.0
+
+    def test_bounce_weight(self):
+        lv = _mk_level(bounce_count=2)
+        # 2 次反弹 → 0.6
+        assert _calc_historical_validity(lv) == pytest.approx(0.6, abs=1e-3)
+
+    def test_bounce_capped_at_3(self):
+        lv = _mk_level(bounce_count=10)
+        # 封顶 3 次 → 0.9
+        assert _calc_historical_validity(lv) == pytest.approx(0.9, abs=1e-3)
+
+    def test_test_count_contribution(self):
+        lv = _mk_level(test_count=3)
+        assert _calc_historical_validity(lv) == pytest.approx(0.24, abs=1e-3)
+
+    def test_sweep_usd_contribution(self):
+        lv = _mk_level(sweep_usd=5e6)
+        # 5e6 / 1e7 = 0.5 → 0.5 * 0.2 = 0.1
+        assert _calc_historical_validity(lv) == pytest.approx(0.1, abs=1e-3)
+
+    def test_combined_capped_at_one(self):
+        lv = _mk_level(bounce_count=5, test_count=10, sweep_usd=1e9)
+        # 超大输入 clamp 到 1
+        assert _calc_historical_validity(lv) == 1.0
+
+    def test_broken_halves_validity(self):
+        lv_ok = _mk_level(bounce_count=2, state="bounced")
+        lv_broken = _mk_level(bounce_count=2, state="broken")
+        assert _calc_historical_validity(lv_broken) == pytest.approx(
+            _calc_historical_validity(lv_ok) * 0.5, abs=1e-3
+        )
+
+    def test_flipped_adds_bonus(self):
+        lv_flip = _mk_level(bounce_count=1, state="flipped")
+        lv_normal = _mk_level(bounce_count=1, state="testing")
+        assert _calc_historical_validity(lv_flip) > _calc_historical_validity(lv_normal)
+
+
+class TestBarrierScore:
+    def test_zero_with_no_layers_no_age(self):
+        lv = _mk_level()
+        assert _calc_barrier_score(lv, now=1000) == 0.0
+
+    def test_cascade_layers_contribution(self):
+        lv = _mk_level(cascade_layers=3)
+        # 3 * 2.5 = 7.5
+        assert _calc_barrier_score(lv, now=1000) == pytest.approx(7.5, abs=1e-3)
+
+    def test_cascade_layers_capped(self):
+        lv = _mk_level(cascade_layers=100)
+        # 封顶 12
+        s = _calc_barrier_score(lv, now=1000)
+        # 无 age → 仅级联 12
+        assert s == pytest.approx(12.0, abs=1e-3)
+
+    def test_age_bonus_full(self):
+        now = int(time.time())
+        lv = _mk_level(first_seen_ts=now - 30 * 86400)  # 30 天前
+        # 30 天 age → 全额 8
+        s = _calc_barrier_score(lv, now=now)
+        assert s == pytest.approx(8.0, abs=0.1)
+
+    def test_age_bonus_partial(self):
+        now = int(time.time())
+        lv = _mk_level(first_seen_ts=now - 15 * 86400)
+        # 15 天 → 半额 4
+        s = _calc_barrier_score(lv, now=now)
+        assert s == pytest.approx(4.0, abs=0.1)
+
+    def test_first_seen_zero_no_age(self):
+        # first_seen_ts=0 表示无记录，不累加 age
+        lv = _mk_level(first_seen_ts=0, cascade_layers=2)
+        s = _calc_barrier_score(lv, now=int(time.time()))
+        # 仅级联 2*2.5=5
+        assert s == pytest.approx(5.0, abs=0.1)
+
+    def test_combined_capped(self):
+        now = int(time.time())
+        lv = _mk_level(cascade_layers=100, first_seen_ts=now - 60 * 86400)
+        s = _calc_barrier_score(lv, now=now)
+        # 100 layers 封 12 + 60 天 age 封 8 → 20 封顶
+        assert s == pytest.approx(20.0, abs=0.5)
+
+
+class TestFinalScore:
+    def test_fresh_level_equals_confluence_plus_barrier(self):
+        now = int(time.time())
+        lv = _mk_level(
+            confluence_score=60.0, last_confirmed_ts=now,
+            historical_validity=0.0, barrier_score=5.0,
+        )
+        # 无衰减，无历史加成 → 60 * 1 * 1 + 5 = 65
+        assert _calc_final_score(lv, now) == pytest.approx(65.0, abs=0.1)
+
+    def test_validity_multiplier(self):
+        now = int(time.time())
+        lv = _mk_level(
+            confluence_score=50.0, last_confirmed_ts=now,
+            historical_validity=1.0, barrier_score=0.0,
+        )
+        # 50 * 1 * 1.3 = 65
+        assert _calc_final_score(lv, now) == pytest.approx(65.0, abs=0.1)
+
+    def test_time_decay_applied(self):
+        now = int(time.time())
+        old_ts = now - 200 * 3600  # 200h → 0.5 衰减
+        lv = _mk_level(
+            confluence_score=50.0, last_confirmed_ts=old_ts,
+            historical_validity=0.0, barrier_score=0.0,
+        )
+        assert _calc_final_score(lv, now) == pytest.approx(25.0, abs=0.5)
+
+    def test_clamp_100(self):
+        now = int(time.time())
+        lv = _mk_level(
+            confluence_score=99.0, last_confirmed_ts=now,
+            historical_validity=1.0, barrier_score=20.0,
+        )
+        # 99 * 1.3 + 20 = 148.7 → clamp 100
+        assert _calc_final_score(lv, now) == 100.0
+
+
+class TestTimeDecayMultiplier:
+    def test_fresh(self):
+        now = int(time.time())
+        lv = _mk_level(last_confirmed_ts=now)
+        assert _final_time_decay_multiplier(lv, now) == 1.0
+
+    def test_tiers(self):
+        now = int(time.time())
+        lv_48h = _mk_level(last_confirmed_ts=now - 48 * 3600)
+        lv_5d = _mk_level(last_confirmed_ts=now - 120 * 3600)
+        lv_month = _mk_level(last_confirmed_ts=now - 720 * 3600)
+        assert _final_time_decay_multiplier(lv_48h, now) == 0.9
+        assert _final_time_decay_multiplier(lv_5d, now) == 0.75
+        assert _final_time_decay_multiplier(lv_month, now) == 0.5
+
+    def test_zero_ts_no_decay(self):
+        # 新创建 level last_confirmed_ts=0 不应该因此被判为超老
+        lv = _mk_level(last_confirmed_ts=0)
+        assert _final_time_decay_multiplier(lv, now=int(time.time())) == 1.0
+
+
+class TestBounceCountIncrement:
+    """_set_state: testing → bounced 才累加 bounce_count"""
+
+    def test_testing_to_bounced_increments(self):
+        from processors.key_level_tracker_v2 import _set_state
+        lv = _mk_level(state="testing", bounce_count=0)
+        _set_state(lv, "bounced", now=1000)
+        assert lv.bounce_count == 1
+        assert lv.state == "bounced"
+
+    def test_bounced_to_bounced_no_increment(self):
+        from processors.key_level_tracker_v2 import _set_state
+        lv = _mk_level(state="bounced", bounce_count=5)
+        _set_state(lv, "bounced", now=1000)
+        # 同状态重入不应计新事件
+        assert lv.bounce_count == 5
+
+    def test_idle_to_approaching_no_change(self):
+        from processors.key_level_tracker_v2 import _set_state
+        lv = _mk_level(state="idle", bounce_count=0)
+        _set_state(lv, "approaching", now=1000)
+        assert lv.bounce_count == 0

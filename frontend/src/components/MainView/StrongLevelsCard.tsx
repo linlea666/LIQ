@@ -56,6 +56,12 @@ function scoreToStars(score: number): number {
   return Math.max(1, Math.min(5, raw));
 }
 
+/** 拿真正用于排序/展示的分：优先 final_score，其次 confluence_score（Phase 2 前兼容） */
+function displayScore(lv: KeyLevelV2): number {
+  if (typeof lv.final_score === "number" && lv.final_score > 0) return lv.final_score;
+  return lv.confluence_score;
+}
+
 function relativeTime(ts: number): string {
   if (!ts || ts <= 0) return "";
   const diffSec = Math.floor(Date.now() / 1000 - ts);
@@ -66,8 +72,12 @@ function relativeTime(ts: number): string {
 }
 
 function historyBrief(lv: KeyLevelV2): string {
-  // 优先用 test_count + sweep_usd 组合描述
+  // 优先用 Phase 2 字段 bounce_count / historical_validity
   const parts: string[] = [];
+  const bounce = lv.bounce_count ?? 0;
+  if (bounce > 0) {
+    parts.push(`成功反弹 ${bounce} 次`);
+  }
   if (lv.test_count > 0) {
     parts.push(`被测试 ${lv.test_count} 次`);
   }
@@ -75,8 +85,12 @@ function historyBrief(lv: KeyLevelV2): string {
     const usdM = lv.sweep_usd / 1e6;
     parts.push(`有过 $${usdM.toFixed(usdM >= 10 ? 0 : 1)}M 资金撞击`);
   }
+  const hv = lv.historical_validity ?? 0;
+  if (parts.length === 0 && hv === 0) return "暂未被价格触碰（干净位）";
   if (parts.length === 0) return "暂未被价格触碰（干净位）";
-  return parts.join(" · ");
+  const hvLabel =
+    hv >= 0.6 ? "（验证充分）" : hv >= 0.3 ? "（部分验证）" : "";
+  return parts.join(" · ") + hvLabel;
 }
 
 const MEDAL = ["🥇", "🥈", "🥉"];
@@ -177,12 +191,13 @@ function LevelBlock({
   sideColor: string;
   barColor: string;
 }) {
-  const stars = scoreToStars(level.confluence_score);
+  const score = displayScore(level);
+  const stars = scoreToStars(score);
   const briefs = useMemo(() => summarizeSources(level.sources, 3), [level.sources]);
   const stateInfo = level.state !== "idle" ? STATE_TEXT[level.state] : null;
   const relTime = relativeTime(level.state_ts);
   const distPct = level.distance_pct;
-  const barWidth = Math.min(100, level.confluence_score);
+  const barWidth = Math.min(100, score);
 
   return (
     <div className="px-4 py-3">
@@ -204,7 +219,11 @@ function LevelBlock({
         <div className="flex-1" />
         <span
           className="text-xs tracking-tighter shrink-0"
-          title={`共振分 ${level.confluence_score.toFixed(0)}/100 · 等级 ${level.strength_tier}`}
+          title={
+            typeof level.final_score === "number" && level.final_score > 0
+              ? `最终评分 ${score.toFixed(0)}/100（共振 ${level.confluence_score.toFixed(0)} × 时间 + 历史 + 屏障 ${level.barrier_score?.toFixed(1) ?? 0}）· 等级 ${level.strength_tier}`
+              : `共振分 ${score.toFixed(0)}/100 · 等级 ${level.strength_tier}`
+          }
         >
           {"★".repeat(stars)}
           <span className="text-slate-700">{"★".repeat(5 - stars)}</span>

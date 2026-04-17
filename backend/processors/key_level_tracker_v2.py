@@ -237,6 +237,9 @@ def _transition(
 
 
 def _set_state(lv: KeyLevelV2, new_state: str, now: int):
+    # Phase 2：一次"新反弹事件"才累加 bounce_count（testing→bounced 而非 bounced→bounced）
+    if new_state == "bounced" and lv.state != "bounced":
+        lv.bounce_count += 1
     lv.prev_state = lv.state
     lv.state = new_state
     lv.state_ts = now
