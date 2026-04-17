@@ -21,7 +21,10 @@ from models.market import CandleData
 from models.market_structure import MarketStructure
 from processors.market_structure import (
     detect_market_structure,
+    _apply_bos_authority_override,
     _classify_direction,
+    _count_consecutive_highs_up,
+    _count_consecutive_lows_down,
     _detect_event,
     _filter_close_swings,
     _calc_bias,
@@ -311,6 +314,137 @@ class TestSummary:
         res = detect_market_structure(candles, min_candles=30)
         assert res is not None
         assert "$" in res.summary
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BOS 权威提权（Hotfix：Sweep 针尖污染化解）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestBosAuthorityOverride:
+    """模拟真实 BTC 场景：
+    highs: 76350 > 75500 > 75425 (连续 HH)
+    lows:  73257 < 74400 (LL，因 sweep)
+    raw direction = transitioning
+    BOS_up 新鲜 → 应提权为 bullish
+    """
+
+    def _make_highs(self):
+        return [
+            SwingPoint(index=100, price=76350, kind="high", ts=1000),
+            SwingPoint(index=80, price=75500, kind="high", ts=900),
+            SwingPoint(index=60, price=75425, kind="high", ts=800),
+        ]
+
+    def _make_lows(self):
+        return [
+            SwingPoint(index=90, price=73257, kind="low", ts=950),  # sweep 尖针
+            SwingPoint(index=70, price=74400, kind="low", ts=850),
+        ]
+
+    def test_bos_up_overrides_transitioning(self):
+        highs = self._make_highs()
+        lows = self._make_lows()
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "BOS_up", 2000, highs, lows, now_ts=2100,
+        )
+        assert new_dir == "bullish"
+
+    def test_bos_down_overrides_transitioning(self):
+        highs = [
+            SwingPoint(index=70, price=72000, kind="high", ts=850),
+            SwingPoint(index=90, price=73000, kind="high", ts=950),  # sweep up 毛刺
+        ]
+        lows = [
+            SwingPoint(index=100, price=70500, kind="low", ts=1000),
+            SwingPoint(index=80, price=71000, kind="low", ts=900),
+            SwingPoint(index=60, price=71500, kind="low", ts=800),
+        ]
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "BOS_down", 2000, highs, lows, now_ts=2100,
+        )
+        assert new_dir == "bearish"
+
+    def test_old_bos_does_not_override(self):
+        """BOS 事件 > 6h → 不提权（陈旧信号）。"""
+        highs = self._make_highs()
+        lows = self._make_lows()
+        # 事件在 7 小时前
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "BOS_up", 2000, highs, lows,
+            now_ts=2000 + 7 * 3600,
+        )
+        assert new_dir == "transitioning"
+
+    def test_insufficient_hh_no_override(self):
+        """highs 只有 1 个 HH → 不提权（主导方向不成立）。"""
+        highs = [
+            SwingPoint(index=100, price=76350, kind="high", ts=1000),
+            SwingPoint(index=80, price=75500, kind="high", ts=900),
+            SwingPoint(index=60, price=76000, kind="high", ts=800),  # 中间有反向
+        ]
+        lows = []
+        # 连续 HH 只能数到 1（75500 -> 76000 是下降）
+        assert _count_consecutive_highs_up(highs) == 1
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "BOS_up", 2000, highs, lows, now_ts=2100,
+        )
+        assert new_dir == "transitioning"
+
+    def test_non_transitioning_untouched(self):
+        """raw direction 已是 bullish/bearish/ranging → 原样返回。"""
+        highs = self._make_highs()
+        lows = self._make_lows()
+        for d in ("bullish", "bearish", "ranging"):
+            assert _apply_bos_authority_override(
+                d, "BOS_up", 2000, highs, lows, now_ts=2100,
+            ) == d
+
+    def test_no_event_no_override(self):
+        highs = self._make_highs()
+        lows = self._make_lows()
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "", 0, highs, lows, now_ts=2100,
+        )
+        assert new_dir == "transitioning"
+
+    def test_choch_event_not_override(self):
+        """只 BOS 才触发提权，CHoCH 不触发（方向反转信号不应提升为延续方向）。"""
+        highs = self._make_highs()
+        lows = self._make_lows()
+        new_dir = _apply_bos_authority_override(
+            "transitioning", "CHoCH_up", 2000, highs, lows, now_ts=2100,
+        )
+        assert new_dir == "transitioning"
+
+
+class TestCountConsecutive:
+    def test_count_hh(self):
+        highs = [
+            SwingPoint(index=30, price=105, kind="high"),
+            SwingPoint(index=20, price=103, kind="high"),
+            SwingPoint(index=10, price=100, kind="high"),
+        ]
+        assert _count_consecutive_highs_up(highs) == 2
+
+    def test_count_hh_breaks_on_reversal(self):
+        highs = [
+            SwingPoint(index=30, price=105, kind="high"),
+            SwingPoint(index=20, price=107, kind="high"),  # 反转
+            SwingPoint(index=10, price=100, kind="high"),
+        ]
+        assert _count_consecutive_highs_up(highs) == 0
+
+    def test_count_ll(self):
+        lows = [
+            SwingPoint(index=30, price=95, kind="low"),
+            SwingPoint(index=20, price=97, kind="low"),
+            SwingPoint(index=10, price=100, kind="low"),
+        ]
+        assert _count_consecutive_lows_down(lows) == 2
+
+    def test_count_empty(self):
+        assert _count_consecutive_highs_up([]) == 0
+        assert _count_consecutive_lows_down([]) == 0
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

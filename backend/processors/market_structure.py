@@ -36,6 +36,9 @@ DEFAULT_MIN_CANDLES = 50
 DEFAULT_MIN_GAP_PCT = 0.5   # 摆动点最小间距 0.5%（过滤毛刺）
 DEFAULT_ATR_GAP_FACTOR = 0.8  # 或 0.8 × ATR 取较大
 
+# BOS 权威提权窗口（见 _apply_bos_authority_override）
+BOS_OVERRIDE_MAX_AGE_HOURS = 6
+
 
 def detect_market_structure(
     candles: list[CandleData],
@@ -98,10 +101,15 @@ def detect_market_structure(
         reverse=True,
     )
 
-    direction = _classify_direction(highs_pts, lows_pts)
+    raw_direction = _classify_direction(highs_pts, lows_pts)
 
     event, event_ts, event_price = _detect_event(
-        price, highs_pts, lows_pts, direction, ts_list[-1],
+        price, highs_pts, lows_pts, raw_direction, ts_list[-1],
+    )
+
+    # BOS 权威提权：化解 sweep 针尖污染导致的伪 transitioning
+    direction = _apply_bos_authority_override(
+        raw_direction, event, event_ts, highs_pts, lows_pts, now_ts,
     )
 
     struct_high = highs_pts[0].price if highs_pts else 0.0
@@ -254,6 +262,64 @@ def _calc_confidence(
             conf += 0.2
 
     return min(1.0, conf)
+
+
+def _count_consecutive_highs_up(highs: list[TaSwingPoint]) -> int:
+    """最近连续 HH（higher-high）次数，最多看 4 个。"""
+    count = 0
+    for i in range(min(len(highs), 4) - 1):
+        if highs[i].price > highs[i + 1].price:
+            count += 1
+        else:
+            break
+    return count
+
+
+def _count_consecutive_lows_down(lows: list[TaSwingPoint]) -> int:
+    """最近连续 LL（lower-low）次数，最多看 4 个。"""
+    count = 0
+    for i in range(min(len(lows), 4) - 1):
+        if lows[i].price < lows[i + 1].price:
+            count += 1
+        else:
+            break
+    return count
+
+
+def _apply_bos_authority_override(
+    direction: str,
+    event: str,
+    event_ts: int,
+    highs: list[TaSwingPoint],
+    lows: list[TaSwingPoint],
+    now_ts: int,
+    max_age_h: int = BOS_OVERRIDE_MAX_AGE_HOURS,
+) -> str:
+    """BOS 权威提权（SMC continuation 原则）。
+
+    根因：swing low/high 可能被一根"扫流动性"（sweep）的尖针污染，
+    导致 _classify_direction 出现 HH+LL 或 LH+HL 的"伪 transitioning"。
+    当近期（<6h）出现新鲜 BOS_up/down 且主导方向的连续性成立时，
+    BOS 本身是比"最新 2 个 swing 比较"更强的结构延续信号，按 SMC
+    标准应当覆盖混合判定。
+
+    规则（仅在 direction == "transitioning" 时生效，保守）：
+      - BOS_up + 事件新鲜 + 连续 ≥2 次 HH → bullish
+      - BOS_down + 事件新鲜 + 连续 ≥2 次 LL → bearish
+      - 其他 → 保持 transitioning（观望）
+    """
+    if direction != "transitioning":
+        return direction
+    if not event or not event_ts:
+        return direction
+    if now_ts - event_ts > max_age_h * 3600:
+        return direction
+
+    if event == "BOS_up" and _count_consecutive_highs_up(highs) >= 2:
+        return "bullish"
+    if event == "BOS_down" and _count_consecutive_lows_down(lows) >= 2:
+        return "bearish"
+    return direction
 
 
 def _consecutive_trend(
