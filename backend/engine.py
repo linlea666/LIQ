@@ -26,6 +26,7 @@ from models.flow import (
     ExchangeFundingRate, OIData, OISnapshot, RangeSignalData, TakerFlowData,
 )
 from models.key_level import KeyLevelSnapshotV2
+from models.market_structure import MarketStructure
 from models.levels import LevelAnalysis
 from models.liquidation import (
     HeatmapData, LiqHistoryData, LiqMaxPainData,
@@ -94,6 +95,8 @@ class CoinState:
         self.candles_daily: list = []
         self.candles_weekly: list = []
         self.range_signal: Optional[RangeSignalData] = None
+        self.market_structure: Optional[MarketStructure] = None
+        self._prev_ms_summary: tuple = ()
         self._prev_liq_map_24h: Optional[LiquidationMap] = None
         self._prev_price_at_liq_poll: float = 0
         self.liq_sweep_events: deque = deque(maxlen=120)
@@ -767,6 +770,7 @@ class Engine:
                         "indicators": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
                         "oi": st.oi is not None,
                         "funding": st.funding is not None,
+                        "market_structure": st.market_structure is not None,
                     })
                 bbx_h = self._bbx.health() if self._bbx else {}
                 logger.info(
@@ -1598,6 +1602,7 @@ class Engine:
                     "liquidation_ready": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
                     "kline_1h_ready": bool(st.candles_1h),
                     "indicators_ready": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
+                    "market_structure_ready": st.market_structure is not None,
                 }
                 for ccy, st in self._states.items()
             ],

@@ -14,6 +14,7 @@ from config.settings import CoinConfig
 from models.market import CandleData
 from processors.ta_core import calc_atr as calc_atr_series
 from processors.ta_core import calc_ema, calc_macd, calc_sma, last_valid
+from processors.market_structure import detect_market_structure
 from processors.range_signal import calculate_range_signal
 from processors.volume_profile import calc_volume_profile
 from sources.binance_futures import BinanceFuturesSource
@@ -311,6 +312,54 @@ async def poll_candles_1h(
         atr_val = calc_atr(candle_models)
         if atr_val > 0:
             state.atr = atr_val
+
+    # 市场结构识别（Commit 2：1h 数据刚刷新就算，零网络开销）
+    recompute_market_structure(state)
+
+
+_DIRECTION_ICON: dict[str, str] = {
+    "bullish": "🟢上升",
+    "bearish": "🔴下降",
+    "ranging": "⚪震荡",
+    "transitioning": "🟡过渡",
+}
+
+
+def recompute_market_structure(state: "CoinState") -> None:
+    """基于 state.candles_1h 刷新 state.market_structure。
+
+    纯算法无网络调用，由 poll_candles_1h 在 1h K 线更新后同步调用。
+    变化即打 INFO（direction / last_event / operate_bias 任一变），
+    不变打 DEBUG，异常 WARNING。
+    """
+    if not state.candles_1h:
+        return
+    try:
+        ms = detect_market_structure(state.candles_1h, timeframe="1h")
+    except Exception as exc:  # 防御：上游算法故障不能影响主流程
+        logger.warning("市场结构计算失败 | coin=%s err=%s", state.coin, exc)
+        return
+
+    state.market_structure = ms
+
+    curr = (ms.direction, ms.last_event, ms.operate_bias)
+    if curr != state._prev_ms_summary:
+        logger.info(
+            "市场结构 | coin=%s 方向=%s 置信度=%.2f 事件=%s 偏置=%s 区间=[%.2f~%.2f]",
+            state.coin,
+            _DIRECTION_ICON.get(ms.direction, ms.direction),
+            ms.confidence,
+            ms.last_event or "-",
+            ms.operate_bias,
+            ms.structure_low,
+            ms.structure_high,
+        )
+        state._prev_ms_summary = curr
+    else:
+        logger.debug(
+            "市场结构无变化 | coin=%s direction=%s bias=%s",
+            state.coin, ms.direction, ms.operate_bias,
+        )
 
 
 async def poll_candles_daily(
