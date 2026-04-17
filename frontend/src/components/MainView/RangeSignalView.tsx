@@ -449,10 +449,72 @@ function BoxStateCard({ rs }: { rs: RangeSignalData }) {
   );
 }
 
+/**
+ * 突破概率卡 —— 动态降级策略
+ *
+ * 设计边界：
+ *   1. 箱体未形成 / 宽度 ≥ 5%  → 突破概率对宽箱体无意义，卡面降级为"过宽提示"，
+ *      建议用户关注"微观区间"而非核心箱体。
+ *   2. 窄箱体（< 5%）且 breakout_direction_bias == none 时，若 1h 市场结构
+ *      已有明确方向（ms_direction ∈ bullish/bearish 且 ms_confidence ≥ 0.6），
+ *      则采纳结构结论覆盖"方向未明"，并在尾部标注数据来源。
+ */
 function BreakoutCard({ rs }: { rs: RangeSignalData }) {
+  const hasBox =
+    rs.range_upper != null &&
+    rs.range_lower != null &&
+    rs.range_upper > rs.range_lower;
+  const boxWidth = rs.box_width_pct ?? 0;
+  const NARROW_BOX_MAX = 5.0; // 宽度超过 5% 视为"非收敛状态"
+
+  if (!hasBox || boxWidth === 0 || boxWidth >= NARROW_BOX_MAX) {
+    return (
+      <Card>
+        <h3 className="text-sm font-bold text-white mb-3">💥 突破概率</h3>
+        <div className="space-y-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2 text-slate-300">
+            <span>ℹ️</span>
+            <span className="font-medium">
+              {!hasBox || boxWidth === 0 ? "当前核心箱体未形成" : `核心箱体过宽 ${boxWidth.toFixed(1)}%`}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            {!hasBox || boxWidth === 0
+              ? "需要等 MA 框架稳定后才能计算突破概率。"
+              : "宽度 ≥ 5% 的箱体通常不会短期整体突破，突破概率不具参考价值。"}
+            建议关注「微观区间」（清算/挂单密集区）和关键位 Tab 的结构徽章。
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
   const prob = rs.breakout_probability;
-  const biasLabel = rs.breakout_direction_bias === "up" ? "偏向上破" : rs.breakout_direction_bias === "down" ? "偏向下破" : "方向未明";
-  const biasColor = rs.breakout_direction_bias === "up" ? "text-green-400" : rs.breakout_direction_bias === "down" ? "text-red-400" : "text-slate-400";
+  // 1h 市场结构融合：当 RangeSignal 自己未判定方向时，采纳结构结论
+  const rawBias = rs.breakout_direction_bias;
+  const msDir = rs.ms_direction;
+  const msConf = rs.ms_confidence ?? 0;
+  const adoptMs =
+    rawBias === "none" &&
+    msConf >= 0.6 &&
+    (msDir === "bullish" || msDir === "bearish");
+  const effectiveBias: "up" | "down" | "none" = adoptMs
+    ? msDir === "bullish"
+      ? "up"
+      : "down"
+    : (rawBias === "up" || rawBias === "down" ? rawBias : "none");
+  const biasLabel =
+    effectiveBias === "up"
+      ? "偏向上破"
+      : effectiveBias === "down"
+        ? "偏向下破"
+        : "方向未明";
+  const biasColor =
+    effectiveBias === "up"
+      ? "text-green-400"
+      : effectiveBias === "down"
+        ? "text-red-400"
+        : "text-slate-400";
 
   return (
     <Card>
@@ -476,7 +538,17 @@ function BreakoutCard({ rs }: { rs: RangeSignalData }) {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-slate-400">方向偏向</span>
-          <span className={`text-xs font-medium ${biasColor}`}>{biasLabel}</span>
+          <span className="flex items-center gap-1.5">
+            <span className={`text-xs font-medium ${biasColor}`}>{biasLabel}</span>
+            {adoptMs && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 cursor-help"
+                title={`采纳自 1h 市场结构：${msDir === "bullish" ? "上升结构" : "下降结构"} · 置信度 ${(msConf * 100).toFixed(0)}%`}
+              >
+                据 1h 结构
+              </span>
+            )}
+          </span>
         </div>
         {rs.breakout_reason && (
           <p className="text-[10px] text-slate-500 mt-1">{rs.breakout_reason}</p>

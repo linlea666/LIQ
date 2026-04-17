@@ -68,7 +68,7 @@ export default function KeyLevelView() {
   return (
     <div className="space-y-4 max-w-4xl">
       <MarketStructureBadge />
-      <StructureSummary kl={kl} price={price} coin={coin} />
+      <StructureSummary kl={kl} coin={coin} />
       <BacktestStatsCard coin={coin} />
       <KLHistoryLinks coin={coin} />
       {kl.bull_bear_line && (
@@ -101,15 +101,12 @@ export default function KeyLevelView() {
 
 function StructureSummary({
   kl,
-  price,
   coin,
 }: {
   kl: KeyLevelSnapshotV2;
-  price: number;
   coin: string;
 }) {
   const aSignals = kl.signals.filter((s) => s.confidence === "A");
-  let title = kl.structure_summary || "分析中...";
   let borderColor = "border-slate-600";
 
   if (aSignals.length > 0) {
@@ -126,12 +123,9 @@ function StructureSummary({
   return (
     <div className={`bg-slate-800/60 border ${borderColor} rounded-lg p-4`}>
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
-            市场结构
-          </span>
-          <span className="text-sm font-semibold text-slate-200">{title}</span>
-        </div>
+        <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
+          📍 最近强位
+        </span>
         <span className="text-xs text-slate-500">
           追踪 {kl.levels.length} 个关键位 · 活跃 {kl.active_count}
         </span>

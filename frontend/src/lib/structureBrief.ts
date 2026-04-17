@@ -201,6 +201,82 @@ export function bounceQualityBrief(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 中长期基调（BullBearLine.current_regime · 日/周线维度）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export function regimeBrief(
+  regime: string | null | undefined,
+): BriefTag | null {
+  if (!regime) return null;
+  switch (regime) {
+    case "bull":
+      return {
+        label: "🌞 中长期偏多",
+        color: "text-emerald-300",
+        bg: "bg-emerald-500/10",
+        hint: "日/周线牛熊分界线（200SMA / 牛市支撑带 / 一目云层）判定为多头区间",
+      };
+    case "bear":
+      return {
+        label: "🌑 中长期偏空",
+        color: "text-red-300",
+        bg: "bg-red-500/10",
+        hint: "日/周线牛熊分界线（200SMA / 牛市支撑带 / 一目云层）判定为空头区间",
+      };
+    case "neutral":
+      return {
+        label: "⚖️ 多空胶着",
+        color: "text-slate-300",
+        bg: "bg-slate-500/15",
+        hint: "日/周线中长期基调多空胶着，方向需看短期结构主导",
+      };
+    default:
+      return null;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MACD 动能状态（日线 · 零轴 + 柱状图方向）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export function macdMomentumBrief(
+  aboveZero: boolean | null | undefined,
+  histRising: boolean | null | undefined,
+): BriefTag | null {
+  if (aboveZero == null || histRising == null) return null;
+  if (aboveZero && histRising) {
+    return {
+      label: "💪 强势多头",
+      color: "text-emerald-400",
+      bg: "bg-emerald-500/10",
+      hint: "日线 MACD 在零轴上方且柱状图持续增长 —— 多头动能增强，顺势做多胜率高",
+    };
+  }
+  if (aboveZero && !histRising) {
+    return {
+      label: "⚡ 多头动能衰减",
+      color: "text-yellow-300",
+      bg: "bg-yellow-500/10",
+      hint: "日线 MACD 仍在零轴上方但柱状图缩短 —— 多头动能正在衰减，警惕回调",
+    };
+  }
+  if (!aboveZero && !histRising) {
+    return {
+      label: "🧊 强势空头",
+      color: "text-red-400",
+      bg: "bg-red-500/10",
+      hint: "日线 MACD 在零轴下方且柱状图持续增长（绝对值）—— 空头动能增强，顺势做空胜率高",
+    };
+  }
+  return {
+    label: "🌙 空头动能衰减",
+    color: "text-sky-300",
+    bg: "bg-sky-500/10",
+    hint: "日线 MACD 仍在零轴下方但柱状图收缩 —— 空头动能衰减，可能出现反弹",
+  };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 突破三步确认（breakout_stage）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
