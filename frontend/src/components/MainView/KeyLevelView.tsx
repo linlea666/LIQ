@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import StrongLevelsCard from "./StrongLevelsCard";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -72,6 +73,7 @@ export default function KeyLevelView() {
         <BullBearCard bb={kl.bull_bear_line} price={price} coin={coin} />
       )}
       {kl.breakout_zone && <BreakoutCard zone={kl.breakout_zone} coin={coin} />}
+      <StrongLevelsCard levels={kl.levels} price={price} coin={coin} />
       <PriceRuler levels={kl.levels} price={price} coin={coin} />
       {activeSignals.length > 0 ? (
         <SignalCards signals={activeSignals} coin={coin} />
