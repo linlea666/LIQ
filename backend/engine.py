@@ -763,6 +763,7 @@ class Engine:
                         "ticker": bool(st.ticker),
                         "liq_1d": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
                         "kline_1h": bool(st.candles_1h),
+                        "kline_15m": bool(st.candles_15m),
                         "indicators": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
                         "oi": st.oi is not None,
                         "funding": st.funding is not None,
@@ -1061,24 +1062,31 @@ class Engine:
 
             sent = 0
             cooled = 0
+            failed = 0
             for event in events:
-                if self._alert_dedup.should_send(event.dedup_key):
-                    ok = await send_alert_email(event, self._notif_cfg)
-                    if ok:
-                        sent += 1
-                else:
+                if not self._alert_dedup.should_send(event.dedup_key):
                     cooled += 1
+                    continue
+                ok = await send_alert_email(event, self._notif_cfg)
+                if ok:
+                    self._alert_dedup.mark_sent(event.dedup_key)
+                    sent += 1
+                else:
+                    # 发送失败不占冷却位：SMTP 恢复后下一轮即可重试，
+                    # 避免"配置缺失/网络抖动→静默锁 45 分钟"的可靠性坑
+                    failed += 1
 
             # 诊断日志：每次触发都打印扫描结果，便于排查"为什么没收到邮件"
             if events or sent:
                 logger.info(
-                    "[alert] ccy=%s min_tier=%s scanned_signals=%d matched=%d cooled=%d sent=%d",
+                    "[alert] ccy=%s min_tier=%s scanned_signals=%d matched=%d cooled=%d sent=%d failed=%d",
                     ccy,
                     self._notif_cfg.min_signal_tier,
                     len(state.key_level_snapshot_v2.signals) if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.signals else 0,
                     len(events),
                     cooled,
                     sent,
+                    failed,
                 )
 
             self._alert_dedup.cleanup()

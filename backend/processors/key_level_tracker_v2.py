@@ -550,33 +550,55 @@ def _generate_scalp_signal(
 
     无 15m K 线数据、ATR 异常、不符合条件 → 返回 None。
     """
+    # 可观测性：S/A 级 level 才打调试日志（避免刷屏），记录每道过滤的命中原因
+    # 目的：排障时能直接回答"为什么这根 S 级阻力没产出 scalp"，而不是人工反推阈值表。
+    is_candidate = lv.strength_tier in ("S", "A")
+
+    def _skip(reason: str) -> None:
+        if is_candidate and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[scalp-skip] %s@%s tier=%s state=%s dist=%.3f%% cascade=%.2f reason=%s",
+                lv.side, f"{lv.price:.2f}", lv.strength_tier, lv.state,
+                lv.distance_pct or 0, lv.cascade_risk or 0, reason,
+            )
+
     if atr <= 0 or price <= 0:
+        _skip("atr_or_price_nonpositive")
         return None
     if lv.strength_tier not in ("S", "A"):
-        return None
+        return None  # 非候选静默，不打日志
     if lv.state not in ("testing", "swept", "bounced", "flipped"):
+        _skip(f"state={lv.state}_not_eligible")
         return None
 
     # 时间过期：scalp 是日内策略，状态进入超过 scalp_signal_expire_sec 即失效
     # （防止关键位长期停留在 testing 状态仍反复产出 scalp 信号）
     scalp_expire = cfg.get("scalp_signal_expire_sec", 1800)
     if lv.state_ts > 0 and (now - lv.state_ts) > scalp_expire:
+        _skip(f"expired_age={now - lv.state_ts}s>{scalp_expire}s")
         return None
 
     max_distance = cfg.get("scalp_max_distance_pct", 0.8)
     if abs(lv.distance_pct) > max_distance:
+        _skip(f"distance={abs(lv.distance_pct):.3f}%>max_{max_distance}%")
         return None
 
     max_cascade = cfg.get("scalp_max_cascade", 0.5)
     if (lv.cascade_risk or 0) >= max_cascade:
+        _skip(f"cascade={lv.cascade_risk:.2f}>=max_{max_cascade}")
         return None
 
     if not candles_15m or len(candles_15m) < 2:
+        _skip("no_15m_candles")
         return None
 
     pattern = detect_reversal_pattern(candles_15m, lv.side)
     min_strength = cfg.get("scalp_min_pattern_strength", 0.6)
     if not pattern.found or pattern.strength < min_strength:
+        _skip(
+            f"pattern_weak found={pattern.found} "
+            f"strength={pattern.strength:.2f}<min_{min_strength}"
+        )
         return None
 
     is_support = lv.side == "support"
@@ -608,11 +630,13 @@ def _generate_scalp_signal(
     risk = abs(entry - sl)
     reward = abs(tp1_price - entry)
     if risk <= 0:
+        _skip("risk_nonpositive")
         return None
     rr = reward / risk
 
     min_rr = cfg.get("scalp_min_rr", 1.5)
     if rr < min_rr:
+        _skip(f"rr={rr:.2f}<min_{min_rr} (tp={tp1_price:.2f} entry={entry:.2f} sl={sl:.2f})")
         return None
 
     # 置信度：S 级 + 强形态(>=0.8) → A，其余 → B

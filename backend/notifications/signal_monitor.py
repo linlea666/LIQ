@@ -58,19 +58,28 @@ class AlertEvent:
 
 
 class AlertDedup:
-    """基于冷却时间的去重器。"""
+    """基于冷却时间的去重器。
+
+    拆分 should_send / mark_sent 的原因（P1 可靠性修复）：
+    旧实现 should_send 成功时直接把 now 写入 _sent，但调用方 send_alert_email
+    若 SMTP 暂时失败（配置缺失 / 网络抖动）会返回 False，此时冷却位已被占用，
+    导致同一 dedup_key 静默锁定整个 cooldown 窗口（默认 45 分钟），
+    用户观感是"S 级信号有了但收不到邮件"。现在强制调用方必须在发送成功后
+    显式 mark_sent，失败时允许下一轮立即重试。
+    """
 
     def __init__(self, cooldown_seconds: int = 1800):
         self.cooldown_seconds = cooldown_seconds
         self._sent: dict[str, float] = {}
 
     def should_send(self, key: str) -> bool:
-        now = time.time()
+        """纯查询：是否超出冷却窗口可以发送。不产生副作用。"""
         last = self._sent.get(key, 0)
-        if now - last < self.cooldown_seconds:
-            return False
-        self._sent[key] = now
-        return True
+        return (time.time() - last) >= self.cooldown_seconds
+
+    def mark_sent(self, key: str) -> None:
+        """记录一次"成功送达"的时间戳。调用方必须在 send 返回 True 后调用。"""
+        self._sent[key] = time.time()
 
     def cleanup(self, max_age: int = 7200):
         """清理过期条目，防止内存泄漏。"""
