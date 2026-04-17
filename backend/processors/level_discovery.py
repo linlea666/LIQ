@@ -56,6 +56,93 @@ from processors.ta_core import (
 logger = logging.getLogger(__name__)
 
 
+def detect_round_numbers(
+    price: float,
+    radius_pct: float = 3.0,
+) -> list[dict]:
+    """检测当前价附近的心理整数关口（散户挂单/止损密集带）。
+
+    输入：
+      price: 当前价
+      radius_pct: 搜索半径（%），默认 ±3%
+
+    返回 list[dict]，每项含：
+      price / side / source / source_tag / base_score
+
+    步长根据币价自适应：
+      >= 10000   → 主 1000  / 次 500    (BTC 档)
+      >= 1000    → 主 100   / 次 50     (ETH 档)
+      >= 100     → 主 10    / 次 5      (SOL 档)
+      >= 10      → 主 1     / 次 0.5    (小币 10 档)
+      >= 1       → 主 0.1   / 次 None
+      < 1        → 主 0.01  / 次 None
+
+    主步长：base_score=15（source_tag='round_major'）
+    次步长：base_score=8 （source_tag='round_minor'）
+
+    不对当前价本身打标签（距离 < 步长 5% 的视为已在位内）。
+    """
+    out: list[dict] = []
+    if price <= 0:
+        return out
+
+    if price >= 10000:
+        major, minor = 1000.0, 500.0
+    elif price >= 1000:
+        major, minor = 100.0, 50.0
+    elif price >= 100:
+        major, minor = 10.0, 5.0
+    elif price >= 10:
+        major, minor = 1.0, 0.5
+    elif price >= 1:
+        major, minor = 0.1, None  # type: ignore[assignment]
+    else:
+        major, minor = 0.01, None  # type: ignore[assignment]
+
+    radius = price * radius_pct / 100.0
+    low = price - radius
+    high = price + radius
+
+    def _emit(step: float, tag: str, score: float, label_prefix: str) -> None:
+        # 在 [low, high] 区间内枚举 step 的倍数
+        start = int(low // step)
+        end = int(high // step) + 1
+        for k in range(start, end):
+            rn = round(step * k, 6)
+            if rn <= 0:
+                continue
+            # 过滤"与当前价几乎重合"（<0.05 * step）
+            if abs(rn - price) < step * 0.05:
+                continue
+            if rn < low or rn > high:
+                continue
+            side = "support" if rn < price else "resistance"
+            # 格式化价格显示
+            if step >= 1:
+                pretty = f"${int(rn):,}"
+            elif step >= 0.1:
+                pretty = f"${rn:.1f}"
+            else:
+                pretty = f"${rn:.2f}"
+            out.append({
+                "price": rn, "side": side,
+                "source": f"{label_prefix}{pretty}",
+                "source_tag": tag,
+                "base_score": score,
+            })
+
+    _emit(major, "round_major", 15.0, "心理关口")
+    if minor is not None:
+        # 次级关口：排除与主级重合的
+        major_set = {round(c["price"], 6) for c in out}
+        before = len(out)
+        _emit(minor, "round_minor", 8.0, "心理关口(次)")
+        # 去重
+        out[before:] = [c for c in out[before:] if round(c["price"], 6) not in major_set]
+
+    return out
+
+
 def detect_oi_surge_zones(
     oi_history: list[dict],
     candles: list[CandleData] | None,
@@ -209,6 +296,15 @@ def _discover_price_structure(
                 dimension="price_structure", source=f"成交密集区(HVN)",
                 source_tag="hvn", base_score=20, timeframe="1H",
             ))
+
+    # ── 心理整数关口（散户挂单/止损密集区）──
+    for rn in detect_round_numbers(price, radius_pct=3.0):
+        cands.append(RawCandidate(
+            price=rn["price"], side=rn["side"],
+            dimension="price_structure",
+            source=rn["source"], source_tag=rn["source_tag"],
+            base_score=rn["base_score"], timeframe="1D",
+        ))
 
 
 def _add_swing_levels(

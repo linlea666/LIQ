@@ -31,6 +31,7 @@ from processors.confluence_scoring import (
 )
 from processors.level_discovery import (
     RawCandidate, DiscoveryResult, detect_oi_surge_zones,
+    detect_round_numbers,
 )
 from processors.key_level_tracker_v2 import (
     run_tracker_v2, _calc_atr_factor, _is_broken,
@@ -810,6 +811,75 @@ class TestTimeDecayMultiplier:
         # 新创建 level last_confirmed_ts=0 不应该因此被判为超老
         lv = _mk_level(last_confirmed_ts=0)
         assert _final_time_decay_multiplier(lv, now=int(time.time())) == 1.0
+
+
+class TestDetectRoundNumbers:
+    """整数关口检测（心理位）"""
+
+    def test_btc_range(self):
+        # BTC 74500 ± 3% = 72265 ~ 76735
+        # 主步 1000：73000/74000/(跳过≈74500)/75000/76000
+        # 次步 500：72500/73500/74500(跳过本身)/75500/76500
+        out = detect_round_numbers(74500.0, radius_pct=3.0)
+        prices = sorted({c["price"] for c in out})
+        # 应包含主关 74000 / 75000
+        assert 74000.0 in prices
+        assert 75000.0 in prices
+        # 应包含次关 73500 / 75500
+        assert 73500.0 in prices or 74500.0 not in prices
+
+        # side 判定正确
+        for c in out:
+            if c["price"] < 74500.0:
+                assert c["side"] == "support"
+            else:
+                assert c["side"] == "resistance"
+
+    def test_majors_higher_score_than_minors(self):
+        out = detect_round_numbers(74500.0, radius_pct=3.0)
+        majors = [c["base_score"] for c in out if c["source_tag"] == "round_major"]
+        minors = [c["base_score"] for c in out if c["source_tag"] == "round_minor"]
+        assert all(m == 15.0 for m in majors)
+        assert all(m == 8.0 for m in minors)
+
+    def test_eth_range(self):
+        # ETH 2450 → 主步 100, 次步 50
+        out = detect_round_numbers(2450.0, radius_pct=3.0)
+        prices = {c["price"] for c in out}
+        assert 2400.0 in prices
+        assert 2500.0 in prices
+
+    def test_skips_self(self):
+        # 刚好整数价，不应把自己加进来
+        out = detect_round_numbers(75000.0, radius_pct=3.0)
+        for c in out:
+            assert c["price"] != 75000.0
+
+    def test_no_duplicate_major_minor(self):
+        # 主次步长都命中 73500 时，不应重复
+        out = detect_round_numbers(74000.0, radius_pct=5.0)
+        seen = set()
+        for c in out:
+            assert c["price"] not in seen, f"duplicate {c['price']}"
+            seen.add(c["price"])
+
+    def test_sol_range(self):
+        # SOL 185 → 主步 10, 次步 5；±3% = 179.45 ~ 190.55
+        out = detect_round_numbers(185.0, radius_pct=3.0)
+        prices = {c["price"] for c in out}
+        assert 180.0 in prices
+        assert 190.0 in prices
+
+    def test_sub_dollar_with_wide_radius(self):
+        # DOGE 0.15 → 主步 0.01，需放宽半径才命中
+        out = detect_round_numbers(0.15, radius_pct=10.0)
+        assert len(out) > 0
+        for c in out:
+            assert c["source_tag"] == "round_major"
+
+    def test_empty_on_zero_price(self):
+        assert detect_round_numbers(0.0) == []
+        assert detect_round_numbers(-100.0) == []
 
 
 class TestBounceCountIncrement:
