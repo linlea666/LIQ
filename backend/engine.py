@@ -199,6 +199,7 @@ class Engine:
             cooldown_seconds=self._settings.notifications.email.cooldown_minutes * 60,
         )
         self._notif_cfg = self._settings.notifications.email
+        self._alert_config_warned = False
 
     @property
     def ai_available(self) -> bool:
@@ -1046,6 +1047,19 @@ class Engine:
     async def _check_alerts(self, ccy: str):
         """检测 S/A 级信号变化并发送邮件通知。"""
         try:
+            # 配置完整性前置闸门：enabled=True 但 SMTP 未填，则完全跳过扫描
+            # 避免"每 5 秒匹配 → 发送失败 → 不锁冷却 → 下轮再匹配"的日志刷屏死循环
+            if not self._notif_cfg.smtp_user or not self._notif_cfg.to:
+                if not self._alert_config_warned:
+                    logger.warning(
+                        "[alert] email config incomplete, scanning disabled | "
+                        "smtp_user=%s recipients=%d | 修复 .env 后重启后端生效",
+                        "<empty>" if not self._notif_cfg.smtp_user else "<set>",
+                        len(self._notif_cfg.to or []),
+                    )
+                    self._alert_config_warned = True
+                return
+
             from notifications.signal_monitor import scan_alerts
             from notifications.email_alert import send_alert_email
 
