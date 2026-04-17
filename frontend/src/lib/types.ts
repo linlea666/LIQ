@@ -350,6 +350,10 @@ export interface KeyLevelV2 {
   historical_validity?: number;
   barrier_score?: number;
   final_score?: number;
+
+  // Commit 4: 质量标注（主动吸筹 / 被动触发 · 三步确认）
+  bounce_quality?: "proactive" | "passive" | "";
+  breakout_stage?: 0 | 1 | 2 | 3;
 }
 
 export interface BullBearLine {

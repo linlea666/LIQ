@@ -37,6 +37,7 @@ from processors.key_level_tracker_v2 import (
     run_tracker_v2, _calc_atr_factor, _is_broken,
     _volume_confirms_break, _oi_confirms_break, _find_opposite_target,
     _generate_scalp_signal, _DEFAULT_CFG,
+    _assess_bounce_quality, _assess_breakout_stage,
 )
 
 
@@ -904,3 +905,199 @@ class TestBounceCountIncrement:
         lv = _mk_level(state="idle", bounce_count=0)
         _set_state(lv, "approaching", now=1000)
         assert lv.bounce_count == 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Commit 4：bounce_quality / breakout_stage 评估
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _bars_15m(vols: list[float], now_ts: int, closes: list[float] | None = None,
+              opens: list[float] | None = None, highs: list[float] | None = None,
+              lows: list[float] | None = None):
+    """构造一串 15m K 线，vols 尾部为最新。"""
+    n = len(vols)
+    candles = []
+    for i, v in enumerate(vols):
+        ts = now_ts - (n - 1 - i) * 900
+        o = (opens[i] if opens else 100.0)
+        c = (closes[i] if closes else 100.0)
+        h = (highs[i] if highs else max(o, c) + 1)
+        low = (lows[i] if lows else min(o, c) - 1)
+        candles.append(CandleData(
+            coin="BTC", ts=ts, o=o, h=h, l=low, c=c, vol=v,
+        ))
+    return candles
+
+
+class TestAssessBounceQuality:
+    def test_returns_empty_when_not_bounced(self):
+        lv = _mk_level(state="testing")
+        bars = _bars_15m([100] * 21, now_ts=1000)
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == ""
+
+    def test_returns_empty_on_insufficient_candles(self):
+        lv = _mk_level(state="bounced")
+        bars = _bars_15m([100] * 10, now_ts=1000)
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == ""
+
+    def test_returns_empty_on_none_candles(self):
+        lv = _mk_level(state="bounced")
+        assert _assess_bounce_quality(lv, None, _DEFAULT_CFG) == ""
+
+    def test_proactive_support(self):
+        """支撑位反弹：放量 2× 均量 + 阳线 → proactive"""
+        vols = [100] * 20 + [250]
+        lv = _mk_level(state="bounced", side="support", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [98],
+                         closes=[100] * 20 + [102])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == "proactive"
+
+    def test_proactive_resistance(self):
+        """阻力位反转：放量 2× 均量 + 阴线 → proactive"""
+        vols = [100] * 20 + [250]
+        lv = _mk_level(state="bounced", side="resistance", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [102],
+                         closes=[100] * 20 + [98])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == "proactive"
+
+    def test_passive_support(self):
+        """支撑位反弹：缩量 0.5× 均量 + 阳线 → passive"""
+        vols = [100] * 20 + [50]
+        lv = _mk_level(state="bounced", side="support", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [99],
+                         closes=[100] * 20 + [101])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == "passive"
+
+    def test_wrong_direction_returns_empty(self):
+        """支撑位但反弹 bar 是阴线 → 不认定"""
+        vols = [100] * 20 + [250]
+        lv = _mk_level(state="bounced", side="support", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [101],
+                         closes=[100] * 20 + [99])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == ""
+
+    def test_neutral_volume_returns_empty(self):
+        """量能处于 passive 与 proactive 之间的灰区"""
+        vols = [100] * 20 + [110]
+        lv = _mk_level(state="bounced", side="support", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [99],
+                         closes=[100] * 20 + [101])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == ""
+
+    def test_zero_avg_vol_returns_empty(self):
+        vols = [0] * 20 + [50]
+        lv = _mk_level(state="bounced", side="support", price=100.0)
+        bars = _bars_15m(vols, now_ts=1000,
+                         opens=[100] * 20 + [99],
+                         closes=[100] * 20 + [101])
+        assert _assess_bounce_quality(lv, bars, _DEFAULT_CFG) == ""
+
+
+class TestAssessBreakoutStage:
+    def test_returns_zero_when_not_broken(self):
+        lv = _mk_level(state="testing", state_ts=1000)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=1100) == 0
+
+    def test_returns_zero_when_atr_invalid(self):
+        lv = _mk_level(state="broken", state_ts=1000)
+        assert _assess_breakout_stage(lv, atr=0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=1100) == 0
+
+    def test_stage1_just_broken(self):
+        """破位后 5 分钟 → stage 1"""
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=1000)
+        now = 1000 + 300  # 5 分钟后
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=now) == 1
+
+    def test_stage1_when_no_candles_after_15min(self):
+        """破位 20 分钟但没有 15m K 线：不能进 stage2"""
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=1000)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=1000 + 1200) == 1
+
+    def test_stage2_retest_support(self):
+        """支撑位破位后某根 bar 触达 level 附近（回踩），但下一根 close 未
+        跌破 confirm 门槛（atr=1.0 × 0.3 = 0.3，需 close ≤ 99.7 才算 stage3） → stage 2"""
+        state_ts = 1000
+        now = state_ts + 2700  # 45 分钟后
+        bars = [
+            CandleData(coin="BTC", ts=state_ts + 900, o=99.5, h=100.4, l=98.5,
+                       c=99.8, vol=100),  # 回踩：high 触达 100
+            CandleData(coin="BTC", ts=state_ts + 1800, o=99.8, h=99.9, l=99.75,
+                       c=99.85, vol=100),  # follow close 99.85 > 99.7，未确认
+        ]
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=state_ts)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=bars,
+                                      cfg=_DEFAULT_CFG, now=now) == 2
+
+    def test_stage3_confirmed_support(self):
+        """支撑位回踩后下一根 close 继续下行 ≥ 0.3×ATR → stage 3"""
+        state_ts = 1000
+        now = state_ts + 2700
+        bars = [
+            CandleData(coin="BTC", ts=state_ts + 900, o=99.5, h=100.3, l=98.5,
+                       c=99.0, vol=100),  # 回踩到 100.3
+            CandleData(coin="BTC", ts=state_ts + 1800, o=99.0, h=99.2, l=97.5,
+                       c=97.8, vol=100),  # close 97.8 < 100 - 0.3*5 = 98.5 ✅
+        ]
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=state_ts)
+        assert _assess_breakout_stage(lv, atr=5.0, candles_15m=bars,
+                                      cfg=_DEFAULT_CFG, now=now) == 3
+
+    def test_stage3_confirmed_resistance(self):
+        """阻力位向上破位 + 回踩 + 继续上行"""
+        state_ts = 1000
+        now = state_ts + 2700
+        bars = [
+            CandleData(coin="BTC", ts=state_ts + 900, o=100.5, h=101.0, l=99.7,
+                       c=100.5, vol=100),  # 回踩到 99.7
+            CandleData(coin="BTC", ts=state_ts + 1800, o=100.5, h=103.0,
+                       l=100.2, c=102.5, vol=100),  # close 102.5 >= 100 + 1.5
+        ]
+        lv = _mk_level(state="broken", side="resistance", price=100.0,
+                       state_ts=state_ts)
+        assert _assess_breakout_stage(lv, atr=5.0, candles_15m=bars,
+                                      cfg=_DEFAULT_CFG, now=now) == 3
+
+    def test_stage_zero_after_expire(self):
+        """破位超过 6h → stage 0（信号过期）"""
+        state_ts = 1000
+        now = state_ts + 7 * 3600
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=state_ts)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=now) == 0
+
+    def test_flipped_state_also_evaluated(self):
+        """flipped 状态也会走三步确认评估"""
+        lv = _mk_level(state="flipped", side="support", price=100.0,
+                       state_ts=1000)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=None,
+                                      cfg=_DEFAULT_CFG, now=1000 + 300) == 1
+
+    def test_no_retest_returns_stage1(self):
+        """破位 45 分钟但 bar 从未触达 level → 保持 stage 1"""
+        state_ts = 1000
+        now = state_ts + 2700
+        bars = [
+            CandleData(coin="BTC", ts=state_ts + 900, o=98.0, h=98.5, l=97.0,
+                       c=97.5, vol=100),  # 远离 level=100
+            CandleData(coin="BTC", ts=state_ts + 1800, o=97.5, h=97.8, l=96.0,
+                       c=96.5, vol=100),
+        ]
+        lv = _mk_level(state="broken", side="support", price=100.0,
+                       state_ts=state_ts)
+        assert _assess_breakout_stage(lv, atr=1.0, candles_15m=bars,
+                                      cfg=_DEFAULT_CFG, now=now) == 1

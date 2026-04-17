@@ -114,6 +114,10 @@ class KeyLevelV2(BaseModel):
     barrier_score: float = 0.0          # 0~20，结构屏障加分（多个清算簇前置、时间存活等）
     final_score: float = 0.0            # 0~100，= confluence_score × 时间衰减 + 历史验证 + 屏障加分
 
+    # Commit 4：质量标注（博主方法论：主动 vs 被动 · 三步确认）
+    bounce_quality: str = ""       # "proactive"(主动吸筹) / "passive"(被动触发) / ""(未反弹)
+    breakout_stage: int = 0        # 0(未破位) / 1(破位) / 2(回踩) / 3(确认)
+
 
 class BullBearLine(BaseModel):
     """多空分界线（独立展示区域）"""

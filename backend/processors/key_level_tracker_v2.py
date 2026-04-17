@@ -38,6 +38,14 @@ _DEFAULT_CFG: dict = {
     "cascade_weight_cap_m": 20.0,
     "cascade_norm": 50.0,
     "signal_expire_sec": 14400,  # 4H
+    # ── Commit 4：质量标注（博主方法论）──
+    "bounce_vol_proactive_mult": 1.5,   # 主动吸筹的量能倍率（>= 近20根均量的 1.5×）
+    "bounce_vol_passive_mult": 0.8,     # 被动触发的量能倍率（< 近20根均量的 0.8×）
+    "breakout_stage1_max_sec": 900,     # stage1 窗口：破位 15m 内
+    "breakout_retest_max_sec": 5400,    # stage2 窗口：破位后 90m 内出现回踩
+    "breakout_retest_atr_mult": 0.5,    # 回踩判定：距 level ±0.5×ATR
+    "breakout_confirm_atr_mult": 0.3,   # stage3 确认：反向推进 ≥ 0.3×ATR
+    "breakout_expire_sec": 21600,       # 6h 后 stage 重置为 0
     # ── Scalp 日内极小止损档参数（仅 S/A 级关键位 + 15m 影线确认时生效）──
     "scalp_max_distance_pct": 0.8,    # 关键位与现价最大偏离
     "scalp_sl_min_pct": 0.2,          # 止损下限（价格百分比）
@@ -83,6 +91,11 @@ def run_tracker_v2(
     if liq_map:
         for lv in snapshot.levels:
             _calc_cascade_risk(lv, liq_map, price, cfg)
+
+    # ── Commit 4：质量标注（在信号生成前，让信号也能读到 stage/quality）──
+    for lv in snapshot.levels:
+        lv.bounce_quality = _assess_bounce_quality(lv, candles_15m, cfg)
+        lv.breakout_stage = _assess_breakout_stage(lv, atr, candles_15m, cfg, now)
 
     # 信号生成
     signals: list[KeyLevelSignal] = []
@@ -234,6 +247,112 @@ def _transition(
     elif lv.state == "flipped":
         if dist_abs > approach_pct * 2:
             _set_state(lv, "idle", now)
+
+
+def _assess_bounce_quality(
+    lv: KeyLevelV2,
+    candles_15m: list[CandleData] | None,
+    cfg: dict,
+) -> str:
+    """评估反弹质量（博主方法论：主动吸筹 vs 被动触发）。
+
+    仅在 state == "bounced" 时有意义，其它状态返回 ""。
+
+    proactive：反弹那根 15m bar 放量 ≥ 近 20 根均量 × 1.5，且方向一致
+               (支撑=阳线 close>open / 阻力=阴线 close<open)
+    passive  ：反弹 bar 缩量 < 近 20 根均量 × 0.8
+    ""       ：中间态 / 数据不足 / 方向不一致
+    """
+    if lv.state != "bounced":
+        return ""
+    if not candles_15m or len(candles_15m) < 21:
+        return ""
+
+    recent = candles_15m[-1]
+    ref = candles_15m[-21:-1]  # 前 20 根做基准
+    avg_vol = sum(c.vol for c in ref) / 20.0
+    if avg_vol <= 0:
+        return ""
+
+    ratio = recent.vol / avg_vol
+    is_support = lv.side == "support"
+    direction_ok = (
+        (recent.close > recent.open) if is_support else (recent.close < recent.open)
+    )
+    if not direction_ok:
+        return ""
+
+    if ratio >= cfg.get("bounce_vol_proactive_mult", 1.5):
+        return "proactive"
+    if ratio < cfg.get("bounce_vol_passive_mult", 0.8):
+        return "passive"
+    return ""
+
+
+def _assess_breakout_stage(
+    lv: KeyLevelV2,
+    atr: float,
+    candles_15m: list[CandleData] | None,
+    cfg: dict,
+    now: int,
+) -> int:
+    """评估突破三步确认进度（博主方法论：破位→回踩→确认）。
+
+    仅在 state in ("broken", "flipped") 时有意义，其它状态返回 0。
+
+    stage 1：破位 15 分钟内
+    stage 2：stage1 之后 90 分钟内，出现一根 bar 的高/低触达 level ±0.5×ATR（回踩）
+    stage 3：回踩后下一根 bar 反向继续推进 ≥ 0.3×ATR（确认延续）
+    stage 0：非破位状态 / 超过 6h 过期
+    """
+    if lv.state not in ("broken", "flipped"):
+        return 0
+    if atr <= 0:
+        return 0
+
+    age = now - lv.state_ts
+    if age <= 0 or age > cfg.get("breakout_expire_sec", 21600):
+        return 0
+
+    if age < cfg.get("breakout_stage1_max_sec", 900):
+        return 1
+
+    if not candles_15m:
+        return 1
+
+    retest_tol = atr * cfg.get("breakout_retest_atr_mult", 0.5)
+    retest_max_sec = cfg.get("breakout_retest_max_sec", 5400)
+    confirm_atr = atr * cfg.get("breakout_confirm_atr_mult", 0.3)
+    is_support = lv.side == "support"
+
+    retest_idx = -1
+    for idx, bar in enumerate(candles_15m):
+        bar_age = now - bar.ts
+        if bar_age <= 0 or bar_age > retest_max_sec:
+            continue
+        if bar.ts < lv.state_ts:
+            continue
+        if (
+            abs(bar.high - lv.price) <= retest_tol
+            or abs(bar.low - lv.price) <= retest_tol
+        ):
+            retest_idx = idx
+            break
+
+    if retest_idx == -1:
+        return 1
+
+    if retest_idx + 1 >= len(candles_15m):
+        return 2
+
+    follow = candles_15m[retest_idx + 1]
+    if is_support:
+        if follow.close <= lv.price - confirm_atr:
+            return 3
+    else:
+        if follow.close >= lv.price + confirm_atr:
+            return 3
+    return 2
 
 
 def _set_state(lv: KeyLevelV2, new_state: str, now: int):
