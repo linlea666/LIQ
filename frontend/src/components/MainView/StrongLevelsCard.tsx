@@ -47,10 +47,10 @@ const BUCKET_DEFS: Array<{
 }> = [
   {
     key: "near",
-    minPct: 0,
+    minPct: 0.25,
     maxPct: 1.5,
     label: "近距",
-    hint: "0~1.5% 短线即时反应位",
+    hint: "0.25%~1.5% 短线即时反应位（<0.25% 属贴脸位，操作价值低，已过滤）",
     dotColor: "bg-sky-400",
     textColor: "text-sky-300",
     bgColor: "bg-sky-500/10",
@@ -68,9 +68,9 @@ const BUCKET_DEFS: Array<{
   {
     key: "far",
     minPct: 4.0,
-    maxPct: 10.0,
+    maxPct: 12.0,
     label: "远距",
-    hint: "4%~10% 波段反弹/突破目标",
+    hint: "4%~12% 波段反弹/突破目标（BTC 约 ±$3k~$10k 空间）",
     dotColor: "bg-orange-400",
     textColor: "text-orange-300",
     bgColor: "bg-orange-500/10",
@@ -144,6 +144,51 @@ function relativeTime(ts: number): string {
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分钟前`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}小时前`;
   return `${Math.floor(diffSec / 86400)}天前`;
+}
+
+function fmtUsdShort(usd: number): string {
+  if (usd >= 1e9) return `$${(usd / 1e9).toFixed(1)}B`;
+  if (usd >= 1e6) return `$${(usd / 1e6).toFixed(0)}M`;
+  if (usd >= 1e3) return `$${(usd / 1e3).toFixed(0)}K`;
+  return `$${usd.toFixed(0)}`;
+}
+
+/**
+ * 把 cascade_risk（0-1 的清算级联风险分）翻译成小白能懂的文案。
+ *
+ * 后端定义：该关键位若被突破，下方/上方堆积的清算簇会被连锁扫取的剧烈程度。
+ * 对支撑位 → 下方多头强平；对阻力位 → 上方空头止损，方向相反。
+ *
+ * 阈值与原行为对齐（>0.5 才显示），避免视觉噪声；tooltip 保留技术细节与原始百分比。
+ */
+function cascadeBrief(
+  lv: KeyLevelV2,
+): { text: string; color: string; hint: string } | null {
+  const risk = lv.cascade_risk ?? 0;
+  if (risk <= 0.5) return null;
+
+  const layers = lv.cascade_layers ?? 0;
+  const usdLabel = fmtUsdShort(lv.cascade_total_usd ?? 0);
+  const isSupport = lv.side === "support";
+  const pctLabel = `${Math.round(risk * 100)}%`;
+
+  if (risk > 0.7) {
+    return {
+      text: isSupport ? "⚠️ 破位可能瀑布下跌" : "⚠️ 破位可能轧空暴涨",
+      color: "text-red-400",
+      hint: isSupport
+        ? `该位下方还堆着 ${layers} 层多头强平盘（合计 ${usdLabel}）。一旦跌破会连锁触发，跌幅可能远超预期。技术分：cascade_risk=${pctLabel}`
+        : `该位上方还堆着 ${layers} 层空头止损（合计 ${usdLabel}）。一旦突破会连环轧空，涨幅可能远超预期。技术分：cascade_risk=${pctLabel}`,
+    };
+  }
+
+  return {
+    text: isSupport ? "破位后可能快速下跌" : "破位后可能快速拉升",
+    color: "text-orange-400",
+    hint: isSupport
+      ? `下方 ${layers} 层多头强平盘堆积（${usdLabel}），跌破后会加速下行。技术分：cascade_risk=${pctLabel}`
+      : `上方 ${layers} 层空头止损堆积（${usdLabel}），突破后会加速上行。技术分：cascade_risk=${pctLabel}`,
+  };
 }
 
 function historyBrief(lv: KeyLevelV2): string {
@@ -427,18 +472,24 @@ function LevelBlock({
       </div>
 
       {/* 当前状态（仅非 idle 展示） */}
-      {stateInfo && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 shrink-0">⚡ 当前状态：</span>
-          <span className={`text-xs ${stateInfo.color}`}>{stateInfo.text}</span>
-          {relTime && <span className="text-[10px] text-slate-500">· {relTime}</span>}
-          {level.cascade_risk > 0.5 && (
-            <span className="text-[10px] text-orange-400 ml-2">
-              级联风险 {(level.cascade_risk * 100).toFixed(0)}%
-            </span>
-          )}
-        </div>
-      )}
+      {stateInfo && (() => {
+        const cascade = cascadeBrief(level);
+        return (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] text-slate-500 shrink-0">⚡ 当前状态：</span>
+            <span className={`text-xs ${stateInfo.color}`}>{stateInfo.text}</span>
+            {relTime && <span className="text-[10px] text-slate-500">· {relTime}</span>}
+            {cascade && (
+              <span
+                className={`text-[11px] ml-2 cursor-help ${cascade.color}`}
+                title={cascade.hint}
+              >
+                · {cascade.text}
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 价格与当前价关系的迷你刻度（额外视觉锚点） */}
       {price > 0 && (
