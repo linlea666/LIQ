@@ -102,13 +102,14 @@ def _build_html(event: "AlertEvent") -> str:
                 align_chip = (
                     '<span style="display:inline-block;margin-left:8px;padding:2px 10px;'
                     'border-radius:10px;background:#dcfce7;color:#15803d;'
-                    'font-size:11px;font-weight:600;">✓ 顺势</span>'
+                    'font-size:11px;font-weight:600;">⚡ 短线顺势</span>'
                 )
             elif ms_align == "conflict":
+                # 中性色调（蓝）而非警示色（橙）——多维博弈不等于危险
                 align_chip = (
                     '<span style="display:inline-block;margin-left:8px;padding:2px 10px;'
-                    'border-radius:10px;background:#fef3c7;color:#92400e;'
-                    'font-size:11px;font-weight:600;">⚠ 逆势</span>'
+                    'border-radius:10px;background:#dbeafe;color:#1e40af;'
+                    'font-size:11px;font-weight:600;">🔄 多维博弈</span>'
                 )
             structure_bar = f"""
     <tr><td style="background:#ffffff;padding:10px 24px;border-bottom:1px solid #e5e7eb;">
@@ -189,15 +190,17 @@ def _build_subject(event: "AlertEvent") -> str:
     else:
         source_cn = "箱体"
 
-    # Commit 6: 结构对齐度写进标题，让交易员一眼看出"顺势/逆势"
-    #   aligned  → ✓顺势（1h 结构方向一致）
-    #   conflict → ⚠逆势（与 1h 结构冲突，须额外警惕）
+    # Commit 6.5: 结构对齐度写进标题，但强调这只是"与 1h 短线结构的关系"
+    #   aligned  → ⚡短线顺势（方向与 1h 小时级动量一致）
+    #   conflict → 🔄多维博弈（方案基于多维综合判断，与 1h 结构相反）
     #   neutral/unknown/"" → 不加标签（结构不明时不打扰）
+    # 关键：逆 1h 结构的多维共振方案往往是高 R:R 机会（如分发末端反弹），
+    #       不应用"⚠逆势"这种暗示"差/危险"的措辞
     align = (event.ms_alignment or "").lower()
     if align == "aligned":
-        align_tag = " ✓顺势"
+        align_tag = " ⚡短线顺势"
     elif align == "conflict":
-        align_tag = " ⚠逆势"
+        align_tag = " 🔄多维博弈"
     else:
         align_tag = ""
 

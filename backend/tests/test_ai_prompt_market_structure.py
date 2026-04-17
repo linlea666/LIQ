@@ -26,12 +26,38 @@ from notifications.signal_monitor import AlertEvent
 # System prompt 铁律 / 分级表检查
 # ─────────────────────────────────────────────────────────────
 
-def test_system_prompt_contains_structure_primacy_rule():
-    """结构优先铁律必须存在 —— 这是 Commit 6 的核心约束。"""
+def test_system_prompt_contains_multi_dimension_weighing_rule():
+    """Commit 6.5: 多维留痕铁律取代了 Commit 6 的"结构优先铁律"。
+    1h 结构不再是一票否决器，AI 必须多维权衡并留痕。"""
     sp = build_system_prompt()
-    assert "结构优先铁律" in sp
-    assert "ms_bias" in sp
-    assert "long_only" in sp or "short_only" in sp
+    assert "多维留痕铁律" in sp
+    assert "ms_direction" in sp or "ms_bias" in sp
+    # 关键：明确否定"结构优先"一票否决的哲学
+    assert "1h 结构从来不是一票否决器" in sp
+    # 逆势方案的留痕格式必须存在
+    assert "🔄 逆 1h 结构" in sp
+
+
+def test_system_prompt_does_not_contain_obsolete_primacy_rule():
+    """回归：旧的'结构优先铁律'和'否则该方案废弃'措辞必须已被清除，
+    避免在 prompt 里留下'AI 必须顺 1h 结构'的矛盾信号。"""
+    sp = build_system_prompt()
+    assert "结构优先铁律" not in sp
+    assert "否则该方案废弃" not in sp
+
+
+def test_system_prompt_contains_multi_dimension_framework():
+    """新增的'多维方向综合权衡'框架必须存在，引导 AI 走完整的数票/判共振/识陷阱流程。"""
+    sp = build_system_prompt()
+    assert "多维方向综合权衡" in sp
+    # 四步法的关键词
+    assert "数票" in sp
+    assert "判共振" in sp
+    assert "识陷阱" in sp
+    # 分发末端反弹陷阱必须作为经典场景被识别
+    assert "分发末端" in sp or "末端反弹" in sp
+    # 档位分层权重
+    assert "短线档" in sp and "远线档" in sp
 
 
 def test_system_prompt_contains_price_lineage_rule():
@@ -74,9 +100,10 @@ def test_system_prompt_section_seven_word_floor():
 
 
 def test_system_prompt_section_eight_mandatory_items():
-    """§八自检必选子项：方向判断层级 + 结构对齐度。"""
+    """§八自检必选子项：方向判断层级 + 多维一致度 + 结构对齐度。"""
     sp = build_system_prompt()
     assert "本次方向判断核心依据层级" in sp
+    assert "多维一致度自述" in sp
     assert "1h 结构对齐度" in sp
 
 
@@ -151,8 +178,9 @@ def test_user_prompt_renders_bos_down_correctly():
     assert "仅顺势做空" in up
 
 
-def test_user_prompt_high_confidence_appends_reverse_rule():
-    """置信度≥60% 且方向明确时，附带逆势开仓的 L1 证据铁律提醒。"""
+def test_user_prompt_high_confidence_appends_reference_note():
+    """Commit 6.5: 置信度≥60% 且方向明确时附加"参考提示"（非铁律），
+    强调 1h 结构是单一参考、多维共振反向时优先多维判断。"""
     snap = _minimal_snapshot({
         "market_structure": {
             "direction": "bullish",
@@ -166,12 +194,37 @@ def test_user_prompt_high_confidence_appends_reverse_rule():
         }
     })
     up = build_user_prompt(snap)
-    assert "铁律提醒" in up
-    assert "L1 级实盘资金背驰" in up
+    # 新措辞：参考提示（不再是"铁律提醒"）
+    assert "参考提示" in up
+    assert "单一参考" in up
+    # 关键：明确允许多维共振反向时采纳多维判断
+    assert "多维判断" in up
+    assert "🔄 逆 1h 结构" in up
+    # 关键：明确否定"一票否决"
+    assert "1h 结构从来不是一票否决器" in up
 
 
-def test_user_prompt_low_confidence_skips_reverse_rule():
-    """置信度 < 60% 时不附加铁律提醒，避免 AI 对不确定结构过度遵从。"""
+def test_user_prompt_does_not_contain_obsolete_iron_rule():
+    """回归：旧的'铁律提醒/否则该方案废弃'措辞必须已被清除。"""
+    snap = _minimal_snapshot({
+        "market_structure": {
+            "direction": "bullish",
+            "last_event": "BOS_up",
+            "operate_bias": "long_only",
+            "confidence": 0.8,
+            "structure_high": 77_400.0,
+            "structure_low": 76_200.0,
+            "swing_highs": [],
+            "swing_lows": [],
+        }
+    })
+    up = build_user_prompt(snap)
+    assert "铁律提醒" not in up
+    assert "否则该方案废弃" not in up
+
+
+def test_user_prompt_low_confidence_skips_reference_note():
+    """置信度 < 60% 时不附加参考提示，避免 AI 对不确定结构过度关注。"""
     snap = _minimal_snapshot({
         "market_structure": {
             "direction": "bullish",
@@ -185,11 +238,11 @@ def test_user_prompt_low_confidence_skips_reverse_rule():
         }
     })
     up = build_user_prompt(snap)
-    assert "铁律提醒" not in up
+    assert "参考提示" not in up
 
 
-def test_user_prompt_ranging_direction_not_forcing_reverse_rule():
-    """震荡结构不应触发'必须顺势'铁律，即使置信度高。"""
+def test_user_prompt_ranging_direction_not_forcing_reference_note():
+    """震荡结构不触发参考提示，避免误导 AI 强行选边。"""
     snap = _minimal_snapshot({
         "market_structure": {
             "direction": "ranging",
@@ -203,7 +256,7 @@ def test_user_prompt_ranging_direction_not_forcing_reverse_rule():
         }
     })
     up = build_user_prompt(snap)
-    assert "铁律提醒" not in up
+    assert "参考提示" not in up
     assert "震荡结构" in up
 
 
@@ -224,22 +277,29 @@ def _event(ms_alignment: str = "", ms_direction: str = "bullish") -> AlertEvent:
     )
 
 
-def test_email_subject_aligned_adds_success_tag():
+def test_email_subject_aligned_uses_short_term_tag():
+    """Commit 6.5: aligned 用"⚡短线顺势"而非"✓顺势"，
+    明确标签只表达"与 1h 短线结构的关系"，不暗示全局方向正确性。"""
     subj = _build_subject(_event(ms_alignment="aligned"))
-    assert "✓顺势" in subj
+    assert "⚡短线顺势" in subj
     assert "A级做多" in subj
 
 
-def test_email_subject_conflict_adds_warning_tag():
+def test_email_subject_conflict_uses_multi_dim_tag():
+    """Commit 6.5: conflict 用"🔄多维博弈"而非"⚠逆势"。
+    逆 1h 结构的多维共振方案往往是高 R:R 机会（分发末端反弹等），
+    不应用"⚠"暗示危险/差。"""
     subj = _build_subject(_event(ms_alignment="conflict"))
-    assert "⚠逆势" in subj
+    assert "🔄多维博弈" in subj
+    # 明确去除旧的负面措辞
+    assert "⚠逆势" not in subj
 
 
 def test_email_subject_no_alignment_no_extra_tag():
     subj = _build_subject(_event(ms_alignment=""))
-    # 既无 ✓ 也无 ⚠
-    assert "顺势" not in subj
-    assert "逆势" not in subj
+    # 既无 ⚡ 也无 🔄（但基础符号可能在其他地方）
+    assert "短线顺势" not in subj
+    assert "多维博弈" not in subj
     # 但基础信息仍完整
     assert "A级做多" in subj
     assert "BTC" in subj
@@ -247,5 +307,5 @@ def test_email_subject_no_alignment_no_extra_tag():
 
 def test_email_subject_neutral_alignment_no_extra_tag():
     subj = _build_subject(_event(ms_alignment="neutral"))
-    assert "顺势" not in subj
-    assert "逆势" not in subj
+    assert "短线顺势" not in subj
+    assert "多维博弈" not in subj
