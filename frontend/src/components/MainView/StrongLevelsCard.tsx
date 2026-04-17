@@ -8,18 +8,20 @@ import type { KeyLevelV2 } from "@/lib/types";
 /**
  * 强支撑/强阻力白话卡片
  *
- * 展示从近到远的 TOP-3 强位，面向小白：
+ * 展示近/中/远三段各 1 个代表位（TOP 3），面向小白：
  *   - 星级 + 进度条直观表达"多强"
  *   - summarizeSources 归一化标签表达"为什么强"
- *   - test_count / sweep_usd / state_ts 包装成白话"历史验证"
+ *   - bounce_count / test_count / sweep_usd 包装成白话"历史验证"
  *
- * 选位策略：
- *   1) 先取 tier ∈ {S, A}，按距离从近到远
- *   2) 不足 3 个则补 tier B
- *   3) 再不足显示空态提示（避免用远位误导小白）
+ * 选位策略（按"距离段"分桶，避免近位把远位挤掉）：
+ *   桶 near [0, 1.5%]  ── 短线即时反应
+ *   桶 mid  [1.5%, 4%] ── 当日挑战位
+ *   桶 far  [4%, 10%]  ── 波段反弹/突破目标
+ *   每桶：tier ∈ {S, A} 优先，按 final_score 取最高；无则降级 B（加"参考"徽标）
+ *   桶完全空 → 不占位，显示"该距离段暂无强位"
  *
- * Phase 2 后端补齐 final_score / historical_validity / bounce_count 后，
- * 排序与"历史验证"文案会自动升级（fallback 到当前字段不中断）。
+ * 后端 final_score / historical_validity / bounce_count 通过 displayScore /
+ * historyBrief 自动 fallback，不可用时退回 confluence_score / test_count。
  */
 
 const STATE_TEXT: Record<string, { text: string; color: string }> = {
@@ -31,23 +33,96 @@ const STATE_TEXT: Record<string, { text: string; color: string }> = {
   flipped: { text: "已翻转", color: "text-purple-400" },
 };
 
-function pickTop(levels: KeyLevelV2[], side: "support" | "resistance", n = 3): KeyLevelV2[] {
+type Bucket = "near" | "mid" | "far";
+
+const BUCKET_DEFS: Array<{
+  key: Bucket;
+  minPct: number;
+  maxPct: number;
+  label: string;
+  hint: string;
+  dotColor: string;
+  textColor: string;
+  bgColor: string;
+}> = [
+  {
+    key: "near",
+    minPct: 0,
+    maxPct: 1.5,
+    label: "近距",
+    hint: "0~1.5% 短线即时反应位",
+    dotColor: "bg-sky-400",
+    textColor: "text-sky-300",
+    bgColor: "bg-sky-500/10",
+  },
+  {
+    key: "mid",
+    minPct: 1.5,
+    maxPct: 4.0,
+    label: "中距",
+    hint: "1.5%~4% 当日挑战位",
+    dotColor: "bg-violet-400",
+    textColor: "text-violet-300",
+    bgColor: "bg-violet-500/10",
+  },
+  {
+    key: "far",
+    minPct: 4.0,
+    maxPct: 10.0,
+    label: "远距",
+    hint: "4%~10% 波段反弹/突破目标",
+    dotColor: "bg-orange-400",
+    textColor: "text-orange-300",
+    bgColor: "bg-orange-500/10",
+  },
+];
+
+interface Picked {
+  level: KeyLevelV2 | null; // null 表示该距离段空缺
+  bucket: Bucket;
+  fallbackB: boolean; // 降级到 B 级（加"参考"徽标）
+}
+
+function tierRank(tier: string): number {
+  if (tier === "S") return 3;
+  if (tier === "A") return 2;
+  if (tier === "B") return 1;
+  return 0;
+}
+
+/** 按距离段分桶选位：每桶独立选 tier 最高 + final_score 最高的代表 */
+function pickByBuckets(levels: KeyLevelV2[], side: "support" | "resistance"): Picked[] {
   const sameSide = levels.filter((l) => l.side === side);
-  const sortByDistance =
-    side === "support"
-      ? (a: KeyLevelV2, b: KeyLevelV2) => b.price - a.price // 支撑：从近到远 = 价格从高到低
-      : (a: KeyLevelV2, b: KeyLevelV2) => a.price - b.price; // 阻力：从近到远 = 价格从低到高
+  const out: Picked[] = [];
 
-  const strong = sameSide
-    .filter((l) => l.strength_tier === "S" || l.strength_tier === "A")
-    .sort(sortByDistance);
-  if (strong.length >= n) return strong.slice(0, n);
+  for (const b of BUCKET_DEFS) {
+    const inBucket = sameSide.filter((l) => {
+      const abs = Math.abs(l.distance_pct);
+      return abs >= b.minPct && abs < b.maxPct;
+    });
+    if (inBucket.length === 0) {
+      out.push({ level: null, bucket: b.key, fallbackB: false });
+      continue;
+    }
 
-  const fillB = sameSide
-    .filter((l) => l.strength_tier === "B")
-    .sort(sortByDistance)
-    .slice(0, n - strong.length);
-  return [...strong, ...fillB];
+    const sorted = [...inBucket].sort((a, b2) => {
+      const rd = tierRank(b2.strength_tier) - tierRank(a.strength_tier);
+      if (rd !== 0) return rd;
+      const sd = displayScore(b2) - displayScore(a);
+      if (sd !== 0) return sd;
+      // 同分时取距离更近的
+      return Math.abs(a.distance_pct) - Math.abs(b2.distance_pct);
+    });
+    const pick = sorted[0];
+    const fallbackB = pick.strength_tier === "B";
+    out.push({ level: pick, bucket: b.key, fallbackB });
+  }
+
+  return out;
+}
+
+function getBucketDef(key: Bucket) {
+  return BUCKET_DEFS.find((b) => b.key === key)!;
 }
 
 function scoreToStars(score: number): number {
@@ -93,8 +168,6 @@ function historyBrief(lv: KeyLevelV2): string {
   return parts.join(" · ") + hvLabel;
 }
 
-const MEDAL = ["🥇", "🥈", "🥉"];
-
 export default function StrongLevelsCard({
   levels,
   price,
@@ -106,7 +179,8 @@ export default function StrongLevelsCard({
 }) {
   const [tab, setTab] = useState<"support" | "resistance">("support");
 
-  const picked = useMemo(() => pickTop(levels, tab, 3), [levels, tab]);
+  const picked = useMemo(() => pickByBuckets(levels, tab), [levels, tab]);
+  const validCount = picked.filter((p) => p.level !== null).length;
 
   const titleCn = tab === "support" ? "强支撑位" : "强阻力位";
   const sideColor = tab === "support" ? "text-green-400" : "text-red-400";
@@ -120,7 +194,7 @@ export default function StrongLevelsCard({
         <div className="flex items-center gap-2">
           <span className="text-base">💎</span>
           <h3 className="text-sm font-semibold text-slate-200">{titleCn}</h3>
-          <span className="text-[10px] text-slate-500">从近到远 · TOP 3</span>
+          <span className="text-[10px] text-slate-500">近 · 中 · 远 各 1 位</span>
         </div>
         <div className="flex gap-1 bg-slate-900/60 rounded-md p-0.5">
           <button
@@ -148,22 +222,33 @@ export default function StrongLevelsCard({
         </div>
       </div>
 
+      {/* 距离段说明条 */}
+      <div className="px-4 py-1.5 bg-slate-900/40 border-b border-slate-700/60 flex items-center gap-3 text-[10px] text-slate-500">
+        <span>💡 距离段：</span>
+        {BUCKET_DEFS.map((b) => (
+          <span key={b.key} className="inline-flex items-center gap-1" title={b.hint}>
+            <span className={`w-1.5 h-1.5 rounded-full ${b.dotColor}`} />
+            <span className={b.textColor}>{b.label}</span>
+            <span className="text-slate-600">{b.minPct}-{b.maxPct}%</span>
+          </span>
+        ))}
+      </div>
+
       {/* 内容 */}
       <div className={`divide-y divide-slate-700/50 ${bgTint}`}>
-        {picked.length === 0 ? (
+        {validCount === 0 ? (
           <div className="px-4 py-6 text-center text-xs text-slate-500">
-            当前暂无满足条件的{titleCn}
+            当前 ±10% 内暂无满足条件的{titleCn}
             <br />
             <span className="text-[10px] text-slate-600">
               （价格可能处于关键位真空区，注意控制杠杆）
             </span>
           </div>
         ) : (
-          picked.map((lv, i) => (
-            <LevelBlock
-              key={`${lv.side}-${lv.price}-${i}`}
-              level={lv}
-              rank={i}
+          picked.map((p, i) => (
+            <BucketBlock
+              key={`${tab}-${p.bucket}-${p.level?.price ?? "empty"}-${i}`}
+              picked={p}
               price={price}
               coin={coin}
               sideColor={sideColor}
@@ -176,16 +261,62 @@ export default function StrongLevelsCard({
   );
 }
 
+function BucketBlock({
+  picked,
+  price,
+  coin,
+  sideColor,
+  barColor,
+}: {
+  picked: Picked;
+  price: number;
+  coin: string;
+  sideColor: string;
+  barColor: string;
+}) {
+  const bucketDef = getBucketDef(picked.bucket);
+
+  if (picked.level === null) {
+    // 距离段空缺：仍显示标签行，告知用户"该段无强位"
+    return (
+      <div className="px-4 py-2 flex items-center gap-2 opacity-60">
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] ${bucketDef.bgColor} ${bucketDef.textColor} shrink-0`}
+          title={bucketDef.hint}
+        >
+          <span className={`inline-block w-1.5 h-1.5 rounded-full ${bucketDef.dotColor} mr-1 align-middle`} />
+          {bucketDef.label}
+        </span>
+        <span className="text-[11px] text-slate-500">该距离段暂无强位（跳过）</span>
+      </div>
+    );
+  }
+
+  return (
+    <LevelBlock
+      level={picked.level}
+      bucketDef={bucketDef}
+      fallbackB={picked.fallbackB}
+      price={price}
+      coin={coin}
+      sideColor={sideColor}
+      barColor={barColor}
+    />
+  );
+}
+
 function LevelBlock({
   level,
-  rank,
+  bucketDef,
+  fallbackB,
   price,
   coin,
   sideColor,
   barColor,
 }: {
   level: KeyLevelV2;
-  rank: number;
+  bucketDef: (typeof BUCKET_DEFS)[number];
+  fallbackB: boolean;
   price: number;
   coin: string;
   sideColor: string;
@@ -201,9 +332,15 @@ function LevelBlock({
 
   return (
     <div className="px-4 py-3">
-      {/* 第一行：奖牌 + 价格 + 距离 + 星级 */}
+      {/* 第一行：距离段徽标 + 价格 + 距离 + 星级 */}
       <div className="flex items-center gap-3 mb-1.5">
-        <span className="text-lg shrink-0 w-6 text-center">{MEDAL[rank] ?? "•"}</span>
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] ${bucketDef.bgColor} ${bucketDef.textColor} shrink-0 inline-flex items-center gap-1`}
+          title={bucketDef.hint}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${bucketDef.dotColor}`} />
+          {bucketDef.label}
+        </span>
         <span className={`text-lg font-mono font-bold ${sideColor} shrink-0`}>
           {formatPrice(level.price, coin)}
         </span>
@@ -239,6 +376,14 @@ function LevelBlock({
         >
           {level.strength_tier}
         </span>
+        {fallbackB && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-slate-600/30 text-slate-400 shrink-0"
+            title="该距离段无 S/A 级强位，降级展示 B 级作参考"
+          >
+            参考
+          </span>
+        )}
       </div>
 
       {/* 进度条 */}
