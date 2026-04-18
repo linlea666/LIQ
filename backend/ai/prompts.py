@@ -569,8 +569,9 @@ def build_user_prompt(snapshot: dict) -> str:
     # 展开展示——让 AI 直接看到大单价格/规模，便于和关键位、清算簇做共振分析
     bid_walls = snapshot.get("orderbook_bid_walls", [])
     ask_walls = snapshot.get("orderbook_ask_walls", [])
+    # 空节友好降级：即使全为空也渲染章节 + 解释，避免 AI 把"无活跃大单"误报为"数据缺失"
+    lines.extend(["", "### 8d. 大单追踪 [数据源: Coinglass 大单监控·实时]"])
     if lo_buy > 0 or lo_sell > 0 or bid_walls or ask_walls:
-        lines.extend(["", "### 8d. 大单追踪 [数据源: Coinglass 大单监控·实时]"])
         if lo_buy > 0 or lo_sell > 0:
             lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: {_fmt_usd_for_prompt(lo_net)}")
             if lo_net > 0:
@@ -603,6 +604,16 @@ def build_user_prompt(snapshot: dict) -> str:
                 )
         else:
             lines.append("Top 卖方大单: 近期上方无活跃大额卖单挂单 → 机构压盘不显著，上行阻力主要来自清算簇/技术位")
+    else:
+        lines.append(
+            "当前无超阈值大单活跃（Coinglass 阈值: 现货≥$100K / 合约≥$1M）。"
+        )
+        lines.append(
+            "→ 非数据缺失，解读为常态信号：大资金观望 / 订单簿静默期 / 本周期无异常挂单"
+        )
+        lines.append(
+            "→ 此时 §6 聚合深度（买卖力差）与 §1 清算簇/ §9g 关键位仍是有效的阻力/支撑依据"
+        )
 
     w_alerts = snapshot.get("whale_hl_alerts_count", 0)
     w_transfers = snapshot.get("whale_transfers_count", 0)
@@ -612,8 +623,16 @@ def build_user_prompt(snapshot: dict) -> str:
     w_outflow = snapshot.get("whale_transfer_outflow_usd", 0.0)
     w_net = snapshot.get("whale_transfer_net_usd", 0.0)
     w_top = snapshot.get("whale_top_transfers", [])
-    if w_alerts > 0 or w_transfers > 0 or hl_positions:
-        lines.extend(["", "### 8e. 巨鲸追踪 [链上+Hyperliquid]"])
+    # 空节友好降级：章节始终渲染，避免 AI 把"无巨鲸活动"误报为"数据缺失"
+    lines.extend(["", "### 8e. 巨鲸追踪 [链上+Hyperliquid]"])
+    if not (w_alerts > 0 or w_transfers > 0 or hl_positions):
+        lines.append(
+            "近期无巨鲸活动采集到（Hyperliquid 无警报/持仓 + 链上无 >$1M 转账）。"
+        )
+        lines.append(
+            "→ 非数据缺失，解读为常态信号：大额资金冷静期 / 采集窗口尚短"
+        )
+    else:
         if w_alerts > 0:
             lines.append(f"Hyperliquid 巨鲸警报: {w_alerts}条")
 

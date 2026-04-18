@@ -51,10 +51,17 @@ def test_section_6_renders_only_aggregate_depth_and_points_to_section_8d():
     assert "§8d" in up
 
 
-def test_empty_large_orders_and_walls_skip_section_8d():
-    """大单和 walls 全空时 §8d 不应被渲染（避免空板块）。"""
+def test_empty_large_orders_and_walls_renders_friendly_fallback_in_section_8d():
+    """大单和 walls 全空时 §8d 仍应渲染章节+友好降级提示（避免 AI 误报为'数据缺失'）。
+
+    对应修复：此前冷启动/无活跃大单时整节不渲染，AI §八自检会列为"缺失数据(§8d)"。
+    现在：章节始终存在，空时渲染"无超阈值大单活跃→非缺失，常态信号"。
+    """
     up = build_user_prompt(_base_snapshot())
-    assert "### 8d. 大单追踪" not in up
+    assert "### 8d. 大单追踪" in up
+    assert "无超阈值大单活跃" in up
+    assert "非数据缺失" in up
+    assert "常态信号" in up
 
 
 def test_populated_walls_render_in_section_8d_with_distance_to_price():

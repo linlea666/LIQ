@@ -132,6 +132,50 @@ def test_prompt_tp1_tp2_semantic_labels():
     assert "TP2=远目标" in prompt or "TP2远" in prompt
 
 
+def test_section_8e_empty_renders_friendly_fallback():
+    """§8e 无任何巨鲸活动时应渲染章节+降级提示（避免 AI 误报为'数据缺失'）。"""
+    snapshot = {
+        "coin": "BTC",
+        "price": 77000,
+        "whale_hl_alerts_count": 0,
+        "whale_transfers_count": 0,
+        "whale_net_direction": "",
+        "whale_hl_positions": [],
+        "whale_transfer_inflow_usd": 0,
+        "whale_transfer_outflow_usd": 0,
+        "whale_transfer_net_usd": 0,
+        "whale_top_transfers": [],
+    }
+    up = build_user_prompt(snapshot)
+    assert "### 8e. 巨鲸追踪" in up
+    assert "近期无巨鲸活动采集到" in up
+    assert "非数据缺失" in up
+    assert "常态信号" in up
+
+
+def test_section_8e_populated_renders_without_fallback():
+    """§8e 有活跃数据时不应出现降级提示。"""
+    snapshot = {
+        "coin": "BTC",
+        "price": 77000,
+        "whale_hl_alerts_count": 2,
+        "whale_transfers_count": 3,
+        "whale_net_direction": "充入交易所(看跌)",
+        "whale_transfer_inflow_usd": 5_000_000,
+        "whale_transfer_outflow_usd": 1_000_000,
+        "whale_transfer_net_usd": 4_000_000,
+        "whale_top_transfers": [
+            {"direction": "inflow", "amount_usd": 5_000_000,
+             "from_label": "wallet", "to_label": "binance exchange"},
+        ],
+    }
+    up = build_user_prompt(snapshot)
+    assert "### 8e. 巨鲸追踪" in up
+    assert "近期无巨鲸活动采集到" not in up
+    assert "Hyperliquid 巨鲸警报: 2条" in up
+    assert "充入交易所" in up
+
+
 def test_system_prompt_tp_iron_law():
     """系统提示应含 TP1/TP2 语义铁律 + R:R 以 TP2 为准。"""
     from ai.prompts import build_system_prompt
