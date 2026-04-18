@@ -472,28 +472,16 @@ def build_user_prompt(snapshot: dict) -> str:
     bid_tot = float(snapshot.get("orderbook_bid_total_usd") or 0)
     ask_tot = float(snapshot.get("orderbook_ask_total_usd") or 0)
     ob_spread = float(snapshot.get("orderbook_spread_pct") or 0)
+    # §6 只展示"聚合深度"——这是 Coinglass 订单簿快照的真实产出
+    # 大单/墙体详情统一移到 §8d「大单追踪」，避免同一份 large_orders 数据
+    # 在两个板块重复展示造成 AI 困惑
     lines.extend([
         "",
-        "### 6. 订单簿深度 [Coinglass聚合·多交易所]",
+        "### 6. 订单簿聚合深度 [数据源: Coinglass · 聚合 Binance/OKX/Bybit 订单簿快照]",
         f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {ob_spread:+.2f}%",
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
-        "说明: 聚合深度来自 Binance/OKX/Bybit 订单簿快照。",
+        "说明: 本节仅含聚合深度总额。具体的大额挂单/墙体请参见 §8d「大单追踪」。",
     ])
-    bid_walls = snapshot.get("orderbook_bid_walls", [])
-    if bid_walls:
-        lines.append("主要买墙(超阈值):")
-        for w in bid_walls:
-            lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
-    else:
-        # 空值必须给 AI 可消费的信息，而不是只留 header 让它判"数据缺失"
-        lines.append("主要买墙: 无超阈值(≥50 BTC/单)大单 → 当前下方深度较分散，无明显机构承接墙")
-    ask_walls = snapshot.get("orderbook_ask_walls", [])
-    if ask_walls:
-        lines.append("主要卖墙(超阈值):")
-        for w in ask_walls:
-            lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
-    else:
-        lines.append("主要卖墙: 无超阈值(≥50 BTC/单)大单 → 当前上方抛压分散，无明显机构压盘墙")
 
     lines.extend([
         "",
@@ -573,13 +561,44 @@ def build_user_prompt(snapshot: dict) -> str:
     lo_buy = snapshot.get("large_orders_buy_count", 0)
     lo_sell = snapshot.get("large_orders_sell_count", 0)
     lo_net = snapshot.get("large_orders_net_usd", 0)
-    if lo_buy > 0 or lo_sell > 0:
-        lines.extend(["", "### 8d. 大单追踪 [实时]"])
-        lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: {_fmt_usd_for_prompt(lo_net)}")
-        if lo_net > 0:
-            lines.append(f"  大资金偏向: 买入为主(净流入)")
-        elif lo_net < 0:
-            lines.append(f"  大资金偏向: 卖出为主(净流出)")
+    # 注：§6 的 orderbook_*_walls 本质上就是这份 large_orders 按方向聚合后的 Top 10
+    # 展开展示——让 AI 直接看到大单价格/规模，便于和关键位、清算簇做共振分析
+    bid_walls = snapshot.get("orderbook_bid_walls", [])
+    ask_walls = snapshot.get("orderbook_ask_walls", [])
+    if lo_buy > 0 or lo_sell > 0 or bid_walls or ask_walls:
+        lines.extend(["", "### 8d. 大单追踪 [数据源: Coinglass 大单监控·实时]"])
+        if lo_buy > 0 or lo_sell > 0:
+            lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: {_fmt_usd_for_prompt(lo_net)}")
+            if lo_net > 0:
+                lines.append(f"  大资金偏向: 买入为主(净流入)")
+            elif lo_net < 0:
+                lines.append(f"  大资金偏向: 卖出为主(净流出)")
+
+        if bid_walls:
+            lines.append("Top 买方大单（按金额排序）:")
+            for w in bid_walls:
+                price_val = w.get("price", 0)
+                usd_val = w.get("size_usd", 0)
+                rel_pct = ((price_val - price) / price * 100) if price > 0 else 0
+                lines.append(
+                    f"  - ${price_val:,.1f} (距现价 {rel_pct:+.2f}%): "
+                    f"{_fmt_usd_for_prompt(usd_val)}"
+                )
+        else:
+            lines.append("Top 买方大单: 近期下方无活跃大额买单挂单 → 机构承接意愿分散，下跌时缓冲有限")
+
+        if ask_walls:
+            lines.append("Top 卖方大单（按金额排序）:")
+            for w in ask_walls:
+                price_val = w.get("price", 0)
+                usd_val = w.get("size_usd", 0)
+                rel_pct = ((price_val - price) / price * 100) if price > 0 else 0
+                lines.append(
+                    f"  - ${price_val:,.1f} (距现价 {rel_pct:+.2f}%): "
+                    f"{_fmt_usd_for_prompt(usd_val)}"
+                )
+        else:
+            lines.append("Top 卖方大单: 近期上方无活跃大额卖单挂单 → 机构压盘不显著，上行阻力主要来自清算簇/技术位")
 
     w_alerts = snapshot.get("whale_hl_alerts_count", 0)
     w_transfers = snapshot.get("whale_transfers_count", 0)

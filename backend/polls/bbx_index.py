@@ -56,6 +56,16 @@ _CHANGE_PCT_MAP: list[tuple[str, str]] = [
 _BBX_COVERAGE_WARN_THRESHOLD = 0.80
 _BBX_PREV_MISSING: set[str] = set()  # 仅在失联集合变化时 WARN，避免稳定失联刷屏
 
+# 覆盖率分母：只统计"本应由 BBX 填充"的字段，排除 MarketIndexData 中已移除/未映射的
+# 历史遗留字段（btc_max_pain/btc_hashrate/usdt_market_cap/stablecoin_dominance/
+# okx_ls_ratio_btc/binance_ls_ratio_btc/raw_items）——这些字段代码里永远为 None，
+# 把它们算进分母会让覆盖率永久虚低、触发假告警。
+_BBX_MAPPABLE_FIELDS: frozenset[str] = (
+    frozenset(f for _, f in _DIRECT_MAP)
+    | frozenset(f for _, f in _CHANGE_PCT_MAP)
+    | frozenset({"exchange_btc_change_24h"})
+)
+
 
 async def poll_bbx_index(
     bbx: BBXSource,
@@ -81,6 +91,8 @@ async def poll_bbx_index(
         val = bbx.get_change_pct(bbx_key)
         if val is not None:
             setattr(mi, mi_field, val)
+        else:
+            missing_keys.append(f"{bbx_key}→{mi_field}")
 
     _EX_BAL_KEYS = [
         "i:bnbbtchold:arkm", "i:okxbtchold:arkm",
@@ -90,10 +102,15 @@ async def poll_bbx_index(
     chg_valid = [c for c in chg_parts if c is not None]
     if chg_valid:
         mi.exchange_btc_change_24h = sum(chg_valid)
+    else:
+        missing_keys.append("exchange_btc_balance_changes→exchange_btc_change_24h")
 
-    total = len(mi.__fields__) - 1
-    populated = sum(1 for f in mi.__fields__ if getattr(mi, f) is not None and f != "ts")
-    logger.info("BBX → MarketIndexData | %d/%d fields populated", populated, total)
+    # 覆盖率按"可映射字段数"计算，不把未映射的历史遗留字段算进去
+    total = len(_BBX_MAPPABLE_FIELDS)
+    populated = sum(
+        1 for f in _BBX_MAPPABLE_FIELDS if getattr(mi, f, None) is not None
+    )
+    logger.info("BBX → MarketIndexData | %d/%d mappable fields populated", populated, total)
 
     coverage = populated / total if total > 0 else 1.0
     global _BBX_PREV_MISSING

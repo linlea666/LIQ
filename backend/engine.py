@@ -1348,7 +1348,11 @@ class Engine:
         return ccy in self._ai_running
 
     def _is_coin_data_ready(self, ccy: str) -> bool:
-        """判断某币种核心数据是否已就绪（ticker + K线 + 指标 + 清算 + OI + 资金费率）。"""
+        """判断某币种核心数据是否已就绪（ticker + K线 + 指标 + 清算 + OI + 资金费率）。
+
+        注：CPS（链上周期评分）为日级低频指标，首次计算可能需 1 小时以上，
+        不纳入此处硬性就绪门，由 `_has_cycle_data` 作为软指标供 auto_ai_loop 权衡。
+        """
         state = self._states.get(ccy)
         if not state or not state.ticker:
             return False
@@ -1364,8 +1368,22 @@ class Engine:
             return False
         return True
 
+    def _has_cycle_data(self, ccy: str) -> bool:
+        """软指标：CPS 是否已算出。BTC 才有；ETH/SOL 跳过。"""
+        if ccy != "BTC":
+            return True
+        state = self._states.get(ccy)
+        return bool(state and state.cycle_position is not None)
+
     async def _auto_ai_loop(self, interval_sec: int) -> None:
-        """定时自动触发 AI 分析（所有支持的币种）。"""
+        """定时自动触发 AI 分析（所有支持的币种）。
+
+        启动阶段策略：
+        1. 先等硬指标（ticker/K线/指标/清算/OI/资金费率）就绪，最多 5 分钟
+        2. 硬指标 OK 后若 CPS 仍未算出，再给它一个"优雅等待期"（最多额外 3 分钟），
+           避免冷启动首轮 AI 分析缺 CPS（上游 onchain poll 是 60min 间隔）
+        3. 优雅等待期满仍无 CPS 则降级触发，AI prompt 自带"§9e 未提供"fallback
+        """
         await asyncio.sleep(30)
         max_wait = 300
         waited = 30
@@ -1376,8 +1394,27 @@ class Engine:
             logger.info("Auto AI waiting for data readiness | coin=%s waited=%ds", default, waited)
             await asyncio.sleep(15)
             waited += 15
-        logger.info("Auto AI analysis loop started | interval=%ds data_ready=%s waited=%ds",
-                     interval_sec, self._is_coin_data_ready(default), waited)
+
+        # 硬指标 OK 后的 CPS 优雅等待：最多额外 180s，有就等、没有不死等
+        cps_grace_max = 180
+        cps_grace = 0
+        while self._running and cps_grace < cps_grace_max:
+            if self._has_cycle_data(default):
+                break
+            logger.info(
+                "Auto AI grace-wait for CPS | coin=%s waited=%ds (max=%ds)",
+                default, cps_grace, cps_grace_max,
+            )
+            await asyncio.sleep(30)
+            cps_grace += 30
+
+        logger.info(
+            "Auto AI analysis loop started | interval=%ds data_ready=%s cps_ready=%s waited=%ds",
+            interval_sec,
+            self._is_coin_data_ready(default),
+            self._has_cycle_data(default),
+            waited + cps_grace,
+        )
         while self._running:
             for ccy in self._settings.supported_coins:
                 if ccy in self._ai_running:

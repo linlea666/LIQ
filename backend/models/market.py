@@ -19,23 +19,13 @@ class CandleData(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class OrderBookLevel(BaseModel):
-    price: float
-    size: float
-    order_count: int = 0
-
-
-class OrderBookSnapshot(BaseModel):
-    """订单簿快照"""
-    coin: str
-    ts: int
-    asks: list[OrderBookLevel]
-    bids: list[OrderBookLevel]
-    source: str = "okx"
-
-
 class WallInfo(BaseModel):
-    """买卖墙信息"""
+    """买卖墙信息。
+
+    注：生产环境下 walls 的填充源是 Coinglass 大单追踪（large_orders），
+    不是订单簿档位聚合。`size` 字段为占位，`size_usd` 才是真实指标。
+    详见 engine._build_ai_snapshot 中的回填逻辑。
+    """
     price: float
     size: float
     size_usd: float = 0
@@ -43,7 +33,12 @@ class WallInfo(BaseModel):
 
 
 class OrderBookAnalysis(BaseModel):
-    """订单簿分析结果"""
+    """订单簿分析结果。
+
+    数据来源组合：
+    - `bid_total_usd / ask_total_usd / spread_pct`：Coinglass 聚合深度（多交易所）
+    - `bid_walls / ask_walls`：由 Coinglass 大单追踪 (large_orders) 回填，非订单簿档位
+    """
     coin: str
     ts: int
     bid_walls: list[WallInfo] = []
