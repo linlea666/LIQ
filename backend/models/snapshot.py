@@ -246,6 +246,11 @@ class AISnapshot(BaseModel):
     whale_transfers_count: int = 0
     whale_net_direction: str = ""
     whale_hl_positions: list[dict] = []
+    # 巨鲸链上转账 USD 流向（按 to_label/from_label=exchange 聚合）
+    whale_transfer_inflow_usd: float = 0
+    whale_transfer_outflow_usd: float = 0
+    whale_transfer_net_usd: float = 0
+    whale_top_transfers: list[dict] = []
 
     # Coinbase 溢价 + 稳定币 + 交易所OI排名
     coinbase_premium: float = 0

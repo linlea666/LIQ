@@ -1521,6 +1521,8 @@ class Engine:
         opt = state.option_max_pain
         lo = state.large_orders
 
+        whale_flows = self._calc_whale_transfer_flows(state.whale_data) if state.whale_data else {}
+
         ob_for_ai = state.orderbook
         if ob_for_ai and lo and lo.orders and not ob_for_ai.bid_walls and not ob_for_ai.ask_walls:
             from models.market import WallInfo
@@ -1582,6 +1584,10 @@ class Engine:
             whale_transfers_count=len(state.whale_data.transfers) if state.whale_data else 0,
             whale_net_direction=self._calc_whale_direction(state.whale_data) if state.whale_data else "",
             whale_hl_positions=self._build_hl_positions(state.whale_data, ccy),
+            whale_transfer_inflow_usd=whale_flows.get("inflow_usd", 0.0),
+            whale_transfer_outflow_usd=whale_flows.get("outflow_usd", 0.0),
+            whale_transfer_net_usd=whale_flows.get("net_usd", 0.0),
+            whale_top_transfers=whale_flows.get("top_transfers", []),
             coinbase_premium=state.coinbase_premium.current_premium if state.coinbase_premium else 0,
             coinbase_premium_trend=self._calc_cb_premium_trend(state.coinbase_premium),
             stablecoin_total_mcap=state.stablecoin_mcap.current_total if state.stablecoin_mcap else 0,
@@ -1610,6 +1616,11 @@ class Engine:
     def _calc_whale_direction(whale):
         from polls.macro import calc_whale_direction
         return calc_whale_direction(whale)
+
+    @staticmethod
+    def _calc_whale_transfer_flows(whale):
+        from polls.macro import calc_whale_transfer_flows
+        return calc_whale_transfer_flows(whale)
 
     @staticmethod
     def _build_hl_positions(whale, ccy):

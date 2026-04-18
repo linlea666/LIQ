@@ -410,24 +410,33 @@ def _calc_sniper_entries(
         if risk <= 0:
             continue
 
-        tp1 = current_price
-        if vp and vp.poc_price > entry:
-            tp1 = vp.poc_price
-        if resistances and resistances[0].price > entry:
-            tp1 = max(tp1, resistances[0].price)
-        tp1 = max(tp1, entry + risk * min_rr)
-
-        tp2 = tp1
+        # TP1: 近目标（部分止盈点）
+        # 上方最近的"有意义目标"：POC / 第一阻力 / 对侧第一清算簇
+        # 这三者取交集（均在 entry 上方），取最小者 = 价格最容易触及的第一站
+        tp1_candidates: list[float] = []
         if liq_map.clusters_above:
-            tp2 = liq_map.clusters_above[0].price_center
+            tp1_candidates.append(liq_map.clusters_above[0].price_center)
+        if vp and vp.poc_price > entry:
+            tp1_candidates.append(vp.poc_price)
+        if resistances and resistances[0].price > entry:
+            tp1_candidates.append(resistances[0].price)
+        if tp1_candidates:
+            tp1 = min(tp1_candidates)
+        else:
+            # 无可锚定近目标时，兜底为 1.5:1 R:R 位置（近目标最低要求）
+            tp1 = entry + risk * 1.5
+
+        # TP2: 远目标（吃满点）- 强制满足 min_sniper_rr
+        tp2 = max(tp1, entry + risk * min_rr)
 
         rr1 = (tp1 - entry) / risk
-        rr2 = (tp2 - entry) / risk if tp2 > entry else rr1
+        rr2 = (tp2 - entry) / risk
 
-        if rr1 < min_rr:
+        # 质量门：TP1 近目标至少 1.5:1（有部分止盈意义），TP2 远目标满足 min_rr
+        if rr1 < 1.5:
             continue
-        if rr2 < 1.5:
-            rr2 = rr1
+        if rr2 < min_rr:
+            continue
 
         entries.append(SniperEntry(
             direction="long",
@@ -443,7 +452,7 @@ def _calc_sniper_entries(
                 f"多头清算簇${cluster.total_usd / 1e6:.0f}M在${cluster.price_from:.0f}-${cluster.price_to:.0f}",
                 f"入场于清算簇下沿(price_from)+ATR缓冲，低处接多",
                 f"止损在{'真空区内' if sl_candidates else 'ATR外扩'}",
-                f"止盈指向对侧清算磁吸点",
+                f"TP1={'对侧清算磁吸/POC/第一阻力(近目标·部分止盈)' if tp1_candidates else '1.5:1 兜底'}，TP2=强制≥{min_rr:.1f}:1(远目标·吃满)",
             ],
         ))
 
@@ -467,24 +476,31 @@ def _calc_sniper_entries(
         if risk <= 0:
             continue
 
-        tp1 = current_price
-        if vp and vp.poc_price < entry:
-            tp1 = vp.poc_price
-        if supports and supports[0].price < entry:
-            tp1 = min(tp1, supports[0].price)
-        tp1 = min(tp1, entry - risk * min_rr)
-
-        tp2 = tp1
+        # TP1: 近目标（部分止盈点）
+        # 下方最近的"有意义目标"：POC / 第一支撑 / 对侧第一清算簇
+        # 这三者均在 entry 下方，取最大者 = 价格最容易触及的第一站
+        tp1_candidates: list[float] = []
         if liq_map.clusters_below:
-            tp2 = liq_map.clusters_below[0].price_center
+            tp1_candidates.append(liq_map.clusters_below[0].price_center)
+        if vp and vp.poc_price < entry:
+            tp1_candidates.append(vp.poc_price)
+        if supports and supports[0].price < entry:
+            tp1_candidates.append(supports[0].price)
+        if tp1_candidates:
+            tp1 = max(tp1_candidates)
+        else:
+            tp1 = entry - risk * 1.5
+
+        # TP2: 远目标（吃满点）- 强制满足 min_sniper_rr
+        tp2 = min(tp1, entry - risk * min_rr)
 
         rr1 = (entry - tp1) / risk
-        rr2 = (entry - tp2) / risk if tp2 < entry else rr1
+        rr2 = (entry - tp2) / risk
 
-        if rr1 < min_rr:
+        if rr1 < 1.5:
             continue
-        if rr2 < 1.5:
-            rr2 = rr1
+        if rr2 < min_rr:
+            continue
 
         entries.append(SniperEntry(
             direction="short",
@@ -500,11 +516,12 @@ def _calc_sniper_entries(
                 f"空头清算簇${cluster.total_usd / 1e6:.0f}M在${cluster.price_from:.0f}-${cluster.price_to:.0f}",
                 f"入场于清算簇上沿(price_to)-ATR缓冲，高处挂空",
                 f"止损在{'真空区内' if sl_candidates else 'ATR外扩'}",
-                f"止盈指向对侧清算磁吸点",
+                f"TP1={'对侧清算磁吸/POC/第一支撑(近目标·部分止盈)' if tp1_candidates else '1.5:1 兜底'}，TP2=强制≥{min_rr:.1f}:1(远目标·吃满)",
             ],
         ))
 
-    entries.sort(key=lambda e: e.rr_ratio_1, reverse=True)
+    # 按 rr_ratio_2（远目标 RR）排序：远目标 RR 反映狙击的潜力上限，更能区分方案质量
+    entries.sort(key=lambda e: e.rr_ratio_2, reverse=True)
     return entries[:6]
 
 
@@ -567,12 +584,13 @@ def _merge_kl_signals_into_sniper(
                 break
 
         if dup_idx is not None:
-            if new_entry.rr_ratio_1 > merged[dup_idx].rr_ratio_1:
+            # 去重时以远目标 RR（rr_ratio_2）为质量标准，和主函数排序口径保持一致
+            if new_entry.rr_ratio_2 > merged[dup_idx].rr_ratio_2:
                 merged[dup_idx] = new_entry
         else:
             merged.append(new_entry)
 
-    merged.sort(key=lambda e: e.rr_ratio_1, reverse=True)
+    merged.sort(key=lambda e: e.rr_ratio_2, reverse=True)
     return merged[:6]
 
 

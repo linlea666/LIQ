@@ -410,6 +410,58 @@ def calc_whale_direction(wd: WhaleData | None) -> str:
     return "中性"
 
 
+def calc_whale_transfer_flows(wd: WhaleData | None) -> dict:
+    """按 USD 金额聚合巨鲸转账流向，解决 AI 反馈"仅有笔数缺金额"的问题。
+
+    返回字段：
+    - inflow_usd: 流入交易所总额（to_label 包含 exchange）
+    - outflow_usd: 流出交易所总额（from_label 包含 exchange）
+    - net_usd: inflow - outflow（正 = 净充入交易所 = 偏空）
+    - top_transfers: 前 3 大转账详情（含方向/金额/交易所标签）
+    """
+    empty = {
+        "inflow_usd": 0.0,
+        "outflow_usd": 0.0,
+        "net_usd": 0.0,
+        "top_transfers": [],
+    }
+    if not wd or not wd.transfers:
+        return empty
+
+    inflow_usd = 0.0
+    outflow_usd = 0.0
+    enriched: list[dict] = []
+    for t in wd.transfers:
+        to_label = (t.to_label or "").lower()
+        from_label = (t.from_label or "").lower()
+        to_is_ex = "exchange" in to_label
+        from_is_ex = "exchange" in from_label
+        if to_is_ex and not from_is_ex:
+            direction = "inflow"
+            inflow_usd += t.amount_usd
+        elif from_is_ex and not to_is_ex:
+            direction = "outflow"
+            outflow_usd += t.amount_usd
+        elif to_is_ex and from_is_ex:
+            direction = "ex_to_ex"
+        else:
+            direction = "wallet_to_wallet"
+        enriched.append({
+            "direction": direction,
+            "amount_usd": t.amount_usd,
+            "from_label": t.from_label or "wallet",
+            "to_label": t.to_label or "wallet",
+        })
+
+    enriched.sort(key=lambda x: x["amount_usd"], reverse=True)
+    return {
+        "inflow_usd": round(inflow_usd, 2),
+        "outflow_usd": round(outflow_usd, 2),
+        "net_usd": round(inflow_usd - outflow_usd, 2),
+        "top_transfers": enriched[:3],
+    }
+
+
 def build_hl_positions(wd: WhaleData | None, ccy: str) -> list[dict]:
     if not wd or not wd.hl_positions:
         return []

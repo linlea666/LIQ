@@ -231,7 +231,11 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 
 ### 常见错误纠正（禁止犯）
 - **资金费率方向**：正费率=多头付钱给空头=**多头拥挤**（轧多风险）；负费率=空头付钱给多头=**空头拥挤**（轧空风险）。绝对不可写反。
-- **R:R 展示顺序**：§四每个方案须先展示 TP1 的 R:R（主目标），再展示 TP2 的 R:R（保守目标）。R:R≥1:{min_rr:.1f} 的达标判定以 TP1 为准。
+- **TP1 / TP2 语义铁律**：
+  - **TP1 = 近目标（部分止盈点）**：对侧清算磁吸 / POC / 第一阻力支撑，通常 R:R 在 1.5-2.5 区间，离入场价**近**
+  - **TP2 = 远目标（吃满点）**：强制 ≥ 1:{min_rr:.1f} 的终极目标，离入场价**远**
+  - 若出现 TP1 比 TP2 更远（价格上），一律判定为引擎数据异常，**严禁**原样输出到§四方案，应在§八「数据冲突」里标注并舍弃该方案
+  - R:R ≥ 1:{min_rr:.1f} 的硬约束**以 TP2 为准**（TP2 是负责兜底 R:R 的远目标）
 """
 
 
@@ -604,14 +608,48 @@ def build_user_prompt(snapshot: dict) -> str:
     w_transfers = snapshot.get("whale_transfers_count", 0)
     w_dir = snapshot.get("whale_net_direction", "")
     hl_positions = snapshot.get("whale_hl_positions", [])
+    w_inflow = snapshot.get("whale_transfer_inflow_usd", 0.0)
+    w_outflow = snapshot.get("whale_transfer_outflow_usd", 0.0)
+    w_net = snapshot.get("whale_transfer_net_usd", 0.0)
+    w_top = snapshot.get("whale_top_transfers", [])
     if w_alerts > 0 or w_transfers > 0 or hl_positions:
         lines.extend(["", "### 8e. 巨鲸追踪 [链上+Hyperliquid]"])
         if w_alerts > 0:
             lines.append(f"Hyperliquid 巨鲸警报: {w_alerts}条")
-        if w_transfers > 0:
-            lines.append(f"链上巨鲸转账: {w_transfers}笔")
+
+        # 链上转账：从"仅笔数"升级为"USD 流向 + Top 转账"
+        if w_transfers > 0 or abs(w_net) > 0 or w_top:
+            if w_inflow > 0 or w_outflow > 0:
+                lines.append(
+                    f"链上巨鲸转账: 共{w_transfers}笔 | "
+                    f"充入交易所 {_fmt_usd_for_prompt(w_inflow)} / "
+                    f"提出交易所 {_fmt_usd_for_prompt(w_outflow)} | "
+                    f"净流向 {_fmt_usd_for_prompt(w_net, signed=True)}"
+                )
+                if w_net > 1e7:
+                    lines.append("  → 净流入交易所 >$10M：巨鲸囤积到交易所，抛压意图明显(偏空)")
+                elif w_net < -1e7:
+                    lines.append("  → 净流出交易所 >$10M：巨鲸撤单到冷钱包，惜售囤币(偏多)")
+                elif w_net != 0:
+                    lines.append(f"  → 净流向规模较小，方向弱信号{'(偏空)' if w_net > 0 else '(偏多)'}")
+            else:
+                lines.append(f"链上巨鲸转账: {w_transfers}笔 (转账标签为钱包间转账，未涉及交易所充提)")
+            if w_top:
+                lines.append("Top 转账（按金额排序）:")
+                direction_zh = {
+                    "inflow": "充入交易所",
+                    "outflow": "提出交易所",
+                    "ex_to_ex": "交易所间调拨",
+                    "wallet_to_wallet": "钱包间转账",
+                }
+                for t in w_top:
+                    lines.append(
+                        f"  - {_fmt_usd_for_prompt(t.get('amount_usd', 0))} "
+                        f"{direction_zh.get(t.get('direction', ''), t.get('direction', ''))} "
+                        f"({t.get('from_label', '?')} → {t.get('to_label', '?')})"
+                    )
         if w_dir:
-            lines.append(f"巨鲸方向: {w_dir}")
+            lines.append(f"巨鲸笔数方向(按转账计数): {w_dir}")
         if hl_positions:
             long_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "long")
             short_usd = sum(p.get("size_usd", 0) for p in hl_positions if p.get("side") == "short")
@@ -1115,7 +1153,23 @@ def build_user_prompt(snapshot: dict) -> str:
             np_str = f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})"
             if np_chg_24h is not None:
                 np_str += f" | 24h变化: {_fmt_usd_for_prompt(np_chg_24h, signed=True)}"
+                # 附加变化占净持仓的百分比 + 显著性标签，帮助 AI 判断"微幅波动 vs 显著增减"
+                if np_latest != 0:
+                    chg_pct = (np_chg_24h / abs(np_latest)) * 100
+                    if abs(chg_pct) >= 5:
+                        tag = "**显著**"
+                    elif abs(chg_pct) >= 2:
+                        tag = "温和"
+                    else:
+                        tag = "微幅"
+                    np_str += f" ({chg_pct:+.1f}% {tag}{'增持' if np_chg_24h > 0 else '减持'})"
             lines.append(np_str)
+            # 方向语义解读：明确告诉 AI 这意味着什么
+            if np_trend:
+                if "上升" in np_trend or "多头增仓" in np_trend:
+                    lines.append("  → 多头持仓递增：看多燃料补充中，但注意需要现货/资金面共振才能续涨")
+                elif "下降" in np_trend or "多头减仓" in np_trend:
+                    lines.append("  → 多头持仓递减：多头离场或空头建仓，常见于高位派发或趋势减弱")
         elif "net_position" in pf:
             lines.append(f"净持仓(v2): ⚠ 采集失败（{pf['net_position']}），本次分析不含此维度")
         if nf_1h is not None:
@@ -1180,6 +1234,7 @@ def build_user_prompt(snapshot: dict) -> str:
 
     lines.append("")
     lines.append("**11a. 短线档方案（引擎狙击，距当前价 1-8%）**")
+    lines.append("*说明: TP1=近目标(部分止盈·清算磁吸/POC/第一阻力支撑)，TP2=远目标(吃满·满足 R:R≥1:{:.1f})*".format(min_rr))
     if sniper:
         for i, se in enumerate(sniper):
             d = se.get("direction", "")
@@ -1187,8 +1242,8 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"方案{i+1} [{d}] 距{dist_pct:.1f}%: "
                          f"入场${se.get('entry_price', 0):,.1f} "
                          f"止损${se.get('stop_loss', 0):,.1f} "
-                         f"TP1=${se.get('take_profit_1', 0):,.1f}(R:R {se.get('rr_ratio_1', 0):.1f}) "
-                         f"TP2=${se.get('take_profit_2', 0):,.1f}(R:R {se.get('rr_ratio_2', 0):.1f})")
+                         f"TP1近=${se.get('take_profit_1', 0):,.1f}(R:R {se.get('rr_ratio_1', 0):.1f}) "
+                         f"TP2远=${se.get('take_profit_2', 0):,.1f}(R:R {se.get('rr_ratio_2', 0):.1f})")
             for logic_line in se.get("logic", []):
                 lines.append(f"    - {logic_line}")
     else:
