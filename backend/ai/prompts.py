@@ -63,6 +63,15 @@ def build_system_prompt() -> str:
 
 ### CPS（周期评分 0-10）统一规则
 CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，为**日线级指标**，不可单独用于实时方向判断。
+
+**⚠ 刻度方向铁律（必读·禁止搞反）**：
+- CPS 是**反向刻度**：数值越**高** = 越接近周期**底部**（便宜，利多）；数值越**低** = 越接近周期**顶部**（贵，利空）
+- 档位映射：`≥8=周期底部区` / `5-7.9=折扣区` / `2-4.9=公允区` / `0.5-1.9=溢价区(偏贵)` / `<0.5=顶部区(极贵)`
+- **严禁**将 CPS=1 / 2 / 3 误读为"底部区"——这些是**偏贵或中性**档位
+- **严禁**将 CPS=8 / 9 误读为"顶部区"——这些是**底部区便宜档**
+- 判断"顺/逆周期"时以方向为准：CPS≥5 时做多=顺周期、做空=逆周期；CPS<2 时做空=顺周期、做多=逆周期
+
+**档位策略**：
 - **4-7（震荡区）**：清算磁吸权重上调、箱体/关键位反弹策略权重上调
 - **<2 或 >8（极端区）**：趋势概率高、级联踩踏风险上调；<2 时做空阶梯优先，≥6 时做多阶梯信心增强
 - **方向冲突**：CPS≥6 输出做空阶梯 或 CPS≤2 输出做多阶梯 → 标题加"⚠CPS方向冲突"，单层风险上限降至 2%
@@ -469,13 +478,22 @@ def build_user_prompt(snapshot: dict) -> str:
         f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {ob_spread:+.2f}%",
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
         "说明: 聚合深度来自 Binance/OKX/Bybit 订单簿快照。",
-        "主要买墙(超阈值):",
     ])
-    for w in snapshot.get("orderbook_bid_walls", []):
-        lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
-    lines.append("主要卖墙(超阈值):")
-    for w in snapshot.get("orderbook_ask_walls", []):
-        lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
+    bid_walls = snapshot.get("orderbook_bid_walls", [])
+    if bid_walls:
+        lines.append("主要买墙(超阈值):")
+        for w in bid_walls:
+            lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
+    else:
+        # 空值必须给 AI 可消费的信息，而不是只留 header 让它判"数据缺失"
+        lines.append("主要买墙: 无超阈值(≥50 BTC/单)大单 → 当前下方深度较分散，无明显机构承接墙")
+    ask_walls = snapshot.get("orderbook_ask_walls", [])
+    if ask_walls:
+        lines.append("主要卖墙(超阈值):")
+        for w in ask_walls:
+            lines.append(f"  - ${w.get('price', 0):,.1f}: {_fmt_usd_for_prompt(w.get('size_usd', 0))} ({w.get('order_count', 0)}单)")
+    else:
+        lines.append("主要卖墙: 无超阈值(≥50 BTC/单)大单 → 当前上方抛压分散，无明显机构压盘墙")
 
     lines.extend([
         "",
@@ -752,7 +770,25 @@ def build_user_prompt(snapshot: dict) -> str:
     if has_cps:
         lines.append("")
         lines.append("### 9e. 链上周期画像 [日级·BTC全局状态机]")
-        lines.append(f"周期评分(CPS): {cp['cps']:.1f}/10 → {cp.get('cps_label', '')}")
+        cps_val = cp['cps']
+        cps_label_val = cp.get('cps_label', '')
+        # CPS 是反向刻度：高分=底部便宜、低分=顶部贵
+        # AI 容易被"1/10 小数"常识误导，必须显式标注刻度方向 + 当前档位解读
+        if cps_val >= 8:
+            cps_intent = "偏多(便宜区·优先做多)"
+        elif cps_val >= 5:
+            cps_intent = "偏多(折扣区·多头有利)"
+        elif cps_val >= 2:
+            cps_intent = "中性(估值合理)"
+        elif cps_val >= 0.5:
+            cps_intent = "偏空(溢价区·多头谨慎)"
+        else:
+            cps_intent = "强空(顶部区·禁止追多)"
+        lines.append(f"周期评分(CPS): {cps_val:.1f}/10 → {cps_label_val}")
+        lines.append(
+            f"  刻度说明: 10=周期底部区(极便宜) / 0=顶部区(极贵)；"
+            f"当前 {cps_val:.1f} → {cps_intent}"
+        )
 
         mvrv_z = cp.get("mvrv_z_score")
         if mvrv_z is not None:

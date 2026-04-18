@@ -52,6 +52,11 @@ _CHANGE_PCT_MAP: list[tuple[str, str]] = [
 ]
 
 
+# BBX 字段覆盖率健康阈值（低于此比例则 WARNING，帮助及时发现上游数据退化）
+_BBX_COVERAGE_WARN_THRESHOLD = 0.80
+_BBX_PREV_MISSING: set[str] = set()  # 仅在失联集合变化时 WARN，避免稳定失联刷屏
+
+
 async def poll_bbx_index(
     bbx: BBXSource,
     states: dict[str, Any],
@@ -63,11 +68,14 @@ async def poll_bbx_index(
         return
 
     mi = MarketIndexData(ts=int(time.time()))
+    missing_keys: list[str] = []
 
     for bbx_key, mi_field in _DIRECT_MAP:
         val = bbx.get_float(bbx_key)
         if val is not None:
             setattr(mi, mi_field, val)
+        else:
+            missing_keys.append(f"{bbx_key}→{mi_field}")
 
     for bbx_key, mi_field in _CHANGE_PCT_MAP:
         val = bbx.get_change_pct(bbx_key)
@@ -83,8 +91,27 @@ async def poll_bbx_index(
     if chg_valid:
         mi.exchange_btc_change_24h = sum(chg_valid)
 
+    total = len(mi.__fields__) - 1
     populated = sum(1 for f in mi.__fields__ if getattr(mi, f) is not None and f != "ts")
-    logger.info("BBX → MarketIndexData | %d/%d fields populated", populated, len(mi.__fields__) - 1)
+    logger.info("BBX → MarketIndexData | %d/%d fields populated", populated, total)
+
+    coverage = populated / total if total > 0 else 1.0
+    global _BBX_PREV_MISSING
+    current_missing = set(missing_keys)
+    if coverage < _BBX_COVERAGE_WARN_THRESHOLD and current_missing != _BBX_PREV_MISSING:
+        logger.warning(
+            "BBX coverage degraded: %d/%d (%.0f%%) | missing %d fields: %s",
+            populated,
+            total,
+            coverage * 100,
+            len(missing_keys),
+            ", ".join(missing_keys) if len(missing_keys) <= 12 else
+            ", ".join(missing_keys[:12]) + f" ... (+{len(missing_keys) - 12} more)",
+        )
+        _BBX_PREV_MISSING = current_missing
+    elif coverage >= _BBX_COVERAGE_WARN_THRESHOLD and _BBX_PREV_MISSING:
+        logger.info("BBX coverage recovered to %.0f%% (%d/%d)", coverage * 100, populated, total)
+        _BBX_PREV_MISSING = set()
 
     for ccy in supported_coins:
         st = states[ccy]
