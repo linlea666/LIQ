@@ -111,6 +111,72 @@ def test_prompt_np_24h_change_pct_tag():
     assert "多头持仓递增" in prompt
 
 
+def test_prompt_np_unit_disclaimer_no_usd_symbol():
+    """净持仓单位修复：不再用 $ 符号渲染（避免 AI 把 coin 计数误解为 USD 金额）。
+
+    对应 AI 反馈："净持仓变化绝对值过小（$1万），参考价值低"
+    根因：Coinglass v2 net-position 单位为基础币 coin 计数，但旧 prompt 用 _fmt_usd_for_prompt 渲染。
+    """
+    snapshot = {
+        "coin": "BTC",
+        "price": 77000,
+        "net_position_latest": 1_500_000,
+        "net_position_trend": "上升(多头增仓)",
+        "net_position_change_24h": 120_000,
+    }
+    prompt = build_user_prompt(snapshot)
+    assert "净持仓(v2)" in prompt
+    # 必须含单位说明
+    assert "coin 计数" in prompt or "非 USD 金额" in prompt
+    # 必须指引 AI 以趋势+百分比为主
+    assert "趋势方向" in prompt and "百分比变化" in prompt
+    # 确认核心渲染不出现 "$1,500,000" 这种错误 USD 形式
+    assert "$1,500,000" not in prompt
+    assert "$120,000" not in prompt
+
+
+def test_prompt_kl_v2_table_renders_bounce_quality_and_breakout_stage():
+    """§9g 关键位表格应渲染 bounce_quality / breakout_stage 两列。
+
+    对应 AI 反馈："关键位状态机中的 bounce_quality 和 breakout_stage 字段为空"
+    根因：后端已计算这两个字段并塞进 kl.levels[i]，但旧 prompt 表格从未输出它们。
+    """
+    snapshot = {
+        "coin": "BTC",
+        "price": 77000,
+        "key_levels": {
+            "active_count": 2,
+            "levels": [
+                {
+                    "price": 76800, "side": "support", "state": "bounced",
+                    "strength_tier": "S", "confluence_score": 85, "source_count": 4,
+                    "cascade_risk": 0.0, "sweep_usd": 0, "sources": ["POC", "MA120"],
+                    "distance_pct": -0.3, "test_count": 2,
+                    "bounce_quality": "proactive", "breakout_stage": 0,
+                },
+                {
+                    "price": 77500, "side": "resistance", "state": "broken",
+                    "strength_tier": "A", "confluence_score": 72, "source_count": 3,
+                    "cascade_risk": 0.6, "sweep_usd": 0, "sources": ["liq_cluster"],
+                    "distance_pct": 0.6, "test_count": 1,
+                    "bounce_quality": "", "breakout_stage": 2,
+                },
+            ],
+            "signals": [],
+        },
+    }
+    prompt = build_user_prompt(snapshot)
+    # 表头必须含两列
+    assert "反弹质量" in prompt
+    assert "突破阶段" in prompt
+    # 主动吸筹渲染
+    assert "主动" in prompt
+    assert "量能≥1.5" in prompt
+    # stage2 回踩中渲染
+    assert "stage2" in prompt
+    assert "回踩中" in prompt
+
+
 def test_prompt_tp1_tp2_semantic_labels():
     """§11a 应明确标注 TP1近 / TP2远 + 说明行。"""
     snapshot = {

@@ -1033,8 +1033,19 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"突破蓄力: BB Squeeze {bz.get('squeeze_direction', '')} {bz.get('note', '')}")
 
         lines.append("")
-        lines.append("| 价位 | 级别 | 类型 | 状态 | 距当前 | 共振分 | 来源数 | 测试 | 扫取量 | 级联风险 | 来源 |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("| 价位 | 级别 | 类型 | 状态 | 反弹质量 | 突破阶段 | 距当前 | 共振分 | 来源数 | 测试 | 扫取量 | 级联风险 | 来源 |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        bq_cn = {
+            "proactive": "主动(量能≥1.5×·升档)",
+            "passive": "被动(量能<0.8×·降档)",
+            "": "-",
+        }
+        bs_cn = {
+            0: "-",
+            1: "stage1(<15m·禁追)",
+            2: "stage2(回踩中·观察)",
+            3: "stage3(已确认·可追)",
+        }
         for lv in kl.get("levels", [])[:15]:
             side_cn = "支撑" if lv.get("side") == "support" else "阻力"
             state_cn = {
@@ -1050,8 +1061,11 @@ def build_user_prompt(snapshot: dict) -> str:
             sweep_usd = lv.get("sweep_usd", 0)
             sweep_str = _fmt_usd_for_prompt(sweep_usd) if sweep_usd > 0 else "-"
             sources = ", ".join(lv.get("sources", [])[:3])
+            bq_str = bq_cn.get(lv.get("bounce_quality", ""), "-")
+            bs_str = bs_cn.get(lv.get("breakout_stage", 0), "-")
             lines.append(
                 f"| ${lv.get('price', 0):,.0f} | {tier} | {side_cn} | {state_cn} | "
+                f"{bq_str} | {bs_str} | "
                 f"{lv.get('distance_pct', 0):+.2f}% | {score:.0f} | {src_cnt} | "
                 f"{lv.get('test_count', 0)} | {sweep_str} | {cascade_str} | {sources} |"
             )
@@ -1169,20 +1183,26 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.extend(["", "### 9h. 净持仓 + 合约资金流 + TD序列"])
         if np_latest is not None:
             np_chg_24h = snapshot.get("net_position_change_24h")
-            np_str = f"净持仓(v2): {_fmt_usd_for_prompt(np_latest)} ({np_trend or ''})"
-            if np_chg_24h is not None:
-                np_str += f" | 24h变化: {_fmt_usd_for_prompt(np_chg_24h, signed=True)}"
-                # 附加变化占净持仓的百分比 + 显著性标签，帮助 AI 判断"微幅波动 vs 显著增减"
-                if np_latest != 0:
-                    chg_pct = (np_chg_24h / abs(np_latest)) * 100
-                    if abs(chg_pct) >= 5:
-                        tag = "**显著**"
-                    elif abs(chg_pct) >= 2:
-                        tag = "温和"
-                    else:
-                        tag = "微幅"
-                    np_str += f" ({chg_pct:+.1f}% {tag}{'增持' if np_chg_24h > 0 else '减持'})"
+            # Coinglass v2 net-position 单位为基础币计数（coin），非 USD
+            # → 绝对值对 AI 无直接参考价值，核心判断依据是"趋势方向 + 24h 百分比变化 + 显著性标签"
+            # 不再用 _fmt_usd_for_prompt() 渲染 raw 数值，避免 AI 误把"$1万"当做资金规模解读
+            np_str = f"净持仓(v2): {np_trend or '趋势待定'}"
+            if np_chg_24h is not None and np_latest != 0:
+                chg_pct = (np_chg_24h / abs(np_latest)) * 100
+                if abs(chg_pct) >= 5:
+                    tag = "**显著**"
+                elif abs(chg_pct) >= 2:
+                    tag = "温和"
+                else:
+                    tag = "微幅"
+                np_str += f" · 24h 变化 {chg_pct:+.1f}% {tag}{'增持' if np_chg_24h > 0 else '减持'}"
+            elif np_chg_24h is not None:
+                np_str += f" · 24h 变化量 {np_chg_24h:+,.0f} (基础币计数)"
             lines.append(np_str)
+            lines.append(
+                "  [数据说明] 数值单位为 Coinglass 合约净多空差 coin 计数（非 USD 金额），"
+                "核心解读以**趋势方向 + 百分比变化**为准，绝对数值仅作趋势判定输入"
+            )
             # 方向语义解读：明确告诉 AI 这意味着什么
             if np_trend:
                 if "上升" in np_trend or "多头增仓" in np_trend:
