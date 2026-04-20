@@ -779,13 +779,20 @@ export type NewsBriefUIStatus =
   | "circuit_break"
   | "ai_failed"
   | "unexpected_empty"
-  | "warming_up";
+  | "warming_up"
+  | "bootstrap";
 
 export interface NewsBriefCurrentResponse {
   ready: boolean;
   status: NewsBriefUIStatus;
   reason?: string;
   brief?: NewsBriefFull;
+}
+
+export interface NewsBriefHistoryResponse {
+  ready: boolean;
+  count: number;
+  items: NewsBriefFull[];
 }
 
 

@@ -575,7 +575,10 @@ async def news_brief_current():
         }
 
     model = (brief.model_used or "").strip()
-    if model == "skipped_no_events":
+    if model == "bootstrap":
+        ui_status = "bootstrap"
+        ui_reason = "首轮简报生成中·通常需 5-15 分钟（等 news_structurer enrich 完成）"
+    elif model == "skipped_no_events":
         ui_status = "circuit_break"
         ui_reason = "上游无新闻事件·已熔断（保护 AI 不编造）"
     elif model == "fallback":
@@ -593,6 +596,40 @@ async def news_brief_current():
         "status": ui_status,
         "reason": ui_reason,
         "brief": brief.model_dump(),
+    }
+
+
+@router.get("/news-brief/history")
+async def news_brief_history(
+    limit: int = Query(30, ge=1, le=200),
+    since_ts: Optional[int] = None,
+):
+    """D09 · 滚动新闻简报历史（供前端时间线回溯）
+
+    - limit: 返回条数上限（1~200）
+    - since_ts: 若提供，只返回 updated_at > since_ts 的版本
+
+    返回按 version 递增排序（最旧→最新），前端可自行反转或做增量加载。
+    单条 item 包含：version / updated_at / trigger / based_on_events_count /
+    tldr_cn / sections / tracked_themes / model_used / char_count /
+    generation_cost_ms / diff_from_prev_version。
+    """
+    try:
+        from processors.news_brief import load_history
+        briefs = load_history(limit=None)  # 先全量读，再按 since_ts + limit 裁剪
+    except Exception as e:
+        logger.warning("news-brief history endpoint failed: %s", e)
+        raise HTTPException(500, f"news_brief history unavailable: {e}")
+
+    if since_ts is not None:
+        briefs = [b for b in briefs if int(b.updated_at or 0) > int(since_ts)]
+    if limit > 0:
+        briefs = briefs[-limit:]
+
+    return {
+        "ready": True,
+        "count": len(briefs),
+        "items": [b.model_dump() for b in briefs],
     }
 
 

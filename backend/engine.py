@@ -541,6 +541,16 @@ class Engine:
         except Exception:
             logger.warning("[D07] news source registration failed", exc_info=True)
 
+        # 启动 Bootstrap Seed：优先从磁盘恢复最近一版简报（重启不丢），
+        # 否则写一个 model_used=bootstrap 的种子，让 D09 立即 ok、前端秒显
+        # "首轮生成中"，避免 run_news_tick Step 3 串行 enrich 期间用户看到
+        # 长时间的"预热中"空白页。
+        try:
+            from processors.news_brief import ensure_bootstrap_brief
+            ensure_bootstrap_brief()
+        except Exception:
+            logger.warning("[D09] ensure_bootstrap_brief failed", exc_info=True)
+
         def _get_ctx() -> dict:
             btc_state = self._states.get("BTC")
             price = 0.0

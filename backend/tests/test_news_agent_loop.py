@@ -12,7 +12,9 @@ from models.news_brief import NewsBrief, NewsBriefSection
 from models.news_event import AssetImpact, MarketEventSignal, RawNewsItem
 from processors.news_agent_loop import run_news_tick
 from processors.news_ledger import NewsLedger, reset_ledger
-from processors.news_brief import reset_current_brief, get_current_brief
+from processors.news_brief import (
+    reset_current_brief, get_current_brief, set_history_dir_for_tests,
+)
 from processors.signal_bus import SignalBus
 
 
@@ -100,12 +102,15 @@ def _make_sig(eid: str, ts: int, *, tier: str = "major", direction: str = "bulli
 # ── Tests ─────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def _reset_singletons():
+def _reset_singletons(tmp_path):
+    # 隔离 news_brief 历史文件到 tmp_path，避免污染 backend/data/
+    set_history_dir_for_tests(str(tmp_path))
     reset_ledger()
     reset_current_brief()
     yield
     reset_ledger()
     reset_current_brief()
+    set_history_dir_for_tests(None)
 
 
 class TestRunNewsTickBasics:

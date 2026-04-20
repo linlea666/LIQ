@@ -19,6 +19,7 @@ from __future__ import annotations
 import difflib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -509,16 +510,128 @@ def _bullet_lines(b: NewsBrief) -> list[str]:
 _CURRENT: Optional[NewsBrief] = None
 _CURRENT_LOCK = threading.Lock()
 
+# ── 历史持久化（与 ai_history.json 同目录同风格） ──────────────
+# 文件布局：data/news_brief_history.json 存 list[NewsBrief.model_dump()]，
+# 最多保留 MAX_HISTORY 条（按 version 递增追加，超量截断首部）。
+# 设计容量：按 brief_interval_sec=3600 算，200 条 ≈ 8 天覆盖，
+# 体积预估 ≤ 500KB，远低于 ai_history.json 的量级，安全。
+MAX_HISTORY = 200
+_HISTORY_FILE_NAME = "news_brief_history.json"
+_HISTORY_LOCK = threading.Lock()
+_HISTORY_DIR_OVERRIDE: Optional[str] = None  # 单测注入用
+
+
+def _resolve_history_path() -> str:
+    """解析 history 文件路径。
+    生产环境：backend/data/news_brief_history.json
+    单测：set_history_dir_for_tests() 覆盖目录
+    """
+    if _HISTORY_DIR_OVERRIDE:
+        return os.path.join(_HISTORY_DIR_OVERRIDE, _HISTORY_FILE_NAME)
+    here = os.path.dirname(os.path.abspath(__file__))  # backend/processors
+    data_dir = os.path.normpath(os.path.join(here, "..", "data"))
+    return os.path.join(data_dir, _HISTORY_FILE_NAME)
+
+
+def set_history_dir_for_tests(path: Optional[str]) -> None:
+    """测试注入历史目录（None → 恢复默认）。"""
+    global _HISTORY_DIR_OVERRIDE
+    _HISTORY_DIR_OVERRIDE = path
+
+
+def _load_history_raw() -> list[dict]:
+    """从磁盘读取原始 history list（损坏/不存在时返回 []）。"""
+    path = _resolve_history_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, list):
+            return raw
+        logger.warning("[D09] history file shape unexpected, resetting | path=%s", path)
+        return []
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("[D09] failed to load history: %s", e)
+        return []
+
+
+def _persist_history_locked(items: list[dict]) -> None:
+    """原子写入历史（调用方已持锁）。"""
+    path = _resolve_history_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, path)
+    except (OSError, TypeError) as e:
+        logger.warning("[D09] failed to persist history: %s", e)
+
+
+def load_history(limit: Optional[int] = None) -> list[NewsBrief]:
+    """读取历史 brief 列表（按 version 递增）。
+
+    limit=None → 全部；limit=N → 最近 N 条（按末尾取）。
+    解析失败的条目跳过，不影响其他记录。
+    """
+    with _HISTORY_LOCK:
+        raw = _load_history_raw()
+    briefs: list[NewsBrief] = []
+    for item in raw:
+        try:
+            briefs.append(NewsBrief(**item))
+        except Exception:
+            continue
+    briefs.sort(key=lambda b: (b.version, b.updated_at))
+    if limit is not None and limit > 0:
+        briefs = briefs[-limit:]
+    return briefs
+
+
+def append_to_history(brief: NewsBrief) -> None:
+    """把一条 brief 追加到历史；保留最近 MAX_HISTORY 条。
+
+    去重规则：同一 (version, updated_at) 不重复写入，避免 engine 重启
+    重新加载 current 再次 set 时把老版本又塞一次。
+    """
+    try:
+        dump = brief.model_dump()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[D09] history append dump failed: %s", e)
+        return
+    key = (int(brief.version or 0), int(brief.updated_at or 0))
+    with _HISTORY_LOCK:
+        raw = _load_history_raw()
+        # 同 key 去重（允许同 version 不同 updated_at 覆盖，例如 bootstrap→真 v1）
+        existing_keys = {
+            (int(it.get("version") or 0), int(it.get("updated_at") or 0))
+            for it in raw if isinstance(it, dict)
+        }
+        if key in existing_keys:
+            return
+        raw.append(dump)
+        if len(raw) > MAX_HISTORY:
+            raw = raw[-MAX_HISTORY:]
+        _persist_history_locked(raw)
+
 
 def get_current_brief() -> Optional[NewsBrief]:
     with _CURRENT_LOCK:
         return _CURRENT
 
 
-def set_current_brief(brief: NewsBrief) -> None:
+def set_current_brief(brief: NewsBrief, *, persist: bool = True) -> None:
+    """设置当前简报；默认同时追加到历史文件。
+
+    persist=False 场景：单测 / 内部 bootstrap 种子（我们希望用户真正的 v1
+    覆盖 bootstrap 时才落一个真实记录）。
+    """
     global _CURRENT
     with _CURRENT_LOCK:
         _CURRENT = brief
+    if persist:
+        append_to_history(brief)
 
 
 def reset_current_brief() -> None:
@@ -529,13 +642,70 @@ def reset_current_brief() -> None:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Bootstrap Seed（解决"启动 15 分钟预热中"体验问题）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def ensure_bootstrap_brief() -> NewsBrief:
+    """启动阶段若内存/历史都无 brief，写入一个"首轮生成中"的种子版本。
+
+    目的：
+      - 前端 /news-brief 页面不再显示"预热中"空白 10~15 分钟
+      - D09 立刻 mark 为 ok（note=bootstrap_pending），而不是 pending
+      - 首次真实 brief 生成时自然覆盖（更高的 version 单调递增）
+
+    返回：设置后的 brief（若已有 current，则直接返回现有的，不覆盖）。
+    """
+    existing = get_current_brief()
+    if existing is not None:
+        return existing
+
+    # 尝试从磁盘恢复最新一条（重启场景）
+    hist = load_history(limit=1)
+    if hist:
+        latest = hist[-1]
+        with _CURRENT_LOCK:
+            global _CURRENT
+            _CURRENT = latest
+        try:
+            _mark_d09(latest)
+        except Exception:
+            logger.debug("[D09] mark restored brief failed", exc_info=True)
+        logger.info(
+            "[D09] restored brief from history | version=%d age=%ds",
+            latest.version, max(0, int(time.time()) - int(latest.updated_at or 0)),
+        )
+        return latest
+
+    # 真·冷启动：发种子
+    seed = NewsBrief(
+        version=1,
+        updated_at=int(time.time()),
+        ts_range_end=int(time.time()),
+        sections=_normalize_sections(None),
+        tldr_cn="首轮简报生成中·通常需 5-15 分钟（等 news_structurer 完成首批事件 enrich）",
+        based_on_events_count=0,
+        model_used="bootstrap",
+        update_trigger="scheduled",
+    )
+    set_current_brief(seed, persist=False)  # bootstrap 不落历史，等真 v1 覆盖
+    try:
+        _mark_d09(seed)
+    except Exception:
+        logger.debug("[D09] mark bootstrap failed", exc_info=True)
+    logger.info("[D09] bootstrap brief seeded | version=%d", seed.version)
+    return seed
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Decision Tracker
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _derive_d09_status(brief: NewsBrief, bullet_total: int) -> tuple[str, str]:
     """根据 brief 状态派生 D09 的 (status, note)。
 
-    语义区分（P0-3 熔断后新增，避免"上游空 = 系统故障"的误报）：
+    语义区分（避免"上游空 = 系统故障"的误报 + 启动体验）：
+      - bootstrap          → ok / note=bootstrap_pending
+        启动种子，避免 D09 pending 15+ 分钟造成误判（首轮生成前）
       - skipped_no_events  → ok / note=upstream_empty
         熔断是健康的保护行为，禁止挂 warn（避免告警疲劳）
       - fallback           → warn / note=ai_call_failed
@@ -544,6 +714,8 @@ def _derive_d09_status(brief: NewsBrief, bullet_total: int) -> tuple[str, str]:
       - 其他未知情况       → warn / note=unexpected_empty
     """
     model = (brief.model_used or "").strip()
+    if model == "bootstrap":
+        return "ok", "bootstrap_pending"
     if model == "skipped_no_events":
         return "ok", "upstream_empty"
     if model == "fallback":
