@@ -729,17 +729,69 @@ async def list_te_reports(max_days: int = Query(30, ge=1, le=180)):
     try:
         from monitoring.te_eval import list_reports
         from monitoring.te_shadow import list_available_dates, get_te_shadow_logger
+        from monitoring import te_ai_log as ai_log_mod
         reports = list_reports(max_days=max_days)
         shadow_dates = list_available_dates(max_days=max_days)
         logger_stats = get_te_shadow_logger().stats()
+        ai_stats = ai_log_mod.stats()
         return {
             "reports": reports,
             "shadow_dates": shadow_dates,
             "logger_stats": logger_stats,
+            "ai_log_stats": ai_stats,
         }
     except Exception as e:
         logger.warning("list te reports failed: %s", e)
         raise HTTPException(500, f"te report listing failed: {e}")
+
+
+@router.get("/te/ai_interpret/{coin}")
+async def te_ai_interpret(coin: str, force: bool = Query(False)):
+    """P0-C · 趋势衰竭模块 · AI 解读（DeepSeek Reasoner 驱动）
+
+    行为：
+      - 读取当前 engine 里最新的 TrendExhaustionSignal
+      - 按信号指纹查缓存（30 min TTL），命中则返回缓存结果
+      - 未命中或 force=true 则调用 AI，结果入缓存 + shadow log
+      - 异常（AI 未配置 / 解析失败）也 200 返回，带 error 字段由前端展示
+
+    返回模型：models.te_interpretation.TEAIInterpretation（完整 model_dump）
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin_upper = coin.upper()
+    state = _engine._states.get(coin_upper)
+    if not state or not state.trend_exhaustion:
+        raise HTTPException(503, f"No trend_exhaustion signal for {coin_upper}")
+
+    signal_dict = state.trend_exhaustion.model_dump()
+    price = float(state.ticker.last) if state.ticker else 0.0
+    atr = float(state.atr or 0.0)
+
+    from ai.te_interpreter import get_te_interpreter
+    from monitoring.te_ai_log import log_interpretation
+
+    interpreter = get_te_interpreter()
+    try:
+        result = await interpreter.interpret(
+            coin=coin_upper,
+            signal_dict=signal_dict,
+            price=price,
+            atr=atr,
+            force=force,
+        )
+    except Exception as e:
+        logger.exception("[TE-AI] interpret top-level failure coin=%s", coin_upper)
+        raise HTTPException(500, f"ai interpret failed: {e}")
+
+    # 仅非缓存命中 + 非错误 时落盘（缓存命中已在之前落过）
+    try:
+        if not result.cache_hit and result.error is None:
+            log_interpretation(result, signal_dict, price)
+    except Exception:
+        logger.debug("[TE-AI] shadow log failed", exc_info=True)
+
+    return result.model_dump()
 
 
 @router.get("/te/reports/{date}")

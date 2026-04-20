@@ -15,6 +15,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMarketStore } from "@/stores/marketStore";
+import TEAIInterpretBlock from "./TEAIInterpretBlock";
 import type {
   TEConsensusLevel,
   TEDirection,
@@ -238,18 +239,39 @@ function TFCard({
 
       {expanded && state.sub_scores.length > 0 && (
         <div className="mt-3 pt-2 border-t border-slate-700/60 space-y-1 text-xs">
-          {state.sub_scores.map((s) => (
-            <div key={s.key} className="flex justify-between">
-              <div className="flex-1 min-w-0">
-                <span className="text-slate-400">{s.name}</span>
-                <span className="text-slate-500 ml-2 truncate">{s.note}</span>
+          <div className="mb-1 text-[10px] text-slate-500 leading-relaxed">
+            <span className="mr-2">🟢 支持{state.direction === "down" ? "下跌" : state.direction === "up" ? "上涨" : "当前方向"}续航</span>
+            <span>🔴 反对续航 / 衰竭信号</span>
+          </div>
+          {state.sub_scores.map((s) => {
+            const favor =
+              Math.abs(s.score) < 0.05 ? "neutral" : s.score > 0 ? "pro" : "con";
+            const icon =
+              favor === "pro" ? "🟢" : favor === "con" ? "🔴" : "⚪";
+            const tooltip =
+              favor === "pro"
+                ? `读数支持当前${state.direction === "down" ? "下跌" : "上涨"}续航`
+                : favor === "con"
+                ? `读数与当前${state.direction === "down" ? "下跌" : "上涨"}方向相反（续航阻力 / 衰竭信号）`
+                : `中性读数，不影响续航判断`;
+            return (
+              <div key={s.key} className="flex justify-between">
+                <div className="flex-1 min-w-0 flex items-start gap-1.5">
+                  <span className="shrink-0 text-[10px] pt-0.5" title={tooltip}>
+                    {icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-slate-400">{s.name}</span>
+                    <span className="text-slate-500 ml-2 truncate">{s.note}</span>
+                  </div>
+                </div>
+                <span className={`font-mono ml-2 ${scoreColor(s.score)}`}>
+                  {s.score >= 0 ? "+" : ""}
+                  {s.score.toFixed(2)}
+                </span>
               </div>
-              <span className={`font-mono ml-2 ${scoreColor(s.score)}`}>
-                {s.score >= 0 ? "+" : ""}
-                {s.score.toFixed(2)}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -387,6 +409,9 @@ export default function TrendExhaustionView() {
           </div>
         </div>
       )}
+
+      {/* ── [3.5] AI 深度解读区块（手动触发） ───────────────────── */}
+      <TEAIInterpretBlock coin={coin} />
 
       {/* ── [4] 日报入口 + 方法论注释 ─────────────────────────── */}
       <div className="flex items-start justify-between gap-3 border-t border-slate-800 pt-2">
