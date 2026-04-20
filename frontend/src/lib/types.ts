@@ -308,6 +308,23 @@ export interface RangeSignalData {
   ms_alignment?: "aligned" | "conflict" | "neutral" | "unknown" | "";
 }
 
+/**
+ * 后端信号分类 id（backend/processors/key_level_tracker_v2.py `_finalize_signal`）
+ * 前端据此渲染徽章文案、颜色、图标，比 A/B/C 字母更直观。
+ */
+export type KeyLevelSignalKind =
+  | "wait_approach"
+  | "wait_sweep"
+  | "snipe_sweep"            // 扫取后做反向（A 级常见）
+  | "snipe_bounce"           // 反弹确认做反向
+  | "breakout_observing"    // 破位刚发生，观望
+  | "breakout_retest"       // 破位回踩（B 级）
+  | "breakout_continuation" // 破位三步确认完成（A 级延续）
+  | "fake_break_reversal"   // 假突破回收反转（A 级）
+  | "flip_retest"           // S/R 翻转回踩
+  | "scalp"                 // 日内极小止损
+  | "";
+
 export interface KeyLevelSignal {
   level_price: number;
   side: string;
@@ -321,6 +338,12 @@ export interface KeyLevelSignal {
   rr_ratio?: number;
   reason: string;
   warnings: string[];
+  /** 通过的确认项（如 sweep_taken / pattern_pin_bar / mtf_aligned / cvd_aligned ...） */
+  confirmations: string[];
+  /** 信号分类 id，前端据此渲染中文徽章 */
+  signal_kind: KeyLevelSignalKind;
+  /** 透明化置信度分数 0-100 (base(A=80/B=60/C=40) + 确认项×4 上限+20 - warnings×3) */
+  score: number;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

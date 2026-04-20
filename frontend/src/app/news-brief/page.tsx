@@ -84,7 +84,7 @@ type Tab = "current" | "history";
 export default function NewsBriefPage() {
   const [tab, setTab] = useState<Tab>("current");
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-300">
+    <div className="news-brief-page min-h-screen bg-slate-950 text-slate-300">
       <header className="border-b border-slate-700 bg-slate-900/80 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">

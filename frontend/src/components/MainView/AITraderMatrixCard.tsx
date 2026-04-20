@@ -151,11 +151,9 @@ export default function AITraderMatrixCard({
         </div>
       </div>
 
-      {/* 市场观点（≤3 行） */}
+      {/* 市场观点（默认折叠 3 行 · 点击展开全文） */}
       {report.market_view_cn && (
-        <div className="text-xs text-slate-300 bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2 leading-relaxed line-clamp-3">
-          {report.market_view_cn}
-        </div>
+        <ExpandableMarketView text={report.market_view_cn} />
       )}
 
       {/* 多维度看盘表（7 板块） */}
@@ -544,6 +542,28 @@ function LevelTile({
         <div className="text-[10.5px] text-slate-400 mt-0.5 leading-snug">
           {reason}
         </div>
+      )}
+    </div>
+  );
+}
+
+function ExpandableMarketView({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  // 粗估是否需要"展开"：超过 120 字 / 含 2 个以上句号视为长文
+  const long =
+    text.length > 120 ||
+    (text.match(/[。！？.!?]/g) ?? []).length >= 2;
+  return (
+    <div className="text-xs text-slate-300 bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2 leading-relaxed">
+      <div className={expanded ? "" : "line-clamp-3"}>{text}</div>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[11px] text-purple-300/80 hover:text-purple-200 underline-offset-2 hover:underline"
+        >
+          {expanded ? "收起 ▲" : "展开全文 ▼"}
+        </button>
       )}
     </div>
   );

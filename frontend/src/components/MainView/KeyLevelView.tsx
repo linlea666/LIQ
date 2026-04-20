@@ -45,8 +45,6 @@ const ACTION_LABELS: Record<string, string> = {
   wait_approach: "等待接近",
 };
 
-const SCALP_ACTIONS = new Set(["scalp_long", "scalp_short"]);
-
 export default function KeyLevelView() {
   const coin = useMarketStore((s) => s.coin);
   const data = useMarketStore((s) => s.data[s.coin]);
@@ -422,6 +420,107 @@ function RulerRow({
   );
 }
 
+// ─── 信号徽章中文 & 颜色 ────────────────────────────────────────────────
+// 每个 signal_kind 对应一个"一眼看懂"的中文短标 + 色调。
+// 优先使用 signal_kind；老数据缺失 signal_kind 时 fallback 到 action。
+const SIGNAL_KIND_META: Record<
+  string,
+  { label: string; emoji: string; tone: "amber" | "emerald" | "sky" | "violet" | "slate" | "rose" }
+> = {
+  snipe_sweep: { label: "扫取反转", emoji: "🎯", tone: "emerald" },
+  snipe_bounce: { label: "反弹确认", emoji: "💪", tone: "emerald" },
+  breakout_observing: { label: "破位观望", emoji: "👀", tone: "slate" },
+  breakout_retest: { label: "破位回踩", emoji: "🔁", tone: "sky" },
+  breakout_continuation: { label: "破位延续", emoji: "🚀", tone: "amber" },
+  fake_break_reversal: { label: "假突破反转", emoji: "⚠️", tone: "rose" },
+  flip_retest: { label: "S/R 翻转", emoji: "🔄", tone: "amber" },
+  scalp: { label: "日内极小止损", emoji: "⚡", tone: "violet" },
+  wait_approach: { label: "前瞻观察", emoji: "🔭", tone: "slate" },
+  wait_sweep: { label: "等扫流动性", emoji: "⏳", tone: "slate" },
+};
+
+const TONE_STYLES: Record<string, { chip: string; ring: string }> = {
+  amber: {
+    chip: "bg-amber-500/15 text-amber-300 border border-amber-500/40",
+    ring: "border-amber-500/50",
+  },
+  emerald: {
+    chip: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40",
+    ring: "border-emerald-500/50",
+  },
+  sky: {
+    chip: "bg-sky-500/15 text-sky-300 border border-sky-500/40",
+    ring: "border-sky-500/50",
+  },
+  violet: {
+    chip: "bg-violet-500/15 text-violet-300 border border-violet-500/40",
+    ring: "border-violet-500/50",
+  },
+  slate: {
+    chip: "bg-slate-600/25 text-slate-300 border border-slate-500/40",
+    ring: "border-slate-600/50",
+  },
+  rose: {
+    chip: "bg-rose-500/15 text-rose-300 border border-rose-500/40",
+    ring: "border-rose-500/50",
+  },
+};
+
+// confirmation key → 一句话中文短描述
+const CONFIRMATION_LABELS: Record<string, string> = {
+  closed_bar: "收盘确认",
+  sweep_taken: "流动性已扫",
+  volume_proactive: "放量主动",
+  retest_in_progress: "回踩中",
+  retest_done: "回踩完成",
+  continuation: "延续确认",
+  fake_break_reclaim: "假破回收",
+  multi_fake_break: "多次守位",
+  mtf_aligned: "1h 同向",
+  cvd_aligned: "CVD 同向",
+  flip_retest: "翻转回踩",
+  pattern_pin_bar: "针形线",
+  pattern_engulfing: "吞没形态",
+  pattern_doji: "十字星",
+};
+
+function labelConfirmation(key: string): string {
+  if (CONFIRMATION_LABELS[key]) return CONFIRMATION_LABELS[key];
+  if (key.startsWith("pattern_")) return key.replace("pattern_", "形态·");
+  return key;
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+  const color =
+    clamped >= 80
+      ? "bg-emerald-400"
+      : clamped >= 60
+        ? "bg-sky-400"
+        : clamped >= 40
+          ? "bg-amber-400"
+          : "bg-rose-400";
+  const label =
+    clamped >= 80 ? "高" : clamped >= 60 ? "中高" : clamped >= 40 ? "中" : "低";
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className="relative h-1.5 w-24 rounded-full bg-slate-700/60 overflow-hidden"
+        title={`置信度 ${clamped}/100（${label}）`}
+      >
+        <div
+          className={`absolute left-0 top-0 h-full ${color} transition-all`}
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+      <span className="text-[10px] text-slate-400 tabular-nums">
+        {clamped}
+        <span className="text-slate-500">/100</span>
+      </span>
+    </div>
+  );
+}
+
 function SignalCards({
   signals,
   coin,
@@ -433,60 +532,45 @@ function SignalCards({
     <div className="grid gap-3 md:grid-cols-2">
       {signals.map((sig, i) => {
         const isLong = sig.action.includes("long");
-        const isScalp = SCALP_ACTIONS.has(sig.action);
-        const borderColor = isScalp
-          ? isLong
-            ? "border-violet-500/70"
-            : "border-orange-500/70"
-          : sig.confidence === "A"
-            ? isLong
-              ? "border-green-500/60"
-              : "border-red-500/60"
-            : "border-yellow-500/40";
-        const bgColor =
-          sig.confidence === "A" ? "bg-slate-800/80" : "bg-slate-800/50";
+        const kindKey = sig.signal_kind || sig.action;
+        const meta = SIGNAL_KIND_META[kindKey] ?? {
+          label: ACTION_LABELS[sig.action] ?? sig.action,
+          emoji: "📍",
+          tone: "slate" as const,
+        };
+        const tone = TONE_STYLES[meta.tone] ?? TONE_STYLES.slate;
+        const dirColor = isLong ? "text-emerald-300" : "text-rose-300";
 
         return (
           <div
             key={i}
-            className={`${bgColor} border ${borderColor} rounded-lg p-3`}
+            className={`bg-slate-800/60 border ${tone.ring} rounded-lg p-3`}
           >
-            <div className="flex items-center gap-2 mb-2">
-              {isScalp && (
-                <span
-                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-500/20 text-violet-300"
-                  title="日内极小止损档（15m 影线确认 + R:R≥1.5，30 分钟有效）"
-                >
-                  日内⚡
-                </span>
-              )}
+            {/* 第一行：类型徽章 + 方向 + 价格 */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span
-                className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                  sig.confidence === "A"
-                    ? "bg-amber-500/20 text-amber-400"
-                    : "bg-blue-500/20 text-blue-400"
-                }`}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${tone.chip}`}
+                title={`信号类型：${meta.label}`}
               >
-                {sig.confidence}级
+                {meta.emoji} {meta.label}
               </span>
-              <span
-                className={`text-sm font-medium ${
-                  isScalp
-                    ? isLong
-                      ? "text-violet-300"
-                      : "text-orange-400"
-                    : isLong
-                      ? "text-green-400"
-                      : "text-red-400"
-                }`}
-              >
+              <span className={`text-sm font-medium ${dirColor}`}>
                 {ACTION_LABELS[sig.action] ?? sig.action}
               </span>
               <span className="text-xs text-slate-500">
                 @{formatPrice(sig.level_price, coin)}
               </span>
             </div>
-            <p className="text-xs text-slate-300 mb-2">{sig.reason}</p>
+
+            {/* 第二行：0-100 置信度分数条（取代 A/B/C 字母） */}
+            <div className="mb-2">
+              <ScoreBar score={sig.score ?? 0} />
+            </div>
+
+            <p className="text-xs text-slate-300 mb-2 leading-relaxed">
+              {sig.reason}
+            </p>
+
             {sig.entry_price != null && (
               <div className="flex gap-3 text-xs text-slate-400 flex-wrap">
                 <span>
@@ -498,7 +582,7 @@ function SignalCards({
                 {sig.stop_loss != null && (
                   <span>
                     止损:{" "}
-                    <span className="text-red-400">
+                    <span className="text-rose-300">
                       {formatPrice(sig.stop_loss, coin)}
                     </span>
                   </span>
@@ -506,7 +590,7 @@ function SignalCards({
                 {sig.tp1 != null && (
                   <span>
                     TP1:{" "}
-                    <span className="text-green-400">
+                    <span className="text-emerald-300">
                       {formatPrice(sig.tp1, coin)}
                     </span>
                   </span>
@@ -514,19 +598,39 @@ function SignalCards({
                 {sig.rr_ratio != null && (
                   <span>
                     R:R={" "}
-                    <span className="text-amber-400">
+                    <span className="text-amber-300">
                       1:{sig.rr_ratio.toFixed(1)}
                     </span>
                   </span>
                 )}
               </div>
             )}
+
+            {/* 确认项 chip 链（✅ 一眼看懂通过了哪些确认） */}
+            {sig.confirmations && sig.confirmations.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {sig.confirmations.map((c, j) => (
+                  <span
+                    key={j}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                    title={`确认项：${c}`}
+                  >
+                    ✓ {labelConfirmation(c)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* 警告（risk） */}
             {sig.warnings.length > 0 && (
-              <div className="mt-2 space-y-1">
+              <div className="mt-2 flex flex-wrap gap-1">
                 {sig.warnings.map((w, j) => (
-                  <p key={j} className="text-xs text-orange-400">
-                    {w}
-                  </p>
+                  <span
+                    key={j}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-300 border border-orange-500/30"
+                  >
+                    ⚠ {w}
+                  </span>
                 ))}
               </div>
             )}

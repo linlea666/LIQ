@@ -1,7 +1,7 @@
 """关键位生命周期追踪器 V2：ATR 自适应 + 量价突破确认 + 智能 R:R
 
-状态流转（与 V1 相同）：
-  IDLE → APPROACHING → TESTING → SWEPT/BOUNCED → (BROKEN → FLIPPED)
+状态流转：
+  IDLE → APPROACHING → TESTING → SWEPT/BOUNCED → (BROKEN → FAKE_BREAK | FLIPPED)
 
 V2 改进：
   - 所有阈值根据 ATR / price 动态缩放
@@ -9,6 +9,15 @@ V2 改进：
   - TP 指向对侧最近关键位或 VP POC（而非固定 ATR 倍数）
   - 信号过期：swept/bounced 超过 4H 自动降级
   - 冲突解决：同时多空 A 级信号时参考温度计
+
+防扫损增强（本轮）：
+  1. fake_break 状态：broken 后若 15m close 回到原 level 未破侧，切到 fake_break
+     并产出反向 A 级 snipe 信号
+  2. breakout_stage 驱动：broken 分支按 stage 分流 wait / B / A
+  3. bounce_quality=passive 降级：缩量反弹降一档
+  4. Z · MTF 1h 一致性：1h 与 level 方向同/异向加/扣分
+  5. V · CVD 背离确认：CVD 方向与信号方向同 / 异给加 / 减分
+  6. 置信度透明化：每张信号带 confirmations / signal_kind / score 0-100
 """
 
 from __future__ import annotations
@@ -16,6 +25,7 @@ from __future__ import annotations
 import logging
 import time
 
+from models.flow import CVDData
 from models.key_level import KeyLevelSignal, KeyLevelSnapshotV2, KeyLevelV2
 from models.liquidation import LiquidationMap
 from models.market import CandleData
@@ -63,7 +73,34 @@ _DEFAULT_CFG: dict = {
     "scalp_max_cascade": 0.5,         # 级联风险上限
     "scalp_min_pattern_strength": 0.6, # 15m 反转形态最小强度（pin bar=0.85 / engulf=0.80 / doji=0.50）
     "scalp_signal_expire_sec": 1800,  # 关键位进入可 scalp 状态后的最长窗口（30 分钟）
+    # ── 假突破反转（fake_break）──
+    "fake_break_expire_sec": 7200,    # fake_break 持续超过 2h 无后续 → 回 idle
 }
+
+
+# 评分映射：base(confidence) + 每项 confirmation + 惩罚每条 warning
+_BASE_SCORE = {"A": 80, "B": 60, "C": 40}
+_CONFIRMATION_BONUS = 4   # 每项 +4
+_CONFIRMATION_CAP = 5     # 最多计 5 项（+20 封顶）
+_WARNING_PENALTY = 3      # 每条 warning -3
+
+
+def _compute_score(sig: KeyLevelSignal) -> int:
+    """透明的置信度评分公式：base + 确认项加分 - warning 扣分，clamp [0,100]。"""
+    base = _BASE_SCORE.get(sig.confidence, 40)
+    bonus = min(_CONFIRMATION_CAP, len(sig.confirmations)) * _CONFIRMATION_BONUS
+    penalty = len(sig.warnings) * _WARNING_PENALTY
+    return max(0, min(100, base + bonus - penalty))
+
+
+def _finalize_signal(sig: KeyLevelSignal | None, kind: str) -> KeyLevelSignal | None:
+    """给信号加 signal_kind 和 score。confirmations 由各分支自行填入。"""
+    if sig is None:
+        return None
+    if not sig.signal_kind:
+        sig.signal_kind = kind
+    sig.score = _compute_score(sig)
+    return sig
 
 
 def run_tracker_v2(
@@ -76,9 +113,16 @@ def run_tracker_v2(
     temperature_score: float = 50,
     candles_4h: list[CandleData] | None = None,
     candles_15m: list[CandleData] | None = None,
+    candles_1h: list[CandleData] | None = None,
+    cvd: CVDData | None = None,
     cfg: dict | None = None,
 ) -> KeyLevelSnapshotV2:
-    """在 confluence_scoring 产出的快照基础上，运行状态机 + 信号生成。"""
+    """在 confluence_scoring 产出的快照基础上，运行状态机 + 信号生成。
+
+    candles_1h · cvd 均为可选（防御式编程，测试与旧调用无痛兼容）：
+      - candles_1h 缺失 → MTF 确认跳过（不加减分）
+      - cvd 缺失     → CVD 确认跳过（不加减分）
+    """
     cfg = {**_DEFAULT_CFG, **(cfg or {})}
     now = int(time.time())
     price = snapshot.current_price
@@ -110,11 +154,15 @@ def run_tracker_v2(
     signals: list[KeyLevelSignal] = []
     opposite_levels = snapshot.levels
     for lv in snapshot.levels:
-        sig = _generate_signal(lv, price, atr, opposite_levels, temperature_score, candles_4h, cfg, now)
+        sig = _generate_signal(
+            lv, price, atr, opposite_levels, temperature_score,
+            candles_4h, cfg, now,
+            candles_1h=candles_1h, cvd=cvd,
+        )
         if sig:
             signals.append(sig)
         # ── Scalp 日内极小止损档：仅 S/A 级 + 15m 影线确认时叠加产出，与上方信号并存 ──
-        scalp = _generate_scalp_signal(lv, price, atr, opposite_levels, candles_15m, cfg, now)
+        scalp = _generate_scalp_signal(lv, price, atr, opposite_levels, candles_15m, cfg, now, cvd=cvd)
         if scalp:
             signals.append(scalp)
 
@@ -300,6 +348,16 @@ def _transition(
             _set_state(lv, "idle", now)
 
     elif lv.state == "broken":
+        # 先判"假突破回收"：最新已收盘 15m bar close 回到原 level 未破侧
+        # 成立 → 状态降级为 fake_break（产出反向 A 级信号）
+        # 注：用户主动打开 break_require_closed_bar 时才启用该检测；关闭则维持 V2 原行为
+        if cfg.get("break_require_closed_bar", True) and _fake_break_reclaim(
+            candles_15m, lv, is_support
+        ):
+            _set_state(lv, "fake_break", now)
+            lv.fake_break_count += 1
+            return
+
         if dist_abs <= flip_zone_pct:
             on_broken_side = (
                 (is_support and price < lv.price) or
@@ -312,6 +370,17 @@ def _transition(
     elif lv.state == "flipped":
         if dist_abs > approach_pct * 2:
             _set_state(lv, "idle", now)
+
+    elif lv.state == "fake_break":
+        # fake_break 持续 > fake_break_expire_sec 且价格远离 level → 回 idle
+        age = now - lv.state_ts
+        expire = cfg.get("fake_break_expire_sec", 7200)
+        if age > expire and dist_abs > approach_pct * 2:
+            _set_state(lv, "idle", now)
+        # 若价格又真正把 level 破了（新一轮破位），重置回 testing 让正常流程再判
+        elif _is_broken(lv, price, break_depth_pct):
+            _set_state(lv, "testing", now)
+            lv.break_start_ts = 0
 
 
 def _assess_bounce_quality(
@@ -473,6 +542,113 @@ def _closed_bar_confirms_break(
     return close > lv.price * (1 + depth_pct / 100)
 
 
+def _fake_break_reclaim(
+    candles: list[CandleData] | None,
+    lv: KeyLevelV2,
+    is_support: bool,
+) -> bool:
+    """假突破回收检测：level 已处于 broken，但最新一根**已收盘** 15m bar 的 close
+    重新回到了 level 未破侧。
+
+    - support：broken 代表 close 跌穿，若下一根已收盘 close 重新 ≥ level.price → 假破
+    - resistance：反之亦然
+
+    用 candles[-2] 保证闭口（candles[-1] 通常是未收盘 bar）。
+    数据不足返回 False（不误判为假破）。
+    """
+    if not candles or len(candles) < 2 or lv.price <= 0:
+        return False
+    last_closed = candles[-2]
+    close = getattr(last_closed, "close", None)
+    if close is None or close <= 0:
+        return False
+    if is_support:
+        return close >= lv.price
+    return close <= lv.price
+
+
+# ─── Z · MTF 1h 一致性 ────────────────────────────────────────────────────────
+
+def _mtf_1h_bias(candles_1h: list[CandleData] | None) -> str:
+    """粗估 1h 方向偏向：
+      - 取最近 4 根 1h 的 close 做 EMA 近似判断
+      - return 'up' | 'down' | 'flat' | 'unknown'
+    数据不足返回 unknown（调用方跳过 MTF 判定，不加减分）。
+    """
+    if not candles_1h or len(candles_1h) < 4:
+        return "unknown"
+    closes = [getattr(c, "close", None) for c in candles_1h[-6:]]
+    closes = [c for c in closes if c and c > 0]
+    if len(closes) < 3:
+        return "unknown"
+    head = closes[0]
+    tail = closes[-1]
+    if head <= 0:
+        return "unknown"
+    change_pct = (tail - head) / head * 100
+    if change_pct >= 0.6:
+        return "up"
+    if change_pct <= -0.6:
+        return "down"
+    return "flat"
+
+
+def _mtf_aligned_with_long(bias: str) -> tuple[bool, bool]:
+    """返回 (aligned, diverged)，flat / unknown 时两者都 False（不加减分）。"""
+    if bias == "up":
+        return True, False
+    if bias == "down":
+        return False, True
+    return False, False
+
+
+def _mtf_aligned_with_short(bias: str) -> tuple[bool, bool]:
+    if bias == "down":
+        return True, False
+    if bias == "up":
+        return False, True
+    return False, False
+
+
+# ─── V · CVD 背离 / 一致性确认 ───────────────────────────────────────────────
+
+def _cvd_trend_value(cvd: CVDData | None) -> str:
+    """拿 CVD 1h 趋势，简化为 'up' / 'down' / 'flat' / 'unknown'。"""
+    if not cvd:
+        return "unknown"
+    trend = (cvd.trend_1h or "").strip().lower()
+    if trend in {"up", "rising", "positive", "bullish"}:
+        return "up"
+    if trend in {"down", "falling", "negative", "bearish"}:
+        return "down"
+    # 没有显式 trend 就用 delta_1h 兜底
+    delta = cvd.delta_1h or 0
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
+
+
+def _cvd_aligned_with_long(cvd: CVDData | None) -> tuple[bool, bool]:
+    """做多：CVD up → aligned；CVD down → diverged；flat/unknown → 不加减分。"""
+    trend = _cvd_trend_value(cvd)
+    if trend == "up":
+        return True, False
+    if trend == "down":
+        return False, True
+    return False, False
+
+
+def _cvd_aligned_with_short(cvd: CVDData | None) -> tuple[bool, bool]:
+    trend = _cvd_trend_value(cvd)
+    if trend == "down":
+        return True, False
+    if trend == "up":
+        return False, True
+    return False, False
+
+
 def _volume_confirms_break(is_support: bool, taker_buy: float, taker_sell: float) -> bool:
     """成交量确认：突破方向的主动成交量 > 对手方。"""
     if taker_buy <= 0 and taker_sell <= 0:
@@ -562,24 +738,32 @@ def _generate_signal(
     candles_4h: list[CandleData] | None,
     cfg: dict,
     now: int,
+    candles_1h: list[CandleData] | None = None,
+    cvd: CVDData | None = None,
 ) -> KeyLevelSignal | None:
     if atr <= 0:
         return None
+
+    # MTF / CVD 偏向预计算（整张信号通用）
+    mtf_bias = _mtf_1h_bias(candles_1h)
 
     if lv.state == "idle":
         if lv.strength_tier in ("S", "A") and abs(lv.distance_pct) <= 15:
             is_support = lv.side == "support"
             direction = "做多" if is_support else "做空"
-            return KeyLevelSignal(
-                level_price=lv.price, side=lv.side, state=lv.state,
-                action="wait_approach",
-                confidence="C",
-                reason=(
-                    f"前瞻观察: {lv.strength_tier}级"
-                    f"{_SIDE_CN.get(lv.side, lv.side)}${lv.price:,.0f}"
-                    f"({lv.source_count}维共振, 距{abs(lv.distance_pct):.1f}%), "
-                    f"价格接近时关注{direction}机会"
+            return _finalize_signal(
+                KeyLevelSignal(
+                    level_price=lv.price, side=lv.side, state=lv.state,
+                    action="wait_approach",
+                    confidence="C",
+                    reason=(
+                        f"前瞻观察: {lv.strength_tier}级"
+                        f"{_SIDE_CN.get(lv.side, lv.side)}${lv.price:,.0f}"
+                        f"({lv.source_count}维共振, 距{abs(lv.distance_pct):.1f}%), "
+                        f"价格接近时关注{direction}机会"
+                    ),
                 ),
+                "wait_approach",
             )
         return None
 
@@ -609,7 +793,7 @@ def _generate_signal(
             )
         else:
             base.confidence = "C"
-        return base
+        return _finalize_signal(base, "wait_approach")
 
     if lv.state == "testing":
         base.action = "wait_sweep"
@@ -624,7 +808,7 @@ def _generate_signal(
             base.reason = f"价格正在测试{side_cn}位${lv.price:,.0f}，等待流动性扫取确认后入场"
         if lv.cascade_risk > 0.7:
             base.warnings.append(f"级联风险{lv.cascade_risk:.0%}，突破后可能瀑布")
-        return base
+        return _finalize_signal(base, "wait_sweep")
 
     if lv.state == "swept":
         tp1_price = _find_opposite_target(lv, price, all_levels, atr)
@@ -653,7 +837,9 @@ def _generate_signal(
         base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
         if lv.cascade_risk > 0.5:
             base.warnings.append(f"注意级联风险{lv.cascade_risk:.0%}，建议减仓")
-        return base
+        base.confirmations.append("sweep_taken")
+        _apply_mtf_cvd(base, long=is_support, mtf_bias=mtf_bias, cvd=cvd)
+        return _finalize_signal(base, "snipe_sweep")
 
     if lv.state == "bounced":
         has_sweep = lv.sweep_usd > 0
@@ -700,14 +886,123 @@ def _generate_signal(
         risk = abs(entry - sl)
         reward = abs(tp1_price - entry)
         base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
-        return base
+
+        # 收集确认项
+        if has_sweep:
+            base.confirmations.append("sweep_taken")
+        if pattern.found:
+            base.confirmations.append(f"pattern_{pattern.name}")
+        # bounce_quality 降级：缩量反弹 = 被动，降一档 + 加 warning
+        if lv.bounce_quality == "proactive":
+            base.confirmations.append("volume_proactive")
+        elif lv.bounce_quality == "passive":
+            base.warnings.append("缩量反弹(被动触发)，容易二次回抽")
+            if base.confidence == "A":
+                base.confidence = "B"
+            elif base.confidence == "B":
+                base.confidence = "C"
+
+        _apply_mtf_cvd(base, long=is_support, mtf_bias=mtf_bias, cvd=cvd)
+        return _finalize_signal(base, "snipe_bounce")
 
     if lv.state == "broken":
-        base.action = "wait_approach"
-        base.reason = f"{side_cn}${lv.price:,.0f}已被突破，等待回踩确认S/R翻转"
-        base.confidence = "C"
-        base.warnings.append("突破后不要追单，等回踩")
-        return base
+        # breakout_stage 驱动置信度：未收盘 / 未回踩 → 观望；回踩中 → B；确认后 → A
+        stage = lv.breakout_stage or 1
+        tp1_price = _find_opposite_target(lv, price, all_levels, atr)
+        direction = "做空" if is_support else "做多"  # 破位后反向：支撑破 = 做空
+
+        if stage <= 1:
+            base.action = "wait_approach"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}刚突破（Stage 1·未收盘确认），"
+                f"等待回踩确认再入场"
+            )
+            base.confidence = "C"
+            base.warnings.append("突破刚刚发生，容易反向假破，不追单")
+            return _finalize_signal(base, "breakout_observing")
+
+        if stage == 2:
+            if is_support:
+                entry = lv.price - atr * 0.3  # 已破支撑，回踩到 level 下方做空
+                sl = lv.price + atr * 0.8
+                base.action = "snipe_short"
+            else:
+                entry = lv.price + atr * 0.3
+                sl = lv.price - atr * 0.8
+                base.action = "snipe_long"
+            base.confidence = "B"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}破位回踩中(Stage 2)，"
+                f"等待回踩确认做{direction}"
+            )
+            base.entry_price = round(entry, 2)
+            base.stop_loss = round(sl, 2)
+            base.tp1 = round(tp1_price, 2)
+            risk = abs(entry - sl)
+            reward = abs(tp1_price - entry)
+            base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
+            base.confirmations.append("retest_in_progress")
+            _apply_mtf_cvd(
+                base, long=not is_support, mtf_bias=mtf_bias, cvd=cvd,
+            )
+            return _finalize_signal(base, "breakout_retest")
+
+        # stage >= 3 确认成功
+        if is_support:
+            entry = lv.price - atr * 0.15
+            sl = lv.price + atr * 0.8
+            base.action = "snipe_short"
+        else:
+            entry = lv.price + atr * 0.15
+            sl = lv.price - atr * 0.8
+            base.action = "snipe_long"
+        base.confidence = "A"
+        base.reason = (
+            f"{side_cn}${lv.price:,.0f}破位三步确认完成(Stage 3) → A级{direction}"
+        )
+        base.entry_price = round(entry, 2)
+        base.stop_loss = round(sl, 2)
+        base.tp1 = round(tp1_price, 2)
+        risk = abs(entry - sl)
+        reward = abs(tp1_price - entry)
+        base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
+        base.confirmations.append("retest_done")
+        base.confirmations.append("continuation")
+        _apply_mtf_cvd(base, long=not is_support, mtf_bias=mtf_bias, cvd=cvd)
+        return _finalize_signal(base, "breakout_continuation")
+
+    if lv.state == "fake_break":
+        # 假突破反转：原 support 被 close 跌穿后又回收，给反向 A 级 snipe_long
+        tp1_price = _find_opposite_target(lv, price, all_levels, atr)
+        if is_support:
+            entry = lv.price + atr * 0.1
+            sl = lv.price - atr * 1.0  # 止损给到原破位深度，防再次真破
+            base.action = "snipe_long"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}假突破回收，"
+                f"破位陷阱 → A级做多（level 二次确认强守）"
+            )
+        else:
+            entry = lv.price - atr * 0.1
+            sl = lv.price + atr * 1.0
+            base.action = "snipe_short"
+            base.reason = (
+                f"{side_cn}${lv.price:,.0f}假突破回收，"
+                f"破位陷阱 → A级做空（level 二次确认强压）"
+            )
+        base.confidence = "A"
+        base.entry_price = round(entry, 2)
+        base.stop_loss = round(sl, 2)
+        base.tp1 = round(tp1_price, 2)
+        risk = abs(entry - sl)
+        reward = abs(tp1_price - entry)
+        base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
+        base.confirmations.append("fake_break_reclaim")
+        base.confirmations.append("closed_bar")
+        if lv.fake_break_count >= 2:
+            base.confirmations.append("multi_fake_break")
+        _apply_mtf_cvd(base, long=is_support, mtf_bias=mtf_bias, cvd=cvd)
+        return _finalize_signal(base, "fake_break_reversal")
 
     if lv.state == "flipped":
         pattern = detect_reversal_pattern(candles_4h, lv.side)
@@ -739,9 +1034,55 @@ def _generate_signal(
         risk = abs(entry - sl)
         reward = abs(tp1_price - entry)
         base.rr_ratio = round(reward / risk, 1) if risk > 0 else 0
-        return base
+        if pattern.found:
+            base.confirmations.append(f"pattern_{pattern.name}")
+        base.confirmations.append("flip_retest")
+        long_side = lv.side == "support"  # 翻成 support → 做多
+        _apply_mtf_cvd(base, long=long_side, mtf_bias=mtf_bias, cvd=cvd)
+        return _finalize_signal(base, "flip_retest")
 
     return None
+
+
+def _apply_mtf_cvd(
+    sig: KeyLevelSignal,
+    long: bool,
+    mtf_bias: str,
+    cvd: CVDData | None,
+) -> None:
+    """给信号叠加 Z · MTF 1h 一致性 + V · CVD 一致性确认。
+
+    行为：
+      - aligned：confirmations 追加 mtf_aligned / cvd_aligned（score 会 +4）
+      - diverged：warnings 追加说明（score -3），并且若原 A 级 → 降为 B，
+        让高频扫损场景（信号方向与高阶方向相反）自动降档
+
+    设计原则：
+      - 数据缺失（unknown/flat）时不加减分，防止测试 / 数据降级误伤
+      - 同时被 Z 和 V 共同判背离时，最多只降 1 档（避免从 A 直接跳 C 过激）
+    """
+    mtf_aligned, mtf_diverged = (
+        _mtf_aligned_with_long(mtf_bias) if long else _mtf_aligned_with_short(mtf_bias)
+    )
+    cvd_aligned, cvd_diverged = (
+        _cvd_aligned_with_long(cvd) if long else _cvd_aligned_with_short(cvd)
+    )
+
+    if mtf_aligned:
+        sig.confirmations.append("mtf_aligned")
+    if cvd_aligned:
+        sig.confirmations.append("cvd_aligned")
+
+    degraded = False
+    if mtf_diverged:
+        sig.warnings.append("1h 级别方向不一致(MTF 背离)")
+        degraded = True
+    if cvd_diverged:
+        sig.warnings.append("CVD 方向与信号相反(资金流背离)")
+        degraded = True
+
+    if degraded and sig.confidence == "A":
+        sig.confidence = "B"
 
 
 def _generate_scalp_signal(
@@ -752,6 +1093,7 @@ def _generate_scalp_signal(
     candles_15m: list[CandleData] | None,
     cfg: dict,
     now: int,
+    cvd: CVDData | None = None,
 ) -> KeyLevelSignal | None:
     """日内极小止损档（scalp）信号生成器。
 
@@ -884,7 +1226,14 @@ def _generate_scalp_signal(
     )
     if lv.cascade_risk and lv.cascade_risk > 0.3:
         sig.warnings.append(f"级联风险{lv.cascade_risk:.0%}，务必硬止损")
-    return sig
+
+    # 填确认项 + MTF/CVD 叠加（scalp 也用同样的一致性确认）
+    sig.confirmations.append(f"pattern_{pattern.name}")
+    sig.confirmations.append("closed_bar")
+    _apply_mtf_cvd(sig, long=is_support, mtf_bias=_mtf_1h_bias(None), cvd=cvd)
+    # 注：scalp 不强依赖 1h MTF（日内尺度），故不显式传 candles_1h；
+    #    仅 CVD 会起作用
+    return _finalize_signal(sig, "scalp")
 
 
 def _find_opposite_target(

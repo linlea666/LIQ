@@ -57,6 +57,22 @@ class KeyLevelSignal(BaseModel):
     reason: str = ""
     warnings: list[str] = Field(default_factory=list)
 
+    # 置信度透明化（小白视线友好）
+    # confirmations：本信号通过的确认项清单（方便前端 ✅ chip 链 + 评分透明化）
+    #   可取值参考 key_level_tracker_v2._CONFIRMATION_KEYS
+    #   如 ["closed_bar", "volume_proactive", "pattern_pin_bar", "sweep_taken",
+    #       "retest_done", "continuation", "fake_break_reclaim", "mtf_aligned",
+    #       "cvd_aligned"]
+    # signal_kind：信号分类，前端据此渲染徽章
+    #   如 "snipe_sweep" / "snipe_bounce" / "flip_retest" / "scalp"
+    #   / "fake_break_reversal" / "breakout_retest" / "breakout_continuation"
+    #   / "wait_approach" / "wait_sweep"
+    # score：0-100 置信度分数
+    #   base(A=80/B=60/C=40) + 确认项×4（上限 +20） - warnings×3；clamp [0,100]
+    confirmations: list[str] = Field(default_factory=list)
+    signal_kind: str = ""
+    score: int = 0
+
 
 class KeyLevelSnapshot(BaseModel):
     """一个币种的关键位追踪快照（推送到前端 + AI）"""
@@ -83,6 +99,7 @@ class KeyLevelV2(BaseModel):
     strength_tier: str = "C"     # "S" (最强) / "A" / "B" / "C"
 
     # 状态机
+    # idle / approaching / testing / swept / bounced / broken / fake_break / flipped
     state: str = "idle"
     state_ts: int = 0
     prev_state: str = ""
@@ -117,6 +134,10 @@ class KeyLevelV2(BaseModel):
     # Commit 4：质量标注（博主方法论：主动 vs 被动 · 三步确认）
     bounce_quality: str = ""       # "proactive"(主动吸筹) / "passive"(被动触发) / ""(未反弹)
     breakout_stage: int = 0        # 0(未破位) / 1(破位) / 2(回踩) / 3(确认)
+
+    # 假突破反转追踪（2026-04 新增）
+    # - fake_break_count：本 level 历史被假突破次数；多次假破 = 防守强度高
+    fake_break_count: int = 0
 
 
 class BullBearLine(BaseModel):

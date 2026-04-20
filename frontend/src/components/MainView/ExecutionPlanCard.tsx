@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { API_BASE } from "@/lib/constants";
 import { formatPrice } from "@/lib/format";
 import type {
+  ConsensusLevel,
   ExecutionPlan,
   ExecutionPlanResponse,
+  FinalDecision,
+  FinalDecisionResponse,
+  RecommendedAction,
   TrafficLight,
 } from "@/lib/types";
 
@@ -103,6 +108,7 @@ function shortSources(sources: string[]): string[] {
 
 export default function ExecutionPlanCard({ coin }: { coin: string }) {
   const [plan, setPlan] = useState<ExecutionPlan | null>(null);
+  const [decision, setDecision] = useState<FinalDecision | null>(null);
   const [ready, setReady] = useState<boolean>(false);
   const [lastErr, setLastErr] = useState<string>("");
 
@@ -111,12 +117,21 @@ export default function ExecutionPlanCard({ coin }: { coin: string }) {
 
     const fetchOnce = async () => {
       try {
-        const r = await fetch(`${API_BASE}/api/execution-plan/${coin}`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j: ExecutionPlanResponse = await r.json();
+        // 并行取执行计划（数学引擎）和融合层决策，
+        // 用于在 conflict/wait/avoid 时对计划卡做"融合覆盖"视觉约束
+        const [r1, r2] = await Promise.all([
+          fetch(`${API_BASE}/api/execution-plan/${coin}`),
+          fetch(`${API_BASE}/api/final-decision/${coin}`).catch(() => null),
+        ]);
+        if (!r1.ok) throw new Error(`HTTP ${r1.status}`);
+        const j1: ExecutionPlanResponse = await r1.json();
         if (cancelled) return;
-        setReady(Boolean(j.ready));
-        setPlan(j.plan ?? null);
+        setReady(Boolean(j1.ready));
+        setPlan(j1.plan ?? null);
+        if (r2 && r2.ok) {
+          const j2: FinalDecisionResponse = await r2.json();
+          if (!cancelled) setDecision(j2.decision ?? null);
+        }
         setLastErr("");
       } catch (e) {
         if (cancelled) return;
@@ -150,11 +165,24 @@ export default function ExecutionPlanCard({ coin }: { coin: string }) {
   const srcBadges = shortSources(plan.corroborating_sources ?? []);
   const safetyTriggered = plan.safety_gates?.triggered;
 
+  // 融合层覆盖：数学计划可能是做多 A 级 20%，
+  // 但若融合层判分歧/观望/回避，用户应按融合层 0% 为准
+  const fusionOverride =
+    decision &&
+    plan.action !== "wait" &&
+    plan.action !== "avoid" &&
+    (decision.consensus_level === "conflict" ||
+      decision.recommended_action === "wait" ||
+      decision.recommended_action === "avoid");
+
   return (
     <div
-      className={`bg-slate-800/70 border-2 ${light.ring} rounded-xl p-4 space-y-3 shadow-lg`}
+      className={`bg-slate-800/70 border-2 ${light.ring} rounded-xl p-4 space-y-3 shadow-lg ${fusionOverride ? "opacity-90" : ""}`}
       data-testid="execution-plan-card"
     >
+      {fusionOverride && decision && (
+        <FusionOverrideBanner coin={coin} decision={decision} planAction={actionCn} />
+      )}
       {/* ── 顶部：红绿灯 + tier + action + 分数 ── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
@@ -194,16 +222,22 @@ export default function ExecutionPlanCard({ coin }: { coin: string }) {
           accent={plan.rr_ratio && plan.rr_ratio >= 2 ? "text-green-300" : "text-slate-300"}
         />
         <MetricTile
-          label="建议仓位"
+          label={fusionOverride ? "原建议仓位·受融合覆盖" : "建议仓位"}
           value={
-            plan.position_size_pct != null ? `${plan.position_size_pct.toFixed(0)}%` : "-"
+            fusionOverride
+              ? `${(plan.position_size_pct ?? 0).toFixed(0)}% → 0%`
+              : plan.position_size_pct != null
+                ? `${plan.position_size_pct.toFixed(0)}%`
+                : "-"
           }
           accent={
-            plan.position_size_pct && plan.position_size_pct >= 30
-              ? "text-green-300"
-              : plan.position_size_pct === 0
-                ? "text-red-300"
-                : "text-slate-300"
+            fusionOverride
+              ? "text-slate-500 line-through decoration-orange-400/60"
+              : plan.position_size_pct && plan.position_size_pct >= 30
+                ? "text-green-300"
+                : plan.position_size_pct === 0
+                  ? "text-red-300"
+                  : "text-slate-300"
           }
         />
       </div>
@@ -269,6 +303,60 @@ function MetricTile({
       <div className="text-[10px] text-slate-500">{label}</div>
       <div className={`font-mono text-sm mt-0.5 ${accent ?? "text-slate-200"}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+const CONSENSUS_TEXT: Record<ConsensusLevel, string> = {
+  strong: "强共识",
+  agree: "一致",
+  math_lead: "数学引擎主导",
+  ai_lead: "AI 主导",
+  conflict: "双引擎分歧",
+  both_wait: "双方观望",
+};
+
+const FUSION_ACTION_TEXT: Record<RecommendedAction, string> = {
+  execute: "执行",
+  reduce_size: "减仓",
+  wait: "观望",
+  avoid: "回避",
+};
+
+function FusionOverrideBanner({
+  coin,
+  decision,
+  planAction,
+}: {
+  coin: string;
+  decision: FinalDecision;
+  planAction: string;
+}) {
+  const consensusCn =
+    CONSENSUS_TEXT[decision.consensus_level] ?? decision.consensus_level;
+  const fusionAction =
+    FUSION_ACTION_TEXT[decision.recommended_action] ?? decision.recommended_action;
+  return (
+    <div className="rounded border border-orange-500/40 bg-orange-500/10 text-orange-200 text-xs px-3 py-2 space-y-1">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="font-semibold">
+          ⚖ 融合层覆盖 · 请以融合层为准
+        </span>
+        <Link
+          href={`/divergence/${coin}`}
+          className="text-[11px] text-blue-300 hover:text-blue-200 underline-offset-2 hover:underline"
+        >
+          查看历史分歧 →
+        </Link>
+      </div>
+      <div className="text-[11px] leading-relaxed">
+        数学引擎原计划 <span className="text-slate-100">{planAction}</span> ·
+        但融合层判定 <span className="text-orange-100 font-semibold">{consensusCn}</span> ·
+        推荐 <span className="text-orange-100 font-semibold">{fusionAction}</span>
+        （综合分 {decision.final_score.toFixed(1)} · 仓位 {decision.recommended_position_pct.toFixed(0)}%）。
+        <br />
+        本卡仅作技术参考，请不要按原 tier 仓位下单。
       </div>
     </div>
   );

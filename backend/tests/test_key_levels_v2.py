@@ -39,7 +39,10 @@ from processors.key_level_tracker_v2 import (
     _generate_scalp_signal, _DEFAULT_CFG,
     _assess_bounce_quality, _assess_breakout_stage,
     _closed_bar_confirms_break,
+    _fake_break_reclaim, _mtf_1h_bias, _cvd_trend_value,
+    _compute_score,
 )
+from models.flow import CVDData
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1204,3 +1207,316 @@ class TestAssessBreakoutStage:
                        state_ts=state_ts)
         assert _assess_breakout_stage(lv, atr=1.0, candles_15m=bars,
                                       cfg=_DEFAULT_CFG, now=now) == 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 2026-04 新增：fake_break / breakout_stage 驱动 / passive 降级
+#               / MTF 一致性 / CVD 一致性 / score 透明化
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _closed_bar(ts: int, close: float) -> CandleData:
+    """快速构造一根 15m 已收盘 bar（vol/open/high/low 占位即可）。"""
+    return CandleData(coin="BTC", ts=ts, o=close, h=close * 1.002,
+                      l=close * 0.998, c=close, vol=100)
+
+
+def _hourly_candles(closes: list[float]) -> list[CandleData]:
+    return [
+        CandleData(coin="BTC", ts=1700000000 + i * 3600,
+                   o=c, h=c * 1.003, l=c * 0.997, c=c, vol=100)
+        for i, c in enumerate(closes)
+    ]
+
+
+class TestFakeBreakReclaim:
+    """_fake_break_reclaim：已收盘 bar 回到 level 未破侧 = 假突破。"""
+
+    def test_support_close_reclaims_returns_true(self):
+        lv = KeyLevelV2(price=100_000, side="support")
+        # candles[-2] 是已收盘 bar，close 回到 >= 100_000 → 假破
+        bars = [_closed_bar(1, 100_100), _closed_bar(2, 99_500)]
+        assert _fake_break_reclaim(bars, lv, is_support=True) is True
+
+    def test_support_close_still_below_returns_false(self):
+        lv = KeyLevelV2(price=100_000, side="support")
+        bars = [_closed_bar(1, 99_800), _closed_bar(2, 99_500)]
+        assert _fake_break_reclaim(bars, lv, is_support=True) is False
+
+    def test_resistance_close_reclaims_returns_true(self):
+        lv = KeyLevelV2(price=100_000, side="resistance")
+        bars = [_closed_bar(1, 99_900), _closed_bar(2, 100_500)]
+        assert _fake_break_reclaim(bars, lv, is_support=False) is True
+
+    def test_insufficient_data_returns_false(self):
+        lv = KeyLevelV2(price=100_000, side="support")
+        assert _fake_break_reclaim(None, lv, is_support=True) is False
+        assert _fake_break_reclaim([], lv, is_support=True) is False
+        assert _fake_break_reclaim([_closed_bar(1, 99_500)], lv,
+                                   is_support=True) is False
+
+
+class TestMTFBias:
+    def test_uptrend_returns_up(self):
+        closes = [100.0, 101.0, 101.5, 102.3, 103.0]
+        assert _mtf_1h_bias(_hourly_candles(closes)) == "up"
+
+    def test_downtrend_returns_down(self):
+        closes = [103.0, 102.3, 101.5, 101.0, 100.0]
+        assert _mtf_1h_bias(_hourly_candles(closes)) == "down"
+
+    def test_flat_returns_flat(self):
+        closes = [100.0, 100.1, 99.9, 100.0, 100.1]
+        assert _mtf_1h_bias(_hourly_candles(closes)) == "flat"
+
+    def test_insufficient_returns_unknown(self):
+        assert _mtf_1h_bias(None) == "unknown"
+        assert _mtf_1h_bias([]) == "unknown"
+        assert _mtf_1h_bias(_hourly_candles([100, 101])) == "unknown"
+
+
+class TestCVDTrendValue:
+    def _mk_cvd(self, trend: str = "", delta: float = 0.0) -> CVDData:
+        return CVDData(coin="BTC", inst_type="CONTRACTS", series=[],
+                       trend_1h=trend, delta_1h=delta)
+
+    def test_explicit_trend(self):
+        assert _cvd_trend_value(self._mk_cvd("up")) == "up"
+        assert _cvd_trend_value(self._mk_cvd("rising")) == "up"
+        assert _cvd_trend_value(self._mk_cvd("bearish")) == "down"
+
+    def test_delta_fallback(self):
+        assert _cvd_trend_value(self._mk_cvd("", 1500.0)) == "up"
+        assert _cvd_trend_value(self._mk_cvd("", -500.0)) == "down"
+        assert _cvd_trend_value(self._mk_cvd("", 0)) == "flat"
+
+    def test_none(self):
+        assert _cvd_trend_value(None) == "unknown"
+
+
+class TestScoreFormula:
+    def test_base_a_with_no_confirmations(self):
+        sig = KeyLevelSignal(level_price=100, side="support",
+                             state="swept", action="snipe_long", confidence="A")
+        assert _compute_score(sig) == 80
+
+    def test_base_b_with_two_confirmations(self):
+        sig = KeyLevelSignal(level_price=100, side="support",
+                             state="bounced", action="snipe_long",
+                             confidence="B",
+                             confirmations=["sweep_taken", "mtf_aligned"])
+        assert _compute_score(sig) == 60 + 4 * 2
+
+    def test_confirmations_capped_at_5(self):
+        sig = KeyLevelSignal(level_price=100, side="support",
+                             state="bounced", action="snipe_long",
+                             confidence="A",
+                             confirmations=["a", "b", "c", "d", "e", "f", "g"])
+        assert _compute_score(sig) == 80 + 4 * 5  # 6th/7th 不加分
+
+    def test_warnings_deduct(self):
+        sig = KeyLevelSignal(level_price=100, side="support",
+                             state="swept", action="snipe_long",
+                             confidence="A", warnings=["w1", "w2"])
+        assert _compute_score(sig) == 80 - 3 * 2
+
+    def test_score_clamped(self):
+        sig = KeyLevelSignal(level_price=100, side="support",
+                             state="idle", action="wait",
+                             confidence="C",
+                             warnings=["w"] * 50)
+        assert _compute_score(sig) == 0
+
+
+class TestFakeBreakStateMachine:
+    """状态机：broken 分支遇假破回收 → 切到 fake_break，产反向 A 级信号。"""
+
+    def test_broken_support_with_reclaim_transitions_to_fake_break(self):
+        # 造一个已经 broken 的支撑，价格在 level 上方、最后一根已收盘 close 回到 level 之上
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="broken", state_ts=int(time.time()) - 300,
+                        breakout_stage=1)
+        res = KeyLevelV2(price=101_500, side="resistance", state="idle")
+        snap = _make_snapshot([lv, res], price=100_200, atr=500)
+        # candles_15m 里倒数第 2 根是已收盘 bar，close=100_100 ≥ 100_000 → 回收
+        candles = [
+            _closed_bar(1, 100_100),   # 已收盘 bar，close 回到 level 之上
+            _closed_bar(2, 100_200),   # 最新未收盘 bar
+        ]
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            candles_15m=candles,
+        )
+        assert snap.levels[0].state == "fake_break"
+        assert snap.levels[0].fake_break_count == 1
+
+        # 紧接着应产出 A 级 snipe_long 信号，signal_kind=fake_break_reversal
+        kinds = [s.signal_kind for s in snap.signals
+                 if s.level_price == 100_000]
+        assert "fake_break_reversal" in kinds
+        sig = next(s for s in snap.signals
+                   if s.signal_kind == "fake_break_reversal")
+        assert sig.action == "snipe_long"
+        assert sig.confidence == "A"
+        assert "fake_break_reclaim" in sig.confirmations
+        assert "closed_bar" in sig.confirmations
+
+    def test_disabled_when_closed_bar_requirement_off(self):
+        """cfg.break_require_closed_bar=False 时不启用假破检测，broken 维持原样。"""
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="broken", state_ts=int(time.time()) - 300,
+                        breakout_stage=1)
+        snap = _make_snapshot([lv], price=100_200, atr=500)
+        candles = [_closed_bar(1, 100_100), _closed_bar(2, 100_200)]
+        cfg = {**_DEFAULT_CFG, "break_require_closed_bar": False}
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            candles_15m=candles, cfg=cfg,
+        )
+        # 不切 fake_break
+        assert snap.levels[0].state == "broken"
+
+
+class TestBreakoutStageDrivenSignal:
+    """broken 分支按 breakout_stage 分流 wait / B / A。
+
+    直接调 `_generate_signal` 绕过 run_tracker_v2 的 _assess_breakout_stage 重算，
+    便于单独验证分支逻辑（stage 评估本身已有独立测试覆盖）。
+    """
+
+    def _gen(self, stage: int):
+        from processors.key_level_tracker_v2 import _generate_signal
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="broken", state_ts=int(time.time()) - 1800,
+                        breakout_stage=stage)
+        res = KeyLevelV2(price=97_000, side="resistance")
+        now = int(time.time())
+        return _generate_signal(
+            lv, price=99_500, atr=500, all_levels=[lv, res],
+            temperature=50, candles_4h=None, cfg=_DEFAULT_CFG, now=now,
+        )
+
+    def test_stage1_returns_wait(self):
+        sig = self._gen(stage=1)
+        assert sig is not None
+        assert sig.signal_kind == "breakout_observing"
+        assert sig.action == "wait_approach"
+        assert sig.confidence == "C"
+        assert sig.score >= 1
+
+    def test_stage2_returns_b_level_snipe(self):
+        sig = self._gen(stage=2)
+        assert sig is not None
+        assert sig.signal_kind == "breakout_retest"
+        assert sig.action == "snipe_short"
+        assert sig.confidence in ("B", "C")
+        assert "retest_in_progress" in sig.confirmations
+
+    def test_stage3_returns_a_level_snipe(self):
+        sig = self._gen(stage=3)
+        assert sig is not None
+        assert sig.signal_kind == "breakout_continuation"
+        assert sig.action == "snipe_short"
+        assert sig.confidence == "A"
+        assert "retest_done" in sig.confirmations
+        assert "continuation" in sig.confirmations
+
+
+class TestPassiveBounceDegradation:
+    """bounced + bounce_quality=passive → 信号降一档 + 加 warning。
+
+    直接调 `_generate_signal`，绕过 run_tracker_v2 的 _assess_bounce_quality 覆盖
+    （quality 评估本身已有独立测试覆盖）。
+    """
+
+    def _gen(self, quality: str):
+        from processors.key_level_tracker_v2 import _generate_signal
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="bounced", state_ts=int(time.time()) - 60,
+                        bounce_quality=quality, sweep_usd=5_000_000)
+        res = KeyLevelV2(price=102_000, side="resistance")
+        return _generate_signal(
+            lv, price=100_500, atr=500, all_levels=[lv, res],
+            temperature=50, candles_4h=None,
+            cfg=_DEFAULT_CFG, now=int(time.time()),
+        )
+
+    def test_active_bounce_a_level(self):
+        sig = self._gen("proactive")
+        assert sig.signal_kind == "snipe_bounce"
+        assert sig.confidence == "A"
+        assert "volume_proactive" in sig.confirmations
+
+    def test_passive_bounce_degraded(self):
+        sig = self._gen("passive")
+        assert sig.signal_kind == "snipe_bounce"
+        assert sig.confidence == "B"
+        assert any("缩量" in w for w in sig.warnings)
+
+    def test_empty_quality_keeps_tier(self):
+        sig = self._gen("")
+        assert sig.signal_kind == "snipe_bounce"
+        assert sig.confidence == "A"
+        assert not any("缩量" in w for w in sig.warnings)
+
+
+class TestMTFCVDIntegration:
+    """MTF 1h 与 CVD 对已生成信号的叠加：aligned 上分、diverged 降档。"""
+
+    def test_long_signal_mtf_cvd_aligned_bumps_score(self):
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="swept", state_ts=int(time.time()) - 60,
+                        sweep_usd=5_000_000)
+        res = KeyLevelV2(price=102_000, side="resistance")
+        snap = _make_snapshot([lv, res], price=100_100, atr=500)
+        candles_1h = _hourly_candles([99_000, 99_500, 99_800, 100_000, 100_200])
+        cvd = CVDData(coin="BTC", inst_type="CONTRACTS", series=[],
+                      trend_1h="up", delta_1h=100)
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            candles_1h=candles_1h, cvd=cvd,
+        )
+        sig = next(s for s in snap.signals if s.signal_kind == "snipe_sweep")
+        assert "mtf_aligned" in sig.confirmations
+        assert "cvd_aligned" in sig.confirmations
+        assert sig.score >= 88  # 80 + 4*(sweep_taken + mtf_aligned + cvd_aligned)
+
+    def test_long_signal_mtf_diverged_degrades_to_b(self):
+        """A 级 swept 做多，1h 明显向下 → 降到 B + warning。"""
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="swept", state_ts=int(time.time()) - 60,
+                        sweep_usd=5_000_000)
+        res = KeyLevelV2(price=102_000, side="resistance")
+        snap = _make_snapshot([lv, res], price=100_100, atr=500)
+        candles_1h = _hourly_candles([102_000, 101_500, 101_000, 100_500, 100_100])
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            candles_1h=candles_1h,
+        )
+        sig = next(s for s in snap.signals if s.signal_kind == "snipe_sweep")
+        assert sig.confidence == "B"
+        assert any("MTF" in w or "1h" in w for w in sig.warnings)
+
+
+class TestSignalKindAndScoreCompleteness:
+    """所有状态下产出的信号必须带 signal_kind + 非零 score。"""
+
+    def test_all_states_populate_new_fields(self):
+        # idle（观察档）
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="idle", distance_pct=5.0)
+        snap = _make_snapshot([lv], price=95_000, atr=500)
+        snap = run_tracker_v2(snap, liq_map=None, sweep_events_1h=[])
+        idle_sigs = [s for s in snap.signals if s.level_price == 100_000]
+        for s in idle_sigs:
+            assert s.signal_kind != ""
+            assert s.score > 0
+
+        # approaching
+        lv = KeyLevelV2(price=100_000, side="support", strength_tier="A",
+                        state="approaching", state_ts=int(time.time()) - 60)
+        res = KeyLevelV2(price=102_000, side="resistance")
+        snap = _make_snapshot([lv, res], price=100_500, atr=500)
+        snap = run_tracker_v2(snap, liq_map=None, sweep_events_1h=[])
+        for s in snap.signals:
+            assert s.signal_kind != ""
+            assert s.score > 0

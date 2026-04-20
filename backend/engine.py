@@ -1391,6 +1391,10 @@ class Engine:
             temperature_score=temp_score,
             candles_4h=state.candles_4h or None,
             candles_15m=state.candles_15m or None,
+            # Z · MTF 1h 一致性：传 1h 蜡烛做大级别方向确认
+            candles_1h=state.candles_1h or None,
+            # V · CVD 背离确认：优先取合约 CVD，其次现货（现货数据更稳）
+            cvd=state.cvd_contract or state.cvd_spot or None,
             cfg=kl_cfg if kl_cfg else None,
         )
 
