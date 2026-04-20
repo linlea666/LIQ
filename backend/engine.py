@@ -520,12 +520,26 @@ class Engine:
         """P1.2b · 启动 News Agent 编排（委托给 news_agent_loop.run_forever）。
 
         get_context 每次回调提供最新 BTC 价格/历史，供 AI 结构化与价格回填。
+        启动前必须注册 D07 新闻源（否则 fetch_all 拿不到任何源，D07 永标 warn）。
         """
         try:
             from processors.news_agent_loop import run_forever
         except Exception:
             logger.warning("[D13] news_agent_loop module unavailable", exc_info=True)
             return
+
+        # 启动时注册 D07 新闻源（yml 不存在时回退到默认 OKX 行业 + 博主两源）
+        try:
+            from sources.news.registry import get_all as _news_get_all, load_from_yaml as _news_load
+            if not _news_get_all():
+                yml_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "config", "news_sources.yml",
+                )
+                registered = _news_load(yml_path if os.path.exists(yml_path) else None)
+                logger.info("[D07] news sources registered count=%d", registered)
+        except Exception:
+            logger.warning("[D07] news source registration failed", exc_info=True)
 
         def _get_ctx() -> dict:
             btc_state = self._states.get("BTC")

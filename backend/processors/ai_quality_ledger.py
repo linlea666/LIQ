@@ -269,7 +269,17 @@ class AIQualityLedger:
     # ── DecisionTracker 对接 ──────────────────────────
 
     def _mark_tracker_locked(self, coin: str) -> None:
-        """把最近窗口的聚合指标写到 D14"""
+        """把最近窗口的聚合指标写到 D14。
+
+        修正点（2026-04）：
+          1. 小样本（n < 5）只刷 metrics，不覆盖 status，避免首轮 AI 单条样本
+             直接把 D14 压成"质量不合格"（此前 rate=0/1 → fail）。
+             5 条阈值与 `_build_trend_hint` 里"样本不足"的判定一致。
+          2. 严重不合格 status 用 "failed"（Status Literal 合法值），此前
+             写成 "fail" 不在 Literal 里，前端 health_aggregator 拉不出
+             failed bucket 且 `fail_count` 也不会累加，显示成 status=fail
+             但 ok/warn/fail 计数全 0 的矛盾态。
+        """
         try:
             from utils.decision_tracker import D, get_tracker
         except Exception:
@@ -287,10 +297,25 @@ class AIQualityLedger:
                 1 for r in window_items if r.matrix_source == "internal_conflict"
             )
             rate = ai_json_hits / n
+
+            # n < 5：只更新 metrics，不覆盖 _mark_d14 已经写好的 status
+            if n < 5:
+                get_tracker().mark(
+                    D.D14_AI_TRADER,
+                    status=None,  # 保留既有 status
+                    log=False,
+                    quality_sample=n,
+                    quality_ai_json_rate=round(rate, 3),
+                    quality_ai_plans_rate=round(plans_hits / n, 3),
+                    quality_conflict_rate=round(conflicts / n, 3),
+                    quality_note="warming_up",
+                )
+                return
+
             status = (
                 "ok" if rate >= 0.6
                 else "warn" if rate >= 0.3
-                else "fail"
+                else "failed"
             )
             # conflict 高于 10% 直接标 warn 覆盖
             if conflicts / n >= 0.1 and status == "ok":
