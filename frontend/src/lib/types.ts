@@ -314,6 +314,14 @@ export interface RangeSignalData {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export type TETimeframe = "1h" | "4h" | "1d";
+export type TEDirection = "up" | "down" | "flat";
+export type TERegime =
+  | "trend_up"
+  | "trend_down"
+  | "range"
+  | "squeeze"
+  | "high_vol_chop"
+  | "extreme";
 export type TEExhaustionState =
   | "healthy_continuation"
   | "momentum_fading"
@@ -347,12 +355,14 @@ export interface TESubScore {
 
 export interface TrendExhaustionState {
   tf: TETimeframe;
+  direction?: TEDirection;
   momentum_score: number;
   participation_score: number;
   exhaustion_score: number;
   composite_score: number;
   state: TEExhaustionState;
   state_age_min: number;
+  confirmed_ticks?: number;
   triggers: string[];
   sub_scores: TESubScore[];
   action_hint: TEActionHint;
@@ -366,10 +376,18 @@ export interface TrendExhaustionSignal {
   tf_4h: TrendExhaustionState | null;
   tf_1d: TrendExhaustionState | null;
   consensus_level: TEConsensusLevel;
+  overall_direction?: TEDirection;
   overall_state: TEExhaustionState;
   overall_action: TEOverallAction;
   overall_position_pct: number;
+  /** 白话第一行：一眼结论，如 "📈 还在涨，动能健康" */
+  overall_plain_cn?: string;
+  /** 白话第二行：行动建议，如 "顺势持有或加仓都可以" */
+  overall_tip_cn?: string;
+  /** 白话第三行 / 专业细节：MTF 溯源 */
   overall_reason_cn: string;
+  regime?: TERegime | null;
+  regime_vetoed?: boolean;
   data_quality: "ok" | "partial" | "insufficient";
   missing_inputs: string[];
 }

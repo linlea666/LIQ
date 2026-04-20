@@ -1,21 +1,25 @@
 "use client";
 
 /**
- * TrendExhaustionView · 趋势动能 / 衰竭 / 反转侦测
+ * TrendExhaustionView · 趋势动能 / 衰竭 / 反转侦测（v2 白话版）
  *
- * 设计原则（与后端 trend_exhaustion.py 一致）：
- *   - 不预测具体点位，只显示"续航 / 衰减 / 衰竭 / 反转 / 观望"5 档状态。
- *   - 小白优先看：顶部大状态徽章 + 一句白话 + 建议动作；不被分数淹没。
- *   - 进阶 / 专业可展开三周期（1h / 4h / 1d）三维雷达式分数。
- *   - 样本不足时如实显示"观望，数据未齐"，不装懂。
+ * 设计原则（与后端 trend_exhaustion.py v2 对齐）：
+ *   - 小白一眼看懂：顶部一张"白话卡"，三行结构：
+ *         Line1: 方向 emoji + "还在涨，动能健康" 等口语化结论
+ *         Line2: "顺势持有或加仓都可以" 行动建议
+ *         Line3: MTF 溯源（折叠在"为什么?"里）
+ *   - 进阶/专业：展开三周期分解 + 子项分数
+ *   - 震荡/极端 regime：顶部一条醒目横条说"当前没有趋势别做方向单"
  */
 
 import { useMemo, useState } from "react";
 import { useMarketStore } from "@/stores/marketStore";
 import type {
   TEConsensusLevel,
+  TEDirection,
   TEExhaustionState,
   TEOverallAction,
+  TERegime,
   TrendExhaustionState,
 } from "@/lib/types";
 
@@ -25,49 +29,41 @@ import type {
 
 const STATE_MAP: Record<
   TEExhaustionState,
-  { label: string; color: string; bg: string; emoji: string; desc: string }
+  { label: string; color: string; bg: string; emoji: string }
 > = {
   healthy_continuation: {
     label: "健康续航",
     color: "text-green-300",
     bg: "bg-green-500/10 border-green-500/40",
     emoji: "▲",
-    desc: "趋势还在推进，动能和资金都在跟",
   },
   momentum_fading: {
     label: "动能减速",
     color: "text-amber-300",
     bg: "bg-amber-500/10 border-amber-500/40",
     emoji: "◆",
-    desc: "推进变慢了，但还没明确反转，保守为主",
   },
   exhaustion_warn: {
     label: "衰竭警戒",
     color: "text-orange-300",
     bg: "bg-orange-500/10 border-orange-500/40",
     emoji: "▼",
-    desc: "多个衰竭信号共振，该平仓或反手了",
   },
   structural_reversal: {
     label: "结构反转",
     color: "text-red-300",
     bg: "bg-red-500/10 border-red-500/40",
     emoji: "⇋",
-    desc: "方向已经切换，顺新方向做",
   },
   neutral: {
     label: "观望",
     color: "text-slate-400",
     bg: "bg-slate-500/10 border-slate-500/40",
     emoji: "·",
-    desc: "暂无明显方向或样本不足",
   },
 };
 
-const CONSENSUS_MAP: Record<
-  TEConsensusLevel,
-  { label: string; color: string }
-> = {
+const CONSENSUS_MAP: Record<TEConsensusLevel, { label: string; color: string }> = {
   strong_agree: { label: "MTF 强共振", color: "text-cyan-300" },
   partial: { label: "部分一致", color: "text-amber-300" },
   conflict: { label: "MTF 分歧", color: "text-red-300" },
@@ -84,11 +80,69 @@ const ACTION_MAP: Record<TEOverallAction, { label: string; color: string }> = {
   stand_aside: { label: "空仓观望", color: "text-slate-400" },
 };
 
-const TF_LABEL: Record<string, string> = {
-  "1h": "1小时",
-  "4h": "4小时",
-  "1d": "日线",
+const REGIME_CN: Record<TERegime, string> = {
+  trend_up: "上升趋势",
+  trend_down: "下降趋势",
+  range: "箱体震荡",
+  squeeze: "蓄力收敛",
+  high_vol_chop: "高波动无序",
+  extreme: "极端行情",
 };
+
+const TF_LABEL: Record<string, string> = { "1h": "1小时", "4h": "4小时", "1d": "日线" };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 白话备选（后端可能没推 overall_plain_cn 时用前端 fallback）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const DIR_EMOJI: Record<TEDirection, string> = { up: "📈", down: "📉", flat: "⏸" };
+
+function fallbackPlain(
+  direction: TEDirection,
+  state: TEExhaustionState,
+  vetoed: boolean,
+): { plain: string; tip: string } {
+  if (vetoed) {
+    return {
+      plain: "当前是震荡/极端行情，没有趋势",
+      tip: "不要做趋势单，空仓或等方向明朗",
+    };
+  }
+  const emoji = DIR_EMOJI[direction] ?? "";
+  const dirWord = direction === "up" ? "涨" : direction === "down" ? "跌" : "";
+  if (!dirWord) {
+    return { plain: "方向未定，等行情明朗", tip: "空仓观望" };
+  }
+  switch (state) {
+    case "healthy_continuation":
+      return {
+        plain: `${emoji} 还在${dirWord}，动能健康`,
+        tip: direction === "up"
+          ? "顺势持有或加仓都可以"
+          : "顺势持空或加空都可以",
+      };
+    case "momentum_fading":
+      return {
+        plain: `${emoji} 还在${dirWord}，但动能在变慢`,
+        tip: direction === "up" ? "已有仓位减半，别再追高" : "已有空单减半，别再追空",
+      };
+    case "exhaustion_warn":
+      return {
+        plain: `${emoji} ${dirWord}不动了，${direction === "up" ? "多" : "空"}头要竭`,
+        tip: "有仓位建议离场观望",
+      };
+    case "structural_reversal":
+      return {
+        plain: `${emoji} ${direction === "up" ? "顶" : "底"}部已确认，方向切换`,
+        tip: direction === "up" ? "清仓，别扛单" : "清空单，别扛单",
+      };
+    default:
+      return {
+        plain: `${emoji} ${dirWord}势方向，信号不清晰`,
+        tip: "保持观望或轻仓跟随",
+      };
+  }
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 小组件
@@ -103,7 +157,6 @@ function scoreColor(score: number): string {
 }
 
 function ScoreBar({ score }: { score: number }) {
-  // score ∈ [-1, 1]，居中 0 往两侧延伸
   const pct = Math.min(100, Math.abs(score) * 100);
   const positive = score >= 0;
   return (
@@ -120,17 +173,14 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 function TFCard({
-  tf,
   state,
   expanded,
   onToggle,
 }: {
-  tf: TrendExhaustionState;
+  state: TrendExhaustionState;
   expanded: boolean;
   onToggle: () => void;
-  state: TrendExhaustionState;
 }) {
-  void tf; // 仅为语义明确，实际读 state.tf
   const meta = STATE_MAP[state.state];
   return (
     <div className={`border rounded-lg p-3 ${meta.bg}`}>
@@ -143,9 +193,12 @@ function TFCard({
             {meta.emoji} {meta.label}
           </span>
           {state.state_age_min > 0 && (
-            <span className="text-[10px] text-slate-500">
-              · {state.state_age_min}m
-            </span>
+            <span className="text-[10px] text-slate-500">· {state.state_age_min}m</span>
+          )}
+          {typeof state.confirmed_ticks === "number" && state.confirmed_ticks < 2 && (
+            (state.state === "exhaustion_warn" || state.state === "structural_reversal") && (
+              <span className="text-[10px] text-amber-300/80">[待二次确认]</span>
+            )
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -163,7 +216,6 @@ function TFCard({
       </div>
       <div className="mt-1 text-xs text-slate-300">{state.reason_cn}</div>
 
-      {/* 三维分数条 */}
       <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
         {[
           { k: "动能", v: state.momentum_score },
@@ -183,7 +235,6 @@ function TFCard({
         ))}
       </div>
 
-      {/* 展开后显示子项 */}
       {expanded && state.sub_scores.length > 0 && (
         <div className="mt-3 pt-2 border-t border-slate-700/60 space-y-1 text-xs">
           {state.sub_scores.map((s) => (
@@ -215,13 +266,12 @@ export default function TrendExhaustionView() {
   const te = data?.trend_exhaustion;
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const toggle = (tf: string) =>
-    setExpanded((e) => ({ ...e, [tf]: !e[tf] }));
+  const [showWhy, setShowWhy] = useState(false);
+  const toggle = (tf: string) => setExpanded((e) => ({ ...e, [tf]: !e[tf] }));
 
   const tfCards = useMemo(() => {
-    if (!te) return [];
+    if (!te) return [] as TrendExhaustionState[];
     const list: TrendExhaustionState[] = [];
-    // 顺序：4h 中枢放中间以突出 MTF 主方向 → 1h → 1d
     if (te.tf_1h) list.push(te.tf_1h);
     if (te.tf_4h) list.push(te.tf_4h);
     if (te.tf_1d) list.push(te.tf_1d);
@@ -236,48 +286,78 @@ export default function TrendExhaustionView() {
     );
   }
 
+  const direction: TEDirection = te.overall_direction ?? "flat";
+  const vetoed = te.regime_vetoed === true;
   const overallMeta = STATE_MAP[te.overall_state];
   const consensusMeta = CONSENSUS_MAP[te.consensus_level];
   const actionMeta = ACTION_MAP[te.overall_action];
 
+  const plain =
+    te.overall_plain_cn && te.overall_plain_cn.trim().length > 0
+      ? te.overall_plain_cn
+      : fallbackPlain(direction, te.overall_state, vetoed).plain;
+  const tip =
+    te.overall_tip_cn && te.overall_tip_cn.trim().length > 0
+      ? te.overall_tip_cn
+      : fallbackPlain(direction, te.overall_state, vetoed).tip;
+
   return (
     <div className="space-y-4">
-      {/* ── 顶部：小白一眼看懂区 ─────────────────────────────── */}
-      <div
-        className={`rounded-xl border-2 p-4 ${overallMeta.bg} transition-all`}
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <span className={`text-3xl ${overallMeta.color}`}>
-              {overallMeta.emoji}
-            </span>
-            <div>
-              <div className={`text-xl font-bold ${overallMeta.color}`}>
-                {overallMeta.label}
-              </div>
-              <div className="text-xs text-slate-400 mt-0.5">
-                {overallMeta.desc}
-              </div>
+      {/* ── [1] 震荡/极端 veto 顶部横条 ──────────────────────── */}
+      {vetoed && te.regime && (
+        <div className="rounded-lg border-2 border-purple-500/60 bg-purple-500/10 p-3 flex items-center gap-3">
+          <span className="text-2xl">⚠</span>
+          <div className="flex-1">
+            <div className="text-base font-semibold text-purple-200">
+              {REGIME_CN[te.regime] ?? te.regime}：当前没有趋势，别做方向单
             </div>
-          </div>
-          <div className="text-right">
-            <div className={`text-sm font-semibold ${actionMeta.color}`}>
-              {actionMeta.label}
+            <div className="text-xs text-purple-300/80 mt-0.5">
+              趋势模块已暂停输出，避免在假行情里给错方向。等 regime 切回 trend 再参考。
             </div>
-            {te.overall_position_pct > 0 && (
-              <div className="text-[10px] text-slate-500 mt-0.5">
-                参考仓位 {Math.round(te.overall_position_pct * 100)}%
-              </div>
-            )}
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`px-2 py-0.5 rounded ${consensusMeta.color} bg-slate-800/60`}>
+      )}
+
+      {/* ── [2] 小白白话卡（三行） ──────────────────────────── */}
+      <div className={`rounded-xl border-2 p-4 ${overallMeta.bg} transition-all`}>
+        {/* Line 1：白话结论（超大） */}
+        <div className="text-2xl font-bold leading-tight text-slate-100">
+          {plain}
+        </div>
+        {/* Line 2：白话行动 */}
+        <div className={`mt-2 text-base font-medium ${actionMeta.color}`}>
+          💡 {tip}
+        </div>
+        {/* Line 3：MTF 元数据（小号字，可折叠 "为什么?" 查看） */}
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className={`px-2 py-0.5 rounded ${overallMeta.color} bg-slate-900/50`}>
+            {overallMeta.emoji} {overallMeta.label}
+          </span>
+          <span className={`px-2 py-0.5 rounded ${consensusMeta.color} bg-slate-900/50`}>
             {consensusMeta.label}
           </span>
-          <span className="text-slate-500">·</span>
-          <span className="text-slate-400 truncate">{te.overall_reason_cn}</span>
+          {te.overall_position_pct > 0 && (
+            <span className="px-2 py-0.5 rounded text-slate-400 bg-slate-900/50">
+              参考仓位 {Math.round(te.overall_position_pct * 100)}%
+            </span>
+          )}
+          {te.regime && !vetoed && (
+            <span className="px-2 py-0.5 rounded text-slate-500 bg-slate-900/30">
+              regime·{REGIME_CN[te.regime] ?? te.regime}
+            </span>
+          )}
+          <button
+            onClick={() => setShowWhy((v) => !v)}
+            className="ml-auto text-[11px] text-slate-400 hover:text-slate-200 underline underline-offset-2"
+          >
+            {showWhy ? "收起依据" : "为什么?"}
+          </button>
         </div>
+        {showWhy && (
+          <div className="mt-2 text-[11px] text-slate-400 leading-relaxed border-t border-slate-700/40 pt-2">
+            {te.overall_reason_cn}
+          </div>
+        )}
         {te.data_quality === "insufficient" && (
           <div className="mt-2 text-[11px] text-amber-300/80">
             ⚠ 数据未齐（{te.missing_inputs.join(", ") || "样本累积中"}），当前仅作参考
@@ -285,8 +365,8 @@ export default function TrendExhaustionView() {
         )}
       </div>
 
-      {/* ── 中部：三周期对比（进阶/专业模式下默认展示） ─────────── */}
-      {(displayMode === "pro" || tfCards.length > 0) && (
+      {/* ── [3] 三周期分解（进阶/专业模式或有数据时展示） ─────── */}
+      {(displayMode === "pro" || tfCards.length > 0) && !vetoed && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-xs text-slate-500">三周期分解</div>
@@ -298,7 +378,6 @@ export default function TrendExhaustionView() {
             {tfCards.map((s) => (
               <TFCard
                 key={s.tf}
-                tf={s}
                 state={s}
                 expanded={!!expanded[s.tf]}
                 onToggle={() => toggle(s.tf)}
@@ -308,11 +387,10 @@ export default function TrendExhaustionView() {
         </div>
       )}
 
-      {/* ── 底部：方法论注释（防止分数崇拜） ─────────────────── */}
+      {/* ── [4] 方法论注释 ─────────────────────────────────── */}
       <div className="text-[11px] text-slate-600 border-t border-slate-800 pt-2 leading-relaxed">
-        方法论：三维加权（动能 40% + 参与度 30% + 衰竭 30%）× 三周期共识。
-        不预测具体顶底点位，只回答「续航还是衰竭」。
-        共识级别比单周期分数更重要，冲突时一律建议观望。
+        方法论：regime-aware 三维加权（动能 + 参与度 + 衰竭）× MTF 共识 × 硬门闸（需连续 2 次才出警戒）。
+        不预测点位，只回答「续航 vs 衰竭」。震荡/极端 regime 会自动暂停方向性结论。
       </div>
     </div>
   );
