@@ -147,14 +147,128 @@ async def get_ai_history(coin: str, limit: int = Query(5, ge=1, le=50)):
 
 @router.get("/ai/detail/{coin}/{ts}")
 async def get_ai_detail(coin: str, ts: int):
-    """按时间戳精确查询单条 AI 分析结果"""
+    """按时间戳精确查询单条 AI 分析结果。
+
+    返回字段（在原 AIAnalysisResult 基础上追加，向后兼容）：
+      - 原 AIAnalysisResult 全部字段（raw_text / market_overview / key_levels ...）
+      - ai_trader_report · L7 AI 交易员完整报告（含 7 板块 FactorMatrix / TradingPlans）
+      - final_decision   · L7.5 双引擎融合后的最终决策
+      - execution_plan   · 数学引擎 L6 ExecutionPlan（供对照）
+      - news_brief       · 本次分析注入 prompt 的新闻简报 + 地缘 + 活跃叙事
+      - _extras_source   · "live" | "archive" | "none"（标记三件套来源）
+
+    数据来源策略：
+      - 若 ts 就是最新一次 AI 分析 → 直接读 live state（零损耗、最全）
+      - 否则按 (coin, ts ± 600s) 在 snapshot_archiver 里找最近一帧（P2.4 归档）
+      - 仍找不到 → _extras_source="none"，只返回老字段
+    """
     if not _engine:
         raise HTTPException(503, "Engine not ready")
     coin = coin.upper()
+    analysis = None
     for h in _engine.get_ai_history(coin):
         if h.ts == ts:
-            return h.model_dump()
-    raise HTTPException(404, f"Analysis not found: {coin}/{ts}")
+            analysis = h
+            break
+    if analysis is None:
+        raise HTTPException(404, f"Analysis not found: {coin}/{ts}")
+
+    base = analysis.model_dump()
+    base["ai_trader_report"] = None
+    base["final_decision"] = None
+    base["execution_plan"] = None
+    base["news_brief"] = None
+    base["_extras_source"] = "none"
+
+    state = _engine._states.get(coin)
+    # 最近一次 AI 分析（history 末尾）
+    live_latest_ts = 0
+    try:
+        hist = list(_engine.get_ai_history(coin))
+        if hist:
+            live_latest_ts = int(hist[-1].ts)
+    except Exception:
+        live_latest_ts = 0
+
+    def _to_plain(obj):
+        if obj is None:
+            return None
+        try:
+            return obj.model_dump()
+        except Exception:
+            try:
+                return dict(obj)
+            except Exception:
+                return None
+
+    def _extract_news_brief(snapshot_dict: dict) -> Optional[dict]:
+        if not snapshot_dict:
+            return None
+        text = snapshot_dict.get("news_brief_text") or ""
+        geo = snapshot_dict.get("geo_overview")
+        narratives = snapshot_dict.get("active_narratives") or []
+        if not text and not geo and not narratives:
+            return None
+        return {
+            "text": text,
+            "version": snapshot_dict.get("news_brief_version") or 0,
+            "trigger": snapshot_dict.get("news_brief_trigger") or "",
+            "updated_at": snapshot_dict.get("news_brief_updated_at") or 0,
+            "geo_overview": geo,
+            "active_narratives": narratives,
+        }
+
+    # ── 策略 A · live ──：ts 是最新一次 → 直接用内存 state
+    if state is not None and live_latest_ts == ts:
+        try:
+            base["ai_trader_report"] = _to_plain(
+                getattr(state, "ai_trader_report", None)
+            )
+            base["final_decision"] = _to_plain(
+                getattr(state, "final_decision", None)
+            )
+            base["execution_plan"] = _to_plain(
+                getattr(state, "execution_plan", None)
+            )
+            snap = getattr(state, "_last_ai_snapshot", None)
+            if snap is not None:
+                snap_dict = _to_plain(snap) or {}
+                base["news_brief"] = _extract_news_brief(snap_dict)
+            if base["ai_trader_report"] or base["final_decision"]:
+                base["_extras_source"] = "live"
+        except Exception as e:
+            logger.debug("ai/detail live fill failed: %s", e, exc_info=True)
+
+    # ── 策略 B · archive ──：历史分析 → 归档器按 ts ±600s 就近找
+    if base["_extras_source"] == "none":
+        try:
+            from processors.snapshot_archiver import get_snapshot_archiver
+            archiver = get_snapshot_archiver()
+            # 容差窗口：AI 分析从发起到归档通常 1-5 分钟，放到 10 分钟保险
+            frames = archiver.read_range(
+                coin=coin,
+                start_ts=ts - 600,
+                end_ts=ts + 600,
+                limit=50,
+            )
+            # frames 是简要列表；按 |ts - 目标| 排序找最近，再 read_frame 精确取全内容
+            if frames:
+                nearest = min(
+                    frames, key=lambda f: abs(int(f.get("ts", 0)) - ts)
+                )
+                full = archiver.read_frame(coin, int(nearest["ts"]))
+                if full:
+                    base["ai_trader_report"] = full.get("ai_trader_report")
+                    base["final_decision"] = full.get("final_decision")
+                    base["execution_plan"] = full.get("execution_plan")
+                    snap_dict = full.get("snapshot") or {}
+                    base["news_brief"] = _extract_news_brief(snap_dict)
+                    if base["ai_trader_report"] or base["final_decision"]:
+                        base["_extras_source"] = "archive"
+        except Exception as e:
+            logger.debug("ai/detail archive fill failed: %s", e, exc_info=True)
+
+    return base
 
 
 @router.get("/key-levels/history/{coin}")

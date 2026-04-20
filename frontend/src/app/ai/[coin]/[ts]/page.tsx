@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { API_BASE } from "@/lib/constants";
-import type { AIAnalysisResult } from "@/lib/types";
+import type { AIDetailResponse } from "@/lib/types";
+import AITraderMatrixCard from "@/components/MainView/AITraderMatrixCard";
+import FinalDecisionCard from "@/components/MainView/FinalDecisionCard";
 
 function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
@@ -42,7 +44,7 @@ export default function AIDetailPage() {
   const coin = (params.coin as string)?.toUpperCase() ?? "BTC";
   const ts = Number(params.ts);
 
-  const [data, setData] = useState<AIAnalysisResult | null>(null);
+  const [data, setData] = useState<AIDetailResponse | null>(null);
   const [error, setError] = useState("");
   const [copyLabel, setCopyLabel] = useState("📋 复制全文");
 
@@ -124,6 +126,50 @@ export default function AIDetailPage() {
 
       {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+        {/* ━━━ 新版双引擎输出（P1.3+）━━━ */}
+        {(data.final_decision || data.ai_trader_report) && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200">
+                🎯 双引擎决策（L7.5 融合层）
+              </h2>
+              <span
+                className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700"
+                title={
+                  data._extras_source === "live"
+                    ? "来源：当前运行内存（最新一次 AI 分析）"
+                    : data._extras_source === "archive"
+                    ? "来源：P2.4 归档（就近 ±10min 匹配）"
+                    : "来源：未命中"
+                }
+              >
+                {data._extras_source === "live"
+                  ? "live"
+                  : data._extras_source === "archive"
+                  ? "archive"
+                  : "不可用"}
+              </span>
+            </div>
+            {data.final_decision && (
+              <FinalDecisionCard
+                coin={coin}
+                externalDecision={data.final_decision}
+              />
+            )}
+            {data.ai_trader_report && (
+              <AITraderMatrixCard
+                coin={coin}
+                externalReport={data.ai_trader_report}
+              />
+            )}
+          </section>
+        )}
+
+        {/* ━━━ 新闻 · 地缘 · 叙事（prompt 本轮注入内容）━━━ */}
+        {data.news_brief && (
+          <NewsBriefCard brief={data.news_brief} />
+        )}
+
         {/* Signal Summary Card */}
         {sig?.reason && (
           <div className={`rounded-xl p-5 border ${
@@ -339,6 +385,164 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
         {children}
       </div>
     </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 本轮 prompt 注入的新闻简报 + 地缘 + 活跃叙事
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface NewsBriefPayload {
+  text: string;
+  version: number;
+  trigger: string;
+  updated_at: number;
+  geo_overview: Record<string, unknown> | null;
+  active_narratives: Array<Record<string, unknown>>;
+}
+
+interface BriefSection {
+  title_cn?: string;
+  bullets_cn?: string[];
+}
+
+interface BriefJson {
+  version?: number;
+  tldr_cn?: string;
+  sections?: BriefSection[];
+  tracked_themes?: Array<Record<string, unknown>>;
+  diff_from_prev_version?: string;
+  update_trigger?: string;
+}
+
+function parseBriefJson(text: string): BriefJson | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as BriefJson;
+  } catch {
+    return null;
+  }
+}
+
+function NewsBriefCard({ brief }: { brief: NewsBriefPayload }) {
+  const parsed = parseBriefJson(brief.text);
+  const geo = brief.geo_overview || {};
+  const narratives = brief.active_narratives || [];
+
+  const geoLevel = Number(geo["overall_level"] ?? 0);
+  const geoLabel = String(geo["overall_label"] ?? "");
+  const geoEmoji = String(geo["overall_emoji"] ?? "🟢");
+  const geoSummary = String(geo["overall_summary_cn"] ?? "");
+
+  const geoColor =
+    geoLevel >= 4 ? "text-red-300 bg-red-500/10 border-red-500/40" :
+    geoLevel >= 3 ? "text-orange-300 bg-orange-500/10 border-orange-500/40" :
+    geoLevel >= 1 ? "text-yellow-300 bg-yellow-500/10 border-yellow-500/40" :
+    "text-green-300 bg-green-500/10 border-green-500/40";
+
+  return (
+    <Card title="📰 新闻 · 地缘 · 叙事（本轮 prompt 注入）">
+      {/* 顶部：来源元信息 */}
+      <div className="flex items-center gap-3 flex-wrap text-xs mb-3">
+        <span className="text-slate-500">
+          简报版本 <span className="text-white font-mono">v{brief.version || 0}</span>
+        </span>
+        {brief.trigger && (
+          <span className="text-slate-500">
+            触发 <span className="text-slate-300">{brief.trigger}</span>
+          </span>
+        )}
+        {brief.updated_at > 0 && (
+          <span className="text-slate-500">
+            更新于 <span className="text-slate-300">{formatFullTime(brief.updated_at)}</span>
+          </span>
+        )}
+      </div>
+
+      {/* 地缘风险条 */}
+      {(geoLevel > 0 || geoSummary) && (
+        <div className={`border rounded-lg px-3 py-2 mb-3 ${geoColor}`}>
+          <div className="text-xs font-semibold mb-0.5 flex items-center gap-2">
+            <span>{geoEmoji}</span>
+            <span>地缘风险 · {geoLabel || "—"}（等级 {geoLevel}/5）</span>
+          </div>
+          {geoSummary && <div className="text-xs opacity-90">{geoSummary}</div>}
+        </div>
+      )}
+
+      {/* TL;DR */}
+      {parsed?.tldr_cn && (
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg px-3 py-2 mb-3">
+          <div className="text-[11px] text-slate-500 mb-1">TL;DR</div>
+          <div className="text-sm text-slate-200 leading-relaxed">{parsed.tldr_cn}</div>
+        </div>
+      )}
+
+      {/* Sections */}
+      {parsed?.sections && parsed.sections.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {parsed.sections.map((sec, i) => (
+            <div key={i} className="border-l-2 border-blue-500/40 pl-3">
+              <div className="text-xs font-semibold text-slate-200 mb-1">
+                {sec.title_cn || `板块 ${i + 1}`}
+              </div>
+              {sec.bullets_cn?.map((b, j) => (
+                <div key={j} className="text-xs text-slate-400 leading-relaxed mb-0.5">
+                  • {b}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 与上一版差异 */}
+      {parsed?.diff_from_prev_version && (
+        <div className="bg-blue-950/20 border border-blue-800/40 rounded px-3 py-2 mb-3 text-xs text-blue-200/90">
+          <span className="text-blue-400 font-semibold">本版变化：</span>
+          {parsed.diff_from_prev_version}
+        </div>
+      )}
+
+      {/* 活跃叙事 */}
+      {narratives.length > 0 && (
+        <div>
+          <div className="text-xs text-slate-500 mb-1.5">活跃叙事主题（{narratives.length}）</div>
+          <div className="flex flex-wrap gap-1.5">
+            {narratives.slice(0, 12).map((n, i) => {
+              const name = String(n["name_cn"] || n["theme_id"] || "—");
+              const intensity = Number(n["intensity"] ?? 0);
+              const dir = String(n["direction"] ?? "neutral");
+              const flip = Number(n["flip_flop_24h"] ?? 0);
+              const dirColor =
+                dir === "bullish" ? "border-green-700/50 text-green-300" :
+                dir === "bearish" ? "border-red-700/50 text-red-300" :
+                "border-slate-700 text-slate-300";
+              return (
+                <span
+                  key={i}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border ${dirColor}`}
+                  title={`强度 ${intensity.toFixed(2)} · 方向 ${dir}${flip > 0 ? ` · 24h 翻转 ${flip} 次` : ""}`}
+                >
+                  {name}
+                  {flip >= 2 && <span className="ml-1 text-amber-400">⚠flip×{flip}</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 原始简报无法解析时的兜底 */}
+      {!parsed && brief.text && (
+        <details className="mt-3 text-xs text-slate-500">
+          <summary className="cursor-pointer hover:text-slate-300">查看原始 brief JSON</summary>
+          <pre className="mt-2 p-2 bg-slate-950 border border-slate-800 rounded overflow-x-auto text-[10px]">
+            {brief.text.slice(0, 2000)}
+          </pre>
+        </details>
+      )}
+    </Card>
   );
 }
 

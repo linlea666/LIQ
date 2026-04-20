@@ -58,12 +58,22 @@ const BIAS_CN: Record<string, string> = {
   potential_reversal: "反转",
 };
 
-export default function FinalDecisionCard({ coin }: { coin: string }) {
-  const [decision, setDecision] = useState<FinalDecision | null>(null);
-  const [ready, setReady] = useState(false);
+export default function FinalDecisionCard({
+  coin,
+  externalDecision,
+}: {
+  coin: string;
+  /** 外部传入的 decision：传入后停用内部轮询，用于历史详情页等静态场景 */
+  externalDecision?: FinalDecision | null;
+}) {
+  const [fetchedDecision, setFetchedDecision] = useState<FinalDecision | null>(null);
+  const [fetchedReady, setFetchedReady] = useState(false);
   const [lastErr, setLastErr] = useState("");
 
+  const useExternal = externalDecision !== undefined;
+
   useEffect(() => {
+    if (useExternal) return;
     let cancelled = false;
     const fetchOnce = async () => {
       try {
@@ -71,8 +81,8 @@ export default function FinalDecisionCard({ coin }: { coin: string }) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j: FinalDecisionResponse = await r.json();
         if (cancelled) return;
-        setReady(Boolean(j.ready));
-        setDecision(j.decision ?? null);
+        setFetchedReady(Boolean(j.ready));
+        setFetchedDecision(j.decision ?? null);
         setLastErr("");
       } catch (e) {
         if (cancelled) return;
@@ -85,7 +95,10 @@ export default function FinalDecisionCard({ coin }: { coin: string }) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [coin]);
+  }, [coin, useExternal]);
+
+  const decision = useExternal ? externalDecision ?? null : fetchedDecision;
+  const ready = useExternal ? Boolean(externalDecision) : fetchedReady;
 
   if (!ready || !decision) {
     return (

@@ -710,6 +710,28 @@ export interface FinalDecisionResponse {
   decision?: FinalDecision;
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AI 详情页专用：AIAnalysisResult + L7 trader_report + L7.5 final_decision + 新闻简报
+// 由 /api/ai/detail/{coin}/{ts} 返回，字段非破坏性追加
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface AIDetailNewsBrief {
+  text: string;
+  version: number;
+  trigger: string;
+  updated_at: number;
+  geo_overview: Record<string, unknown> | null;
+  active_narratives: Array<Record<string, unknown>>;
+}
+
+export interface AIDetailResponse extends AIAnalysisResult {
+  ai_trader_report: AITraderReport | null;
+  final_decision: FinalDecision | null;
+  execution_plan: Record<string, unknown> | null;
+  news_brief: AIDetailNewsBrief | null;
+  _extras_source: "live" | "archive" | "none";
+}
+
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // P1.6 · DecisionTracker · D1-D17 全景灯

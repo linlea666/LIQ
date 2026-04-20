@@ -62,12 +62,22 @@ const DIRECTION_CN: Record<string, string> = {
   avoid: "回避",
 };
 
-export default function AITraderMatrixCard({ coin }: { coin: string }) {
-  const [report, setReport] = useState<AITraderReport | null>(null);
-  const [ready, setReady] = useState(false);
+export default function AITraderMatrixCard({
+  coin,
+  externalReport,
+}: {
+  coin: string;
+  /** 外部传入的 report：传入后将停用内部轮询，用于历史详情页等静态场景 */
+  externalReport?: AITraderReport | null;
+}) {
+  const [fetchedReport, setFetchedReport] = useState<AITraderReport | null>(null);
+  const [fetchedReady, setFetchedReady] = useState(false);
   const [lastErr, setLastErr] = useState("");
 
+  const useExternal = externalReport !== undefined;
+
   useEffect(() => {
+    if (useExternal) return; // 外部驱动：跳过轮询
     let cancelled = false;
     const fetchOnce = async () => {
       try {
@@ -75,8 +85,8 @@ export default function AITraderMatrixCard({ coin }: { coin: string }) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j: AITraderReportResponse = await r.json();
         if (cancelled) return;
-        setReady(Boolean(j.ready));
-        setReport(j.report ?? null);
+        setFetchedReady(Boolean(j.ready));
+        setFetchedReport(j.report ?? null);
         setLastErr("");
       } catch (e) {
         if (cancelled) return;
@@ -89,7 +99,10 @@ export default function AITraderMatrixCard({ coin }: { coin: string }) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [coin]);
+  }, [coin, useExternal]);
+
+  const report = useExternal ? externalReport ?? null : fetchedReport;
+  const ready = useExternal ? Boolean(externalReport) : fetchedReady;
 
   if (!ready || !report) {
     return (
