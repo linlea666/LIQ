@@ -107,6 +107,9 @@ class CoinState:
         # L2 MarketRegime 快照（D01）。由 _recompute 末尾写入
         from models.regime import RegimeSnapshot  # local import 避免顶部循环
         self.regime_snapshot: Optional[RegimeSnapshot] = None
+        # 趋势衰竭信号（Phase 1，独立 processor，与 range_signal / key_level_v2 正交）
+        from models.trend_exhaustion import TrendExhaustionSignal as _TrendExhaustionSignal
+        self.trend_exhaustion: Optional[_TrendExhaustionSignal] = None
         # L4 ExecutionPlan（D02 数学引擎主输出）
         from models.execution_plan import ExecutionPlan as _ExecutionPlan
         self.execution_plan: Optional[_ExecutionPlan] = None
@@ -1151,6 +1154,15 @@ class Engine:
         except Exception:
             logger.debug("[D01] compute_regime_from_state failed", exc_info=True)
 
+        # ── 趋势衰竭侦测（Phase 1，独立模块，不进硬门，仅作为前端展示 + AI 偏置）──
+        try:
+            from processors.trend_exhaustion import compute_trend_exhaustion
+            state.trend_exhaustion = compute_trend_exhaustion(
+                state, prev_signal=state.trend_exhaustion,
+            )
+        except Exception:
+            logger.debug("[TE] compute_trend_exhaustion failed", exc_info=True)
+
         # ── L3 SignalBus ingest：把 KeyLevelSignal 投射为 CandidateSignal ──
         try:
             from processors.signal_bus import get_bus, adapt_key_level_signal
@@ -1549,6 +1561,8 @@ class Engine:
             payload["macd"] = state.macd_data
         if state.boll_data:
             payload["boll"] = state.boll_data
+        if state.trend_exhaustion:
+            payload["trend_exhaustion"] = state.trend_exhaustion.model_dump()
         if state.news:
             payload["news_count"] = len(state.news.articles)
 
@@ -1999,6 +2013,9 @@ class Engine:
             market_structure=state.market_structure,
             market_structure_1d=state.market_structure_1d,
             market_structure_1w=state.market_structure_1w,
+            trend_exhaustion=(
+                state.trend_exhaustion.model_dump() if state.trend_exhaustion else None
+            ),
         )
 
         result = await self._analyzer.analyze(snapshot)

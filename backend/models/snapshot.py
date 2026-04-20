@@ -205,6 +205,11 @@ class AISnapshot(BaseModel):
     market_structure_1d: Optional[dict] = None
     market_structure_1w: Optional[dict] = None
 
+    # 趋势衰竭 / 动能共振（Phase 1，多周期 MTF）
+    # 结构为 TrendExhaustionSignal.model_dump()，AI 读取 consensus_level / overall_state /
+    # overall_reason_cn 可在冲突解析阶段做"续航 vs 衰竭"二择。
+    trend_exhaustion: Optional[dict] = None
+
     # 清算热力图摘要（价格-时间维度密度峰值）
     liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
 

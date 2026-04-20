@@ -115,6 +115,45 @@ def last_valid(series: list[float | None]) -> float | None:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RSI (Wilder, 序列版)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def calc_rsi(values: list[float], period: int = 14) -> list[float | None]:
+    """Wilder 平滑 RSI，返回与输入等长序列。
+
+    前 `period` 根为 None（样本不足，避免误用）。
+    供 trend_exhaustion / 背离检测等需要历史 RSI 序列的模块使用；
+    只需最新值时对返回值调用 last_valid。
+    """
+    n = len(values)
+    if n <= period:
+        return [None] * n
+    gains: list[float] = [0.0]
+    losses: list[float] = [0.0]
+    for i in range(1, n):
+        diff = values[i] - values[i - 1]
+        gains.append(max(diff, 0.0))
+        losses.append(max(-diff, 0.0))
+    result: list[float | None] = [None] * n
+    avg_gain = sum(gains[1 : period + 1]) / period
+    avg_loss = sum(losses[1 : period + 1]) / period
+    if avg_loss == 0:
+        result[period] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        result[period] = 100 - (100 / (1 + rs))
+    for i in range(period + 1, n):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss == 0:
+            result[i] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            result[i] = 100 - (100 / (1 + rs))
+    return result
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ATR (Wilder)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

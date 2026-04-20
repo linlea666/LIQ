@@ -309,6 +309,73 @@ export interface RangeSignalData {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TrendExhaustion · 趋势动能 / 衰竭 / 反转侦测
+//   对齐后端 `models.trend_exhaustion.TrendExhaustionSignal`
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type TETimeframe = "1h" | "4h" | "1d";
+export type TEExhaustionState =
+  | "healthy_continuation"
+  | "momentum_fading"
+  | "exhaustion_warn"
+  | "structural_reversal"
+  | "neutral";
+export type TEConsensusLevel = "strong_agree" | "partial" | "conflict" | "neutral";
+export type TEOverallAction =
+  | "add"
+  | "hold"
+  | "reduce"
+  | "close"
+  | "counter_small"
+  | "counter_main"
+  | "stand_aside";
+export type TEActionHint =
+  | "add"
+  | "hold"
+  | "reduce"
+  | "close"
+  | "counter_small"
+  | "stand_aside";
+
+export interface TESubScore {
+  key: string;
+  name: string;
+  score: number;
+  note: string;
+  value: number | null;
+}
+
+export interface TrendExhaustionState {
+  tf: TETimeframe;
+  momentum_score: number;
+  participation_score: number;
+  exhaustion_score: number;
+  composite_score: number;
+  state: TEExhaustionState;
+  state_age_min: number;
+  triggers: string[];
+  sub_scores: TESubScore[];
+  action_hint: TEActionHint;
+  reason_cn: string;
+}
+
+export interface TrendExhaustionSignal {
+  coin: string;
+  ts: number;
+  tf_1h: TrendExhaustionState | null;
+  tf_4h: TrendExhaustionState | null;
+  tf_1d: TrendExhaustionState | null;
+  consensus_level: TEConsensusLevel;
+  overall_state: TEExhaustionState;
+  overall_action: TEOverallAction;
+  overall_position_pct: number;
+  overall_reason_cn: string;
+  data_quality: "ok" | "partial" | "insufficient";
+  missing_inputs: string[];
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MTF 市场结构（日/周线完整快照）
 //   对齐后端 `models.market_structure.MarketStructure`
 //   仅 WebSocket market_update 的 `market_structure_1d/1w` 使用
@@ -572,6 +639,7 @@ export interface MarketUpdate {
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
   key_levels_v2?: KeyLevelSnapshotV2;
+  trend_exhaustion?: TrendExhaustionSignal;
   market_structure_1d?: MarketStructureSnapshot;
   market_structure_1w?: MarketStructureSnapshot;
   option_max_pain?: Record<string, unknown>;

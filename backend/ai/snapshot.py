@@ -120,6 +120,7 @@ def build_ai_snapshot(
     market_structure: Optional[MarketStructure] = None,
     market_structure_1d: Optional[MarketStructure] = None,
     market_structure_1w: Optional[MarketStructure] = None,
+    trend_exhaustion: Optional[dict] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -333,6 +334,7 @@ def build_ai_snapshot(
         market_structure=market_structure.model_dump() if market_structure else None,
         market_structure_1d=market_structure_1d.model_dump() if market_structure_1d else None,
         market_structure_1w=market_structure_1w.model_dump() if market_structure_1w else None,
+        trend_exhaustion=trend_exhaustion,
         liq_clusters_above_30d=clusters_above_30d,
         liq_clusters_below_30d=clusters_below_30d,
         liq_imbalance_ratio_30d=imbalance_30d,
