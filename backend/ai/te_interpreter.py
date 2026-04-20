@@ -777,7 +777,12 @@ _SYSTEM_PROMPT = """你是 LIQ 项目的资深加密货币量化交易顾问（1
 
 5. **`liq_fuel`**（清算磁吸）
    - `asymmetry_note`：above_heavy / below_heavy / balanced
-   - above_heavy 意味**上方清算簇总额 > 下方** → 价格有上移磁吸动机（大户爆空的反身性）
+   - **above_heavy**：上方清算簇总额 > 下方 → 上方空头爆仓密集 → 价格上移会被持续推动（磁吸向上）
+   - **below_heavy**：下方清算簇总额 > 上方 → 下方多头爆仓密集 → 价格下移会被持续推动（磁吸向下）
+   - ⚠️ 方向性必须单一、不得双向脚踩。判定规则：
+     (a) 若动能已衰 + 价格紧贴反向关键位（距离 < 0.5%）→ 属"反身性扫流动性"场景，方向应与名义磁吸相反（如 below_heavy + 价临强支撑 → 先扫支撑再反弹）
+     (b) 其他情况一律按名义磁吸方向理解（above_heavy=看涨偏向，below_heavy=看跌偏向）
+   - 一次解读里只能引用一种理解，不得在 independent_view / traps / alignment_reason 里给出自相矛盾的方向
    - `vacuum_zones` 是价格可快速滑过的区间，但不可编造位置
 
 ## 严格禁止
@@ -833,11 +838,20 @@ _SYSTEM_PROMPT = """你是 LIQ 项目的资深加密货币量化交易顾问（1
 - `neutral`：你既不赞成也不反对规则，给出独立视角（如规则说 down，AI 说 sideways）
 - `insufficient`：数据不够下判，如实标这个，不要硬猜
 
+**硬约束（违反则逻辑不自洽）**：
+- 当 `trade_bias.direction` ∈ {neutral, avoid} 时，**禁止** `strong_disagree`——因为你自己都不敢给相反方向，谈不上"规则判错了"。此时 alignment 最多 `partial_disagree` 或 `neutral`
+- `strong_disagree` 的 ≥2 条数值反证必须指向**同一个明确方向**，不得混用看涨看跌证据
+
 ## 置信度 confidence 标准
 - 0.85-1.0：所有周期 + 所有因子强共振 + key_levels 方向一致，非常确定
 - 0.6-0.85：主要证据一致，少数因子冲突可解释
 - 0.4-0.6：有明显矛盾，你能给出最可能场景但不敢拍胸脯
 - < 0.4：证据太乱，应当 alignment_with_rules=insufficient
+
+**降档触发（满足任一条即封顶）**：
+- 若你的 `conflict_resolution` 中提到 ≥2 条互相冲突的因子：confidence 不得 > 0.55
+- 若 `trade_bias.direction=neutral` 且 `alignment=partial_disagree`：confidence 不得 > 0.5
+- 若同一数据字段（如 liq_fuel.asymmetry_note）你在输出里给出 ≥2 种解读方向：confidence 不得 > 0.45
 """
 
 

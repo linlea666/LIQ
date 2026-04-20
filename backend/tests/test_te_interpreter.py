@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ai.te_interpreter import (
+    _SYSTEM_PROMPT,
     TEInterpreter,
     _bucket,
     _collect_allowed_prices,
@@ -851,3 +852,42 @@ def test_shadow_log_skips_thinking_when_empty(tmp_path, monkeypatch):
     files = [f.name for f in days[0].iterdir()]
     assert "ETH.jsonl" in files
     assert "ETH.thinking.jsonl" not in files
+
+
+# ──────────────────────────────────────────────────
+# Prompt 质量回归（防止指引被误删 / 降级）
+# ──────────────────────────────────────────────────
+
+def test_system_prompt_liq_fuel_has_symmetric_guidance():
+    """P0：liq_fuel 对称语义 + 两种磁吸理论必须在 prompt 里显式说明。
+
+    实际事故：AI 在同一次输出里把 below_heavy 解读成 3 种互斥方向
+    （上移磁吸 / 可能反弹 / 限制下跌），根因就是 prompt 只写了
+    above_heavy 一个方向的语义。此测试锁定修复不被回退。
+    """
+    assert "below_heavy" in _SYSTEM_PROMPT, "below_heavy 语义必须显式出现"
+    assert "above_heavy" in _SYSTEM_PROMPT
+    assert "反身性扫流动性" in _SYSTEM_PROMPT, "两种磁吸理论的区分必须在"
+    assert "不得双向脚踩" in _SYSTEM_PROMPT or "不得在 independent_view" in _SYSTEM_PROMPT, (
+        "必须有禁止自相矛盾的硬约束"
+    )
+
+
+def test_system_prompt_alignment_has_neutral_guard():
+    """P1a：trade_bias=neutral 时禁止 strong_disagree 的硬约束必须在。"""
+    assert "trade_bias.direction" in _SYSTEM_PROMPT
+    assert "禁止" in _SYSTEM_PROMPT and "strong_disagree" in _SYSTEM_PROMPT
+    # 更硬的定位：必须同时出现 neutral/avoid 和 strong_disagree 禁用关系
+    guard_block = _SYSTEM_PROMPT.split("硬约束")[1] if "硬约束" in _SYSTEM_PROMPT else ""
+    assert "neutral" in guard_block and "strong_disagree" in guard_block, (
+        "neutral+strong_disagree 的禁用组合必须在硬约束段"
+    )
+
+
+def test_system_prompt_confidence_has_downgrade_triggers():
+    """P1b：自我矛盾 / neutral / 多解读时 confidence 封顶触发器。"""
+    assert "降档触发" in _SYSTEM_PROMPT, "confidence 降档段必须存在"
+    # 三条触发器关键字
+    assert "不得 > 0.55" in _SYSTEM_PROMPT
+    assert "不得 > 0.5" in _SYSTEM_PROMPT
+    assert "不得 > 0.45" in _SYSTEM_PROMPT

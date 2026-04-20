@@ -73,7 +73,7 @@ export default function TEAIDetailPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center ai-detail-page">
         <div className="text-center">
           <div className="text-rose-400 text-lg mb-4">{error}</div>
           <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">
@@ -86,7 +86,7 @@ export default function TEAIDetailPage() {
 
   if (!data) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center ai-detail-page">
         <div className="animate-spin w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full" />
       </div>
     );
@@ -96,7 +96,7 @@ export default function TEAIDetailPage() {
   const rules = data.rules_snapshot || {};
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-300">
+    <div className="min-h-screen bg-slate-950 text-slate-300 ai-detail-page">
       {/* Header */}
       <header className="border-b border-slate-700 bg-slate-900/80 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between flex-wrap gap-3">
