@@ -502,6 +502,64 @@ export interface TEAIInterpretation {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TE · AI 解读 · 历史与详情（对齐 `monitoring.te_ai_log.log_interpretation`）
+//   /api/te/ai_interpret/{coin}/history
+//   /api/te/ai_interpret/{coin}/detail/{ts}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface TEAIHistoryItem {
+  ts: number;
+  coin: string;
+  price: number;
+  fingerprint: string;
+  model: string;
+  cache_hit: boolean;
+  from_cache_age_sec: number;
+  latency_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+  reasoning_tokens: number;
+  ai: {
+    summary_cn: string;
+    scenario: TEAIScenario;
+    trend_assessment: TETrendAssessment | null;
+    level_projection: TELevelProjection | null;
+    trade_bias: TETradeBias | null;
+    conflict_resolution: string;
+    traps: string[];
+    triggers_to_watch: string[];
+    independent_view: string;
+    action_suggestion: string;
+    confidence: number;
+    alignment_with_rules: TEAIAlignment;
+    alignment_reason: string;
+  };
+  rules_snapshot: {
+    overall_state?: string | null;
+    overall_action?: string | null;
+    overall_direction?: string | null;
+    consensus_level?: string | null;
+    regime?: string | null;
+    regime_vetoed?: boolean;
+    overall_position_pct?: number | null;
+  };
+  error: string | null;
+}
+
+export interface TEAIHistoryResponse {
+  coin: string;
+  items: TEAIHistoryItem[];
+  total: number;
+  limit: number;
+}
+
+/** /detail 返回在 TEAIHistoryItem 基础上附加 reasoning 字段 */
+export interface TEAIDetailResponse extends TEAIHistoryItem {
+  reasoning?: string;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MTF 市场结构（日/周线完整快照）
 //   对齐后端 `models.market_structure.MarketStructure`
 //   仅 WebSocket market_update 的 `market_structure_1d/1w` 使用

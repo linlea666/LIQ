@@ -26,9 +26,15 @@ sys.path.insert(0, str(ROOT))
 
 from ai.te_interpreter import (
     TEInterpreter,
+    _bucket,
     _collect_allowed_prices,
+    _compact_flow_metrics,
     _compact_key_levels,
+    _compact_liq_fuel,
+    _compact_market_structure,
+    _compact_sentiment,
     _extract_json,
+    _extras_fingerprint_buckets,
     _fingerprint,
     _parse_ai_json,
 )
@@ -644,6 +650,189 @@ def test_fingerprint_includes_key_levels():
     # 无 key_levels 和有 key_levels 也应不同
     fp_no_kl = _fingerprint("BTC", s, None)
     assert fp_no_kl != fp1
+
+
+# ──────────────────────────────────────────────────
+# Phase 3 · Market Structure / Flow / Sentiment / Liq Fuel
+# ──────────────────────────────────────────────────
+
+
+def _make_ms(direction="bullish", event="BOS_up", tf="1h", high=80000, low=75000):
+    return {
+        "timeframe": tf,
+        "direction": direction,
+        "last_event": event,
+        "event_ts": int(time.time() * 1000) - 30 * 60 * 1000,  # 30min ago
+        "structure_high": high,
+        "structure_low": low,
+        "operate_bias": "long_only" if direction == "bullish" else "short_only",
+        "confidence": 0.75,
+        "summary": f"{tf} {direction}",
+    }
+
+
+def test_compact_market_structure_aligned_up():
+    ms_1h = _make_ms("bullish", "BOS_up", "1h")
+    ms_1d = _make_ms("bullish", "CHoCH_up", "1d")
+    ms_1w = _make_ms("bullish", "BOS_up", "1w")
+    out = _compact_market_structure(ms_1h, ms_1d, ms_1w, price=78000)
+    assert out is not None
+    assert out["alignment"] == "aligned_up"
+    assert out["1h"]["direction"] == "bullish"
+    assert out["1d"]["last_event"] == "CHoCH_up"
+    assert out["1h"]["event_age_min"] is not None
+    assert out["1h"]["event_age_min"] >= 29  # 30min 左右
+
+
+def test_compact_market_structure_only_1h():
+    ms_1h = _make_ms("bullish", "BOS_up", "1h")
+    out = _compact_market_structure(ms_1h, None, None, price=78000)
+    assert out is not None
+    # 只有 1h，另外两个周期为 None
+    assert out["1h"] is not None
+    assert out["1d"] is None
+    assert out["1w"] is None
+    # 单周期不足以判断 alignment
+    assert out["alignment"] == "insufficient"
+
+
+def test_compact_flow_metrics_oi_4h_calc():
+    """oi_history 足够 48 条（5m 粒度 × 48 = 4h）→ 现算 4h%。"""
+    now_ts = int(time.time())
+    # 48 条：价从 1B 涨到 1.02B（+2%）
+    history = []
+    for i in range(48):
+        history.append({
+            "ts": now_ts - (48 - i) * 300,
+            "oi_usd": 1_000_000_000 + i * (20_000_000 / 47),
+        })
+    history.append({"ts": now_ts, "oi_usd": 1_020_000_000})
+    funding = {"oi_weighted_rate": 0.0005}  # +5bp
+    out = _compact_flow_metrics(funding, None, None, history, None)
+    assert out is not None
+    assert "change_4h_pct" in out["oi"]
+    # 1e9 → 1.02e9 = +2.0%
+    assert abs(out["oi"]["change_4h_pct"] - 2.0) < 0.5
+
+
+def test_compact_flow_metrics_oi_history_too_short():
+    """不足 48 条 → 不算 4h%，不报错。"""
+    history = [{"ts": 0, "oi_usd": 1e9}] * 10
+    funding = {"oi_weighted_rate": 0.0005}
+    out = _compact_flow_metrics(funding, None, None, history, None)
+    assert out is not None
+    assert "change_4h_pct" not in (out.get("oi") or {})
+
+
+def test_compact_sentiment_retail_long_smart_short():
+    """散户 1.3（偏多）+ 大户 0.8（偏空）→ divergence = retail_long_smart_short。"""
+    retail = {"avg_ratio": 1.3, "exchanges": [], "cycle": "1h"}
+    top_acct = {"avg_ratio": 0.85, "exchanges": [], "cycle": "1h"}
+    top_pos = {"avg_ratio": 0.80, "exchanges": [], "cycle": "1h"}
+    out = _compact_sentiment(retail, top_acct, top_pos)
+    assert out is not None
+    assert out["divergence"] == "retail_long_smart_short"
+
+
+def test_compact_liq_fuel_above_heavy():
+    """上方清算总额 > 下方 → asymmetry_note = above_heavy。"""
+    liq = {
+        "clusters_above": [
+            {"price_center": 80000, "price_from": 79500, "price_to": 80500,
+             "distance_pct": 2.0, "total_usd": 100e6, "side": "short", "dominant_leverage": "20x"},
+            {"price_center": 82000, "price_from": 81500, "price_to": 82500,
+             "distance_pct": 5.0, "total_usd": 50e6, "side": "short", "dominant_leverage": "10x"},
+        ],
+        "clusters_below": [
+            {"price_center": 76000, "price_from": 75500, "price_to": 76500,
+             "distance_pct": -2.0, "total_usd": 30e6, "side": "long", "dominant_leverage": "20x"},
+        ],
+        "imbalance_ratio": 5.0,  # 150/30
+        "vacuum_zones": [
+            {"price_from": 80500, "price_to": 81500, "midpoint": 81000, "note": "gap"},
+        ],
+    }
+    out = _compact_liq_fuel(liq, price=78000)
+    assert out is not None
+    assert out["asymmetry_note"] == "above_heavy"
+    assert len(out["above"]) == 2
+    assert len(out["below"]) == 1
+
+
+# ──────────────────────────────────────────────────
+# Phase 3 · 指纹桶化
+# ──────────────────────────────────────────────────
+
+
+def test_fingerprint_bucketing_crosses_boundary():
+    """OI 5m% 从 +0.15 到 +0.25（跨 0.2 桶边界）→ 指纹变。"""
+    s = _make_signal()
+    # 桶大小 0.2：0.15→ bucket 0.2，0.25→ bucket 0.2 也可能… 我们选跨 0 线的：
+    # 0.05 → bucket 0.0；0.25 → bucket 0.2
+    extras1 = {"oi": {"change_5m_pct": 0.05, "change_1h_pct": 0.1, "trend": "up"}}
+    extras2 = {"oi": {"change_5m_pct": 0.25, "change_1h_pct": 0.1, "trend": "up"}}
+    assert _fingerprint("BTC", s, None, extras1) != _fingerprint("BTC", s, None, extras2)
+
+
+def test_fingerprint_bucketing_small_noise_stable():
+    """OI 5m% 从 0.15 到 0.18（同一 0.2 桶）→ 指纹不变（抗噪）。"""
+    s = _make_signal()
+    extras1 = {"oi": {"change_5m_pct": 0.15, "change_1h_pct": 0.1, "trend": "up"}}
+    extras2 = {"oi": {"change_5m_pct": 0.18, "change_1h_pct": 0.1, "trend": "up"}}
+    assert _fingerprint("BTC", s, None, extras1) == _fingerprint("BTC", s, None, extras2)
+
+
+def test_fingerprint_stable_without_extras():
+    """向后兼容：extras_dict=None 或缺省，指纹与旧行为一致（不受 extras 干扰）。"""
+    s = _make_signal()
+    fp_no_extras_new = _fingerprint("BTC", s, None, None)
+    fp_no_extras_old = _fingerprint("BTC", s, None)  # 使用默认 None
+    assert fp_no_extras_new == fp_no_extras_old
+
+
+def test_bucket_basic():
+    assert _bucket(None, 0.2) is None
+    assert _bucket("nan_garbage", 0.2) is None
+    assert _bucket(0.15, 0.2) == 0.2
+    assert _bucket(0.05, 0.2) == 0.0
+    assert _bucket(-0.15, 0.2) == -0.2
+
+
+def test_extras_fingerprint_buckets_empty():
+    """None 或 {} 输入 → 返回 {}，不会污染指纹。"""
+    assert _extras_fingerprint_buckets(None) == {}
+    assert _extras_fingerprint_buckets({}) == {}
+
+
+def test_shadow_log_includes_new_fields(tmp_path, monkeypatch):
+    """回归：补全后的 log_interpretation 必须包含 4 个新字段。"""
+    from models.te_interpretation import (
+        TEAIInterpretation as _TEResult,
+        TradeBias, TrendAssessment, LevelProjection,
+    )
+    monkeypatch.setattr(ai_log_mod, "_repo_root", lambda: str(tmp_path))
+    result = _TEResult(
+        coin="BTC",
+        ts=int(time.time()),
+        signal_fingerprint="log_test_fp",
+        model="deepseek-reasoner",
+        summary_cn="test",
+        trend_assessment=TrendAssessment(primary_trend="uptrend", momentum_quality="fuel_full"),
+        level_projection=LevelProjection(target_level=78000, break_likelihood="likely"),
+        trade_bias=TradeBias(direction="long", strength="standard"),
+        independent_view="独立观察一句",
+    )
+    ai_log_mod.log_interpretation(result, _make_signal(), price=77500)
+    day_root = Path(ai_log_mod.ai_log_root())
+    files = sorted(next(day_root.iterdir()).iterdir())
+    # 只校验主 jsonl，不关心 thinking
+    jsonl = next(p for p in files if p.name == "BTC.jsonl")
+    lines = jsonl.read_text(encoding="utf-8").strip().splitlines()
+    obj = json.loads(lines[-1])
+    assert obj["ai"]["trend_assessment"]["primary_trend"] == "uptrend"
+    assert obj["ai"]["level_projection"]["break_likelihood"] == "likely"
+    assert obj["ai"]["trade_bias"]["direction"] == "long"
+    assert obj["ai"]["independent_view"] == "独立观察一句"
 
 
 def test_shadow_log_skips_thinking_when_empty(tmp_path, monkeypatch):

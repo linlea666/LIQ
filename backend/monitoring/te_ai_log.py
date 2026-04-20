@@ -25,7 +25,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from models.te_interpretation import TEAIInterpretation
@@ -81,9 +81,22 @@ def log_interpretation(
             "ai": {
                 "summary_cn": result.summary_cn,
                 "scenario": result.scenario,
+                "trend_assessment": (
+                    result.trend_assessment.model_dump()
+                    if result.trend_assessment else None
+                ),
+                "level_projection": (
+                    result.level_projection.model_dump()
+                    if result.level_projection else None
+                ),
+                "trade_bias": (
+                    result.trade_bias.model_dump()
+                    if result.trade_bias else None
+                ),
                 "conflict_resolution": result.conflict_resolution,
                 "traps": result.traps,
                 "triggers_to_watch": result.triggers_to_watch,
+                "independent_view": result.independent_view,
                 "action_suggestion": result.action_suggestion,
                 "confidence": result.confidence,
                 "alignment_with_rules": result.alignment_with_rules,
@@ -133,6 +146,124 @@ def list_available_dates(max_days: int = 30) -> list[str]:
             dates.append(name)
     dates.sort(reverse=True)
     return dates[:max_days]
+
+
+def read_history(coin: str, limit: int = 20, max_days: int = 30) -> list[dict]:
+    """读取某币种最近 N 条 AI 解读记录（从新到旧）。
+
+    只读主 JSONL（不读 thinking，避免大文件 IO）。从最近日期往前扫，
+    够 limit 条即止。
+
+    Args:
+        coin: 大写币种，如 "BTC"
+        limit: 最多返回条数
+        max_days: 最多回溯多少天
+
+    Returns:
+        list[dict]：每项为 jsonl 行原样 dict，按 ts 降序。
+    """
+    coin_u = (coin or "").upper()
+    if not coin_u:
+        return []
+    root = ai_log_root()
+    if not os.path.isdir(root):
+        return []
+    results: list[dict] = []
+    dates = list_available_dates(max_days)
+    for day in dates:
+        if len(results) >= limit:
+            break
+        path = os.path.join(root, day, f"{coin_u}.jsonl")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception:
+            continue
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            results.append(obj)
+            if len(results) >= limit:
+                break
+    results.sort(key=lambda r: int(r.get("ts", 0)), reverse=True)
+    return results[:limit]
+
+
+def read_detail(coin: str, ts: int, with_reasoning: bool = True) -> Optional[dict]:
+    """按 ts 查找单条记录（精确匹配）。
+
+    Args:
+        coin: 大写币种
+        ts: 记录 ts（unix 秒）
+        with_reasoning: 是否附带 .thinking.jsonl 中同 fingerprint 的 reasoning
+
+    Returns:
+        命中则返回主记录 dict（若 with_reasoning=True 会附加 "reasoning" 字段），
+        未命中返回 None。
+    """
+    coin_u = (coin or "").upper()
+    if not coin_u or ts <= 0:
+        return None
+    root = ai_log_root()
+    if not os.path.isdir(root):
+        return None
+
+    # ts 通常属于触发当天，但跨天边界容错 → 扫最近 2 天就够
+    # 我们不知道 ts 具体对应哪天（可能服务器时区 vs 北京时区差），所以回退到扫所有最近 7 天
+    target_fp: Optional[str] = None
+    main_record: Optional[dict] = None
+    for day in list_available_dates(max_days=7):
+        path = os.path.join(root, day, f"{coin_u}.jsonl")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if int(obj.get("ts", 0)) == int(ts):
+                        main_record = obj
+                        target_fp = obj.get("fingerprint") or None
+                        break
+        except Exception:
+            continue
+        if main_record is not None:
+            # 同天找 thinking
+            if with_reasoning and target_fp:
+                think_path = os.path.join(root, day, f"{coin_u}.thinking.jsonl")
+                if os.path.isfile(think_path):
+                    try:
+                        with open(think_path, "r", encoding="utf-8") as f:
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    t_obj = json.loads(line)
+                                except Exception:
+                                    continue
+                                if (
+                                    t_obj.get("fingerprint") == target_fp
+                                    and int(t_obj.get("ts", 0)) == int(ts)
+                                ):
+                                    main_record["reasoning"] = t_obj.get("reasoning") or ""
+                                    break
+                    except Exception:
+                        pass
+            return main_record
+    return None
 
 
 def stats() -> dict:

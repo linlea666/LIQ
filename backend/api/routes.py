@@ -784,7 +784,12 @@ async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
             key_levels_dict = state.key_level_snapshot_v2.model_dump()
         except Exception:
             key_levels_dict = None
-    fp = interpreter.compute_fingerprint(coin_upper, signal_dict, key_levels_dict)
+    # 扩展上下文：多周期 MS / funding / OI / LS / Liq Map（与 ws.py replay 共享同一收集器）
+    from api._ai_helpers import collect_extras
+    extras_dict = collect_extras(state)
+    fp = interpreter.compute_fingerprint(
+        coin_upper, signal_dict, key_levels_dict, extras_dict,
+    )
 
     from api.ws import push_to_coin
     from monitoring.te_ai_log import log_interpretation
@@ -819,6 +824,7 @@ async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
                 coin=coin_upper, signal_dict=signal_dict,
                 price=price, atr=atr,
                 key_levels_dict=key_levels_dict,
+                extras_dict=extras_dict,
                 force=force,
             )
             # WS 推送结果（成功或 AI 自身带 error 都走 te_ai_result）
@@ -877,6 +883,7 @@ async def te_ai_interpret_peek(coin: str):
         raise HTTPException(404, f"No trend_exhaustion signal for {coin_upper}")
 
     from ai.te_interpreter import get_te_interpreter
+    from api._ai_helpers import collect_extras
     interpreter = get_te_interpreter()
     signal_dict = state.trend_exhaustion.model_dump()
     key_levels_dict: Optional[dict] = None
@@ -885,11 +892,60 @@ async def te_ai_interpret_peek(coin: str):
             key_levels_dict = state.key_level_snapshot_v2.model_dump()
         except Exception:
             key_levels_dict = None
-    fp = interpreter.compute_fingerprint(coin_upper, signal_dict, key_levels_dict)
+    extras_dict = collect_extras(state)
+    fp = interpreter.compute_fingerprint(
+        coin_upper, signal_dict, key_levels_dict, extras_dict,
+    )
     cached = interpreter.peek_cache(fp)
     if cached is None:
         raise HTTPException(404, "No cached interpretation for current signal")
     return cached.model_dump()
+
+
+@router.get("/te/ai_interpret/{coin}/history")
+async def te_ai_interpret_history(
+    coin: str,
+    limit: int = Query(20, ge=1, le=100),
+):
+    """读取某币种最近 N 条 AI 解读历史（从新到旧）。
+
+    数据源：`logs/te_ai_interpret/YYYY-MM-DD/{COIN}.jsonl`
+    （不含 reasoning，避免文件膨胀；需要时走 /detail 端点）
+
+    Returns:
+        {items: [...], total: n, coin: "BTC"}
+    """
+    from monitoring.te_ai_log import read_history
+    coin_upper = coin.upper()
+    items = read_history(coin_upper, limit=limit, max_days=30)
+    return {
+        "coin": coin_upper,
+        "items": items,
+        "total": len(items),
+        "limit": limit,
+    }
+
+
+@router.get("/te/ai_interpret/{coin}/detail/{ts}")
+async def te_ai_interpret_detail(coin: str, ts: int):
+    """读取单条 AI 解读完整详情（含 reasoning 思考链）。
+
+    Args:
+        coin: 币种大写
+        ts: 记录 ts（unix 秒，与 history 列表中的 ts 对应）
+
+    Returns:
+        完整 jsonl dict + reasoning 字段（若 .thinking.jsonl 有同 fingerprint 记录）
+    """
+    from monitoring.te_ai_log import read_detail
+    coin_upper = coin.upper()
+    record = read_detail(coin_upper, ts, with_reasoning=True)
+    if record is None:
+        raise HTTPException(
+            404,
+            f"No AI interpretation record found | coin={coin_upper} ts={ts}",
+        )
+    return record
 
 
 @router.get("/te/reports/{date}")

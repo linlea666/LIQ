@@ -34,7 +34,7 @@ import type {
 // 元数据映射
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const ALIGNMENT_META: Record<
+export const ALIGNMENT_META: Record<
   TEAIAlignment,
   { label: string; bg: string; text: string; desc: string }
 > = {
@@ -70,7 +70,7 @@ const ALIGNMENT_META: Record<
   },
 };
 
-const SCENARIO_META: Record<TEAIScenario, { label: string; color: string }> = {
+export const SCENARIO_META: Record<TEAIScenario, { label: string; color: string }> = {
   trend_continuation: { label: "顺势续航", color: "text-emerald-300" },
   bear_rebound: { label: "熊市反弹", color: "text-orange-300" },
   bull_pullback: { label: "牛市回调", color: "text-blue-300" },
@@ -242,7 +242,7 @@ function BreakLikelihoodBar({
   );
 }
 
-function formatCacheAge(sec: number): string {
+export function formatCacheAge(sec: number): string {
   if (sec < 60) return `${sec}s 前`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m 前`;
   return `${Math.floor(sec / 3600)}h 前`;
@@ -436,11 +436,8 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
               <LevelProjectionCard lp={result.level_projection} />
             )}
 
-          {/* ④ 交易倾向卡（新） */}
-          {result.trade_bias &&
-            result.trade_bias.direction !== "neutral" && (
-              <TradeBiasCard tb={result.trade_bias} />
-            )}
+          {/* ④ 交易倾向卡（neutral/avoid 也显示，让 AI 立场对用户可见） */}
+          {result.trade_bias && <TradeBiasCard tb={result.trade_bias} />}
 
           {/* ⑤ 矛盾消解 */}
           {result.conflict_resolution && (
@@ -558,7 +555,7 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
 // 子卡片：趋势评估
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function TrendAssessmentCard({ ta }: { ta: TETrendAssessment }) {
+export function TrendAssessmentCard({ ta }: { ta: TETrendAssessment }) {
   const pt = PRIMARY_TREND_META[ta.primary_trend];
   const md = MOMENTUM_DIRECTION_META[ta.momentum_direction];
   return (
@@ -595,7 +592,7 @@ function TrendAssessmentCard({ ta }: { ta: TETrendAssessment }) {
 // 子卡片：关键位投射
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function LevelProjectionCard({ lp }: { lp: TELevelProjection }) {
+export function LevelProjectionCard({ lp }: { lp: TELevelProjection }) {
   const directionLabel =
     lp.direction_tested === "resistance"
       ? "测试阻力"
@@ -653,47 +650,70 @@ function LevelProjectionCard({ lp }: { lp: TELevelProjection }) {
 // 子卡片：交易倾向
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function TradeBiasCard({ tb }: { tb: TETradeBias }) {
+export function TradeBiasCard({ tb }: { tb: TETradeBias }) {
   const meta = TRADE_DIRECTION_META[tb.direction];
+  const isStandby = tb.direction === "neutral" || tb.direction === "avoid";
+  // 只有真正"有入场倾向"时才显示三栏（入场/失效/时间窗）
+  const hasActionable =
+    !isStandby && (tb.entry_zone_cn || tb.invalidation_cn || tb.timeframe_cn);
+
+  // standby 态的标题措辞更明确，避免用户误以为"有单可开"
+  const title = isStandby
+    ? tb.direction === "avoid"
+      ? `${meta.icon} AI 建议：回避交易`
+      : `${meta.icon} AI 建议：暂不开单 · 观望`
+    : `${meta.icon} 交易倾向（AI 建议 · 非强制）`;
+
   return (
     <div className={`rounded-md border p-2.5 ${meta.bg}`}>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
         <div className={`text-[11px] font-semibold ${meta.color}`}>
-          {meta.icon} 交易倾向（AI 建议 · 非强制）
+          {title}
         </div>
         <div className="text-[11px] text-slate-400">
           <span className="mr-2">
             <span className="text-slate-500">方向：</span>
             <span className={`${meta.color} font-semibold`}>{meta.label}</span>
           </span>
-          <span>
-            <span className="text-slate-500">强度：</span>
-            <span className="text-slate-200">
-              {TRADE_STRENGTH_META[tb.strength]}
+          {tb.strength !== "none" && (
+            <span>
+              <span className="text-slate-500">强度：</span>
+              <span className="text-slate-200">
+                {TRADE_STRENGTH_META[tb.strength]}
+              </span>
             </span>
-          </span>
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[11px]">
-        {tb.entry_zone_cn && (
-          <div className="rounded bg-slate-900/60 px-2 py-1">
-            <div className="text-[10px] text-slate-500">入场区</div>
-            <div className="text-slate-200">{tb.entry_zone_cn}</div>
-          </div>
-        )}
-        {tb.invalidation_cn && (
-          <div className="rounded bg-slate-900/60 px-2 py-1">
-            <div className="text-[10px] text-slate-500">失效位</div>
-            <div className="text-rose-200">{tb.invalidation_cn}</div>
-          </div>
-        )}
-        {tb.timeframe_cn && (
-          <div className="rounded bg-slate-900/60 px-2 py-1">
-            <div className="text-[10px] text-slate-500">时间窗</div>
-            <div className="text-slate-200">{tb.timeframe_cn}</div>
-          </div>
-        )}
-      </div>
+      {hasActionable && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[11px]">
+          {tb.entry_zone_cn && (
+            <div className="rounded bg-slate-900/60 px-2 py-1">
+              <div className="text-[10px] text-slate-500">入场区</div>
+              <div className="text-slate-200">{tb.entry_zone_cn}</div>
+            </div>
+          )}
+          {tb.invalidation_cn && (
+            <div className="rounded bg-slate-900/60 px-2 py-1">
+              <div className="text-[10px] text-slate-500">失效位</div>
+              <div className="text-rose-200">{tb.invalidation_cn}</div>
+            </div>
+          )}
+          {tb.timeframe_cn && (
+            <div className="rounded bg-slate-900/60 px-2 py-1">
+              <div className="text-[10px] text-slate-500">时间窗</div>
+              <div className="text-slate-200">{tb.timeframe_cn}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* standby 态：即便没有入场区也显示失效位（作为"回到交易区的触发点"） */}
+      {isStandby && tb.invalidation_cn && !hasActionable && (
+        <div className="text-[11px] text-slate-400">
+          <span className="text-slate-500">观察失效位：</span>
+          <span className="text-rose-300">{tb.invalidation_cn}</span>
+        </div>
+      )}
       {tb.why_cn && (
         <div className="mt-2 text-[11px] text-slate-400 leading-relaxed">
           <span className="text-slate-300">理由：</span>

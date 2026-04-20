@@ -16,6 +16,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMarketStore } from "@/stores/marketStore";
 import TEAIInterpretBlock from "./TEAIInterpretBlock";
+import TEAIHistoryList from "./TEAIHistoryList";
 import type {
   TEConsensusLevel,
   TEDirection,
@@ -412,6 +413,9 @@ export default function TrendExhaustionView() {
 
       {/* ── [3.5] AI 深度解读区块（手动触发） ───────────────────── */}
       <TEAIInterpretBlock coin={coin} />
+
+      {/* ── [3.6] AI 解读历史（仅手动触发过的记录） ──────────────── */}
+      <TEAIHistoryList coin={coin} />
 
       {/* ── [4] 日报入口 + 方法论注释 ─────────────────────────── */}
       <div className="flex items-start justify-between gap-3 border-t border-slate-800 pt-2">

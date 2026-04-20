@@ -43,7 +43,7 @@ from models.te_interpretation import TEAIInterpretation
 logger = logging.getLogger(__name__)
 
 # ── 配置常量 ──────────────────────────────────────
-_CACHE_TTL_SEC = 30 * 60           # 同指纹缓存 30 分钟
+_CACHE_TTL_SEC = 5 * 60            # 同指纹缓存 5 分钟（配合桶化快变量指纹，支持分钟级刷新）
 _CACHE_MAX_ENTRIES = 200           # LRU 上限
 _MAX_REASONING_STORE_CHARS = 50000 # reasoning 单次入库最大长度
 _DEFAULT_TIMEOUT_SEC = 180         # Reasoner 思考可能慢
@@ -59,11 +59,115 @@ class _CacheEntry:
 # 数据压缩函数（把 TrendExhaustionSignal + KeyLevelSnapshotV2 压成 AI 能消化的结构）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _fingerprint(coin: str, signal_dict: dict, kl_dict: Optional[dict] = None) -> str:
-    """为信号生成缓存键：采纳"判定性"字段，避免毛刺扰动缓存。
+def _bucket(x, size: float):
+    """把数值量化到指定桶大小。x=None → None；异常 → None。
 
-    采纳：coin + overall_state + direction + regime + regime_vetoed +
-          consensus + 三周期 composite（1 位）+ key_levels 指纹（若有）
+    例：_bucket(0.17, 0.2) = 0.2；_bucket(0.3, 0.2) = 0.4（跳档阈值 = size/2）。
+    """
+    if x is None:
+        return None
+    try:
+        return round(float(x) / size) * size
+    except Exception:
+        return None
+
+
+def _extras_fingerprint_buckets(extras: Optional[dict]) -> dict:
+    """把 extras_dict 中的"快变量"桶化后加入指纹键。
+
+    策略：**变化快但有信号价值**的字段进指纹 + 每项单独桶化（避免毛刺），
+    配合 5min TTL 实现"行情剧变即刷新，平稳时吃缓存"。
+
+    每项独立 try/except，一条异常不影响其他字段参与指纹。
+    """
+    if not extras:
+        return {}
+    out: dict = {}
+
+    # ── OI 变化率（多周期桶化） ──
+    try:
+        oi = extras.get("oi") or {}
+        out["oi_5m"] = _bucket(oi.get("change_5m_pct"), 0.2)
+        out["oi_1h"] = _bucket(oi.get("change_1h_pct"), 0.5)
+    except Exception:
+        pass
+    try:
+        out["oi_4h"] = _bucket(extras.get("oi_4h_pct"), 0.5)
+    except Exception:
+        pass
+    try:
+        out["oi_24h"] = _bucket(extras.get("oi_change_24h_pct"), 1.0)
+    except Exception:
+        pass
+
+    # ── Funding（转 bp，桶化到 1bp） ──
+    try:
+        funding = extras.get("funding") or {}
+        r = funding.get("oi_weighted_rate")
+        if r is not None:
+            out["fr_oiw_bp"] = _bucket(float(r) * 10000.0, 1.0)
+    except Exception:
+        pass
+    try:
+        mf = extras.get("multi_funding") or {}
+        r = mf.get("oi_weighted")
+        if r is not None:
+            out["mfr_bp"] = _bucket(float(r) * 10000.0, 1.0)
+    except Exception:
+        pass
+
+    # ── LS Ratio × 3 维度（桶化到 0.1） ──
+    for key, alias in (
+        ("ls_ratio", "lsr_g"),
+        ("ls_top_account", "lsr_a"),
+        ("ls_top_position", "lsr_p"),
+    ):
+        try:
+            ls = extras.get(key) or {}
+            out[alias] = _bucket(ls.get("avg_ratio"), 0.1)
+        except Exception:
+            pass
+
+    # ── Market Structure：事件 + 分钟级时间戳（新事件立即翻新） ──
+    for key, alias in (("ms_1h", "ms1h"), ("ms_1d", "ms1d"), ("ms_1w", "ms1w")):
+        try:
+            ms = extras.get(key) or {}
+            out[f"{alias}_ev"] = ms.get("last_event") or ""
+            ts_ms = int(ms.get("event_ts", 0) or 0)
+            out[f"{alias}_min"] = ts_ms // 60_000
+            out[f"{alias}_dir"] = ms.get("direction") or ""
+        except Exception:
+            pass
+
+    # ── Liq Map：不对称性 + 最近两侧簇中心价（整百） ──
+    try:
+        lm = extras.get("liq_map_1d") or {}
+        out["liq_ib"] = _bucket(lm.get("imbalance_ratio"), 0.5)
+        above = (lm.get("clusters_above") or [])
+        below = (lm.get("clusters_below") or [])
+        if above:
+            out["liq_a0"] = _bucket(above[0].get("price_center"), 100.0)
+        if below:
+            out["liq_b0"] = _bucket(below[0].get("price_center"), 100.0)
+    except Exception:
+        pass
+
+    return out
+
+
+def _fingerprint(
+    coin: str,
+    signal_dict: dict,
+    kl_dict: Optional[dict] = None,
+    extras_dict: Optional[dict] = None,
+) -> str:
+    """为信号生成缓存键：采纳"判定性"字段 + 桶化的"快变量"。
+
+    采纳：
+      - TE 主维度：coin + overall_state + direction + regime + regime_vetoed + consensus
+      - TE 多周期：tf_1h/4h/1d 的 composite（0.1 精度）+ state
+      - key_levels：S/A 级强位价格（百位）+ 牛熊分界 regime
+      - extras 快变量（桶化）：OI/funding/LS/MS 事件/liq 不对称性
     """
     keys = {
         "coin": coin.upper(),
@@ -91,6 +195,9 @@ def _fingerprint(coin: str, signal_dict: dict, kl_dict: Optional[dict] = None) -
             keys["bb"] = bb
         except Exception:
             pass
+
+    # extras 快变量（桶化后参与指纹，分钟级响应行情剧变）
+    keys.update(_extras_fingerprint_buckets(extras_dict))
 
     s = json.dumps(keys, sort_keys=True, ensure_ascii=False)
     return hashlib.md5(s.encode("utf-8")).hexdigest()[:16]
@@ -215,6 +322,384 @@ def _compact_key_levels(kl_dict: Optional[dict], current_price: float) -> Option
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 扩展数据压缩：Market Structure / Flow / Sentiment / Liq Fuel
+# （给 AI 审计时做更独立的趋势判断 + 拥挤度判断 + 磁吸判断）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _compact_one_ms(ms: Optional[dict], price: float) -> Optional[dict]:
+    """单周期 MarketStructure 压缩（提炼 AI 能直接用的锚）。"""
+    if not ms:
+        return None
+    try:
+        structure_high = float(ms.get("structure_high", 0.0) or 0.0)
+        structure_low = float(ms.get("structure_low", 0.0) or 0.0)
+        event_ts = int(ms.get("event_ts", 0) or 0)
+        now_ms = int(time.time() * 1000)
+        event_age_min: Optional[int] = None
+        if event_ts > 0:
+            event_age_min = max(0, (now_ms - event_ts) // 60_000)
+        price_vs_high_pct = None
+        price_vs_low_pct = None
+        if price and structure_high > 0:
+            price_vs_high_pct = round((price - structure_high) / structure_high * 100.0, 2)
+        if price and structure_low > 0:
+            price_vs_low_pct = round((price - structure_low) / structure_low * 100.0, 2)
+        return {
+            "timeframe": ms.get("timeframe") or "",
+            "direction": ms.get("direction") or "ranging",
+            "last_event": ms.get("last_event") or "",
+            "event_age_min": event_age_min,
+            "structure_high": round(structure_high, 2) if structure_high else None,
+            "structure_low": round(structure_low, 2) if structure_low else None,
+            "price_vs_high_pct": price_vs_high_pct,
+            "price_vs_low_pct": price_vs_low_pct,
+            "operate_bias": ms.get("operate_bias") or "stand_aside",
+            "confidence": round(float(ms.get("confidence", 0.0) or 0.0), 2),
+            "summary": (ms.get("summary") or "")[:80],
+        }
+    except Exception:
+        return None
+
+
+def _compact_market_structure(
+    ms_1h: Optional[dict],
+    ms_1d: Optional[dict],
+    ms_1w: Optional[dict],
+    price: float,
+) -> Optional[dict]:
+    """多周期 Market Structure 压缩 + 跨周期对齐标签。
+
+    输出含 alignment:
+      - "aligned_up"：1h/1d/1w 全 bullish
+      - "aligned_down"：1h/1d/1w 全 bearish
+      - "mixed"：周期间方向冲突
+      - "ranging"：全 ranging/transitioning
+      - "insufficient"：数据缺失（缺 ≥2 周期）
+
+    对齐标签是 AI 判"真实趋势"的硬锚（权重高于 bull_bear_line）。
+    """
+    c_1h = _compact_one_ms(ms_1h, price)
+    c_1d = _compact_one_ms(ms_1d, price)
+    c_1w = _compact_one_ms(ms_1w, price)
+
+    if not any([c_1h, c_1d, c_1w]):
+        return None
+
+    # 跨周期对齐
+    alignment = "insufficient"
+    dirs = [c["direction"] for c in (c_1h, c_1d, c_1w) if c]
+    if len(dirs) >= 2:
+        bull_count = sum(1 for d in dirs if d == "bullish")
+        bear_count = sum(1 for d in dirs if d == "bearish")
+        range_count = sum(1 for d in dirs if d in ("ranging", "transitioning"))
+        if bull_count == len(dirs):
+            alignment = "aligned_up"
+        elif bear_count == len(dirs):
+            alignment = "aligned_down"
+        elif range_count == len(dirs):
+            alignment = "ranging"
+        elif bull_count > 0 and bear_count > 0:
+            alignment = "mixed"
+        else:
+            alignment = "mixed"
+
+    return {
+        "1h": c_1h,
+        "1d": c_1d,
+        "1w": c_1w,
+        "alignment": alignment,
+    }
+
+
+def _extreme_tag_from_bp(bp: float) -> str:
+    """funding 极端分档（8h 基点）。
+
+    >+10 bp: crowded_long（做多拥挤）
+    <-10 bp: crowded_short（做空拥挤）
+    |x| <= 3 bp: neutral
+    其他: mild_bias_long / mild_bias_short
+    """
+    try:
+        v = float(bp)
+    except Exception:
+        return "unknown"
+    if v > 10:
+        return "crowded_long"
+    if v < -10:
+        return "crowded_short"
+    if v >= 3:
+        return "mild_bias_long"
+    if v <= -3:
+        return "mild_bias_short"
+    return "neutral"
+
+
+def _compact_flow_metrics(
+    funding: Optional[dict],
+    multi_funding: Optional[dict],
+    oi: Optional[dict],
+    oi_history: Optional[list],
+    oi_change_24h_pct: Optional[float],
+) -> Optional[dict]:
+    """funding + OI 压缩（含 4h% 现算）。
+
+    4h% 算法：从 oi_history（5m 间隔）取当前与第 -48 条（4h 前）相比。
+    不足 48 条 → 返回 None（不报错）。
+    """
+    has_any = funding or multi_funding or oi
+    if not has_any:
+        return None
+
+    out: dict = {}
+
+    # ── funding（官方主源） ──
+    if funding:
+        try:
+            okx = funding.get("okx_rate")
+            bn = funding.get("binance_rate")
+            avg = funding.get("avg_rate", 0) or 0
+            oiw = funding.get("oi_weighted_rate", 0) or 0
+            oiw_bp = float(oiw) * 10000.0
+            out["funding"] = {
+                "okx_bp": round(float(okx) * 10000.0, 2) if okx is not None else None,
+                "binance_bp": round(float(bn) * 10000.0, 2) if bn is not None else None,
+                "avg_bp": round(float(avg) * 10000.0, 2),
+                "oi_weighted_bp": round(oiw_bp, 2),
+                "extreme_tag": _extreme_tag_from_bp(oiw_bp),
+                "interpretation": (funding.get("interpretation") or "")[:80],
+            }
+        except Exception:
+            pass
+
+    # ── multi_funding（多交易所 + 7d 均值） ──
+    if multi_funding:
+        try:
+            avg_current = float(multi_funding.get("avg_current", 0) or 0)
+            avg_7d = float(multi_funding.get("avg_7d", 0) or 0)
+            oi_weighted = float(multi_funding.get("oi_weighted", 0) or 0)
+            exchanges_in = multi_funding.get("exchanges") or []
+            exchanges_out = []
+            for ex in exchanges_in[:5]:
+                try:
+                    cur = ex.get("current")
+                    a7 = ex.get("avg_7d")
+                    exchanges_out.append({
+                        "exchange": ex.get("exchange") or "",
+                        "current_bp": round(float(cur) * 10000.0, 2) if cur is not None else None,
+                        "avg_7d_bp": round(float(a7) * 10000.0, 2) if a7 is not None else None,
+                    })
+                except Exception:
+                    continue
+            out["multi_funding"] = {
+                "avg_current_bp": round(avg_current * 10000.0, 2),
+                "avg_7d_bp": round(avg_7d * 10000.0, 2),
+                "deviation_bp": round((avg_current - avg_7d) * 10000.0, 2),
+                "oi_weighted_bp": round(oi_weighted * 10000.0, 2),
+                "exchanges": exchanges_out,
+                "interpretation": (multi_funding.get("interpretation") or "")[:80],
+            }
+        except Exception:
+            pass
+
+    # ── OI 多周期（1h/4h/24h） ──
+    oi_block: dict = {}
+    if oi:
+        try:
+            current_usd = float(oi.get("current_usd", 0) or 0)
+            oi_block["current_usd_m"] = round(current_usd / 1e6, 1) if current_usd else None
+            oi_block["change_5m_pct"] = oi.get("change_5m_pct")
+            oi_block["change_1h_pct"] = oi.get("change_1h_pct")
+            oi_block["trend"] = oi.get("trend") or ""
+        except Exception:
+            pass
+
+    # 4h%：从 oi_history 现算（5m 粒度 × 48 = 4h）
+    try:
+        if oi_history and len(oi_history) >= 48:
+            current_point = oi_history[-1]
+            past_point = oi_history[-48]
+            cur_v = float(current_point.get("oi_usd", 0) or 0)
+            past_v = float(past_point.get("oi_usd", 0) or 0)
+            if past_v > 0:
+                oi_block["change_4h_pct"] = round((cur_v - past_v) / past_v * 100.0, 2)
+    except Exception:
+        pass
+
+    # 24h% 用现成字段
+    try:
+        if oi_change_24h_pct is not None:
+            oi_block["change_24h_pct"] = round(float(oi_change_24h_pct), 2)
+    except Exception:
+        pass
+
+    if oi_block:
+        out["oi"] = oi_block
+
+    return out if out else None
+
+
+def _ls_divergence_label(
+    retail: Optional[dict], top_acct: Optional[dict], top_pos: Optional[dict]
+) -> str:
+    """散户 vs 大户多空比的分歧标签。
+
+    - retail_long_smart_short：散户偏多 (>1.2) + 大户账户或持仓偏空 (<0.9)
+    - retail_short_smart_long：散户偏空 (<0.8) + 大户偏多 (>1.1)
+    - aligned：散户与大户同向
+    - mild_divergence：轻微分歧
+    - n/a：缺数据
+    """
+    def _ratio(d):
+        try:
+            return float((d or {}).get("avg_ratio", 1.0))
+        except Exception:
+            return 1.0
+
+    if not retail and not top_acct and not top_pos:
+        return "n/a"
+
+    r = _ratio(retail) if retail else None
+    ta = _ratio(top_acct) if top_acct else None
+    tp = _ratio(top_pos) if top_pos else None
+    smart_ratios = [x for x in (ta, tp) if x is not None]
+    if r is None or not smart_ratios:
+        return "n/a"
+    smart_avg = sum(smart_ratios) / len(smart_ratios)
+
+    if r > 1.2 and smart_avg < 0.9:
+        return "retail_long_smart_short"
+    if r < 0.8 and smart_avg > 1.1:
+        return "retail_short_smart_long"
+    # 同向判断：比值都 >1 或都 <1 且偏离幅度 > 0.1
+    if (r > 1.05 and smart_avg > 1.05) or (r < 0.95 and smart_avg < 0.95):
+        return "aligned"
+    return "mild_divergence"
+
+
+def _compact_one_ls(ls: Optional[dict]) -> Optional[dict]:
+    if not ls:
+        return None
+    try:
+        exchanges = ls.get("exchanges") or []
+        long_pct: Optional[float] = None
+        short_pct: Optional[float] = None
+        if exchanges:
+            try:
+                long_pct = round(
+                    sum(float(e.get("long_pct", 0) or 0) for e in exchanges) / len(exchanges), 2,
+                )
+                short_pct = round(
+                    sum(float(e.get("short_pct", 0) or 0) for e in exchanges) / len(exchanges), 2,
+                )
+            except Exception:
+                pass
+        return {
+            "avg_ratio": round(float(ls.get("avg_ratio", 1.0) or 1.0), 3),
+            "long_pct": long_pct,
+            "short_pct": short_pct,
+            "cycle": ls.get("cycle") or "",
+            "interpretation": (ls.get("interpretation") or "")[:80],
+        }
+    except Exception:
+        return None
+
+
+def _compact_sentiment(
+    ls_retail: Optional[dict],
+    ls_top_account: Optional[dict],
+    ls_top_position: Optional[dict],
+) -> Optional[dict]:
+    """三维度多空比压缩（散户 + 大户账户 + 大户持仓）+ 分歧标签。
+
+    散户 vs 大户反向（retail_long_smart_short 或 retail_short_smart_long）是
+    AI 判断"聪明钱 vs 情绪钱"最有价值的反转预警信号。
+    """
+    if not any([ls_retail, ls_top_account, ls_top_position]):
+        return None
+    return {
+        "retail": _compact_one_ls(ls_retail),
+        "top_account": _compact_one_ls(ls_top_account),
+        "top_position": _compact_one_ls(ls_top_position),
+        "divergence": _ls_divergence_label(ls_retail, ls_top_account, ls_top_position),
+    }
+
+
+def _asymmetry_label(imbalance_ratio: float) -> str:
+    """imbalance_ratio = above_total / below_total。"""
+    try:
+        r = float(imbalance_ratio)
+    except Exception:
+        return "unknown"
+    if r > 1.5:
+        return "above_heavy"
+    if r < 0.67:
+        return "below_heavy"
+    return "balanced"
+
+
+def _compact_liq_fuel(
+    liq_map_1d: Optional[dict], price: float
+) -> Optional[dict]:
+    """Liquidation Map 燃料分布压缩（1d 周期）。
+
+    保留：
+      - 上下方最多 3 个清算密集区（按距离排序，含 total_usd_m + side + dominant_leverage）
+      - imbalance_ratio + asymmetry 标签（磁吸方向）
+      - 最多 2 个真空区（vacuum zones）
+    """
+    if not liq_map_1d:
+        return None
+    try:
+        clusters_above_raw = liq_map_1d.get("clusters_above") or []
+        clusters_below_raw = liq_map_1d.get("clusters_below") or []
+
+        def _pack_cluster(c: dict) -> Optional[dict]:
+            try:
+                return {
+                    "price_center": round(float(c.get("price_center", 0.0) or 0.0), 2),
+                    "price_from": round(float(c.get("price_from", 0.0) or 0.0), 2),
+                    "price_to": round(float(c.get("price_to", 0.0) or 0.0), 2),
+                    "distance_pct": round(float(c.get("distance_pct", 0.0) or 0.0), 2),
+                    "total_usd_m": round(float(c.get("total_usd", 0.0) or 0.0) / 1e6, 2),
+                    "side": c.get("side") or "",
+                    "dominant_leverage": c.get("dominant_leverage") or "",
+                }
+            except Exception:
+                return None
+
+        above = [p for p in (_pack_cluster(c) for c in clusters_above_raw[:6]) if p]
+        below = [p for p in (_pack_cluster(c) for c in clusters_below_raw[:6]) if p]
+        above.sort(key=lambda x: abs(x.get("distance_pct") or 0.0))
+        below.sort(key=lambda x: abs(x.get("distance_pct") or 0.0))
+
+        vacuum_zones_raw = liq_map_1d.get("vacuum_zones") or []
+        vacuum_zones: list[dict] = []
+        for v in vacuum_zones_raw[:2]:
+            try:
+                vacuum_zones.append({
+                    "from": round(float(v.get("price_from", 0.0) or 0.0), 2),
+                    "to": round(float(v.get("price_to", 0.0) or 0.0), 2),
+                    "mid": round(float(v.get("midpoint", 0.0) or 0.0), 2),
+                    "note": (v.get("note") or "")[:50],
+                })
+            except Exception:
+                continue
+
+        imbalance = float(liq_map_1d.get("imbalance_ratio", 0.0) or 0.0)
+        return {
+            "above": above[:3],
+            "below": below[:3],
+            "imbalance_ratio": round(imbalance, 2),
+            "asymmetry_note": _asymmetry_label(imbalance),
+            "vacuum_zones": vacuum_zones,
+            "current_price": round(price, 2) if price else None,
+        }
+    except Exception:
+        return None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Prompt 工程（核心：把 AI 从"翻译器"提升为"审计员 + 再判断者"）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -235,11 +720,13 @@ _SYSTEM_PROMPT = """你是 LIQ 项目的资深加密货币量化交易顾问（1
 4. **交易倾向** (`trade_bias`)：若条件足够，给出方向 + 入场区 + 失效位 + 时间窗（可选；条件不足就 direction="neutral"）
 5. **独立观察** (`independent_view`)：规则没覆盖但你注意到的关键点（可留空字符串）
 
-## 可推翻规则的 4 种合法情形
+## 可推翻规则的 6 种合法情形
 - 多数 sub 的 note 集体指向规则方向的**反面**（如 FVG 多1空0 + OI 踩踏做多 + CVD 资金在跟 ↔ direction=down）
 - 规则 direction 只来自短期 1h，但 4h/1d 结构**完全相反**
 - 价已远离 EMA20 ≥ 2σ 但**没有放量**——规则容易把"健康延伸"误当"衰竭"
 - 挤压带 `breakout_zone.direction` 与规则方向相反，且动能已在转向
+- `market_structure.alignment == "aligned_up"`（1h/1d/1w 全 bullish）但规则 direction=down → 可推翻为 bull_pullback
+- `sentiment.divergence == "retail_long_smart_short"` + funding 进入 crowded_long → reversal_early 预警
 
 ## 关键位使用指引（这是 AI 的独立优势）
 你会收到 `key_levels` 对象，包含：
@@ -266,9 +753,37 @@ _SYSTEM_PROMPT = """你是 LIQ 项目的资深加密货币量化交易顾问（1
 - 若遇到 regime_vetoed=true 的震荡/极端行情：**强制** direction="avoid"
 - 若规则 + AI 判断分歧严重：direction="neutral"，让用户看观察点
 
+## 扩展数据使用指引（这批数据是你独立判断的新武器）
+你还会收到这 4 类上下文（可能部分缺失，None 时忽略）：
+
+1. **`market_structure`**（多周期 BOS/CHoCH + swing 锚）
+   - `alignment`（aligned_up / aligned_down / mixed / ranging / insufficient）是**宏观趋势硬锚**，权重高于 `bull_bear_line.regime`
+   - `1h/1d/1w.last_event`（BOS_up/down · CHoCH_up/down）+ `event_age_min` 表示结构新鲜度，事件 < 120 分钟视为新
+   - `operate_bias` 和 `direction` 冲突时以更高周期为准（1w > 1d > 1h）
+
+2. **`flow_metrics.funding`**（以基点表示）
+   - `extreme_tag`：neutral / mild_bias_* / crowded_*（>±10bp 即拥挤）
+   - `multi_funding.deviation_bp` = 当前 - 7d 均值，偏离 >3bp 值得警惕
+   - crowded_long + 价在高位 = 反转风险上升
+
+3. **`flow_metrics.oi`**（多周期变化率）
+   - `change_5m_pct`/`change_1h_pct`/`change_4h_pct`/`change_24h_pct` 组合读
+   - 价涨 + OI 短期强增（1h > +1% 或 5m > +0.5%）= 真多头（可支持 trend_continuation）
+   - 价跌 + OI 强增 = 真空头；价涨 + OI 下降 = 逼空 / 空头平仓（续航质量差）
+
+4. **`sentiment`**（散户 retail vs 大户 top_account/top_position）
+   - `divergence`：retail_long_smart_short 或 retail_short_smart_long 是**强反转预警**
+   - aligned 表示情绪 + 聪明钱同向（续航概率高）
+
+5. **`liq_fuel`**（清算磁吸）
+   - `asymmetry_note`：above_heavy / below_heavy / balanced
+   - above_heavy 意味**上方清算簇总额 > 下方** → 价格有上移磁吸动机（大户爆空的反身性）
+   - `vacuum_zones` 是价格可快速滑过的区间，但不可编造位置
+
 ## 严格禁止
 - ❌ 不要引用任何历史价格 / 历史走势 / 历史表现（你没有这些数据，说了就是幻觉）
 - ❌ 不要编造不在 `key_levels` 里的价位（违反会被测试层拒绝）
+- ❌ 不要编造不在 `liq_fuel.above/below/vacuum_zones` 里的清算价位
 - ❌ 不要用 "总体来看……" "综合判断……" 这种废话起手
 - ❌ 字段里禁止出现 Markdown 符号（# * - 等），纯文本即可
 - ❌ 不准直接把规则的 `overall_plain_cn` 原文复制进你的 `summary_cn`
@@ -332,8 +847,12 @@ def _build_user_prompt(
     price: float,
     atr: float,
     key_levels: Optional[dict] = None,
+    market_structure: Optional[dict] = None,
+    flow_metrics: Optional[dict] = None,
+    sentiment: Optional[dict] = None,
+    liq_fuel: Optional[dict] = None,
 ) -> str:
-    """把信号 + 关键位压成 AI 能消化的结构化上下文。"""
+    """把信号 + 关键位 + 扩展数据压成 AI 能消化的结构化上下文。"""
     payload = {
         "coin": coin,
         "price_now": round(price, 4) if price else None,
@@ -358,16 +877,23 @@ def _build_user_prompt(
             "1d": _compact_tf(signal_dict.get("tf_1d")),
         },
         "key_levels": key_levels,  # 可能为 None，AI 会降级处理
+        "market_structure": market_structure,  # 多周期 BOS/CHoCH + alignment
+        "flow_metrics": flow_metrics,          # funding + OI 多周期
+        "sentiment": sentiment,                # 散户 vs 大户 + divergence
+        "liq_fuel": liq_fuel,                  # 清算磁吸 + 真空区
     }
     body = json.dumps(payload, ensure_ascii=False, indent=2)
     return (
         f"以下是 {coin} 当前时刻的**原始读数**。按 system 里的定位，你是审计员而非翻译器。\n\n"
         f"## 关键字段解读（再强调一遍）\n"
-        f"- `rules_verdict_candidate` 只是规则**初步整理**，你有权基于下方 sub 的 note + key_levels 推翻它。\n"
+        f"- `rules_verdict_candidate` 只是规则**初步整理**，你有权基于下方 sub 的 note + key_levels + "
+        f"market_structure + flow_metrics + sentiment + liq_fuel 推翻它。\n"
         f"- `tf.*.sub` 列表中每项 score 的符号是『相对当前 direction』的：\n"
         f"  + 表示『支持当前 direction 方向续航』，- 表示『反对续航 / 衰竭信号』。\n"
         f"  如果 direction=down 但多数 sub 的 note 暗示看涨（负 score），这就是**反转早期**或**规则判错**的线索。\n"
-        f"- `key_levels` 是 AI 的独立优势来源。你必须用其中的具体价位做 `level_projection.target_level`，不准编造。\n\n"
+        f"- `key_levels` / `liq_fuel` 是你引用**价位**的唯一合法来源，不准编造。\n"
+        f"- `market_structure.alignment` 是宏观趋势硬锚，权重高于 rules_verdict_candidate.overall_direction。\n"
+        f"- `sentiment.divergence == retail_long_smart_short` 或 `retail_short_smart_long` 是强反转预警。\n\n"
         f"## 数据\n```json\n{body}\n```"
     )
 
@@ -642,8 +1168,9 @@ class TEInterpreter:
         coin: str,
         signal_dict: dict,
         key_levels_dict: Optional[dict] = None,
+        extras_dict: Optional[dict] = None,
     ) -> str:
-        return _fingerprint(coin, signal_dict, key_levels_dict)
+        return _fingerprint(coin, signal_dict, key_levels_dict, extras_dict)
 
     def peek_cache(self, fp: str) -> Optional[TEAIInterpretation]:
         return self._get_cached(fp)
@@ -681,6 +1208,7 @@ class TEInterpreter:
         price: float,
         atr: float = 0.0,
         key_levels_dict: Optional[dict] = None,
+        extras_dict: Optional[dict] = None,
         force: bool = False,
     ) -> TEAIInterpretation:
         """主入口。
@@ -691,11 +1219,39 @@ class TEInterpreter:
             price: 当前 ticker 价格
             atr: 1h ATR14（可选）
             key_levels_dict: KeyLevelSnapshotV2.model_dump()（可选，AI 的独立优势源）
+            extras_dict: `backend/api/_ai_helpers.collect_extras` 的返回值（可选，
+                         含多周期 Market Structure + funding + OI + LS + Liq Map）
             force: True 则绕过缓存强制重算
         """
-        # 先压缩 key_levels（避免每次调用都重算）
+        # 先压缩输入（避免缓存 miss 时重复压缩）
         compact_kl = _compact_key_levels(key_levels_dict, price)
-        fp = _fingerprint(coin, signal_dict, key_levels_dict)
+        compact_ms = None
+        compact_flow = None
+        compact_sent = None
+        compact_liq = None
+        if extras_dict:
+            compact_ms = _compact_market_structure(
+                extras_dict.get("ms_1h"),
+                extras_dict.get("ms_1d"),
+                extras_dict.get("ms_1w"),
+                price,
+            )
+            compact_flow = _compact_flow_metrics(
+                extras_dict.get("funding"),
+                extras_dict.get("multi_funding"),
+                extras_dict.get("oi"),
+                extras_dict.get("oi_history"),
+                extras_dict.get("oi_change_24h_pct"),
+            )
+            compact_sent = _compact_sentiment(
+                extras_dict.get("ls_ratio"),
+                extras_dict.get("ls_top_account"),
+                extras_dict.get("ls_top_position"),
+            )
+            compact_liq = _compact_liq_fuel(
+                extras_dict.get("liq_map_1d"), price,
+            )
+        fp = _fingerprint(coin, signal_dict, key_levels_dict, extras_dict)
 
         if not force:
             cached = self._get_cached(fp)
@@ -724,7 +1280,9 @@ class TEInterpreter:
         self._inflight[fp] = event
         try:
             result = await self._do_call(
-                coin, signal_dict, price, atr, compact_kl, fp,
+                coin, signal_dict, price, atr,
+                compact_kl, compact_ms, compact_flow, compact_sent, compact_liq,
+                fp,
             )
             if result.error is None:
                 self._put_cache(fp, result)
@@ -741,10 +1299,17 @@ class TEInterpreter:
         price: float,
         atr: float,
         compact_kl: Optional[dict],
+        compact_ms: Optional[dict],
+        compact_flow: Optional[dict],
+        compact_sent: Optional[dict],
+        compact_liq: Optional[dict],
         fp: str,
     ) -> TEAIInterpretation:
         system = _SYSTEM_PROMPT
-        user = _build_user_prompt(coin, signal_dict, price, atr, compact_kl)
+        user = _build_user_prompt(
+            coin, signal_dict, price, atr,
+            compact_kl, compact_ms, compact_flow, compact_sent, compact_liq,
+        )
         t0 = time.time()
         raw_text = ""
         reasoning = ""
@@ -765,11 +1330,18 @@ class TEInterpreter:
                 api_kwargs["temperature"] = 0.2
                 api_kwargs["response_format"] = {"type": "json_object"}
 
+            extras_tag = ",".join([
+                "kl" if compact_kl else "",
+                "ms" if compact_ms else "",
+                "flow" if compact_flow else "",
+                "sent" if compact_sent else "",
+                "liq" if compact_liq else "",
+            ]).strip(",").replace(",,", ",")
             logger.info(
-                "[TE-AI] call start | coin=%s fp=%s model=%s reasoner=%s kl=%s",
-                coin, fp, self._model, is_reasoner,
-                f"S/A={len((compact_kl or {}).get('strong_resistances') or []) + len((compact_kl or {}).get('strong_supports') or [])}"
-                if compact_kl else "none",
+                "[TE-AI] call start | coin=%s fp=%s model=%s reasoner=%s extras=%s kl_sa=%s",
+                coin, fp, self._model, is_reasoner, extras_tag or "none",
+                f"{len((compact_kl or {}).get('strong_resistances') or []) + len((compact_kl or {}).get('strong_supports') or [])}"
+                if compact_kl else "0",
             )
             response = await self._client.chat.completions.create(**api_kwargs)
             msg = response.choices[0].message
