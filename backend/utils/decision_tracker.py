@@ -391,10 +391,11 @@ class DecisionTracker:
     def _refresh_d16_phase_status(self) -> None:
         """D16 · P0/P1/P2 路线：根据 D01-D15 + D17 的当前状态自动聚合
 
-        规则：
-          - 有 fail → failed / "P2_degraded"
-          - 有 pending → warn / "P0" 或 "P1" 或 "P2_partial"（按已 ok 个数分段）
-          - 全部 ok/warn → ok / "P2_done"
+        规则（**pending 不视为降级**，避免启动期自证循环产生 warn）：
+          - 有 fail                         → failed / "P2_degraded"
+          - 有 warn（其它项真实 warn）       → warn   / phase 按 ok_count 分段
+          - 有 pending（启动/冷启）          → pending / "P0_booting" 或 "P1_rolling" 或 "P2_partial"
+          - 全部 ok                         → ok     / "P2_done"
         """
         try:
             others = [
@@ -418,16 +419,29 @@ class DecisionTracker:
                         warn_count += 1
                     elif rec.status == "failed":
                         fail_count += 1
+
+            def _phase_from_ok(ok: int) -> str:
+                return "P0" if ok < 6 else "P1" if ok < 15 else "P2_partial"
+
             if fail_count > 0:
                 phase_status: Status = "failed"
                 phase = "P2_degraded"
-            elif pending:
+            elif warn_count > 0:
+                # 存在其它真实 warn，D16 也跟随 warn，phase 反映进度
                 phase_status = "warn"
-                phase = "P0" if ok_count < 6 else "P1" if ok_count < 15 else "P2_partial"
+                phase = _phase_from_ok(ok_count)
+            elif pending:
+                # 仅启动/冷启中，不算降级
+                phase_status = "pending"
+                if ok_count == 0:
+                    phase = "P0_booting"
+                elif ok_count < 15:
+                    phase = "P1_rolling"
+                else:
+                    phase = "P2_partial"
             else:
                 phase_status = "ok"
                 phase = "P2_done"
-            # 直接进入 mark 走既有累计 / 时间戳逻辑
             self.mark(
                 D.D16_PHASED_ROADMAP,
                 status=phase_status,

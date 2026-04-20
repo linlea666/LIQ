@@ -164,9 +164,12 @@ def _report_cascade_health(snapshot: KeyLevelSnapshotV2, cfg: dict) -> None:
         cfg_cascade_norm = float(cfg.get("cascade_norm", 120.0))
         user_override = cfg_cascade_norm != 120.0
 
+        # 关键位 snapshot 每 2-5s 一次，log=False 避免刷屏；
+        # runtime 状态仍可通过 /api/decisions/summary 或 D1-D17 看板查询
         get_tracker().mark(
             D.D05_CASCADE_FIX,
             status="ok",
+            log=False,
             cfg_cascade_norm=cfg_cascade_norm,
             user_override=user_override,
             a_tier_count=a_total,
