@@ -532,13 +532,35 @@ def reset_current_brief() -> None:
 # Decision Tracker
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _derive_d09_status(brief: NewsBrief, bullet_total: int) -> tuple[str, str]:
+    """根据 brief 状态派生 D09 的 (status, note)。
+
+    语义区分（P0-3 熔断后新增，避免"上游空 = 系统故障"的误报）：
+      - skipped_no_events  → ok / note=upstream_empty
+        熔断是健康的保护行为，禁止挂 warn（避免告警疲劳）
+      - fallback           → warn / note=ai_call_failed
+        AI 真的挂了，这才是真正需要关注的 warn
+      - 正常生成（bullets>0 或 tldr 非空） → ok / note=""
+      - 其他未知情况       → warn / note=unexpected_empty
+    """
+    model = (brief.model_used or "").strip()
+    if model == "skipped_no_events":
+        return "ok", "upstream_empty"
+    if model == "fallback":
+        return "warn", "ai_call_failed"
+    if bullet_total > 0 or brief.tldr_cn:
+        return "ok", ""
+    return "warn", "unexpected_empty"
+
+
 def _mark_d09(brief: NewsBrief) -> None:
     try:
         from utils.decision_tracker import D, get_tracker
         bullet_total = sum(len(s.bullets) for s in brief.sections)
+        status, note = _derive_d09_status(brief, bullet_total)
         get_tracker().mark(
             D.D09_NEWS_BRIEF,
-            status="ok" if bullet_total > 0 or brief.tldr_cn else "warn",
+            status=status,
             log=True,
             version=brief.version,
             char_count=brief.char_count,
@@ -548,6 +570,7 @@ def _mark_d09(brief: NewsBrief) -> None:
             tracked_themes=len(brief.tracked_themes),
             generation_cost_ms=brief.generation_cost_ms,
             model_used=brief.model_used,
+            note=note,
         )
     except Exception:  # noqa: BLE001
         logger.debug("[D09] mark failed", exc_info=True)

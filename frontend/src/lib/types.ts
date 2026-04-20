@@ -733,6 +733,61 @@ export interface AIDetailResponse extends AIAnalysisResult {
   _extras_source: "live" | "archive" | "none";
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// D09 · 滚动新闻简报（供 /news-brief 页面人工审计 AI 记忆锚）
+// 由 GET /api/news-brief/current 返回
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface NewsBriefSection {
+  section_id: "macro" | "regulatory" | "onchain" | "risk";
+  section_title_cn: string;
+  bullets: string[];
+  max_bullets: number;
+  last_rewritten_ts: number;
+}
+
+export interface NewsBriefTrackedTheme {
+  theme_id: string;
+  theme_name_cn: string;
+  current_stance_cn: string;
+  flip_flop_count_24h: number;
+  latest_update_ts: number;
+  relevance_score: number;
+}
+
+export interface NewsBriefFull {
+  version: number;
+  updated_at: number;
+  ts_range_start: number;
+  ts_range_end: number;
+  coverage_hours: number;
+  sections: NewsBriefSection[];
+  tldr_cn: string;
+  tracked_themes: NewsBriefTrackedTheme[];
+  char_count: number;
+  token_estimate: number;
+  update_trigger: "scheduled" | "blackswan" | "user";
+  based_on_events_count: number;
+  model_used: string;
+  generation_cost_ms: number;
+  diff_from_prev_version: string;
+  prev_version_updated_at: number | null;
+}
+
+export type NewsBriefUIStatus =
+  | "ok"
+  | "circuit_break"
+  | "ai_failed"
+  | "unexpected_empty"
+  | "warming_up";
+
+export interface NewsBriefCurrentResponse {
+  ready: boolean;
+  status: NewsBriefUIStatus;
+  reason?: string;
+  brief?: NewsBriefFull;
+}
+
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // P1.6 · DecisionTracker · D1-D17 全景灯

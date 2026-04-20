@@ -546,6 +546,56 @@ async def get_backtest_stats(coin: str):
     return _engine.compute_backtest_stats(coin)
 
 
+@router.get("/news-brief/current")
+async def news_brief_current():
+    """D09 · 当前滚动新闻简报（供前端人工对证 AI 记忆锚）
+
+    用途：
+      - 人工审计 AI prompt 里实际注入了什么新闻
+      - 识别熔断态（model_used=skipped_no_events）与故障态（fallback）
+      - 对证 bullets / tldr / tracked_themes / diff
+
+    返回契约（前端可据此渲染徽章）：
+      - ready=false → 简报尚未生成（首启动 ~60s 内）
+      - status=ok / circuit_break / ai_failed / unexpected_empty
+      - 其余字段为 NewsBrief model_dump()
+    """
+    try:
+        from processors.news_brief import get_current_brief
+        brief = get_current_brief()
+    except Exception as e:
+        logger.warning("news-brief current endpoint failed: %s", e)
+        raise HTTPException(500, f"news_brief unavailable: {e}")
+
+    if brief is None:
+        return {
+            "ready": False,
+            "status": "warming_up",
+            "reason": "brief 未生成（启动后 ~60s 或首轮 fetch 未完成）",
+        }
+
+    model = (brief.model_used or "").strip()
+    if model == "skipped_no_events":
+        ui_status = "circuit_break"
+        ui_reason = "上游无新闻事件·已熔断（保护 AI 不编造）"
+    elif model == "fallback":
+        ui_status = "ai_failed"
+        ui_reason = "AI 调用失败·沿用上一版本"
+    elif sum(len(s.bullets) for s in brief.sections) > 0 or brief.tldr_cn:
+        ui_status = "ok"
+        ui_reason = ""
+    else:
+        ui_status = "unexpected_empty"
+        ui_reason = "简报为空但非熔断/fallback，需人工排查"
+
+    return {
+        "ready": True,
+        "status": ui_status,
+        "reason": ui_reason,
+        "brief": brief.model_dump(),
+    }
+
+
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""

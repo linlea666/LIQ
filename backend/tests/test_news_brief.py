@@ -17,7 +17,7 @@ from models.news_event import (
 from processors.news_brief import (
     generate_brief, get_current_brief, reset_current_brief, set_current_brief,
     _normalize_sections, _parse_brief_response, _extract_json_object,
-    _diff_briefs, _bullet_lines,
+    _diff_briefs, _bullet_lines, _derive_d09_status,
 )
 
 
@@ -425,6 +425,68 @@ def test_generate_brief_circuit_break_preserves_version_chain():
     assert brief.based_on_events_count == 0
     assert brief.model_used == "skipped_no_events"
     assert len(analyzer.calls) == 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# D09 status 语义（P0-3 后续修复：熔断态 ≠ 故障态）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_d09_status_skipped_no_events_is_ok_not_warn():
+    """熔断是健康的保护行为，不应挂 warn（否则上游长期空窗会告警疲劳）。"""
+    brief = NewsBrief(
+        version=1, updated_at=int(time.time()),
+        tldr_cn="",
+        sections=_normalize_sections(None),
+        based_on_events_count=0,
+        model_used="skipped_no_events",
+    )
+    status, note = _derive_d09_status(brief, bullet_total=0)
+    assert status == "ok"
+    assert note == "upstream_empty"
+
+
+def test_d09_status_fallback_is_warn_because_ai_actually_failed():
+    """AI 调用失败走 fallback 才是真正需要关注的 warn。"""
+    brief = NewsBrief(
+        version=2, updated_at=int(time.time()),
+        tldr_cn="（AI 失败·保留上一版本）",
+        sections=_normalize_sections(None),
+        based_on_events_count=3,
+        model_used="fallback",
+    )
+    status, note = _derive_d09_status(brief, bullet_total=0)
+    assert status == "warn"
+    assert note == "ai_call_failed"
+
+
+def test_d09_status_normal_content_is_ok():
+    """正常生成：有 bullets 或 tldr → ok / 空 note。"""
+    brief = NewsBrief(
+        version=3, updated_at=int(time.time()),
+        tldr_cn="正常简报",
+        sections=[NewsBriefSection(
+            section_id="macro", section_title_cn="宏观", bullets=["FOMC 将于本周召开"],
+        )],
+        based_on_events_count=5,
+        model_used="deepseek-chat",
+    )
+    status, note = _derive_d09_status(brief, bullet_total=1)
+    assert status == "ok"
+    assert note == ""
+
+
+def test_d09_status_unexpected_empty_is_warn():
+    """既非熔断也非 fallback，但内容为空 → warn，note 标注 unexpected。"""
+    brief = NewsBrief(
+        version=4, updated_at=int(time.time()),
+        tldr_cn="",
+        sections=_normalize_sections(None),
+        based_on_events_count=10,
+        model_used="deepseek-chat",  # 非熔断也非 fallback
+    )
+    status, note = _derive_d09_status(brief, bullet_total=0)
+    assert status == "warn"
+    assert note == "unexpected_empty"
 
 
 def test_bullet_lines_diff():
