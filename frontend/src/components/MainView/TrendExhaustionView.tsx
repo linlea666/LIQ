@@ -389,7 +389,9 @@ export default function TrendExhaustionView() {
 
       {/* ── [4] 方法论注释 ─────────────────────────────────── */}
       <div className="text-[11px] text-slate-600 border-t border-slate-800 pt-2 leading-relaxed">
-        方法论：regime-aware 三维加权（动能 + 参与度 + 衰竭）× MTF 共识 × 硬门闸（需连续 2 次才出警戒）。
+        方法论：regime-aware 三维打分 × MTF 共识 × 硬门闸（需连续 2 次才出警戒）。
+        动能 = MACD/价格斜率/RSI/FVG；参与度 = CVD/OI 踩踏/CB 溢价/资金费率；
+        衰竭 = TD/背离/Fib 扩展/清算簇磁吸。
         不预测点位，只回答「续航 vs 衰竭」。震荡/极端 regime 会自动暂停方向性结论。
       </div>
     </div>

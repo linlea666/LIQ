@@ -24,10 +24,12 @@ v2 相比 v1 的四个关键升级（针对 Phase 1 审计暴露的问题）：
         p1: CVD 斜率 × 价格斜率（+ 吸筹 absorption 识别）
         p2: OI×Price 踩踏识别（四象限 × 强度 + 爆仓辅助）
         p3: Coinbase 溢价流向（仅 BTC 启用）
+        p4: 资金费率极端（反向指标：多头拥挤 = 衰竭前兆）
     D3 衰竭触发器（Exhaustion）
         e1: TD Sequential count ≥ 9
         e2: RSI-Price 显性/隐性背离
         e3: Fib 扩展 1.272 / 1.618 命中
+        e4: 清算簇磁吸（顺势侧近端大簇 = 续航燃料；无簇 = 动能耗尽）
 
 MTF 共识（4h+1d 为主，1h 作冲突检查，带 regime veto 与 2 tick 硬门闸）。
 """
@@ -65,8 +67,8 @@ logger = logging.getLogger(__name__)
 
 # 默认子项权重（无 context 时的 baseline）
 _W_D1_SUBS = {"m1_macd_2d": 0.35, "m2_slope_z": 0.25, "m3_rsi_zone": 0.20, "m4_fvg": 0.20}
-_W_D2_SUBS = {"p1_cvd_momo": 0.50, "p2_oi_price": 0.35, "p3_cb_premium": 0.15}
-_W_D3_SUBS = {"e1_td_seq": 0.40, "e2_rsi_div": 0.40, "e3_fib_ext": 0.20}
+_W_D2_SUBS = {"p1_cvd_momo": 0.40, "p2_oi_price": 0.25, "p3_cb_premium": 0.10, "p4_funding": 0.25}
+_W_D3_SUBS = {"e1_td_seq": 0.30, "e2_rsi_div": 0.30, "e3_fib_ext": 0.20, "e4_liq_fuel": 0.20}
 
 # 三维合成默认权重
 _W_D_DEFAULT = {"D1": 0.40, "D2": 0.30, "D3": 0.30}
@@ -109,6 +111,8 @@ class _Context:
     global_liq_long_1h: float = 0.0
     global_liq_short_1h: float = 0.0
     coinbase_premium: Optional[float] = None
+    funding_bp_8h: Optional[float] = None   # 单次 8h 资金费率（bp=万分之），+5 = 0.05%
+    liq_map: object = None                  # LiquidationMap (1d/3d) 供 e4 读取
     is_btc: bool = False
     dynamic_warnings: list[str] = field(default_factory=list)
 
@@ -173,6 +177,28 @@ def _build_context(
 
     if ctx.is_btc and state.coinbase_premium is not None:
         ctx.coinbase_premium = float(state.coinbase_premium.current_premium or 0.0)
+
+    # 资金费率：优先 multi_funding.oi_weighted（多所 OI 加权），退化到 funding.oi_weighted_rate
+    #   原始单位为"小数"（如 0.0005 = 0.05% per 8h），乘 10000 得 bp
+    fr_raw: Optional[float] = None
+    mf = getattr(state, "multi_funding", None)
+    funding = getattr(state, "funding", None)
+    if mf is not None and getattr(mf, "oi_weighted", 0) not in (0, None):
+        fr_raw = float(mf.oi_weighted)
+    elif mf is not None and getattr(mf, "avg_current", 0) not in (0, None):
+        fr_raw = float(mf.avg_current)
+    elif funding is not None:
+        fr_raw = float(
+            getattr(funding, "oi_weighted_rate", 0)
+            or getattr(funding, "avg_rate", 0)
+            or 0.0
+        )
+    if fr_raw is not None and fr_raw != 0:
+        ctx.funding_bp_8h = fr_raw * 10000.0  # 0.0005 → 5 bp
+
+    # 清算地图：优先取 1d，否则 3d / 7d
+    lmaps = getattr(state, "liq_maps", None) or {}
+    ctx.liq_map = lmaps.get("1d") or lmaps.get("24h") or lmaps.get("3d") or lmaps.get("7d")
 
     return ctx
 
@@ -538,6 +564,44 @@ def _p3_coinbase_premium_flow(ctx: _Context) -> tuple[float, str, Optional[float
     return _signed(raw, ctx), note, float(cb)
 
 
+def _p4_funding_extreme(ctx: _Context) -> tuple[float, str, Optional[float]]:
+    """资金费率极端（反向指标）。
+
+    语义：
+      - 极端正费率（多头付空头）= 多头过度拥挤 = 对价格继续向上是负面（反向）
+      - 极端负费率 = 空头过度拥挤 = 对价格向上是正面
+      - 强趋势期阈值放宽（趋势中极端费率可维持数周）
+    阈值（单位 bp，8h 周期；年化 = bp × 3 × 365 / 100 ≈ bp × 11 %/年）：
+        +20 bp 极端拥挤 / +10 bp 拥挤 / +5 bp 偏拥挤 / 0 中性 / -5 / -10 / -20
+    """
+    if ctx.funding_bp_8h is None:
+        return 0.0, "资金费率缺失", None
+    fr = ctx.funding_bp_8h
+
+    # raw_score 正向 = 支持向上继续。高正费率 → raw 负。
+    if fr >= 20:
+        raw, note = -0.8, f"资金费率 {fr:+.1f}bp 极端多头拥挤（年化 ~{fr*11:.0f}%）"
+    elif fr >= 10:
+        raw, note = -0.5, f"资金费率 {fr:+.1f}bp 多头拥挤"
+    elif fr >= 5:
+        raw, note = -0.2, f"资金费率 {fr:+.1f}bp 多头偏拥挤"
+    elif fr <= -20:
+        raw, note = 0.8, f"资金费率 {fr:+.1f}bp 极端空头拥挤（反向机会）"
+    elif fr <= -10:
+        raw, note = 0.5, f"资金费率 {fr:+.1f}bp 空头拥挤"
+    elif fr <= -5:
+        raw, note = 0.2, f"资金费率 {fr:+.1f}bp 空头偏拥挤"
+    else:
+        raw, note = 0.0, f"资金费率 {fr:+.1f}bp 中性"
+
+    # 强趋势期：极端费率可维持很久，降权避免过早反转判定
+    if ctx.is_strong_trend and abs(raw) > 0:
+        raw *= 0.5
+        note += "（趋势期降权）"
+
+    return _signed(raw, ctx), note, float(fr)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # D3 衰竭触发器
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -650,6 +714,72 @@ def _e3_fib_extension_hit(
     return 0.0, "未触及扩展位", None
 
 
+def _e4_liq_cluster_fuel(
+    price: float, ctx: _Context,
+) -> tuple[float, str, Optional[float]]:
+    """清算簇磁吸/燃料余量（基于 LiquidationMap.clusters_above/below）。
+
+    逻辑（与币种无关，全用相对占比）：
+        1. 取顺势方向侧（up → clusters_above 空头爆仓簇；down → clusters_below 多头爆仓簇）
+        2. 该侧 10% 内总量 vs 整侧总量 = near_ratio
+        3. 找近端最大单簇占该侧比重 = top_ratio
+        4. 打分：
+             near_ratio≥0.30 且 top_ratio≥0.20（近端有大磁铁）→ +0.5（续航燃料充足）
+             near_ratio<0.10（近端已被洗过）→ -0.4（燃料耗尽，动能衰竭）
+             其他中间值 → 线性映射
+    """
+    liq_map = ctx.liq_map
+    if liq_map is None or price <= 0 or ctx.direction == "flat":
+        return 0.0, "清算地图/方向缺失", None
+
+    use_above = ctx.direction == "up"
+    clusters = list(getattr(liq_map, "clusters_above", []) or []) if use_above \
+        else list(getattr(liq_map, "clusters_below", []) or [])
+    if not clusters:
+        return 0.0, "顺势侧无清算簇", None
+
+    total_side = sum(float(c.total_usd or 0) for c in clusters)
+    if total_side <= 0:
+        return 0.0, "顺势侧簇总量为 0", None
+
+    def _dpct(c) -> float:
+        dp = getattr(c, "distance_pct", None)
+        if dp is not None and dp > 0:
+            return float(dp)
+        center = float(getattr(c, "price_center", 0) or 0)
+        if center <= 0:
+            return 999.0
+        return abs(center - price) / price * 100.0
+
+    near = [c for c in clusters if _dpct(c) <= 10.0]
+    near_total = sum(float(c.total_usd or 0) for c in near)
+    near_ratio = near_total / total_side if total_side > 0 else 0.0
+    top_usd = max((float(c.total_usd or 0) for c in near), default=0.0)
+    top_ratio = top_usd / total_side if total_side > 0 else 0.0
+
+    # 先算"支持续航"的绝对强度，再按 direction 映射到"支持向上"语义（_signed 期望）
+    if near_ratio >= 0.30 and top_ratio >= 0.20:
+        abs_strength = 0.5
+        note = (
+            f"顺势 10% 内簇占 {near_ratio*100:.0f}%，最大簇 {top_usd/1e6:.0f}M"
+            f"（{top_ratio*100:.0f}%）→ 磁吸续航"
+        )
+    elif near_ratio < 0.10:
+        abs_strength = -0.4
+        note = f"顺势 10% 内簇仅占 {near_ratio*100:.0f}%，燃料耗尽"
+    elif near_ratio >= 0.20:
+        abs_strength = 0.25
+        note = f"顺势 10% 内簇占 {near_ratio*100:.0f}%（一般）"
+    else:
+        abs_strength = -0.15
+        note = f"顺势 10% 内簇占 {near_ratio*100:.0f}%（偏弱）"
+
+    # direction=up：abs_strength 正 = 向上续航 = raw 正 ✓
+    # direction=down：abs_strength 正 = 向下续航 = "向上" raw 应为负，_signed 再翻回正
+    raw = abs_strength if ctx.direction == "up" else -abs_strength
+    return _signed(raw, ctx), note, float(near_ratio)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 聚合
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -736,6 +866,14 @@ def _compute_single_tf(
     else:
         weights_d2.pop("p3_cb_premium", None)
 
+    # p4 资金费率：4h/1d 启用（1h 过于嘈杂，funding 天然是 8h 粒度）
+    if tf in ("4h", "1d") and ctx.funding_bp_8h is not None:
+        p4_s, p4_note, p4_val = _p4_funding_extreme(ctx)
+        d2_subs.append(SubScore(key="p4_funding", name="资金费率", score=p4_s,
+                                note=p4_note, value=p4_val))
+    else:
+        weights_d2.pop("p4_funding", None)
+
     # 归一化 D2 权重
     if weights_d2:
         total = sum(weights_d2.values())
@@ -755,7 +893,19 @@ def _compute_single_tf(
         SubScore(key="e2_rsi_div", name="RSI 背离", score=e2_s, note=e2_note, value=e2_val),
         SubScore(key="e3_fib_ext", name="Fib 扩展命中", score=e3_s, note=e3_note, value=e3_val),
     ]
-    exhaustion_score = _weighted(d3_subs, _W_D3_SUBS)
+    weights_d3 = dict(_W_D3_SUBS)
+    # e4 清算簇磁吸：4h/1d 启用（1h 清算簇变化太快，噪声大）
+    if tf in ("4h", "1d") and ctx.liq_map is not None:
+        e4_s, e4_note, e4_val = _e4_liq_cluster_fuel(closes[-1], ctx)
+        d3_subs.append(SubScore(key="e4_liq_fuel", name="清算簇磁吸", score=e4_s,
+                                note=e4_note, value=e4_val))
+    else:
+        weights_d3.pop("e4_liq_fuel", None)
+    if weights_d3:
+        total = sum(weights_d3.values())
+        if total > 0:
+            weights_d3 = {k: v / total for k, v in weights_d3.items()}
+    exhaustion_score = _weighted(d3_subs, weights_d3)
 
     w = _dynamic_weights(ctx)
     composite = w["D1"] * momentum_score + w["D2"] * participation_score + w["D3"] * exhaustion_score

@@ -35,6 +35,7 @@ from processors.trend_exhaustion import (  # noqa: E402
     _Context,
     _confirm_or_downgrade,
     _e1_td_sequential,
+    _e4_liq_cluster_fuel,
     _m1_macd_hist_accel,
     _m1_macd_second_derivative,  # legacy shim
     _m3_rsi_zone,
@@ -42,6 +43,7 @@ from processors.trend_exhaustion import (  # noqa: E402
     _p2_oi_price_alignment,  # legacy shim
     _p2_oi_price_confluence,
     _p3_coinbase_premium_flow,
+    _p4_funding_extreme,
     _plain_cn,
     _resolve_consensus,
     compute_trend_exhaustion,
@@ -87,6 +89,8 @@ def _make_state(
     global_liq_short_1h: float = 0.0,
     global_liq_long_1h: float = 0.0,
     coinbase_premium: float | None = None,
+    funding_rate: float | None = None,   # 小数形式如 0.0005=0.05%
+    liq_map=None,                         # 传入伪造 LiquidationMap
 ):
     """构造最小 CoinState-like 对象（含 v2 所需 regime + structure）。"""
     candles_1h = _mk_candles(closes_1h, vol_spike_last=vol_spike_last_1h)
@@ -123,6 +127,22 @@ def _make_state(
     if coinbase_premium is not None:
         coinbase_prem_obj = SimpleNamespace(current_premium=coinbase_premium)
 
+    funding_obj = None
+    multi_funding_obj = None
+    if funding_rate is not None:
+        funding_obj = SimpleNamespace(
+            coin=coin, ts=0, okx_rate=funding_rate, binance_rate=funding_rate,
+            avg_rate=funding_rate, oi_weighted_rate=funding_rate,
+            next_funding_ts=0, interpretation="",
+        )
+        multi_funding_obj = SimpleNamespace(
+            coin=coin, ts=0, exchanges=[],
+            avg_current=funding_rate, avg_7d=funding_rate, oi_weighted=funding_rate,
+            interpretation="",
+        )
+
+    liq_maps = {"1d": liq_map} if liq_map is not None else {}
+
     return SimpleNamespace(
         coin=coin,
         ticker=ticker,
@@ -140,7 +160,30 @@ def _make_state(
         taker_flow=taker_flow,
         global_liq=global_liq,
         coinbase_premium=coinbase_prem_obj,
+        funding=funding_obj,
+        multi_funding=multi_funding_obj,
+        liq_maps=liq_maps,
         trend_exhaustion=None,
+    )
+
+
+def _mk_liq_map(above_specs, below_specs, price_ref: float = 100.0):
+    """构造最小 LiquidationMap-like 对象。
+    specs = [(distance_pct, total_usd), ...]   distance_pct>0 = 远离当前价
+    """
+    def _c(dp, usd, side):
+        sign = 1 if side == "short" else -1
+        center = price_ref * (1 + sign * dp / 100.0)
+        return SimpleNamespace(
+            price_center=center, price_from=center * 0.99, price_to=center * 1.01,
+            total_usd=float(usd), side=side, dominant_leverage="50",
+            distance_pct=float(dp),
+        )
+    return SimpleNamespace(
+        coin="BTC", ts=0, cycle="1d", leverage_groups=[],
+        clusters_above=[_c(dp, u, "short") for dp, u in above_specs],
+        clusters_below=[_c(dp, u, "long") for dp, u in below_specs],
+        vacuum_zones=[], imbalance_ratio=0, exchange="",
     )
 
 
@@ -268,6 +311,121 @@ def test_e1_td_sell_9_multi_dir():
 def test_e1_td_empty():
     s, _, _ = _e1_td_sequential(td_count=None, td_direction="", ctx=_ctx_up_trend())
     assert s == 0.0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Phase 3：p4 资金费率 + e4 清算簇磁吸
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_p4_funding_extreme_long_crowded_in_uptrend():
+    """上涨趋势 + 资金费率 +30 bp 极端多头拥挤 → 衰竭信号（趋势期降权后仍显著为负）。"""
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", funding_bp_8h=30.0)
+    s, note, val = _p4_funding_extreme(ctx)
+    assert s < -0.2, f"极端多头拥挤（趋势期）应给明显衰竭负分，得到 {s} ({note})"
+    assert "极端" in note and val == 30.0
+
+
+def test_p4_funding_extreme_short_crowded_is_bullish_fuel():
+    """上涨趋势 + 资金费率 -25 bp（空头极端拥挤）→ 对向上是正面（反向指标）。"""
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", funding_bp_8h=-25.0)
+    s, note, _ = _p4_funding_extreme(ctx)
+    assert s > 0.2, f"空头极端拥挤应为续航正分，得到 {s} ({note})"
+
+
+def test_p4_funding_extreme_same_signal_in_downtrend_is_inverted():
+    """下跌趋势 + 资金费率 -25 bp（空头拥挤）→ 对 direction=down 来说 = 衰竭。"""
+    ctx_down = _Context(tf="1d", regime="trend_down", direction="down", funding_bp_8h=-25.0)
+    s, note, _ = _p4_funding_extreme(ctx_down)
+    assert s < -0.1, f"下跌趋势中空头拥挤 = 衰竭前兆，应负分，得到 {s} ({note})"
+
+
+def test_p4_funding_neutral_range():
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", funding_bp_8h=2.0)
+    s, _, _ = _p4_funding_extreme(ctx)
+    assert s == 0.0
+
+
+def test_p4_funding_missing_returns_zero():
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", funding_bp_8h=None)
+    s, _, _ = _p4_funding_extreme(ctx)
+    assert s == 0.0
+
+
+def test_e4_liq_fuel_near_big_cluster_supports_continuation():
+    """上涨 + 顺势 3% 处有 60% 占比的大空头清算簇 → 磁吸续航 +0.5。"""
+    liq_map = _mk_liq_map(
+        above_specs=[(3.0, 6e8), (15.0, 1e8), (25.0, 3e8)],  # 近端大簇
+        below_specs=[(5.0, 1e8)],
+    )
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", liq_map=liq_map)
+    s, note, ratio = _e4_liq_cluster_fuel(price=100.0, ctx=ctx)
+    assert s > 0.3, f"近端大簇应续航正分，得到 {s} ({note})"
+    assert "磁吸" in note and ratio is not None and ratio >= 0.5
+
+
+def test_e4_liq_fuel_no_near_cluster_signals_exhaustion():
+    """上涨 + 顺势 10% 内簇总量极小 → 燃料耗尽 -0.4。"""
+    liq_map = _mk_liq_map(
+        above_specs=[(25.0, 5e8), (30.0, 3e8)],  # 远端簇
+        below_specs=[(5.0, 1e8)],
+    )
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", liq_map=liq_map)
+    s, note, _ = _e4_liq_cluster_fuel(price=100.0, ctx=ctx)
+    assert s < -0.2, f"近端无簇应衰竭负分，得到 {s} ({note})"
+    assert "耗尽" in note
+
+
+def test_e4_liq_fuel_downtrend_mirror():
+    """下跌趋势 + 下方近端大多头清算簇 → 对 direction=down 续航正分。"""
+    liq_map = _mk_liq_map(
+        above_specs=[(10.0, 1e8)],
+        below_specs=[(3.0, 6e8), (15.0, 1e8), (25.0, 3e8)],
+    )
+    ctx = _Context(tf="1d", regime="trend_down", direction="down", liq_map=liq_map)
+    s, _, _ = _e4_liq_cluster_fuel(price=100.0, ctx=ctx)
+    assert s > 0.3, "下跌趋势 + 下方近端大簇，应续航正分"
+
+
+def test_e4_liq_fuel_flat_direction_returns_zero():
+    liq_map = _mk_liq_map(above_specs=[(3.0, 6e8)], below_specs=[(3.0, 6e8)])
+    ctx = _Context(tf="1d", regime="range", direction="flat", liq_map=liq_map)
+    s, _, _ = _e4_liq_cluster_fuel(price=100.0, ctx=ctx)
+    assert s == 0.0
+
+
+def test_e4_liq_fuel_missing_map_returns_zero():
+    ctx = _Context(tf="1d", regime="trend_up", direction="up", liq_map=None)
+    s, _, _ = _e4_liq_cluster_fuel(price=100.0, ctx=ctx)
+    assert s == 0.0
+
+
+def test_end_to_end_phase3_features_appear_in_signal():
+    """集成测试：funding + liq_map 都提供时，1d 的 sub_scores 应包含 p4 + e4。"""
+    closes_1h = _linear_up(80, start=100.0, step=0.3)
+    for _ in range(10):
+        closes_1h.append(closes_1h[-1] + 0.5)
+    last = closes_1h[-1]
+    liq_map = _mk_liq_map(
+        above_specs=[(3.0, 6e8), (20.0, 3e8)],
+        below_specs=[(4.0, 2e8)],
+        price_ref=last,
+    )
+    state = _make_state(
+        closes_1h=closes_1h,
+        closes_4h=closes_1h[-60:],
+        closes_1d=closes_1h[-50:],
+        cvd_matches_price=True,
+        oi_chg_1h=1.5,
+        regime="trend_up",
+        direction_1d="bullish",
+        funding_rate=0.0003,  # 3 bp，小幅多头偏拥挤
+        liq_map=liq_map,
+    )
+    sig = compute_trend_exhaustion(state)
+    assert sig is not None and sig.tf_1d is not None
+    keys = {s.key for s in sig.tf_1d.sub_scores}
+    assert "p4_funding" in keys, f"1d 应包含 p4_funding，实际 {keys}"
+    assert "e4_liq_fuel" in keys, f"1d 应包含 e4_liq_fuel，实际 {keys}"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
