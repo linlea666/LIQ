@@ -745,22 +745,18 @@ async def list_te_reports(max_days: int = Query(30, ge=1, le=180)):
         raise HTTPException(500, f"te report listing failed: {e}")
 
 
-@router.get("/te/ai_interpret/{coin}")
-async def te_ai_interpret(coin: str, force: bool = Query(False)):
-    """P0-C · 趋势衰竭模块 · AI 解读（DeepSeek Reasoner 驱动）
+@router.post("/te/ai_interpret/{coin}")
+async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
+    """P0-C · 触发趋势衰竭 AI 解读（fire-and-forget，对齐主 AI 架构）
 
-    【任务异步模式】—— 解决 Reasoner 30-120s 长调用被反向代理 60s 超时切断的问题。
+    HTTP 秒回 → 后台任务跑 DeepSeek Reasoner → 结果通过 WebSocket 事件
+    `te_ai_result` 推送到订阅该币种的所有客户端；失败 push `te_ai_error`。
 
     响应 schema：
-      - status="done"  ：完整 TEAIInterpretation.model_dump() + status 字段
-      - status="pending" ：{status, signal_fingerprint, coin, message, eta_sec}
-                           前端应每 2-3s 轮询（不带 force）直到 status=done
-      - status="error" ：TEAIInterpretation 带 error 字段（非 HTTP 错误）
-
-    行为：
-      1. 命中缓存（且非 force）→ 直接 status=done 秒回
-      2. 已有同指纹后台任务在跑（且非 force）→ 返回 status=pending（不重复启动）
-      3. 无缓存、无 inflight（或 force=True）→ 启动后台任务，立即返回 pending
+      - status="cached"     ：缓存命中，结果已同步 push 到 WS；附带 interpretation
+      - status="processing" ：已启动后台任务，等 WS 推
+      - status="inflight"   ：已有同指纹任务在跑，等 WS 推
+      - status="error"      ：AI 未配置等致命错误
     """
     if not _engine:
         raise HTTPException(503, "Engine not ready")
@@ -769,72 +765,116 @@ async def te_ai_interpret(coin: str, force: bool = Query(False)):
     if not state or not state.trend_exhaustion:
         raise HTTPException(503, f"No trend_exhaustion signal for {coin_upper}")
 
+    from ai.te_interpreter import get_te_interpreter
+    interpreter = get_te_interpreter()
+    if not interpreter.available:
+        return {
+            "status": "error",
+            "coin": coin_upper,
+            "message": "AI 未配置 API Key（请检查 DEEPSEEK_API_KEY）",
+        }
+
     signal_dict = state.trend_exhaustion.model_dump()
     price = float(state.ticker.last) if state.ticker else 0.0
     atr = float(state.atr or 0.0)
-
-    from ai.te_interpreter import get_te_interpreter
-    from monitoring.te_ai_log import log_interpretation
-
-    interpreter = get_te_interpreter()
-    if not interpreter.available:
-        from models.te_interpretation import TEAIInterpretation
-        err = TEAIInterpretation(
-            coin=coin_upper, ts=int(time.time()),
-            signal_fingerprint="",
-            error="AI 未配置 API Key",
-            alignment_with_rules="insufficient",
-        )
-        return {"status": "error", **err.model_dump()}
-
     fp = interpreter.compute_fingerprint(coin_upper, signal_dict)
 
-    # ── 1. 命中缓存（非 force）→ 秒回 ────────────────
+    from api.ws import push_to_coin
+    from monitoring.te_ai_log import log_interpretation
+
+    # ── 1. 命中缓存（非 force）→ 同步 push 一次让前端更新，然后秒回 ──
     if not force:
         cached = interpreter.peek_cache(fp)
         if cached is not None:
-            return {"status": "done", **cached.model_dump()}
-
-        # ── 2. 已有同指纹任务在跑 → 返回 pending 不重复启动 ──
-        if interpreter.is_inflight(fp):
+            await push_to_coin(coin_upper, "te_ai_result", cached.model_dump())
             return {
-                "status": "pending",
-                "signal_fingerprint": fp,
+                "status": "cached",
                 "coin": coin_upper,
-                "message": "AI 正在思考中，请稍候轮询…",
-                "eta_sec": 30,
+                "signal_fingerprint": fp,
+                "interpretation": cached.model_dump(),
             }
 
-    # ── 3. 启动后台任务 ────────────────────────────
+        # ── 2. 已有同指纹任务在跑 → 秒回，等它跑完会自动 WS push ──
+        if interpreter.is_inflight(fp):
+            return {
+                "status": "inflight",
+                "coin": coin_upper,
+                "signal_fingerprint": fp,
+                "message": "AI 已在思考中，结果将通过 WebSocket 推送",
+            }
+
+    # ── 3. 启动后台任务 + WS 推送 ───────────────────
     import asyncio
 
-    async def _run_interpret():
+    async def _run_and_push():
         try:
             result = await interpreter.interpret(
-                coin=coin_upper,
-                signal_dict=signal_dict,
-                price=price,
-                atr=atr,
-                force=force,
+                coin=coin_upper, signal_dict=signal_dict,
+                price=price, atr=atr, force=force,
             )
+            # WS 推送结果（成功或 AI 自身带 error 都走 te_ai_result）
+            try:
+                await push_to_coin(
+                    coin_upper, "te_ai_result", result.model_dump(),
+                )
+                logger.info(
+                    "[TE-AI] result pushed via WS | coin=%s fp=%s state=%s latency=%dms",
+                    coin_upper, fp,
+                    "error" if result.error else "done",
+                    result.latency_ms,
+                )
+            except Exception:
+                logger.warning("[TE-AI] ws push failed", exc_info=True)
             # shadow log（仅实际调用过 AI 且未出错）
             try:
                 if not result.cache_hit and result.error is None:
                     log_interpretation(result, signal_dict, price)
             except Exception:
                 logger.debug("[TE-AI] shadow log failed", exc_info=True)
-        except Exception:
-            logger.exception("[TE-AI] bg task failed coin=%s fp=%s", coin_upper, fp)
+        except Exception as e:
+            logger.exception("[TE-AI] bg task crashed | coin=%s fp=%s", coin_upper, fp)
+            try:
+                await push_to_coin(coin_upper, "te_ai_error", {
+                    "coin": coin_upper,
+                    "signal_fingerprint": fp,
+                    "message": f"{type(e).__name__}: {str(e)[:200]}",
+                })
+            except Exception:
+                pass
 
-    asyncio.create_task(_run_interpret())
-
+    asyncio.create_task(_run_and_push())
     return {
-        "status": "pending",
-        "signal_fingerprint": fp,
+        "status": "processing",
         "coin": coin_upper,
-        "message": "AI 已开始思考，请 2-3 秒后轮询…",
-        "eta_sec": 30,
+        "signal_fingerprint": fp,
+        "message": "AI 已开始思考，结果将通过 WebSocket 推送",
     }
+
+
+@router.get("/te/ai_interpret/{coin}")
+async def te_ai_interpret_peek(coin: str):
+    """查询当前缓存的 AI 解读结果（不触发新计算）。
+
+    用途：
+      - 页面刷新时拉取最后一次解读（WS replay 也会推，这是兜底）
+      - 调试：查看最近一次 AI 的完整输出
+    返回：缓存命中则返回 TEAIInterpretation.model_dump()，否则 404。
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin_upper = coin.upper()
+    state = _engine._states.get(coin_upper)
+    if not state or not state.trend_exhaustion:
+        raise HTTPException(404, f"No trend_exhaustion signal for {coin_upper}")
+
+    from ai.te_interpreter import get_te_interpreter
+    interpreter = get_te_interpreter()
+    signal_dict = state.trend_exhaustion.model_dump()
+    fp = interpreter.compute_fingerprint(coin_upper, signal_dict)
+    cached = interpreter.peek_cache(fp)
+    if cached is None:
+        raise HTTPException(404, "No cached interpretation for current signal")
+    return cached.model_dump()
 
 
 @router.get("/te/reports/{date}")

@@ -81,6 +81,24 @@ async def subscribe(sid, data):
                 await sio.emit("ai_result", latest.model_dump(), to=sid)
                 logger.info("AI result replayed on subscribe | sid=%s coin=%s age=%.0fs", sid, coin, age)
 
+    # TE · AI 解读 replay：若当前信号有缓存解读，订阅时推一次（与主 AI 对齐）
+    if _engine:
+        try:
+            state = _engine._states.get(coin)
+            if state and state.trend_exhaustion:
+                from ai.te_interpreter import get_te_interpreter
+                interpreter = get_te_interpreter()
+                fp = interpreter.compute_fingerprint(coin, state.trend_exhaustion.model_dump())
+                cached = interpreter.peek_cache(fp)
+                if cached is not None:
+                    await sio.emit("te_ai_result", cached.model_dump(), to=sid)
+                    logger.info(
+                        "TE-AI result replayed on subscribe | sid=%s coin=%s age=%ds",
+                        sid, coin, cached.from_cache_age_sec,
+                    )
+        except Exception:
+            logger.debug("TE-AI replay failed", exc_info=True)
+
 
 async def push_to_coin(coin: str, event: str, data: dict):
     """向订阅了某币种的所有客户端推送数据"""

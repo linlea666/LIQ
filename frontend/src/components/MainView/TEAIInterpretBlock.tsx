@@ -1,63 +1,25 @@
 "use client";
 
 /**
- * TrendExhaustion · AI 解读区块（DeepSeek Reasoner 驱动）
+ * TrendExhaustion · AI 深度解读区块（DeepSeek Reasoner 驱动）
  *
- * 设计原则：
- *   - 按钮常驻，但默认不亮；有缓存时显示缓存年龄
- *   - 三段式渲染：结论 + 矛盾消解 / 陷阱 / 触发条件 + AI 对齐规则的标签
- *   - 思考过程（reasoning_content）默认折叠，点"看 AI 怎么想的"展开
- *   - 错误兜底：AI 未配置 / 超时都直接展示 error 文案，不 crash
+ * 架构对齐主 AI 模式（fire-and-forget + WebSocket 推送）：
+ *   1. 点击按钮 → POST /api/te/ai_interpret/{coin} → 秒回 processing/cached/inflight
+ *   2. 若 cached：后端同步 push `te_ai_result`，前端 store 即刻更新
+ *   3. 否则：后端跑 Reasoner（30-120s），完成后 push `te_ai_result`
+ *   4. 失败：后端 push `te_ai_error`，前端在 store 里标红
+ *   5. 订阅币种时：若有近期缓存，后端会 replay 一次 `te_ai_result`
  *
- * 与规则引擎的关系：这是**补充层**，规则侧结论仍然主导。
- * AI alignment_with_rules 会以颜色标签提醒用户"AI 是否认同规则"。
+ * 本组件**只从 store 读**，不再做 HTTP 轮询。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE } from "@/lib/constants";
-
-type AlignmentKind =
-  | "agree"
-  | "partial_disagree"
-  | "strong_disagree"
-  | "insufficient";
-
-type ScenarioKind =
-  | "trend_continuation"
-  | "bear_rebound"
-  | "bull_pullback"
-  | "reversal_early"
-  | "reversal_confirmed"
-  | "choppy_range"
-  | "unclear";
-
-interface TEAIInterpretation {
-  coin: string;
-  ts: number;
-  signal_fingerprint: string;
-  model: string;
-  cache_hit: boolean;
-  from_cache_age_sec: number;
-  latency_ms: number;
-  tokens_in: number;
-  tokens_out: number;
-  reasoning_tokens: number;
-  summary_cn: string;
-  scenario: ScenarioKind;
-  conflict_resolution: string;
-  traps: string[];
-  triggers_to_watch: string[];
-  action_suggestion: string;
-  confidence: number;
-  alignment_with_rules: AlignmentKind;
-  alignment_reason: string;
-  reasoning: string;
-  error: string | null;
-  raw_text: string;
-}
+import { useMarketStore } from "@/stores/marketStore";
+import type { TEAIAlignment, TEAIScenario } from "@/lib/types";
 
 const ALIGNMENT_META: Record<
-  AlignmentKind,
+  TEAIAlignment,
   { label: string; bg: string; text: string; desc: string }
 > = {
   agree: {
@@ -86,7 +48,7 @@ const ALIGNMENT_META: Record<
   },
 };
 
-const SCENARIO_META: Record<ScenarioKind, { label: string; color: string }> = {
+const SCENARIO_META: Record<TEAIScenario, { label: string; color: string }> = {
   trend_continuation: { label: "顺势续航", color: "text-emerald-300" },
   bear_rebound: { label: "熊市反弹", color: "text-orange-300" },
   bull_pullback: { label: "牛市回调", color: "text-blue-300" },
@@ -123,99 +85,64 @@ function formatCacheAge(sec: number): string {
   return `${Math.floor(sec / 3600)}h 前`;
 }
 
-// 轮询配置
-const POLL_INTERVAL_MS = 2500;
-const MAX_WAIT_MS = 180_000; // Reasoner 最长允许 3 分钟
-
-// 后端响应形状（pending 时字段少）
-type BackendResp =
-  | (TEAIInterpretation & { status: "done" | "error" })
-  | {
-      status: "pending";
-      signal_fingerprint: string;
-      coin: string;
-      message: string;
-      eta_sec: number;
-    };
-
 export default function TEAIInterpretBlock({ coin }: { coin: string }) {
-  const [result, setResult] = useState<TEAIInterpretation | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [waitedSec, setWaitedSec] = useState(0);
-  const [err, setErr] = useState("");
+  const result = useMarketStore((s) => s.teAiByCoin[coin.toUpperCase()] ?? null);
+  const loading = useMarketStore(
+    (s) => s.teAiLoadingByCoin[coin.toUpperCase()] ?? false,
+  );
+  const err = useMarketStore(
+    (s) => s.teAiErrorByCoin[coin.toUpperCase()] ?? "",
+  );
+  const setTEAILoading = useMarketStore((s) => s.setTEAILoading);
+  const setTEAIError = useMarketStore((s) => s.setTEAIError);
+
   const [showReasoning, setShowReasoning] = useState(false);
+  const [waitedSec, setWaitedSec] = useState(0);
 
-  // 取消标志（切币种 / 组件卸载时中断轮询）
-  const abortRef = useRef(false);
-
-  // 等待计时器
+  // 等待计时器（从按下按钮开始计；结果到达 loading 自动变 false → 停）
+  const startTsRef = useRef(0);
   useEffect(() => {
-    if (!loading) return;
-    const t0 = Date.now();
-    setWaitedSec(0);
+    if (!loading) {
+      setWaitedSec(0);
+      return;
+    }
+    startTsRef.current = Date.now();
     const timer = setInterval(() => {
-      setWaitedSec(Math.round((Date.now() - t0) / 1000));
+      setWaitedSec(Math.round((Date.now() - startTsRef.current) / 1000));
     }, 1000);
     return () => clearInterval(timer);
   }, [loading]);
 
-  // 切币种时中断正在轮询的请求
-  useEffect(() => {
-    abortRef.current = true;
-    setResult(null);
-    setErr("");
-    setLoading(false);
-    abortRef.current = false;
-  }, [coin]);
-
-  const fetchInterpret = useCallback(
-    async (force = false) => {
+  const trigger = useCallback(
+    async (force: boolean) => {
       if (!coin) return;
-      abortRef.current = false;
-      setLoading(true);
-      setErr("");
-
-      const startTs = Date.now();
+      const c = coin.toUpperCase();
+      setTEAILoading(c, true);
+      setTEAIError(c, null);
       try {
-        // 第一次请求带 force（若用户点的是"重新解读"），后续轮询永远不带
-        let firstCall = true;
-        while (!abortRef.current) {
-          if (Date.now() - startTs > MAX_WAIT_MS) {
-            throw new Error(
-              `AI 思考超时（${Math.round(MAX_WAIT_MS / 1000)}s），请稍后重试`,
-            );
-          }
-          const url = `${API_BASE}/api/te/ai_interpret/${coin}${
-            firstCall && force ? "?force=true" : ""
-          }`;
-          firstCall = false;
-          const r = await fetch(url, { cache: "no-store" });
-          if (!r.ok) {
-            const txt = await r.text();
-            throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`);
-          }
-          const j = (await r.json()) as BackendResp;
-
-          if (j.status === "pending") {
-            await new Promise((resolve) =>
-              setTimeout(resolve, POLL_INTERVAL_MS),
-            );
-            continue;
-          }
-
-          // done 或 error
-          const full = j as TEAIInterpretation & { status: string };
-          setResult(full);
-          if (full.error) setErr(full.error);
-          return;
+        const url = `${API_BASE}/api/te/ai_interpret/${c}${
+          force ? "?force=true" : ""
+        }`;
+        const r = await fetch(url, { method: "POST", cache: "no-store" });
+        if (!r.ok) {
+          const txt = await r.text();
+          throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`);
+        }
+        const j = (await r.json()) as {
+          status: "processing" | "cached" | "inflight" | "error";
+          message?: string;
+        };
+        // cached / inflight：后端已同步 push 或即将 push，状态由 WS 驱动
+        // processing：等 WS 推
+        // error：直接展示
+        if (j.status === "error") {
+          setTEAIError(c, j.message || "AI 触发失败");
         }
       } catch (e) {
-        setErr((e as Error).message || "AI 解读失败");
-      } finally {
-        setLoading(false);
+        setTEAIError(c, (e as Error).message || "AI 解读失败");
       }
     },
-    [coin],
+    [coin, setTEAILoading, setTEAIError],
   );
 
   const align = result ? ALIGNMENT_META[result.alignment_with_rules] : null;
@@ -227,7 +154,7 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
     if (result.cache_hit)
       return `🤖 已解读（${formatCacheAge(
         result.from_cache_age_sec,
-      )}·点击重新思考）`;
+      )}·点击重新解读）`;
     return "🤖 重新解读";
   }, [loading, waitedSec, result]);
 
@@ -240,12 +167,12 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
             🤖 AI 深度解读
           </span>
           <span className="text-[10px] text-slate-500">
-            DeepSeek Reasoner · 仅补充规则给不了的层次
+            DeepSeek Reasoner · 结果通过 WebSocket 推送
           </span>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => fetchInterpret(!!result)}
+            onClick={() => trigger(!!result)}
             disabled={loading}
             className={`rounded-md border px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 ${
               result
@@ -268,23 +195,21 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
         </div>
       )}
 
-      {/* 加载中占位 */}
+      {/* 加载中占位（WS 推送前的 UX） */}
       {loading && (
         <div className="mt-3 space-y-1.5">
           <div className="text-[12px] text-slate-400 animate-pulse">
-            正在读取多周期数据 + 推理矛盾场景…（Reasoner 首次调用典型 20-60s）
+            正在读取多周期数据 + 推理矛盾场景…（Reasoner 思考典型 20-90s）
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-500">
             <span>已等待 {waitedSec}s</span>
             <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden max-w-[240px]">
               <div
                 className="h-full bg-blue-500/60 transition-all"
-                style={{
-                  width: `${Math.min(100, (waitedSec / 60) * 100)}%`,
-                }}
+                style={{ width: `${Math.min(100, (waitedSec / 60) * 100)}%` }}
               />
             </div>
-            <span className="text-slate-600">{">60s 属于正常"}</span>
+            <span className="text-slate-600">WebSocket 推送到达即显示</span>
           </div>
         </div>
       )}
@@ -412,13 +337,6 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
                 : `${(result.latency_ms / 1000).toFixed(1)}s`}
             </span>
           </div>
-        </div>
-      )}
-
-      {/* AI 返回 error 且非 HTTP 错误 */}
-      {result?.error && !loading && (
-        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs text-amber-200">
-          ⚠ AI 解读失败：{result.error}
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import type {
   AIAnalysisResult,
   MarketUpdate,
   SourceHealth,
+  TEAIInterpretation,
 } from "@/lib/types";
 import { API_BASE } from "@/lib/constants";
 import type { CoinType } from "@/lib/constants";
@@ -36,6 +37,14 @@ interface MarketStore {
 
   activeTab: string;
   setActiveTab: (tab: string) => void;
+
+  // TE · AI 深度解读（按 coin 分存；WS 推送驱动）
+  teAiByCoin: Record<string, TEAIInterpretation>;
+  teAiLoadingByCoin: Record<string, boolean>;
+  teAiErrorByCoin: Record<string, string | null>;
+  setTEAIResult: (result: TEAIInterpretation) => void;
+  setTEAILoading: (coin: string, loading: boolean) => void;
+  setTEAIError: (coin: string, err: string | null) => void;
 }
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
@@ -101,4 +110,39 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
 
   activeTab: "liquidation",
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  teAiByCoin: {},
+  teAiLoadingByCoin: {},
+  teAiErrorByCoin: {},
+  setTEAIResult: (result) =>
+    set((state) => {
+      const coin = (result.coin || "").toUpperCase();
+      if (!coin) return {};
+      return {
+        teAiByCoin: { ...state.teAiByCoin, [coin]: result },
+        teAiLoadingByCoin: { ...state.teAiLoadingByCoin, [coin]: false },
+        teAiErrorByCoin: {
+          ...state.teAiErrorByCoin,
+          [coin]: result.error ?? null,
+        },
+      };
+    }),
+  setTEAILoading: (coin, loading) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        teAiLoadingByCoin: { ...state.teAiLoadingByCoin, [c]: loading },
+        teAiErrorByCoin: loading
+          ? { ...state.teAiErrorByCoin, [c]: null }
+          : state.teAiErrorByCoin,
+      };
+    }),
+  setTEAIError: (coin, err) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        teAiErrorByCoin: { ...state.teAiErrorByCoin, [c]: err },
+        teAiLoadingByCoin: { ...state.teAiLoadingByCoin, [c]: false },
+      };
+    }),
 }));

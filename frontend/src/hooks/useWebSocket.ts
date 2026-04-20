@@ -4,7 +4,11 @@ import { useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 import { WS_URL } from "@/lib/constants";
 import { useMarketStore } from "@/stores/marketStore";
-import type { AIAnalysisResult, MarketUpdate } from "@/lib/types";
+import type {
+  AIAnalysisResult,
+  MarketUpdate,
+  TEAIInterpretation,
+} from "@/lib/types";
 
 export function useWebSocket() {
   const socketRef = useRef<Socket | null>(null);
@@ -13,6 +17,8 @@ export function useWebSocket() {
   const updateMarketData = useMarketStore((s) => s.updateMarketData);
   const setAIResult = useMarketStore((s) => s.setAIResult);
   const setAIError = useMarketStore((s) => s.setAIError);
+  const setTEAIResult = useMarketStore((s) => s.setTEAIResult);
+  const setTEAIError = useMarketStore((s) => s.setTEAIError);
 
   coinRef.current = coin;
 
@@ -44,6 +50,23 @@ export function useWebSocket() {
       console.log("[WS] ai_error received | coin=%s", data.coin);
       setAIError(data.message);
     });
+
+    // TE · AI 深度解读推送（对齐主 AI fire-and-forget 架构）
+    socket.on("te_ai_result", (data: TEAIInterpretation) => {
+      console.log(
+        "[WS] te_ai_result received | coin=%s align=%s conf=%s",
+        data.coin, data.alignment_with_rules, data.confidence,
+      );
+      setTEAIResult(data);
+    });
+
+    socket.on(
+      "te_ai_error",
+      (data: { coin: string; message: string; signal_fingerprint?: string }) => {
+        console.log("[WS] te_ai_error received | coin=%s", data.coin);
+        setTEAIError(data.coin, data.message);
+      },
+    );
 
     socket.on("disconnect", () => {
       console.log("[WS] disconnected");

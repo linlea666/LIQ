@@ -394,6 +394,53 @@ export interface TrendExhaustionSignal {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TE · AI 深度解读（DeepSeek Reasoner 驱动）
+//   对齐后端 `models.te_interpretation.TEAIInterpretation`
+//   WebSocket 事件：`te_ai_result` / `te_ai_error`
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type TEAIAlignment =
+  | "agree"
+  | "partial_disagree"
+  | "strong_disagree"
+  | "insufficient";
+
+export type TEAIScenario =
+  | "trend_continuation"
+  | "bear_rebound"
+  | "bull_pullback"
+  | "reversal_early"
+  | "reversal_confirmed"
+  | "choppy_range"
+  | "unclear";
+
+export interface TEAIInterpretation {
+  coin: string;
+  ts: number;
+  signal_fingerprint: string;
+  model: string;
+  cache_hit: boolean;
+  from_cache_age_sec: number;
+  latency_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+  reasoning_tokens: number;
+  summary_cn: string;
+  scenario: TEAIScenario;
+  conflict_resolution: string;
+  traps: string[];
+  triggers_to_watch: string[];
+  action_suggestion: string;
+  confidence: number;
+  alignment_with_rules: TEAIAlignment;
+  alignment_reason: string;
+  reasoning: string;
+  error: string | null;
+  raw_text: string;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MTF 市场结构（日/周线完整快照）
 //   对齐后端 `models.market_structure.MarketStructure`
 //   仅 WebSocket market_update 的 `market_structure_1d/1w` 使用
