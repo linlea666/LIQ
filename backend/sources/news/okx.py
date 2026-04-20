@@ -101,9 +101,29 @@ class OkxTimelineSource(NewsSource):
             )
             raise
 
-        raw_list = (payload or {}).get("data") or []
+        # 兼容两种响应外壳：
+        #   旧形态：{"data": [ {...}, ... ]}
+        #   新形态：{"data": {"contentDataList": [...], "nextCursor": "..."}}
+        # 2026-04 实测 OKX 已切到新形态；这里做双兼容避免未来再翻车。
+        data_obj = (payload or {}).get("data")
+        if isinstance(data_obj, list):
+            raw_list: list[Any] = data_obj
+        elif isinstance(data_obj, dict):
+            raw_list = (
+                data_obj.get("contentDataList")
+                or data_obj.get("items")
+                or data_obj.get("list")
+                or []
+            )
+        else:
+            raw_list = []
         if not isinstance(raw_list, list):
-            logger.debug("[D07] %s unexpected data shape: %s", self.name, type(raw_list))
+            logger.warning(
+                "[D07] %s unexpected data shape payload_keys=%s data_type=%s",
+                self.name,
+                list((payload or {}).keys())[:8],
+                type(data_obj).__name__,
+            )
             raw_list = []
 
         items: list[RawNewsItem] = []

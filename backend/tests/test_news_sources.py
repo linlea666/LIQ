@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Optional
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -114,6 +115,79 @@ def test_okx_normalize_seconds_publish_time_promoted_to_ms():
     item = s._normalize({"contentId": "X", "publishTime": 1_700_000_000, "titleNew": "t"})
     assert item is not None
     assert item.publish_time == 1_700_000_000_000  # 被补成毫秒
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 响应外壳兼容（OKX 2026-04 改版 data→dict.contentDataList）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _make_fake_session(payload: dict):
+    """构造一个最小可用的 aiohttp.ClientSession mock，返回固定 payload。"""
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json = AsyncMock(return_value=payload)
+    resp.__aenter__ = AsyncMock(return_value=resp)
+    resp.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=resp)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    return session
+
+
+def test_okx_fetch_parses_new_shell_data_contentDataList():
+    """OKX 新结构：{"code":"0","data":{"contentDataList":[...]}}，必须解析出条目。"""
+    payload = {
+        "code": "0",
+        "data": {
+            "contentDataList": [
+                {
+                    "contentId": "N1",
+                    "publishTime": 1_700_000_000_000,
+                    "titleNew": "BTC 暴涨",
+                    "contentCnShort": "...",
+                    "viewCount": 100,
+                },
+                {
+                    "contentId": "N2",
+                    "publishTime": 1_700_000_060_000,
+                    "titleNew": "ETH 反弹",
+                    "contentCnShort": "...",
+                    "viewCount": 50,
+                },
+            ],
+            "nextCursor": "xx",
+        },
+    }
+    s = create_industry_source()
+    with patch("sources.news.okx.aiohttp.ClientSession", return_value=_make_fake_session(payload)):
+        items = asyncio.run(s.fetch())
+    ids = [it.external_id for it in items]
+    assert ids == ["N1", "N2"]
+
+
+def test_okx_fetch_parses_legacy_shell_data_list():
+    """旧结构：{"data":[...]} 仍须兼容。"""
+    payload = {
+        "code": "0",
+        "data": [
+            {"contentId": "L1", "publishTime": 1_700_000_000_000, "titleNew": "t"},
+        ],
+    }
+    s = create_industry_source()
+    with patch("sources.news.okx.aiohttp.ClientSession", return_value=_make_fake_session(payload)):
+        items = asyncio.run(s.fetch())
+    assert [it.external_id for it in items] == ["L1"]
+
+
+def test_okx_fetch_unknown_shell_returns_empty_without_raise():
+    """未知外壳：不抛异常、返回 0 条、仍打一条 warning 便于后续发现。"""
+    payload = {"code": "0", "data": "<- str surprised us"}
+    s = create_industry_source()
+    with patch("sources.news.okx.aiohttp.ClientSession", return_value=_make_fake_session(payload)):
+        items = asyncio.run(s.fetch())
+    assert items == []
 
 
 def test_heat_score_bounds():
