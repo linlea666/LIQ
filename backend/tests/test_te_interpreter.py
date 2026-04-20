@@ -387,6 +387,34 @@ def test_shadow_log_writes_main_and_thinking(tmp_path, monkeypatch):
     assert stats["total_records"] == 1
 
 
+@pytest.mark.asyncio
+async def test_public_helpers_for_async_polling():
+    """routes.py 依赖这几个 public 方法做任务异步模式，确保不被重构破坏。"""
+    interp = TEInterpreter()
+    sig = _make_signal()
+
+    fp1 = interp.compute_fingerprint("BTC", sig)
+    fp2 = interp.compute_fingerprint("BTC", sig)
+    assert fp1 == fp2 and len(fp1) == 16
+
+    # 空缓存 / 空 inflight
+    assert interp.peek_cache(fp1) is None
+    assert interp.is_inflight(fp1) is False
+
+    # 手动塞一条缓存，peek_cache 能拿到且标 cache_hit
+    from models.te_interpretation import TEAIInterpretation as TIModel
+    from ai.te_interpreter import _CacheEntry
+    dummy = TIModel(
+        coin="BTC", ts=int(time.time()), signal_fingerprint=fp1,
+        summary_cn="test",
+    )
+    interp._cache[fp1] = _CacheEntry(result=dummy, expires_at=time.time() + 60)
+    got = interp.peek_cache(fp1)
+    assert got is not None
+    assert got.cache_hit is True
+    assert got.summary_cn == "test"
+
+
 def test_shadow_log_skips_thinking_when_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(ai_log_mod, "_repo_root", lambda: str(tmp_path))
     result = TEAIInterpretation(

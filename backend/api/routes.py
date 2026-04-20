@@ -749,13 +749,18 @@ async def list_te_reports(max_days: int = Query(30, ge=1, le=180)):
 async def te_ai_interpret(coin: str, force: bool = Query(False)):
     """P0-C · 趋势衰竭模块 · AI 解读（DeepSeek Reasoner 驱动）
 
-    行为：
-      - 读取当前 engine 里最新的 TrendExhaustionSignal
-      - 按信号指纹查缓存（30 min TTL），命中则返回缓存结果
-      - 未命中或 force=true 则调用 AI，结果入缓存 + shadow log
-      - 异常（AI 未配置 / 解析失败）也 200 返回，带 error 字段由前端展示
+    【任务异步模式】—— 解决 Reasoner 30-120s 长调用被反向代理 60s 超时切断的问题。
 
-    返回模型：models.te_interpretation.TEAIInterpretation（完整 model_dump）
+    响应 schema：
+      - status="done"  ：完整 TEAIInterpretation.model_dump() + status 字段
+      - status="pending" ：{status, signal_fingerprint, coin, message, eta_sec}
+                           前端应每 2-3s 轮询（不带 force）直到 status=done
+      - status="error" ：TEAIInterpretation 带 error 字段（非 HTTP 错误）
+
+    行为：
+      1. 命中缓存（且非 force）→ 直接 status=done 秒回
+      2. 已有同指纹后台任务在跑（且非 force）→ 返回 status=pending（不重复启动）
+      3. 无缓存、无 inflight（或 force=True）→ 启动后台任务，立即返回 pending
     """
     if not _engine:
         raise HTTPException(503, "Engine not ready")
@@ -772,26 +777,64 @@ async def te_ai_interpret(coin: str, force: bool = Query(False)):
     from monitoring.te_ai_log import log_interpretation
 
     interpreter = get_te_interpreter()
-    try:
-        result = await interpreter.interpret(
-            coin=coin_upper,
-            signal_dict=signal_dict,
-            price=price,
-            atr=atr,
-            force=force,
+    if not interpreter.available:
+        from models.te_interpretation import TEAIInterpretation
+        err = TEAIInterpretation(
+            coin=coin_upper, ts=int(time.time()),
+            signal_fingerprint="",
+            error="AI 未配置 API Key",
+            alignment_with_rules="insufficient",
         )
-    except Exception as e:
-        logger.exception("[TE-AI] interpret top-level failure coin=%s", coin_upper)
-        raise HTTPException(500, f"ai interpret failed: {e}")
+        return {"status": "error", **err.model_dump()}
 
-    # 仅非缓存命中 + 非错误 时落盘（缓存命中已在之前落过）
-    try:
-        if not result.cache_hit and result.error is None:
-            log_interpretation(result, signal_dict, price)
-    except Exception:
-        logger.debug("[TE-AI] shadow log failed", exc_info=True)
+    fp = interpreter.compute_fingerprint(coin_upper, signal_dict)
 
-    return result.model_dump()
+    # ── 1. 命中缓存（非 force）→ 秒回 ────────────────
+    if not force:
+        cached = interpreter.peek_cache(fp)
+        if cached is not None:
+            return {"status": "done", **cached.model_dump()}
+
+        # ── 2. 已有同指纹任务在跑 → 返回 pending 不重复启动 ──
+        if interpreter.is_inflight(fp):
+            return {
+                "status": "pending",
+                "signal_fingerprint": fp,
+                "coin": coin_upper,
+                "message": "AI 正在思考中，请稍候轮询…",
+                "eta_sec": 30,
+            }
+
+    # ── 3. 启动后台任务 ────────────────────────────
+    import asyncio
+
+    async def _run_interpret():
+        try:
+            result = await interpreter.interpret(
+                coin=coin_upper,
+                signal_dict=signal_dict,
+                price=price,
+                atr=atr,
+                force=force,
+            )
+            # shadow log（仅实际调用过 AI 且未出错）
+            try:
+                if not result.cache_hit and result.error is None:
+                    log_interpretation(result, signal_dict, price)
+            except Exception:
+                logger.debug("[TE-AI] shadow log failed", exc_info=True)
+        except Exception:
+            logger.exception("[TE-AI] bg task failed coin=%s fp=%s", coin_upper, fp)
+
+    asyncio.create_task(_run_interpret())
+
+    return {
+        "status": "pending",
+        "signal_fingerprint": fp,
+        "coin": coin_upper,
+        "message": "AI 已开始思考，请 2-3 秒后轮询…",
+        "eta_sec": 30,
+    }
 
 
 @router.get("/te/reports/{date}")

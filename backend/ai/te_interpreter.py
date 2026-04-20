@@ -314,6 +314,20 @@ class TEInterpreter:
     def available(self) -> bool:
         return self._client is not None
 
+    # ── public helpers（给 routes.py 异步调度用） ──────────
+    def compute_fingerprint(self, coin: str, signal_dict: dict) -> str:
+        """给定信号算指纹（也是缓存/轮询 key）。"""
+        return _fingerprint(coin, signal_dict)
+
+    def peek_cache(self, fp: str) -> Optional[TEAIInterpretation]:
+        """查缓存但不触发计算。命中则返回 cache_hit=True 的副本。"""
+        return self._get_cached(fp)
+
+    def is_inflight(self, fp: str) -> bool:
+        """是否有同指纹的后台任务正在跑（用于前端轮询状态）。"""
+        ev = self._inflight.get(fp)
+        return ev is not None and not ev.is_set()
+
     def _get_cached(self, fp: str) -> Optional[TEAIInterpretation]:
         entry = self._cache.get(fp)
         if entry is None:
@@ -388,7 +402,9 @@ class TEInterpreter:
             return result
         finally:
             event.set()
-            self._inflight.pop(fp, None)
+            # 只有当当前 event 仍是注册的那个时才 pop（避免并发 force 场景误清）
+            if self._inflight.get(fp) is event:
+                self._inflight.pop(fp, None)
 
     async def _do_call(
         self, coin: str, signal_dict: dict, price: float, atr: float, fp: str,
