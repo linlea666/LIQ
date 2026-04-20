@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from config.settings import CoinConfig
 
@@ -29,6 +30,10 @@ from models.market import TickerData
 from processors.percentile import PercentileTracker
 from sources.binance_futures import BinanceFuturesSource
 from sources.coinglass import CoinglassSource
+from sources.funding_official import (
+    fetch_official_pair as fetch_official_funding_pair,
+    to_okx_inst_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -185,55 +190,113 @@ async def poll_funding_all(
     percentile: PercentileTracker,
     logged_keys: set[str],
 ) -> None:
-    """获取全币种多交易所资金费率。"""
-    data = await cg.fetch_fr_exchange_list()
-    if not data:
-        return
-    log_api_fields_once("funding-rate", data, logged_keys)
+    """获取全币种资金费率（官方主源 + Coinglass fallback）。
 
-    symbol_to_ccy = {
-        get_coin(c).symbol_cg: c
-        for c in supported_coins
-    }
+    取源策略（阶段 1 切换后）：
+      1. 主源：并发打 Binance `/fapi/v1/premiumIndex` + OKX `/api/v5/public/funding-rate`
+         - 单位明确：两家均为小数（0.0001 = 0.01%），无 ×10/×100 单位风险
+         - 无 API key，公共接口，延迟 80-120ms
+      2. 官方两家同时失败才退回 Coinglass `fetch_fr_exchange_list` 的 avg
+         - 保留 Coinglass 是为了全球网络异常的兜底，而非常态使用
 
-    for item in data:
-        symbol = item.get("symbol", "")
-        ccy = symbol_to_ccy.get(symbol)
-        if not ccy:
-            continue
+    方案 B（展示层精简）：
+      exchanges 列表只保留 Binance + OKX 两条，不再展示 Coinglass 其他 8 家。
+      理由：下游阈值判定和 AI prompt 均未真正使用 Bybit/HTX/Gate 等数据，
+            展示 10 家反而分散注意力、增加前端噪音。
+    """
+    # ── 主源：并发拉官方 Binance + OKX，每币一次 ──
+    official: dict[str, tuple[Optional[float], Optional[float]]] = {}
+    tasks = []
+    for ccy in supported_coins:
+        coin = get_coin(ccy)
+        tasks.append((
+            ccy,
+            fetch_official_funding_pair(
+                coin.symbol_cg_pair,  # e.g. "BTCUSDT"
+                to_okx_inst_id(coin.symbol_cg_pair),  # e.g. "BTC-USDT-SWAP"
+            ),
+        ))
+    results = await asyncio.gather(*(t[1] for t in tasks), return_exceptions=True)
+    for idx, (ccy, _) in enumerate(tasks):
+        res = results[idx]
+        if isinstance(res, Exception):
+            logger.warning("[funding-official] %s gather exception: %s", ccy, res)
+            official[ccy] = (None, None)
+        else:
+            official[ccy] = res  # (bn_rate, okx_rate)
 
+    # ── Fallback 源：若任何币种官方两家同时失败，拉一次 Coinglass ──
+    need_fallback = any(bn is None and ox is None for bn, ox in official.values())
+    cg_by_symbol: dict[str, list[dict]] = {}
+    if need_fallback:
+        try:
+            data = await cg.fetch_fr_exchange_list()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[funding-official] coinglass fallback fetch fail: %s", e)
+            data = None
+        if data:
+            log_api_fields_once("funding-rate", data, logged_keys)
+            for item in data:
+                sym = item.get("symbol", "")
+                if sym:
+                    cg_by_symbol[sym] = item.get(
+                        "stablecoin_margin_list", item.get("uMarginList", []),
+                    ) or []
+
+    # ── 组装每币 state ──
+    now_ts = int(time.time())
+    for ccy in supported_coins:
         state = states[ccy]
-        exchanges = []
-        avg_current = 0.0
-        count = 0
-        okx_rate = None
-        bn_rate = None
+        coin = get_coin(ccy)
+        bn_rate, okx_rate = official.get(ccy, (None, None))
 
-        margin_list = item.get("stablecoin_margin_list", item.get("uMarginList", []))
-        all_rates: list[float] = []
-        for ex_item in margin_list:
-            ex_name = ex_item.get("exchange", ex_item.get("exchangeName", ""))
-            rate = ex_item.get("funding_rate", ex_item.get("rate"))
-            if rate is not None:
-                rate = float(rate)
-                exchanges.append(ExchangeFundingRate(
-                    exchange=ex_name, current=rate,
-                ))
-                all_rates.append(rate)
-                count += 1
-                if "okx" in ex_name.lower() or "okex" in ex_name.lower():
-                    okx_rate = rate
-                elif "binance" in ex_name.lower():
-                    bn_rate = rate
+        exchanges: list[ExchangeFundingRate] = []
+        source_used = "official"
+        avg_rates: list[float] = []
 
-        if len(all_rates) >= 3:
-            sorted_rates = sorted(all_rates)
-            median = sorted_rates[len(sorted_rates) // 2]
-            filtered = [r for r in all_rates if abs(r - median) < 10 * max(abs(median), 0.0005)]
-            avg_current = sum(filtered) / len(filtered) if filtered else 0
-        elif all_rates:
-            avg_current = sum(all_rates) / len(all_rates)
+        if bn_rate is not None:
+            exchanges.append(ExchangeFundingRate(exchange="Binance", current=bn_rate))
+            avg_rates.append(bn_rate)
+        if okx_rate is not None:
+            exchanges.append(ExchangeFundingRate(exchange="OKX", current=okx_rate))
+            avg_rates.append(okx_rate)
 
+        # Fallback 到 Coinglass（仅当官方两家都失败）
+        if not avg_rates:
+            source_used = "coinglass_fallback"
+            cg_margin = cg_by_symbol.get(coin.symbol_cg, [])
+            cg_rates: list[float] = []
+            for ex_item in cg_margin:
+                name = (ex_item.get("exchange") or ex_item.get("exchangeName") or "").lower()
+                rate = ex_item.get("funding_rate", ex_item.get("rate"))
+                if rate is None:
+                    continue
+                try:
+                    r = float(rate)
+                except (TypeError, ValueError):
+                    continue
+                cg_rates.append(r)
+                if "binance" in name and bn_rate is None:
+                    bn_rate = r
+                    exchanges.append(ExchangeFundingRate(exchange="Binance", current=r))
+                elif ("okx" in name or "okex" in name) and okx_rate is None:
+                    okx_rate = r
+                    exchanges.append(ExchangeFundingRate(exchange="OKX", current=r))
+            # 若 Coinglass 也没给出 Binance/OKX，用中位数兜底
+            if not exchanges and len(cg_rates) >= 3:
+                sorted_rates = sorted(cg_rates)
+                median = sorted_rates[len(sorted_rates) // 2]
+                filtered = [
+                    r for r in cg_rates
+                    if abs(r - median) < 10 * max(abs(median), 0.0005)
+                ]
+                if filtered:
+                    avg_rates = filtered
+            elif not avg_rates and exchanges:
+                avg_rates = [e.current for e in exchanges]
+
+        # ── 聚合 + 阈值判定（阈值保留原值 0.0005） ──
+        avg_current = sum(avg_rates) / len(avg_rates) if avg_rates else 0.0
         interp = "中性"
         if avg_current > 0.0005:
             interp = "多头拥挤"
@@ -241,19 +304,30 @@ async def poll_funding_all(
             interp = "空头拥挤"
 
         state.multi_funding = MultiFundingRateData(
-            coin=ccy, ts=int(time.time()),
+            coin=ccy, ts=now_ts,
             exchanges=exchanges,
             avg_current=round(avg_current, 6),
             interpretation=interp,
         )
-
         state.funding = FundingRateData(
-            coin=ccy, ts=int(time.time()),
+            coin=ccy, ts=now_ts,
             okx_rate=okx_rate, binance_rate=bn_rate,
             avg_rate=round(avg_current, 6),
             interpretation=interp,
         )
         percentile.push(ccy, "funding", avg_current)
+
+        # ── 首次日志（每币种只打一次，便于验证切源成功） ──
+        log_key = f"funding_official_ready_{ccy}"
+        if log_key not in state._log_once_keys and (bn_rate is not None or okx_rate is not None):
+            state._log_once_keys.add(log_key)
+            logger.info(
+                "[funding-official] %s source=%s bn=%s okx=%s avg=%.6f interp=%s",
+                ccy, source_used,
+                f"{bn_rate:.6f}" if bn_rate is not None else "N/A",
+                f"{okx_rate:.6f}" if okx_rate is not None else "N/A",
+                avg_current, interp,
+            )
 
 
 async def poll_ls_ratio(
