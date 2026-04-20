@@ -277,6 +277,90 @@ export function macdMomentumBrief(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MTF 一致性徽章（1w / 1d / 1h 三周期结构对齐度）
+//
+// 与 backend/ai/prompts.py `_mtf_alignment_line` 同口径。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+type MTFDirectionInput = string | null | undefined;
+
+interface MtfSnapshotLike {
+  direction?: MTFDirectionInput;
+  confidence?: number | null;
+}
+
+const MTF_CONF_MIN = 0.5;
+
+function _normalizeDir(
+  ms: MtfSnapshotLike | null | undefined,
+): "bullish" | "bearish" | "unclear" | "missing" {
+  if (!ms) return "missing";
+  const conf = ms.confidence ?? 0;
+  const d = ms.direction;
+  if ((d === "bullish" || d === "bearish") && conf >= MTF_CONF_MIN) return d;
+  return "unclear";
+}
+
+/**
+ * MTF 一致性徽章输入：三个 TF 的原始结构快照（任意一个可缺失）。
+ * 返回：
+ *   - resonance=true  → 三周期同向共振（加码信号）
+ *   - divergence_big  → 周/日方向相反（降仓信号）
+ *   - partial_split   → 日周同向 + 1h 相反（1h 回调/反弹）
+ *   - neutral         → 无明确共振（次要参考）
+ */
+export function mtfAlignmentBrief(
+  ms_1w: MtfSnapshotLike | null | undefined,
+  ms_1d: MtfSnapshotLike | null | undefined,
+  ms_1h: MtfSnapshotLike | null | undefined,
+): BriefTag | null {
+  if (!ms_1w && !ms_1d && !ms_1h) return null;
+
+  const w = _normalizeDir(ms_1w);
+  const d = _normalizeDir(ms_1d);
+  const h = _normalizeDir(ms_1h);
+
+  // 三周期同向共振
+  if (w === d && d === h && (w === "bullish" || w === "bearish")) {
+    const isLong = w === "bullish";
+    return {
+      label: isLong ? "🎯 MTF 三周期共振·多" : "🎯 MTF 三周期共振·空",
+      color: isLong ? "text-emerald-300" : "text-red-300",
+      bg: isLong ? "bg-emerald-500/15" : "bg-red-500/15",
+      hint: `1w / 1d / 1h 三周期同向${isLong ? "多头" : "空头"} — 高胜率窗口，可考虑加大仓位或延长持有`,
+    };
+  }
+
+  // 日周冲突
+  if ((w === "bullish" || w === "bearish") && (d === "bullish" || d === "bearish") && w !== d) {
+    return {
+      label: "⚠ MTF 周日冲突",
+      color: "text-orange-400",
+      bg: "bg-orange-500/15",
+      hint: "周线与日线方向相反 — 结构转换期，宜降仓 / 只做短线，避免逆大周期重仓",
+    };
+  }
+
+  // 日周同向 + 1h 反向 → 回调/反弹
+  if (w === d && (w === "bullish" || w === "bearish") && (h === "bullish" || h === "bearish") && h !== w) {
+    const bigIsLong = w === "bullish";
+    return {
+      label: `🔄 日周${bigIsLong ? "多" : "空"} vs 1h ${h === "bullish" ? "多" : "空"}`,
+      color: "text-amber-300",
+      bg: "bg-amber-500/15",
+      hint: `日周主导方向=${bigIsLong ? "多头" : "空头"}，1h 视为${bigIsLong ? "回调" : "反弹"}执行层 — 短线可做 1h 方向，中远线以日周为准`,
+    };
+  }
+
+  return {
+    label: "ℹ MTF 未共振",
+    color: "text-slate-400",
+    bg: "bg-slate-500/15",
+    hint: "周/日/小时结构未形成明确共振（含震荡或置信度不足），MTF 对齐度作为次要参考",
+  };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 突破三步确认（breakout_stage）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -89,7 +89,7 @@ def _build_strict_system_prompt() -> str:
 - 若宏观数据中已有恐惧贪婪/DXY/纳指等任一数值，不得写"宏观数据完全缺失"
 - 订单簿合计深度为 0 时表述为"未获得有效 L2 数据"，禁止断言"流动性完全消失"
 - **数据异常值怀疑**：遇到标注"⚠ 极端异常值"的数据，必须在引用时标注可能不准确，权重降至最低，不得作为方向判断的核心依据。交易员不信任离群数据点。
-- **多维留痕铁律**（§9i 有数据时）：§9i 的 `ms_direction` / `ms_bias` 是 L3 层**小时级**的**单一参考**，不是最终方向裁决。§四每个方案"核心依据"列必须显式标注 `顺 1h 结构 ✓` 或 `🔄 逆 1h 结构 · 理由：[L层级+具体数据]`。逆势方案**无需**达到 L1 级别才成立——L2 资金面 / L4 宏观 / L5 链上周期的**多维共振**同样可以压过 1h 结构，但必须说清**具体哪几个维度组合**推翻了它。1h 结构从来不是一票否决器。
+- **多维留痕铁律**（§9i 有数据时）：§9i 现为**多时间框架（1w/1d/1h）结构**，`ms_1h.direction` / `ms_1h.bias` 是 L3 层**小时级**的**执行层参考**，不是最终方向裁决；`ms_1d` 为中线参考，`ms_1w` 为远线/趋势参考。§四每个方案"核心依据"列必须显式标注 `顺 1h 结构 ✓` 或 `🔄 逆 1h 结构 · 理由：[L层级+具体数据]`；当 MTF 一致性行显示"三周期同向共振"时方向权重升档，显示"日周冲突/背离"时仓位须降档。逆势方案**无需**达到 L1 级别才成立——L2 资金面 / L4 宏观 / L5 链上周期的**多维共振**同样可以压过 1h 结构，但必须说清**具体哪几个维度组合**推翻了它。1h 结构从来不是一票否决器。
 - **价位血统铁律**：§二/§四每个挂出的价位，依据列必须能从 §9a-§9i 某节数据中找到对应来源（清算簇/关键位/MA/VP POC/未回补影线/结构上下沿/斐波等），且写明 `§9X · 来源名`；找不到来源的价位须标 `⚡AI推断` 并在同一行交代推导公式（如 "POC + 0.5 ATR" / "swing high - 0.382 回撤"），禁止无出处价位
 - **心理位禁令**：$77,000 / $80,000 / $100,000 等整数关口若未出现在数据列表中，禁止单独作为依据；可作为氛围描述，但不得进入 §二图谱和 §四挂单价
 - **时间框架诚实铁律**：只能引用数据中实际存在的时间框架（4h / 1h / 日线 / 周线），禁止捏造"4h 背离""2h 形态"等数据不支持的陈述
@@ -279,7 +279,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **数据冲突**：哪些维度给出矛盾信号（如CVD看多但OI下降），如何取舍（请按 L1-L5 层级表述裁决路径）
 - **本次方向判断核心依据层级**：明确写出主要依据来自哪几层（如"主要依据 L1 Taker Buy + L3 1h BOS↑ 共振，L4 费率持平不构成威胁"）
 - **多维一致度自述**（核心）：列出与最终方向**一致**的维度（N 个）和**背驰**的维度（M 个），说明为何一致方的权重超过背驰方。如果最终方向与 §9i 1h 结构**不同**，必须明确说明"采纳哪几个维度的共振压过了 1h 结构"（如"日周偏空+ETF 连续 3 日净流出+MVRV 2.8 → L2+L3+L5 三层共振偏空，1h 结构属于末端反弹陷阱，不采纳"）
-- **1h 结构对齐度**：§9i 有数据时须说明"本次 §四方案与 ms_bias 一致 / 🔄 反向（并声明多维依据）"
+- **1h 结构对齐度（MTF 扩展）**：§9i 有数据时须说明"本次 §四方案与 `ms_1h.bias` 一致 / 🔄 反向（并声明多维依据）"，并参考 MTF 一致性行：三周期共振可加码，日周冲突须降仓
 - **改进建议**：对数据采集或指标计算的建议（可选）
 
 ### 格式铁律
@@ -438,6 +438,134 @@ def _append_news_context(lines: list[str], snapshot: dict) -> None:
     lines.append(
         "- 【使用规则】§一须纳入新闻叙事大方向；§四若与新闻强烈冲突须给出理由；"
         "flip-flop 主题权重减半；geo level≥4 时禁止新开仓。"
+    )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# §9i · MTF 市场结构渲染 helpers
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_MS_DIRECTION_CN = {
+    "bullish": "上升结构（HH+HL）",
+    "bearish": "下降结构（LH+LL）",
+    "ranging": "震荡结构（无明显方向）",
+    "transitioning": "结构转换中（信号冲突）",
+}
+_MS_BIAS_CN = {
+    "long_only": "仅顺势做多",
+    "short_only": "仅顺势做空",
+    "both_ok": "双向可做",
+    "stand_aside": "观望为宜",
+}
+_MS_EVENT_CN = {
+    "BOS_up": "BOS↑（向上延续破前高）",
+    "BOS_down": "BOS↓（向下延续破前低）",
+    "CHoCH_up": "CHoCH↑（向上反转破前高）",
+    "CHoCH_down": "CHoCH↓（向下反转破前低）",
+}
+# MTF 一致性判定阈值：同向且置信度任一≥0.5 视为"共振"
+_MS_MTF_CONF_MIN = 0.5
+
+
+def _render_ms_block(tf_label: str, ms: dict, *, verbose: bool) -> list[str]:
+    """渲染单个时间框架的市场结构行。
+
+    - tf_label: "1w" / "1d" / "1h"
+    - verbose: True 则展示 swing 序列 + summary（1h 默认 verbose），
+               False 则只给方向 / 事件 / 置信度（1w/1d 精简展示）
+    """
+    if not ms:
+        return []
+    dir_cn = _MS_DIRECTION_CN.get(ms.get("direction", ""), ms.get("direction", "-"))
+    bias_cn = _MS_BIAS_CN.get(ms.get("operate_bias", ""), ms.get("operate_bias", "-"))
+    event_raw = ms.get("last_event") or ""
+    event_cn = _MS_EVENT_CN.get(event_raw, event_raw or "无新事件")
+    conf = ms.get("confidence") or 0
+
+    out: list[str] = []
+    out.append(
+        f"[{tf_label}] 方向: {dir_cn} | 最近事件: {event_cn} | "
+        f"偏置: {bias_cn} | 置信度: {conf:.0%}"
+    )
+    struct_hi, struct_lo = ms.get("structure_high"), ms.get("structure_low")
+    if struct_hi and struct_lo:
+        out.append(f"    结构区间: ${struct_lo:,.0f} - ${struct_hi:,.0f}")
+
+    if verbose:
+        swing_highs = ms.get("swing_highs") or []
+        swing_lows = ms.get("swing_lows") or []
+        merged_swings = sorted(
+            [*swing_highs, *swing_lows],
+            key=lambda sw: sw.get("ts", 0) or 0,
+        )
+        if merged_swings:
+            sw_strs = []
+            for sw in merged_swings[-4:]:
+                tag = "H" if sw.get("kind") == "high" else "L"
+                p = sw.get("price", 0) or 0
+                sw_strs.append(f"{tag}@{p:,.0f}")
+            out.append("    最近 swing: " + " → ".join(sw_strs))
+        summary = ms.get("summary")
+        if summary:
+            out.append(f"    结构要点: {summary}")
+    return out
+
+
+def _mtf_alignment_line(
+    ms_1w: dict | None, ms_1d: dict | None, ms_1h: dict | None,
+) -> str | None:
+    """输出 MTF 一致性判定行。
+
+    4 种典型组合：
+      - 三周期同向共振（1w/1d/1h 都 bullish 或都 bearish，置信度达标）→ 高胜率窗口
+      - 日周同向 + 1h 相反 → 回调/反弹：1h 作执行层短打
+      - 日周分歧（1w ≠ 1d）→ 结构转换中，宜降仓
+      - 数据不足（任一 TF 缺失或都 ranging/transitioning）→ 结构不明
+    """
+    have = [ms for ms in (ms_1w, ms_1d, ms_1h) if ms]
+    if not have:
+        return None
+
+    def _dir_of(ms: dict | None) -> str:
+        if not ms:
+            return "missing"
+        conf = ms.get("confidence") or 0
+        d = ms.get("direction", "")
+        if d in ("bullish", "bearish") and conf >= _MS_MTF_CONF_MIN:
+            return d
+        return "unclear"  # ranging / transitioning / 置信度不足
+
+    w, d, h = _dir_of(ms_1w), _dir_of(ms_1d), _dir_of(ms_1h)
+
+    # 三 TF 同向且都达置信度门槛
+    if w == d == h and w in ("bullish", "bearish"):
+        side = "多" if w == "bullish" else "空"
+        return (
+            f"🎯 MTF 一致性: **三周期同向共振（1w/1d/1h 全 {side}）** — "
+            f"**高胜率窗口**，可考虑加大仓位/延长持有。"
+        )
+
+    # 日周同向 & 1h 相反
+    if w == d and w in ("bullish", "bearish") and h in ("bullish", "bearish") and h != w:
+        big_side = "多" if w == "bullish" else "空"
+        small_side = "空" if h == "bearish" else "多"
+        return (
+            f"🔄 MTF 分歧: **日周{big_side}头 vs 1h {small_side}头** — "
+            f"1h 视为**回调/反弹执行层**，短线可做 1h 方向但目标位须参考日周结构关键位；"
+            "中远线主导方向仍以日周为准。"
+        )
+
+    # 日周分歧（结构转换中 / 趋势变化期）
+    if w in ("bullish", "bearish") and d in ("bullish", "bearish") and w != d:
+        return (
+            "⚠ MTF 冲突: **周线与日线方向相反** — "
+            "结构转换期，宜**降低仓位 / 只做短线**，避免逆大周期重仓。"
+        )
+
+    # 剩余情况（含 unclear / missing）
+    return (
+        "ℹ MTF 提示: 周/日/小时结构未形成明确共振（含震荡或置信度不足），"
+        "本次以单 TF 结构 + 关键位共振为主，MTF 对齐度作为次要参考。"
     )
 
 
@@ -1233,6 +1361,13 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"突破蓄力: BB Squeeze {bz.get('squeeze_direction', '')} {bz.get('note', '')}")
 
         lines.append("")
+        lines.append(
+            "[字段语义] 反弹质量/突破阶段为**状态感知字段**，仅在关键位处于对应状态时激活："
+            "`反弹质量=-` 表示该 level 尚未发生反弹（state ≠ testing/bounced），属**预期空值**；"
+            "`突破阶段=-` 表示该 level 尚未突破（state ≠ broken/flipped），亦属**预期空值**。"
+            "⚠ 不要将这些 `-` 解读为「数据缺失/未采集」而触发数据质量警报。"
+        )
+        lines.append("")
         lines.append("| 价位 | 级别 | 类型 | 状态 | 反弹质量 | 突破阶段 | 距当前 | 共振分 | 来源数 | 测试 | 扫取量 | 级联风险 | 来源 |")
         lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         bq_cn = {
@@ -1302,72 +1437,49 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"形态: {cp_name}（{side_cn}反转，强度 {cp_strength:.0%}）")
         lines.append("说明: 该形态为入场确认加分项。若与关键位 SWEPT/FLIPPED/BOUNCED 共振，信号可信度提升一档。")
 
-    # ── §9i 1h 市场结构（Price Action / SMC · BOS/CHoCH 识别） ──
-    ms = snapshot.get("market_structure")
-    if ms:
-        lines.extend(["", "### 9i. 1h 市场结构 [核心·结构决定偏向]"])
-        dir_cn = {
-            "bullish": "上升结构（HH+HL）",
-            "bearish": "下降结构（LH+LL）",
-            "ranging": "震荡结构（无明显方向）",
-            "transitioning": "结构转换中（信号冲突）",
-        }.get(ms.get("direction", ""), ms.get("direction", ""))
-        bias_cn = {
-            "long_only": "仅顺势做多",
-            "short_only": "仅顺势做空",
-            "both_ok": "双向可做",
-            "stand_aside": "观望为宜",
-        }.get(ms.get("operate_bias", ""), ms.get("operate_bias", ""))
-        event_raw = ms.get("last_event") or ""
-        event_cn = {
-            "BOS_up": "BOS↑（向上延续破前高）",
-            "BOS_down": "BOS↓（向下延续破前低）",
-            "CHoCH_up": "CHoCH↑（向上反转破前高）",
-            "CHoCH_down": "CHoCH↓（向下反转破前低）",
-        }.get(event_raw, event_raw or "无新事件")
-        conf = ms.get("confidence", 0) or 0
-
-        lines.append(f"方向: {dir_cn} | 最近事件: {event_cn} | 操作偏置: {bias_cn} | 置信度: {conf:.0%}")
-
-        struct_hi = ms.get("structure_high")
-        struct_lo = ms.get("structure_low")
-        if struct_hi and struct_lo:
-            lines.append(f"结构区间: ${struct_lo:,.0f} - ${struct_hi:,.0f}")
-
-        swing_highs = ms.get("swing_highs") or []
-        swing_lows = ms.get("swing_lows") or []
-        merged_swings = sorted(
-            [*swing_highs, *swing_lows],
-            key=lambda sw: sw.get("ts", 0) or 0,
+    # ── §9i 价格结构（多时间框架 · Price Action / SMC · BOS/CHoCH） ──
+    # MTF 改造（2026-04）：原来只渲染 1h，现扩展到 1w/1d/1h 三行 + 一致性判定行
+    # - 1w / 1d 数据由 recompute_market_structure_weekly / _daily 产出
+    # - 周线数据量少 (70 bars)，置信度低时只展示不要求 AI 过度依赖
+    ms_1h = snapshot.get("market_structure")
+    ms_1d = snapshot.get("market_structure_1d")
+    ms_1w = snapshot.get("market_structure_1w")
+    if ms_1h or ms_1d or ms_1w:
+        # 标题保留"1h 市场结构"语义（系统 prompt L3 分级表用的即该措辞），
+        # 同时附注 MTF 扩展，供 AI 理解 1w/1d 为中/远线参考层。
+        lines.extend(
+            ["", "### 9i. 1h 市场结构（MTF 扩展 · 1w/1d/1h）[核心·结构决定偏向]"]
         )
-        if merged_swings:
-            sw_strs = []
-            for sw in merged_swings[-4:]:
-                tag = "H" if sw.get("kind") == "high" else "L"
-                p = sw.get("price", 0) or 0
-                sw_strs.append(f"{tag}@{p:,.0f}")
-            lines.append("最近 swing: " + " → ".join(sw_strs))
+        # 逐 TF 渲染（大周期先展示，引导 AI 自上而下判定）
+        if ms_1w:
+            lines.extend(_render_ms_block("1w", ms_1w, verbose=False))
+        if ms_1d:
+            lines.extend(_render_ms_block("1d", ms_1d, verbose=False))
+        if ms_1h:
+            lines.extend(_render_ms_block("1h", ms_1h, verbose=True))
 
-        summary = ms.get("summary")
-        if summary:
-            lines.append(f"结构要点: {summary}")
+        # MTF 一致性判定行（非硬约束，仅作为 AI 方向偏置输入）
+        mtf_line = _mtf_alignment_line(ms_1w, ms_1d, ms_1h)
+        if mtf_line:
+            lines.append(mtf_line)
 
-        if conf >= 0.6 and ms.get("direction") in ("bullish", "bearish"):
-            lines.append(
-                "参考提示: 1h 结构是"
-                "【4-24h 动量的 L3 小时级单一参考】"
-                "，不是最终方向裁决。"
-            )
-            lines.append(
-                "  · 短线档（1-8%）可优先参考此方向；"
-                "中/远线档须结合宏观/资金面/链上/日周结构综合判断，不受 1h 结构单独约束。"
-            )
-            lines.append(
-                "  · 若多维共振（宏观+资金面+链上+日周）与 1h 结构相反——"
-                "如'1h 上升 + 中长期偏空 + ETF 净流出 + MVRV 高位'这类分发末端反弹——"
-                "**优先采纳多维判断**，在方案核心依据列标 `🔄 逆 1h 结构 · 理由：[具体维度组合]`；"
-                "1h 结构从来不是一票否决器。"
-            )
+        # 1h 参考提示（保留原有教学指引，但语义升级为 MTF 视角）
+        if ms_1h:
+            conf_1h = (ms_1h.get("confidence") or 0)
+            if conf_1h >= 0.6 and ms_1h.get("direction") in ("bullish", "bearish"):
+                lines.append(
+                    "参考提示: 1h 结构是 L3 小时级的**短线执行层单一参考**，不是最终方向裁决。"
+                )
+                lines.append(
+                    "  · 档位对齐：短线（1-8%）主要看 1h；中线（8-15%）看 1d；"
+                    "远线（>15%）看 1w。MTF 同向共振 = 高胜率窗口；MTF 背离 = 降仓/观望。"
+                )
+                lines.append(
+                    "  · 若多维共振（宏观+资金面+链上+日周结构）与 1h 相反——"
+                    "如『1h 上升 + 1d 下降 + 1w 下降 + ETF 净流出 + MVRV 高位』这类分发末端反弹——"
+                    "**优先采纳多维判断**，方案核心依据列标 `🔄 逆 1h 结构 · 理由：[维度组合]`；"
+                    "1h 结构从来不是一票否决器。"
+                )
 
     # ── §9h 净持仓 + 合约资金流 + TD序列 ──
     np_trend = snapshot.get("net_position_trend")
@@ -1384,24 +1496,46 @@ def build_user_prompt(snapshot: dict) -> str:
         if np_latest is not None:
             np_chg_24h = snapshot.get("net_position_change_24h")
             # Coinglass v2 net-position 单位为基础币计数（coin），非 USD
-            # → 绝对值对 AI 无直接参考价值，核心判断依据是"趋势方向 + 24h 百分比变化 + 显著性标签"
+            # → 绝对值对 AI 无直接参考价值，核心判断依据是"趋势方向 + 24h 相对变化 + 显著性标签"
             # 不再用 _fmt_usd_for_prompt() 渲染 raw 数值，避免 AI 误把"$1万"当做资金规模解读
             np_str = f"净持仓(v2): {np_trend or '趋势待定'}"
-            if np_chg_24h is not None and np_latest != 0:
-                chg_pct = (np_chg_24h / abs(np_latest)) * 100
-                if abs(chg_pct) >= 5:
-                    tag = "**显著**"
-                elif abs(chg_pct) >= 2:
-                    tag = "温和"
+            if np_chg_24h is not None:
+                # 净持仓是带符号累积值（净多 - 净空 coin 数），24h 内可从 +300 翻到 -200。
+                # 旧版用 abs(latest) 做分母会产生 -276% 这类脱离 [-100,100] 的诡异值。
+                # 新版：用 24h 内端点的较大幅值做分母，并 clamp 到 ±200% 内防越界。
+                # 若 base 太小（接近方向翻转期），直接退化为"绝对变化量 + 趋势标签"。
+                np_vals_start = float(np_latest) - float(np_chg_24h)  # 24h 前端点
+                base = max(abs(float(np_latest)), abs(np_vals_start))
+                chg_pct = None  # None = 基数过小，不输出百分比
+                if base >= 1.0:  # 避免除零 + 避免分母接近 0 的荒诞值
+                    raw_pct = (float(np_chg_24h) / base) * 100.0
+                    chg_pct = max(-200.0, min(200.0, raw_pct))
+
+                # 显著性 tag 阈值沿用历史经验值（5%/2%），仅分母口径做了健壮化
+                if chg_pct is not None:
+                    if abs(chg_pct) >= 5:
+                        tag = "**显著**"
+                    elif abs(chg_pct) >= 2:
+                        tag = "温和"
+                    else:
+                        tag = "微幅"
+                    direction_label = '增持' if np_chg_24h > 0 else '减持'
+                    np_str += (
+                        f" · 24h 变化 {chg_pct:+.1f}% ({np_chg_24h:+,.0f} coin) "
+                        f"{tag}{direction_label}"
+                    )
                 else:
-                    tag = "微幅"
-                np_str += f" · 24h 变化 {chg_pct:+.1f}% {tag}{'增持' if np_chg_24h > 0 else '减持'}"
-            elif np_chg_24h is not None:
-                np_str += f" · 24h 变化量 {np_chg_24h:+,.0f} (基础币计数)"
+                    # base 太小（方向翻转期 / 持仓近 0）：不输出百分比，避免误导 AI
+                    np_str += (
+                        f" · 24h 变化量 {np_chg_24h:+,.0f} coin"
+                        f"（方向翻转期，基数过小不计百分比）"
+                    )
             lines.append(np_str)
             lines.append(
                 "  [数据说明] 数值单位为 Coinglass 合约净多空差 coin 计数（非 USD 金额），"
-                "核心解读以**趋势方向 + 百分比变化**为准，绝对数值仅作趋势判定输入"
+                "核心解读以**趋势方向 + 百分比变化**为准，绝对数值仅作趋势判定输入。"
+                "百分比分母已改为 24h 端点较大幅值（避免方向翻转期分母接近 0 产生荒诞数值）；"
+                "若标注『方向翻转期，基数过小』则以绝对变化量为准。"
             )
             # 方向语义解读：明确告诉 AI 这意味着什么
             if np_trend:

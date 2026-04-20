@@ -118,6 +118,8 @@ def build_ai_snapshot(
     liq_heatmap: Optional[HeatmapData] = None,
     poll_failures: dict[str, str] | None = None,
     market_structure: Optional[MarketStructure] = None,
+    market_structure_1d: Optional[MarketStructure] = None,
+    market_structure_1w: Optional[MarketStructure] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -329,6 +331,8 @@ def build_ai_snapshot(
         range_signal=range_signal.model_dump() if range_signal else None,
         key_levels=key_level_snapshot_v2.model_dump() if key_level_snapshot_v2 else None,
         market_structure=market_structure.model_dump() if market_structure else None,
+        market_structure_1d=market_structure_1d.model_dump() if market_structure_1d else None,
+        market_structure_1w=market_structure_1w.model_dump() if market_structure_1w else None,
         liq_clusters_above_30d=clusters_above_30d,
         liq_clusters_below_30d=clusters_below_30d,
         liq_imbalance_ratio_30d=imbalance_30d,

@@ -239,30 +239,134 @@ def build_factor_matrix(
 
 
 def _section_a_macro(snapshot: AISnapshot) -> AIFactorSection:
+    """构造宏观联动板块。
+
+    从 AISnapshot 顶层散落字段（dxy / nasdaq / sp500 / gold / us_10y_yield）直接组装，
+    不再依赖不存在的 `macro_items` / `market_index_items` 数组字段，避免走 fallback
+    后由 AI 重复填充（导致 "数据未就绪" 占位与 AI 补丁行共存的 UI 矛盾）。
+    """
     rows: list[AIFactorRow] = []
-    # 市场指数（DXY/Nasdaq 等若 snapshot 里没有，则给空占位）
-    market_idx = getattr(snapshot, "market_index_items", None) or []
-    # AISnapshot 里实际字段是 market_index_snapshot（dict list）；用 getattr 容忍缺席
-    raw = getattr(snapshot, "macro_items", None) or market_idx
-    for item in raw[:6]:
+
+    # ── DXY：美元指数，与风险资产反向 ──
+    dxy = getattr(snapshot, "dxy", None)
+    dxy_chg = getattr(snapshot, "dxy_change_pct", None)
+    if isinstance(dxy, (int, float)):
+        d_dxy: Direction = "neutral"
+        if isinstance(dxy_chg, (int, float)):
+            if dxy_chg > 0.2:
+                d_dxy = "bearish"   # DXY 涨 → 美元强 → 风险资产承压
+            elif dxy_chg < -0.2:
+                d_dxy = "bullish"
+        rows.append(AIFactorRow(
+            dimension="DXY(美元指数)",
+            value_display=(
+                f"{dxy:.2f} ({dxy_chg:+.2f}%)"
+                if isinstance(dxy_chg, (int, float))
+                else f"{dxy:.2f}"
+            ),
+            value_raw=float(dxy),
+            signal=(
+                "美元走强·风险承压" if d_dxy == "bearish"
+                else "美元走弱·风险利好" if d_dxy == "bullish"
+                else "持平"
+            ),
+            direction=d_dxy, resonance="medium", data_source_ref="§macro.dxy",
+        ))
+
+    # ── 美股指数：与 crypto 正相关 ──
+    for name_cn, val_key, chg_key, src in (
+        ("纳指", "nasdaq", "nasdaq_change_pct", "§macro.nasdaq"),
+        ("标普500", "sp500", "sp500_change_pct", "§macro.sp500"),
+    ):
+        v = getattr(snapshot, val_key, None)
+        c = getattr(snapshot, chg_key, None)
+        if not isinstance(v, (int, float)):
+            continue
+        d_eq: Direction = "neutral"
+        if isinstance(c, (int, float)):
+            if c > 0.3:
+                d_eq = "bullish"
+            elif c < -0.3:
+                d_eq = "bearish"
+        rows.append(AIFactorRow(
+            dimension=name_cn,
+            value_display=(
+                f"{v:,.2f} ({c:+.2f}%)"
+                if isinstance(c, (int, float))
+                else f"{v:,.2f}"
+            ),
+            value_raw=float(v),
+            signal=_macro_signal_text(name_cn, c),
+            direction=d_eq, resonance="medium", data_source_ref=src,
+        ))
+
+    # ── 黄金：与 crypto 相关性不固定，只展示不定方向 ──
+    gold = getattr(snapshot, "gold", None)
+    gold_chg = getattr(snapshot, "gold_change_pct", None)
+    if isinstance(gold, (int, float)):
+        rows.append(AIFactorRow(
+            dimension="黄金",
+            value_display=(
+                f"${gold:,.2f} ({gold_chg:+.2f}%)"
+                if isinstance(gold_chg, (int, float))
+                else f"${gold:,.2f}"
+            ),
+            value_raw=float(gold),
+            signal=_macro_signal_text("黄金", gold_chg),
+            direction="neutral", resonance="low", data_source_ref="§macro.gold",
+        ))
+
+    # ── 美债 10Y 收益率：高利率环境压制风险资产 ──
+    # 仅有绝对水平（无 change_pct），按阈值给定性判断
+    y10 = getattr(snapshot, "us_10y_yield", None)
+    if isinstance(y10, (int, float)):
+        if y10 >= 4.5:
+            d_y10: Direction = "bearish"
+            sig_y10 = "高利率压制风险资产"
+        elif y10 >= 3.5:
+            d_y10 = "neutral"
+            sig_y10 = "利率温和"
+        else:
+            d_y10 = "bullish"
+            sig_y10 = "利率友好·流动性宽松"
+        rows.append(AIFactorRow(
+            dimension="美债 10Y 收益率",
+            value_display=f"{y10:.2f}%",
+            value_raw=float(y10),
+            signal=sig_y10,
+            direction=d_y10, resonance="medium", data_source_ref="§macro.bond",
+        ))
+
+    # ── 兼容老口径 macro_items / market_index_items（若未来迁移到数组） ──
+    legacy_raw = (
+        getattr(snapshot, "macro_items", None)
+        or getattr(snapshot, "market_index_items", None)
+        or []
+    )
+    for item in legacy_raw[:6]:
+        if not isinstance(item, dict):
+            continue
         name = str(item.get("name") or item.get("key") or "")
         chg = item.get("change_pct")
         val = item.get("value") or item.get("price")
-        direction: Direction = "neutral"
+        d_leg: Direction = "neutral"
         if isinstance(chg, (int, float)):
             if chg > 0.3:
-                direction = "bullish"
+                d_leg = "bullish"
             elif chg < -0.3:
-                direction = "bearish"
+                d_leg = "bearish"
         rows.append(AIFactorRow(
             dimension=name or "macro",
-            value_display=f"{val} ({chg:+.2f}%)" if isinstance(chg, (int, float)) else str(val or "-"),
+            value_display=(
+                f"{val} ({chg:+.2f}%)"
+                if isinstance(chg, (int, float))
+                else str(val or "-")
+            ),
             value_raw=float(val) if isinstance(val, (int, float)) else None,
             signal=_macro_signal_text(name, chg),
-            direction=direction,
-            resonance="medium",
-            data_source_ref="§macro",
+            direction=d_leg, resonance="medium", data_source_ref="§macro",
         ))
+
     if not rows:
         rows.append(AIFactorRow(
             dimension="宏观指数", value_display="数据未就绪",
@@ -396,8 +500,90 @@ def _section_c_derivatives(snapshot: AISnapshot) -> AIFactorSection:
     )
 
 
+def _ms_row(tf_label: str, ms: dict | None) -> AIFactorRow | None:
+    """把单个 TF 的市场结构字典转成一行 AIFactorRow（展示在技术面 §D）。
+
+    - 仅 bullish/bearish 时 direction 非 neutral
+    - 置信度高（≥0.6）→ resonance=high，低（<0.4）→ low，中间 medium
+    - value_display 形如 "上升结构 · BOS↑ · 置信 82%"
+    """
+    if not ms:
+        return None
+    dir_raw = ms.get("direction") or ""
+    if dir_raw == "bullish":
+        direction: Direction = "bullish"
+        dir_cn = "上升结构"
+    elif dir_raw == "bearish":
+        direction = "bearish"
+        dir_cn = "下降结构"
+    elif dir_raw == "ranging":
+        direction = "neutral"
+        dir_cn = "震荡结构"
+    elif dir_raw == "transitioning":
+        direction = "neutral"
+        dir_cn = "结构转换中"
+    else:
+        return None
+
+    conf = float(ms.get("confidence") or 0)
+    event_cn_map = {
+        "BOS_up": "BOS↑",
+        "BOS_down": "BOS↓",
+        "CHoCH_up": "CHoCH↑",
+        "CHoCH_down": "CHoCH↓",
+    }
+    event = event_cn_map.get(ms.get("last_event") or "", "")
+    bias_map = {
+        "long_only": "仅做多",
+        "short_only": "仅做空",
+        "both_ok": "双向",
+        "stand_aside": "观望",
+    }
+    bias_cn = bias_map.get(ms.get("operate_bias") or "", "")
+
+    value_parts = [dir_cn]
+    if event:
+        value_parts.append(event)
+    value_parts.append(f"置信 {conf * 100:.0f}%")
+    value_display = " · ".join(value_parts)
+
+    signal_parts = []
+    if bias_cn:
+        signal_parts.append(bias_cn)
+    sh, sl = ms.get("structure_high"), ms.get("structure_low")
+    if isinstance(sh, (int, float)) and isinstance(sl, (int, float)):
+        signal_parts.append(f"区间 ${sl:,.0f}-${sh:,.0f}")
+    signal = " · ".join(signal_parts) if signal_parts else "结构未激活"
+
+    if conf >= 0.6:
+        resonance: Any = "high"
+    elif conf >= 0.4:
+        resonance = "medium"
+    else:
+        resonance = "low"
+
+    return AIFactorRow(
+        dimension=f"{tf_label} 价格结构",
+        value_display=value_display,
+        value_raw=None,
+        signal=signal,
+        direction=direction,
+        resonance=resonance,
+        data_source_ref="§9i",
+    )
+
+
 def _section_d_technical(snapshot: AISnapshot) -> AIFactorSection:
     rows: list[AIFactorRow] = []
+
+    # MTF 市场结构：1w → 1d → 1h（大周期先展示，引导 AI 自上而下）
+    for tf_label, attr in (("1w", "market_structure_1w"),
+                           ("1d", "market_structure_1d"),
+                           ("1h", "market_structure")):
+        ms_dict = getattr(snapshot, attr, None)
+        row = _ms_row(tf_label, ms_dict)
+        if row is not None:
+            rows.append(row)
 
     rsi = getattr(snapshot, "rsi_14", None)
     if isinstance(rsi, (int, float)):

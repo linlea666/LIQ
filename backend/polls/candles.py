@@ -363,6 +363,120 @@ def recompute_market_structure(state: "CoinState") -> None:
         )
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MTF · 日线 / 周线级别市场结构（防"未收盘 bar 污染"版）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 日线 / 周线周期（秒）
+_DAILY_BAR_SEC = 24 * 3600
+_WEEKLY_BAR_SEC = 7 * 24 * 3600
+
+# 日线放宽一点，fractal_k 默认值 3 即可（大约 3 天两侧 = 6 天，还合理）
+# 周线须放宽更多：bar 数只有 70，3 左右每个 swing 要 7 周；改 2 + min_candles=30
+_WEEKLY_FRACTAL_K = 2
+_WEEKLY_MIN_CANDLES = 30
+_WEEKLY_MIN_GAP_PCT = 3.0   # 周线波动大，毛刺阈值抬高
+
+
+def _strip_unclosed_last(
+    candles: list[CandleData], bar_seconds: int,
+) -> list[CandleData]:
+    """丢掉"未收盘"的最后一根 bar（防 MTF 结构周中天天变）。
+
+    判定规则：若最后一根 bar 的起始时间 + bar 周期 > 现在时间，说明该 bar 仍在生长中，
+    price action 未定型，把它喂给 swing detector 会产生不稳定 swing。
+    """
+    if not candles or len(candles) < 2 or bar_seconds <= 0:
+        return candles
+    last = candles[-1]
+    # ts 可能是毫秒或秒，归一到秒
+    last_ts = int(last.ts)
+    if last_ts > 1_000_000_000_000:   # 毫秒时间戳（> 2001 年以后 13 位）
+        last_ts //= 1000
+    now = int(time.time())
+    # bar 结束时间 = 起始时间 + 周期；未到就意味着未收盘
+    if last_ts + bar_seconds > now:
+        return candles[:-1]
+    return candles
+
+
+def recompute_market_structure_daily(state: "CoinState") -> None:
+    """基于 state.candles_daily 刷新 state.market_structure_1d。
+
+    在 `poll_candles_daily` 成功后同步调用（10 分钟一次，成本极低）。
+    关键差异 vs 1h：
+      - 丢掉未收盘当日 bar（防当日走势变化引起结构天天变）
+      - timeframe="1d"，用默认 fractal_k=3（刚好对应 6 日确认）
+    """
+    if not state.candles_daily:
+        return
+    try:
+        candles = _strip_unclosed_last(state.candles_daily, _DAILY_BAR_SEC)
+        ms = detect_market_structure(candles, timeframe="1d")
+    except Exception as exc:
+        logger.warning("日线市场结构计算失败 | coin=%s err=%s", state.coin, exc)
+        return
+    if ms is None:
+        return
+
+    state.market_structure_1d = ms
+    curr = (ms.direction, ms.last_event, ms.operate_bias)
+    if curr != state._prev_ms_summary_1d:
+        logger.info(
+            "日线结构(1d) | coin=%s 方向=%s 置信度=%.2f 事件=%s 偏置=%s 区间=[%.2f~%.2f]",
+            state.coin,
+            _DIRECTION_ICON.get(ms.direction, ms.direction),
+            ms.confidence,
+            ms.last_event or "-",
+            ms.operate_bias,
+            ms.structure_low,
+            ms.structure_high,
+        )
+        state._prev_ms_summary_1d = curr
+
+
+def recompute_market_structure_weekly(state: "CoinState") -> None:
+    """基于 state.candles_weekly 刷新 state.market_structure_1w。
+
+    在 `poll_candles_weekly` 成功后同步调用（1 小时一次）。
+    关键差异 vs 1h/1d：
+      - 丢掉未收盘当周 bar
+      - 周线数据少（70 bars ≈ 1.3 年），fractal_k 收紧为 2，min_candles=30
+      - min_gap_pct 从 0.5% 抬到 3.0%，符合周线波动幅度
+    """
+    if not state.candles_weekly:
+        return
+    try:
+        candles = _strip_unclosed_last(state.candles_weekly, _WEEKLY_BAR_SEC)
+        ms = detect_market_structure(
+            candles,
+            timeframe="1w",
+            fractal_k=_WEEKLY_FRACTAL_K,
+            min_candles=_WEEKLY_MIN_CANDLES,
+            min_gap_pct=_WEEKLY_MIN_GAP_PCT,
+        )
+    except Exception as exc:
+        logger.warning("周线市场结构计算失败 | coin=%s err=%s", state.coin, exc)
+        return
+    if ms is None:
+        return
+
+    state.market_structure_1w = ms
+    curr = (ms.direction, ms.last_event, ms.operate_bias)
+    if curr != state._prev_ms_summary_1w:
+        logger.info(
+            "周线结构(1w) | coin=%s 方向=%s 置信度=%.2f 事件=%s 偏置=%s 区间=[%.2f~%.2f]",
+            state.coin,
+            _DIRECTION_ICON.get(ms.direction, ms.direction),
+            ms.confidence,
+            ms.last_event or "-",
+            ms.operate_bias,
+            ms.structure_low,
+            ms.structure_high,
+        )
+        state._prev_ms_summary_1w = curr
+
+
 async def poll_candles_daily(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:
@@ -384,6 +498,8 @@ async def poll_candles_daily(
         if "binance_klines_1d_ready" not in state._log_once_keys:
             state._log_once_keys.add("binance_klines_1d_ready")
             logger.info("Binance K线生效 | coin=%s interval=1d bars=%d", coin.ccy, len(state.candles_daily))
+        # MTF · 日线价格结构（swing + BOS/CHoCH），同步重算
+        recompute_market_structure_daily(state)
 
 
 async def poll_candles_weekly(
@@ -407,3 +523,5 @@ async def poll_candles_weekly(
         if "binance_klines_1w_ready" not in state._log_once_keys:
             state._log_once_keys.add("binance_klines_1w_ready")
             logger.info("Binance K线生效 | coin=%s interval=1w bars=%d", coin.ccy, len(state.candles_weekly))
+        # MTF · 周线价格结构（swing + BOS/CHoCH），同步重算
+        recompute_market_structure_weekly(state)

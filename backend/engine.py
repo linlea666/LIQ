@@ -97,6 +97,13 @@ class CoinState:
         self.range_signal: Optional[RangeSignalData] = None
         self.market_structure: Optional[MarketStructure] = None
         self._prev_ms_summary: tuple = ()
+        # MTF 扩展（日线 / 周线级别价格结构，用于 AI MTF 一致性判定）
+        # - 由 poll_candles_daily / poll_candles_weekly 成功后同步 recompute
+        # - 防过拟合：仅作为 AI 偏置输入，不进入决策硬门（D15 融合层暂不消费）
+        self.market_structure_1d: Optional[MarketStructure] = None
+        self.market_structure_1w: Optional[MarketStructure] = None
+        self._prev_ms_summary_1d: tuple = ()
+        self._prev_ms_summary_1w: tuple = ()
         # L2 MarketRegime 快照（D01）。由 _recompute 末尾写入
         from models.regime import RegimeSnapshot  # local import 避免顶部循环
         self.regime_snapshot: Optional[RegimeSnapshot] = None
@@ -1513,6 +1520,12 @@ class Engine:
             payload["range_signal"] = state.range_signal.model_dump()
         if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.levels:
             payload["key_levels_v2"] = state.key_level_snapshot_v2.model_dump()
+        # MTF 市场结构（1d / 1w）独立 dict —— 1h 简版仍通过 range_signal.ms_* 暴露，
+        # 此处提供完整结构供前端 MarketStructureBadge 做 MTF 对齐度展示
+        if state.market_structure_1d:
+            payload["market_structure_1d"] = state.market_structure_1d.model_dump()
+        if state.market_structure_1w:
+            payload["market_structure_1w"] = state.market_structure_1w.model_dump()
 
         # 新维度
         if state.option_max_pain:
@@ -1984,6 +1997,8 @@ class Engine:
             td_sequential_direction=state.td_sequential_direction,
             poll_failures=dict(state.poll_failures),
             market_structure=state.market_structure,
+            market_structure_1d=state.market_structure_1d,
+            market_structure_1w=state.market_structure_1w,
         )
 
         result = await self._analyzer.analyze(snapshot)

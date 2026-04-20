@@ -308,6 +308,36 @@ export interface RangeSignalData {
   ms_alignment?: "aligned" | "conflict" | "neutral" | "unknown" | "";
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MTF 市场结构（日/周线完整快照）
+//   对齐后端 `models.market_structure.MarketStructure`
+//   仅 WebSocket market_update 的 `market_structure_1d/1w` 使用
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type MSDirection = "bullish" | "bearish" | "ranging" | "transitioning";
+export type MSEvent = "BOS_up" | "BOS_down" | "CHoCH_up" | "CHoCH_down";
+export type MSBias = "long_only" | "short_only" | "both_ok" | "stand_aside";
+
+export interface MarketStructureSwing {
+  ts: number;
+  price: number;
+  kind: "high" | "low";
+}
+
+export interface MarketStructureSnapshot {
+  timeframe: "1h" | "1d" | "1w" | string;
+  direction: MSDirection | string;
+  last_event?: MSEvent | string | null;
+  event_ts?: number | null;
+  operate_bias: MSBias | string;
+  confidence: number;
+  structure_high?: number | null;
+  structure_low?: number | null;
+  swing_highs?: MarketStructureSwing[];
+  swing_lows?: MarketStructureSwing[];
+  summary?: string | null;
+}
+
 /**
  * 后端信号分类 id（backend/processors/key_level_tracker_v2.py `_finalize_signal`）
  * 前端据此渲染徽章文案、颜色、图标，比 A/B/C 字母更直观。
@@ -542,6 +572,8 @@ export interface MarketUpdate {
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
   key_levels_v2?: KeyLevelSnapshotV2;
+  market_structure_1d?: MarketStructureSnapshot;
+  market_structure_1w?: MarketStructureSnapshot;
   option_max_pain?: Record<string, unknown>;
   option_info?: Record<string, unknown>;
   large_orders?: Record<string, unknown>;

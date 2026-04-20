@@ -401,10 +401,27 @@ interface NewsBriefPayload {
   active_narratives: Array<Record<string, unknown>>;
 }
 
+/**
+ * 后端 `NewsBriefSection` 序列化结构（backend/models/news_brief.py）。
+ * 注意字段命名：后端是 `section_title_cn` / `bullets`，与前端其它 AI Matrix
+ * 的 `title_cn` / `bullets_cn` 命名不同，历史原因保留以避免后端模型变更。
+ * 这里同时保留旧字段的兼容读取，容忍后端字段演进。
+ */
 interface BriefSection {
+  section_id?: "macro" | "regulatory" | "onchain" | "risk" | string;
+  section_title_cn?: string;
+  bullets?: string[];
+  /** 兼容：如后端将来改名为 title_cn/bullets_cn 也能渲染 */
   title_cn?: string;
   bullets_cn?: string[];
 }
+
+const SECTION_ID_FALLBACK_CN: Record<string, string> = {
+  macro: "宏观",
+  regulatory: "监管",
+  onchain: "链上",
+  risk: "风险",
+};
 
 interface BriefJson {
   version?: number;
@@ -478,21 +495,34 @@ function NewsBriefCard({ brief }: { brief: NewsBriefPayload }) {
         </div>
       )}
 
-      {/* Sections */}
+      {/* Sections（兼容后端 section_title_cn/bullets 与前端旧 title_cn/bullets_cn） */}
       {parsed?.sections && parsed.sections.length > 0 && (
         <div className="space-y-2 mb-3">
-          {parsed.sections.map((sec, i) => (
-            <div key={i} className="border-l-2 border-blue-500/40 pl-3">
-              <div className="text-xs font-semibold text-slate-200 mb-1">
-                {sec.title_cn || `板块 ${i + 1}`}
-              </div>
-              {sec.bullets_cn?.map((b, j) => (
-                <div key={j} className="text-xs text-slate-400 leading-relaxed mb-0.5">
-                  • {b}
+          {parsed.sections.map((sec, i) => {
+            const title =
+              sec.section_title_cn ||
+              sec.title_cn ||
+              (sec.section_id
+                ? SECTION_ID_FALLBACK_CN[sec.section_id] ?? sec.section_id
+                : "") ||
+              `板块 ${i + 1}`;
+            const bullets = sec.bullets ?? sec.bullets_cn ?? [];
+            return (
+              <div key={i} className="border-l-2 border-blue-500/40 pl-3">
+                <div className="text-xs font-semibold text-slate-200 mb-1">
+                  {title}
                 </div>
-              ))}
-            </div>
-          ))}
+                {bullets.map((b, j) => (
+                  <div
+                    key={j}
+                    className="text-xs text-slate-400 leading-relaxed mb-0.5"
+                  >
+                    • {b}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

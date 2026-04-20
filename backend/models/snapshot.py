@@ -198,6 +198,12 @@ class AISnapshot(BaseModel):
     # Phase 11: 1h 市场结构（Price Action / SMC · BOS/CHoCH 识别）
     # 顶层独立注入，让 AI 能在 §一/§四 阶段优先对齐结构方向，避免逆势误判
     market_structure: Optional[dict] = None
+    # Phase 11+: MTF 扩展 — 日线 / 周线级别市场结构（同 detect_market_structure 产出）
+    # - 由 recompute_market_structure_daily / _weekly 在 K 线更新后计算
+    # - 周线会丢掉未收盘 bar，fractal_k=2 / min_candles=30（周线数据量少）
+    # - AI 用于 MTF 一致性判定（1w/1d/1h 同向 vs 分歧）
+    market_structure_1d: Optional[dict] = None
+    market_structure_1w: Optional[dict] = None
 
     # 清算热力图摘要（价格-时间维度密度峰值）
     liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
