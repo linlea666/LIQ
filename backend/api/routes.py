@@ -723,6 +723,77 @@ async def decisions_health_summary():
         raise HTTPException(500, f"health aggregator unavailable: {e}")
 
 
+@router.get("/te/reports")
+async def list_te_reports(max_days: int = Query(30, ge=1, le=180)):
+    """P0-B · 列出已有的 TrendExhaustion 日报（按日期降序）。"""
+    try:
+        from monitoring.te_eval import list_reports
+        from monitoring.te_shadow import list_available_dates, get_te_shadow_logger
+        reports = list_reports(max_days=max_days)
+        shadow_dates = list_available_dates(max_days=max_days)
+        logger_stats = get_te_shadow_logger().stats()
+        return {
+            "reports": reports,
+            "shadow_dates": shadow_dates,
+            "logger_stats": logger_stats,
+        }
+    except Exception as e:
+        logger.warning("list te reports failed: %s", e)
+        raise HTTPException(500, f"te report listing failed: {e}")
+
+
+@router.get("/te/reports/{date}")
+async def get_te_report(date: str, regenerate: bool = Query(False)):
+    """P0-B · 读取指定日期的 TrendExhaustion 日报（Markdown）。
+
+    若 regenerate=true 或文件不存在，则按需触发一次事后打标。
+    """
+    try:
+        from monitoring.te_eval import read_report, evaluate_day
+        if regenerate:
+            stats, path = evaluate_day(date)
+            md = read_report(date)
+            return {
+                "date": date,
+                "markdown": md,
+                "exists": md is not None,
+                "stats": {
+                    "total_records": stats.total_records,
+                    "judged": stats.overall.judged,
+                    "correct": stats.overall.correct,
+                    "wrong": stats.overall.wrong,
+                    "neutral": stats.overall.neutral,
+                    "pending": stats.overall.pending,
+                    "accuracy": stats.overall.accuracy,
+                    "soft_accuracy": stats.overall.soft_accuracy,
+                },
+                "regenerated": True,
+            }
+        md = read_report(date)
+        if md is None:
+            stats, path = evaluate_day(date)
+            md = read_report(date)
+            if md is None:
+                raise HTTPException(404, f"report unavailable for {date}")
+            return {
+                "date": date,
+                "markdown": md,
+                "exists": True,
+                "regenerated": True,
+            }
+        return {
+            "date": date,
+            "markdown": md,
+            "exists": True,
+            "regenerated": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("get te report failed date=%s: %s", date, e)
+        raise HTTPException(500, f"te report read failed: {e}")
+
+
 @router.get("/logs")
 async def get_logs(
     level: Optional[str] = Query(None, description="Filter by level: INFO, WARNING, ERROR"),

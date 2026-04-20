@@ -1163,6 +1163,19 @@ class Engine:
         except Exception:
             logger.debug("[TE] compute_trend_exhaustion failed", exc_info=True)
 
+        # ── TE Shadow Logger（P0-A）：异步投递，永不阻塞主链路 ──
+        try:
+            if state.trend_exhaustion is not None and state.ticker is not None:
+                from monitoring.te_shadow import get_te_shadow_logger
+                get_te_shadow_logger().record(
+                    coin=ccy,
+                    signal=state.trend_exhaustion,
+                    price=float(state.ticker.last or 0.0),
+                    atr=float(state.atr or 0.0),
+                )
+        except Exception:
+            logger.debug("[TE-Shadow] record failed", exc_info=True)
+
         # ── L3 SignalBus ingest：把 KeyLevelSignal 投射为 CandidateSignal ──
         try:
             from processors.signal_bus import get_bus, adapt_key_level_signal

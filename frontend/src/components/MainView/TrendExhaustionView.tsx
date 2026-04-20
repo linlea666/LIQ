@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useMarketStore } from "@/stores/marketStore";
 import type {
   TEConsensusLevel,
@@ -387,12 +388,21 @@ export default function TrendExhaustionView() {
         </div>
       )}
 
-      {/* ── [4] 方法论注释 ─────────────────────────────────── */}
-      <div className="text-[11px] text-slate-600 border-t border-slate-800 pt-2 leading-relaxed">
-        方法论：regime-aware 三维打分 × MTF 共识 × 硬门闸（需连续 2 次才出警戒）。
-        动能 = MACD/价格斜率/RSI/FVG；参与度 = CVD/OI 踩踏/CB 溢价/资金费率；
-        衰竭 = TD/背离/Fib 扩展/清算簇磁吸。
-        不预测点位，只回答「续航 vs 衰竭」。震荡/极端 regime 会自动暂停方向性结论。
+      {/* ── [4] 日报入口 + 方法论注释 ─────────────────────────── */}
+      <div className="flex items-start justify-between gap-3 border-t border-slate-800 pt-2">
+        <div className="text-[11px] text-slate-600 leading-relaxed flex-1">
+          方法论：regime-aware 三维打分 × MTF 共识 × 硬门闸（需连续 2 次才出警戒）。
+          动能 = MACD/价格斜率/RSI/FVG；参与度 = CVD/OI 踩踏/CB 溢价/资金费率；
+          衰竭 = TD/背离/Fib 扩展/清算簇磁吸。
+          不预测点位，只回答「续航 vs 衰竭」。震荡/极端 regime 会自动暂停方向性结论。
+        </div>
+        <Link
+          href="/te/report"
+          className="shrink-0 whitespace-nowrap rounded-md border border-slate-700 bg-slate-900/60 px-2.5 py-1 text-[11px] text-slate-300 hover:border-blue-500 hover:text-blue-300 transition"
+          title="查看准确率日报（事后打标 + AI 复核模板）"
+        >
+          📊 准确率日报
+        </Link>
       </div>
     </div>
   );

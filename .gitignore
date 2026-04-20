@@ -24,3 +24,5 @@ backend/data/plan_backtest.json
 backend/data/replay/
 # 本地 Cursor MCP 配置（机器相关绝对路径）
 .cursor/mcp.json
+# P0 · TrendExhaustion 影子日志 / 日报（运行时生成，不进仓）
+backend/logs/

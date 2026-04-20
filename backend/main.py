@@ -138,16 +138,67 @@ logger = logging.getLogger("liq")
 engine = Engine()
 
 
+async def _te_eval_scheduler():
+    """P0-B · 后台任务：每小时跑一次 TE 事后打标，生成昨日/今日日报。
+
+    策略：
+      - 启动后等 60s 再跑（避免和 engine 启动期抢 CPU）
+      - 每次评估 "昨天" + "今天"（今天当日滚动生成，24h 后 pending 信号会被打标）
+      - 单次失败不影响循环
+    """
+    from monitoring.te_eval import evaluate_day, _yesterday_slug
+    from monitoring.te_shadow import _BJ_TZ
+    from datetime import datetime as _dt
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            today = _dt.now(_BJ_TZ).strftime("%Y-%m-%d")
+            yesterday = _yesterday_slug()
+            for d in {yesterday, today}:
+                try:
+                    stats, path = evaluate_day(d)
+                    logger.info(
+                        "[TE-Eval] scheduled run date=%s records=%d judged=%d report=%s",
+                        d, stats.total_records, stats.overall.judged, path,
+                    )
+                except Exception:
+                    logger.warning("[TE-Eval] scheduled run failed date=%s", d, exc_info=True)
+        except Exception:
+            logger.exception("[TE-Eval] scheduler outer loop error")
+        # 每小时一次
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     set_routes_engine(engine)
     set_ws_engine(engine)
+
+    # P0-A Shadow Logger：启动后台 writer
+    try:
+        from monitoring.te_shadow import get_te_shadow_logger
+        get_te_shadow_logger().start()
+    except Exception:
+        logger.warning("[TE-Shadow] startup failed", exc_info=True)
+
     task = asyncio.create_task(engine.start())
+
+    # P0-B 每小时评估任务
+    te_eval_task = asyncio.create_task(_te_eval_scheduler(), name="te_eval_scheduler")
+
     logger.info("LIQ Engine started")
     yield
     engine._running = False
     await engine.stop()
     task.cancel()
+    te_eval_task.cancel()
+    # Shadow Logger 清理
+    try:
+        from monitoring.te_shadow import get_te_shadow_logger
+        await get_te_shadow_logger().stop()
+    except Exception:
+        pass
     logger.info("LIQ Engine stopped")
 
 
