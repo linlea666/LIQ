@@ -23,6 +23,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 Timeframe = Literal["1h", "4h", "1d"]
+Direction = Literal["up", "down", "flat"]   # 衰竭模块的方向视角（复用 market_structure_1d）
 ExhaustionState = Literal[
     "healthy_continuation",  # 健康续航：动能强、参与度在跟、尚未出现衰竭
     "momentum_fading",       # 动能衰减：一阶动能开始减速但还未出现结构破坏
@@ -40,6 +41,10 @@ OverallAction = Literal[
     "counter_main",   # 主攻方向已切换
     "stand_aside",    # 观望
 ]
+# 6 档 regime（复用 models.common_enums.MarketRegimeLabel，避免交叉依赖此处本地化）
+RegimeLabel = Literal[
+    "trend_up", "trend_down", "range", "squeeze", "high_vol_chop", "extreme",
+]
 
 
 class SubScore(BaseModel):
@@ -56,16 +61,18 @@ class TrendExhaustionState(BaseModel):
     """单周期衰竭状态（1h/4h/1d 各一份）。"""
 
     tf: Timeframe
+    direction: Direction = "flat"     # 该周期当前的视角方向：用于"续航"定义正负
 
-    # 三维得分：+1 强续航 / 0 中性 / -1 强衰竭
-    momentum_score: float = 0.0       # D1 动能（MACD 二阶 / 价格离 EMA20 σ / RSI 区）
-    participation_score: float = 0.0  # D2 参与度（CVD 动能 / OI-Price 共振）
+    # 三维得分：+1 强续航 / 0 中性 / -1 强衰竭（符号相对 direction）
+    momentum_score: float = 0.0       # D1 动能（MACD 二阶 / 价格斜率 z / RSI 区 / FVG 续航）
+    participation_score: float = 0.0  # D2 参与度（CVD 动能+吸筹 / OI-Price 踩踏识别 / CB 溢价）
     exhaustion_score: float = 0.0     # D3 衰竭触发器（TD / 背离 / Fib 扩展命中）
 
     composite_score: float = 0.0      # 三维加权综合，-1~+1
 
     state: ExhaustionState = "neutral"
     state_age_min: int = 0            # 当前状态持续多少分钟（前端用来判断"刚翻"还是"老状态"）
+    confirmed_ticks: int = 0          # 同向连续确认次数（用于硬门闸 exhaustion_warn/structural_reversal）
 
     # 触发器 + 人类可读解释
     triggers: list[str] = Field(default_factory=list)  # 命中的关键词，如 "rsi_bear_div", "td_setup_9"
@@ -87,10 +94,18 @@ class TrendExhaustionSignal(BaseModel):
 
     # ── MTF 共识总评（小白最终看这个） ─────────────────────────────
     consensus_level: ConsensusLevel = "neutral"
+    overall_direction: Direction = "flat"        # 当前主导方向（up/down/flat），复用 4h 结构方向
     overall_state: ExhaustionState = "neutral"
     overall_action: OverallAction = "stand_aside"
     overall_position_pct: float = 0.0   # 建议仓位占比 0~1（仅为参考）
-    overall_reason_cn: str = ""         # 一句白话，如 "4h/1d 共振衰竭，1h 仍在最后一冲"
+
+    # 白话三行（前端"小白卡"直接渲染） ──────────────────────────
+    overall_plain_cn: str = ""          # 第一行：一眼结论，例 "还在涨，动能健康"
+    overall_tip_cn: str = ""            # 第二行：行动建议，例 "顺势持有，跌破 4H EMA20 再撤"
+    overall_reason_cn: str = ""         # 第三行：MTF 来源，例 "4h/1d 共振，1h 最后一冲"
+
+    regime: Optional[RegimeLabel] = None  # 当前 regime（veto 来源）
+    regime_vetoed: bool = False           # 是否因震荡/极端被强制观望
 
     # ── 调试 / 日志 ──────────────────────────────────────────────
     data_quality: Literal["ok", "partial", "insufficient"] = "insufficient"
