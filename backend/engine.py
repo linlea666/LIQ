@@ -97,6 +97,18 @@ class CoinState:
         self.range_signal: Optional[RangeSignalData] = None
         self.market_structure: Optional[MarketStructure] = None
         self._prev_ms_summary: tuple = ()
+        # L2 MarketRegime 快照（D01）。由 _recompute 末尾写入
+        from models.regime import RegimeSnapshot  # local import 避免顶部循环
+        self.regime_snapshot: Optional[RegimeSnapshot] = None
+        # L4 ExecutionPlan（D02 数学引擎主输出）
+        from models.execution_plan import ExecutionPlan as _ExecutionPlan
+        self.execution_plan: Optional[_ExecutionPlan] = None
+        # L7 AITraderReport（D14 AI 引擎主输出） + L7.5 FinalDecision（D15 融合）
+        from models.ai_trader_report import AITraderReport as _AITraderReport
+        from models.fused_decision import FinalDecision as _FinalDecision
+        self.ai_trader_report: Optional[_AITraderReport] = None
+        self.final_decision: Optional[_FinalDecision] = None
+        self.last_fusion_ts: float = 0.0
         self._prev_liq_map_24h: Optional[LiquidationMap] = None
         self._prev_price_at_liq_poll: float = 0
         self.liq_sweep_events: deque = deque(maxlen=120)
@@ -416,11 +428,19 @@ class Engine:
             self._settings.supported_coins, self._default_coin,
         )
 
+        # ── D1-D17 架构决策追踪：启动时打印清单与状态 ──
+        try:
+            from utils.decision_tracker import get_tracker
+            get_tracker().log_boot()
+        except Exception:
+            logger.debug("decision_tracker boot log failed", exc_info=True)
+
         tasks = [
             asyncio.create_task(self._grace_check_loop()),
             asyncio.create_task(self._cache_persist_loop()),
             asyncio.create_task(self._source_observe_loop()),
             asyncio.create_task(self._binance_ticker_ws_loop()),
+            asyncio.create_task(self._decision_summary_loop()),
         ]
 
         # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
@@ -488,7 +508,49 @@ class Engine:
         if email_cfg and getattr(email_cfg, 'to', None):
             tasks.append(asyncio.create_task(self._digest_email_loop()))
 
+        # ── D13 · News Intelligence Agent 编排（P1.2b） ──
+        try:
+            tasks.append(asyncio.create_task(self._news_agent_loop()))
+        except Exception:
+            logger.debug("[D13] news_agent_loop schedule failed", exc_info=True)
+
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _news_agent_loop(self):
+        """P1.2b · 启动 News Agent 编排（委托给 news_agent_loop.run_forever）。
+
+        get_context 每次回调提供最新 BTC 价格/历史，供 AI 结构化与价格回填。
+        """
+        try:
+            from processors.news_agent_loop import run_forever
+        except Exception:
+            logger.warning("[D13] news_agent_loop module unavailable", exc_info=True)
+            return
+
+        def _get_ctx() -> dict:
+            btc_state = self._states.get("BTC")
+            price = 0.0
+            history: list[dict] = []
+            if btc_state is not None:
+                if btc_state.ticker is not None:
+                    price = float(getattr(btc_state.ticker, "price", 0.0) or 0.0)
+                # candle_prices / candle_ts 是 1h/15m K 线收盘价序列（按秒 ts 递增）
+                # 可用于新闻价格反应回填（精度足够：±1h / ±2h / ±24h 容差内匹配）
+                prices = list(btc_state.candle_prices or [])
+                ts_list = list(btc_state.candle_ts or [])
+                for t, p in zip(ts_list, prices):
+                    try:
+                        history.append({"ts": int(t), "price": float(p)})
+                    except Exception:
+                        continue
+            return {
+                "running": self._running,
+                "current_btc_price": price,
+                "price_history": history,
+                "target_coins": list(self._active_coins),
+            }
+
+        await run_forever(_get_ctx)
 
     def _create_full_poll_tasks(self, coin: CoinConfig, stagger: float) -> list[asyncio.Task]:
         """为活跃币种创建完整轮询任务集。
@@ -1004,6 +1066,7 @@ class Engine:
         if price <= 0:
             return
 
+        _recompute_t0 = time.time()
         liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
 
         state.temperature, _factor_scores = calc_market_temperature(
@@ -1040,6 +1103,149 @@ class Engine:
         )
 
         self._recompute_range_signal(ccy)
+
+        # ── D01 L2 MarketRegime 识别（轻量，不依赖 AISnapshot）──
+        try:
+            from processors.market_regime import compute_regime_from_state
+            state.regime_snapshot = compute_regime_from_state(
+                coin=ccy,
+                price=price,
+                atr_14=state.atr or 0.0,
+                boll_data=state.boll_4h_data or state.boll_data,
+                structure=state.market_structure,
+                hist_vol_pct=(state.market_index.btc_hist_vol if state.market_index else None),
+                ema20=state.ema20_cg,
+                prev=state.regime_snapshot,
+            )
+        except Exception:
+            logger.debug("[D01] compute_regime_from_state failed", exc_info=True)
+
+        # ── L3 SignalBus ingest：把 KeyLevelSignal 投射为 CandidateSignal ──
+        try:
+            from processors.signal_bus import get_bus, adapt_key_level_signal
+            bus = get_bus()
+            kl_snap = state.key_level_snapshot_v2
+            if kl_snap and kl_snap.signals:
+                # 建 level_price → KeyLevelV2 的快查表（附加 cascade_risk 等 provenance）
+                lv_by_price = {lv.price: lv for lv in (kl_snap.levels or [])}
+                for sig in kl_snap.signals:
+                    kl_level = lv_by_price.get(sig.level_price)
+                    bus.ingest(adapt_key_level_signal(ccy, sig, kl_level, ts=kl_snap.ts or None))
+        except Exception:
+            logger.debug("[L3] signal_bus ingest failed", exc_info=True)
+
+        # ── L5 SafetyGate：5 道护栏评估（轻量调用路径，不构造 AISnapshot）──
+        safety_result = None
+        try:
+            from processors.safety_gate import evaluate_safety_gates
+            liq_24h_total = None
+            if state.global_liq is not None:
+                liq_24h_total = (
+                    float(getattr(state.global_liq, "long_24h_usd", 0) or 0)
+                    + float(getattr(state.global_liq, "short_24h_usd", 0) or 0)
+                )
+            safety_result = evaluate_safety_gates(
+                coin=ccy,
+                price=price,
+                atr_14=state.atr or 0.0,
+                liq_24h_total_usd=liq_24h_total,
+                source_health=self.get_source_health() if self._running else None,
+            )
+        except Exception:
+            logger.debug("[L5] safety_gate eval failed", exc_info=True)
+
+        # ── L4 SignalSynthesizer：合成 ExecutionPlan ──
+        try:
+            from processors.signal_bus import get_bus as _get_bus
+            from processors.signal_synthesizer import synthesize
+            from processors.plan_backtest import get_plan_backtest_store
+            now_ts = int(time.time())
+            candidates = _get_bus().query(
+                ccy,
+                min_ts=now_ts - 3600,  # 近 1h 窗口
+                include_expired=False,
+            )
+            if state.regime_snapshot is not None:
+                # D04：用历史胜率（若已有 ≥10 个样本）喂 backtest_hint
+                backtest_hint = None
+                try:
+                    backtest_hint = get_plan_backtest_store().get_stats(ccy)
+                    if backtest_hint.total_signals < 10:
+                        backtest_hint = None  # 样本不足不打 bonus，避免噪声
+                except Exception:
+                    backtest_hint = None
+
+                state.execution_plan = synthesize(
+                    coin=ccy,
+                    candidates=candidates,
+                    regime=state.regime_snapshot,
+                    current_price=price,
+                    safety_gates=safety_result,
+                    backtest_hint=backtest_hint,
+                )
+
+                # D04：把新 plan 喂回 backtest store，让 tick 驱动 SL/TP 判定
+                try:
+                    if state.execution_plan is not None:
+                        get_plan_backtest_store().track(
+                            state.execution_plan,
+                            current_price=price,
+                        )
+                except Exception:
+                    logger.debug("[D04] plan_backtest track failed", exc_info=True)
+        except Exception:
+            logger.debug("[L4] signal_synthesizer failed", exc_info=True)
+
+        # P1.5 · D04 扩展：每次 recompute 推进分歧回测样本窗口（1h/2h/24h）
+        try:
+            from processors.divergence_backfill import get_divergence_store
+            get_divergence_store().advance(ccy, current_price=price)
+        except Exception:
+            logger.debug("[D04.div] advance failed", exc_info=True)
+
+        # P2.1 · 信号 PnL 追踪：记录最新 plans + tick 推进所有 pending/in-flight 样本
+        try:
+            from processors.signal_pnl_tracker import get_signal_pnl_tracker
+            pnl = get_signal_pnl_tracker()
+            if state.execution_plan is not None:
+                pnl.record_math_plan(state.execution_plan, current_price=price)
+            ai_report = getattr(state, "ai_trader_report", None)
+            if ai_report is not None and getattr(ai_report, "trading_plans", None):
+                pnl.record_ai_plans(
+                    coin=ccy,
+                    trading_plans=ai_report.trading_plans,
+                    current_price=price,
+                    created_ts=int(getattr(ai_report, "ts", 0) or 0),
+                    regime=str(
+                        getattr(state.regime_snapshot, "regime", "")
+                        if getattr(state, "regime_snapshot", None) else ""
+                    ),
+                )
+            final_decision = getattr(state, "final_decision", None)
+            if final_decision is not None:
+                pnl.record_final_decision(final_decision, current_price=price)
+            # tick 所有 coin 样本（包括此前创建的）
+            pnl.tick(ccy, price=price)
+        except Exception:
+            logger.debug("[P2.1] signal_pnl step failed", exc_info=True)
+
+        # ── D02 双引擎 pipeline 心跳总结 ──
+        try:
+            from utils.decision_tracker import D, get_tracker
+            pipeline_ms = int((time.time() - _recompute_t0) * 1000)
+            math_plan_ok = state.execution_plan is not None
+            get_tracker().mark(
+                D.D02_DUAL_ENGINE,
+                status="ok" if math_plan_ok else "warn",
+                log=False,
+                coin=ccy,
+                math_plan_ok=math_plan_ok,
+                ai_report_ok=False,  # 待 P1 AI Trader 上线后改写
+                upstream_ok=bool(state.key_level_snapshot_v2 is not None and state.levels is not None),
+                pipeline_ms=pipeline_ms,
+            )
+        except Exception:
+            logger.debug("[D02] recompute summary mark failed", exc_info=True)
 
         if self._notif_cfg.enabled:
             asyncio.ensure_future(self._check_alerts(ccy))
@@ -1432,6 +1638,28 @@ class Engine:
                 await asyncio.sleep(5)
             await asyncio.sleep(60)
 
+    async def _decision_summary_loop(self) -> None:
+        """D1-D17 架构决策定期健康汇总。
+
+        每 30 分钟打印一次状态表（pending/ok/warn/fail 分布 + 各决策 ok_count）。
+        便于长期运行时快速判断哪些架构点已落实、哪些还没被触达。
+        不影响主流程：tracker 内部已兜底。
+        """
+        await asyncio.sleep(600)  # 启动后给系统 10 分钟稳态后再首次汇总
+        try:
+            from utils.decision_tracker import get_tracker
+            tracker = get_tracker()
+        except Exception:
+            logger.debug("decision_tracker import failed, summary loop exit")
+            return
+        logger.info("Decision summary loop started | interval=1800s")
+        while self._running:
+            try:
+                tracker.log_summary(force=True)
+            except Exception:
+                logger.debug("decision_tracker log_summary error", exc_info=True)
+            await asyncio.sleep(1800)
+
     async def _auto_kl_snapshot_loop(self, interval_sec: int) -> None:
         """定时保存关键位快照到历史。"""
         await asyncio.sleep(120)
@@ -1499,16 +1727,140 @@ class Engine:
 
     async def _ai_analysis_task(self, ccy: str) -> None:
         try:
+            t0 = time.time()
             result = await self.run_ai_analysis(ccy)
+            latency_ms = int((time.time() - t0) * 1000)
             await push_to_coin(ccy, "ai_result", result.model_dump())
             logger.info("AI result pushed via WebSocket | coin=%s | len=%d",
                         ccy, len(result.raw_text) if result.raw_text else 0)
+
+            # P1.3 · D14 构建 AITraderReport + D15 融合 FinalDecision
+            try:
+                await self._build_and_fuse_trader_report(ccy, result, latency_ms=latency_ms)
+            except Exception:
+                logger.warning("[D14/D15] build_and_fuse failed | coin=%s", ccy, exc_info=True)
         except Exception as e:
             logger.error("AI background task failed | coin=%s | %s: %s",
                          ccy, type(e).__name__, e, exc_info=True)
             await push_to_coin(ccy, "ai_error", {"coin": ccy, "message": str(e)})
         finally:
             self._ai_running.discard(ccy)
+
+    async def _build_and_fuse_trader_report(
+        self, ccy: str, analysis: AIAnalysisResult, *, latency_ms: int = 0,
+    ) -> None:
+        """P1.3 · 把 AIAnalysisResult 升级为 AITraderReport，并与 ExecutionPlan 融合。"""
+        state = self._states.get(ccy)
+        if state is None:
+            return
+
+        try:
+            from ai.trader_report_builder import build_ai_trader_report
+            from processors.signal_fusion import fuse_decisions
+            from processors.divergence_backfill import get_divergence_store
+        except Exception:
+            logger.debug("[D14/D15] module import failed", exc_info=True)
+            return
+
+        try:
+            # 沿用 run_ai_analysis 刚构建的 snapshot（stash 于 state），避免重复装配
+            snapshot = getattr(state, "_last_ai_snapshot", None)
+            if snapshot is None:
+                logger.debug("[D14] last snapshot missing, skip trader report build | coin=%s", ccy)
+                return
+
+            report = build_ai_trader_report(
+                analysis,
+                snapshot,
+                math_plan=state.execution_plan,
+                model_name=getattr(self._analyzer, "_model", "") or "",
+                latency_ms=int(latency_ms or 0),
+            )
+            state.ai_trader_report = report
+        except Exception:
+            logger.warning("[D14] trader report build failed | coin=%s", ccy, exc_info=True)
+            return
+
+        if state.execution_plan is None:
+            # 数学引擎未就绪则不融合
+            return
+        try:
+            # 当前轮次活跃叙事数量（供 FinalDecision 展示）
+            active_themes = 0
+            try:
+                from processors.narrative_tracker import get_narrative_tracker
+                active_themes = len(get_narrative_tracker().get_active(limit=50))
+            except Exception:
+                pass
+            # 地缘 overview（供 FinalDecision 展示）
+            geo_overview_obj = None
+            try:
+                from processors.geo_risk_tracker import get_geo_risk_tracker
+                geo_overview_obj = get_geo_risk_tracker().get_overview()
+            except Exception:
+                pass
+
+            # P1.5 · D04 扩展：fuse 前查询历史分歧样本（若 ≥10 样本）
+            div_stats_list = None
+            try:
+                _div_store = get_divergence_store()
+                div_stats_list = _div_store.get_stats_list(ccy)
+                if not div_stats_list:
+                    div_stats_list = None
+            except Exception:
+                div_stats_list = None
+
+            decision = fuse_decisions(
+                ccy,
+                state.execution_plan,
+                report,
+                geo_overview=geo_overview_obj,
+                divergence_stats=div_stats_list,
+                active_themes_count=active_themes,
+            )
+            state.final_decision = decision
+            state.last_fusion_ts = time.time()
+            await push_to_coin(ccy, "final_decision", decision.model_dump())
+            logger.info(
+                "[D15] fusion ok | coin=%s consensus=%s score=%.1f action=%s pos=%.0f%%",
+                ccy, decision.consensus_level, decision.final_score,
+                decision.recommended_action, decision.recommended_position_pct,
+            )
+
+            # P1.5 · D04 扩展：若为 conflict，记录到分歧回测仓
+            try:
+                price_now = float(
+                    getattr(state.ticker, "last", 0) or decision.current_price
+                )
+                get_divergence_store().track(decision, current_price=price_now)
+            except Exception:
+                logger.debug("[D04.div] track after fuse failed", exc_info=True)
+
+            # P2.4 · 归档一帧完整 pipeline 快照供 /replay 回放
+            try:
+                from processors.snapshot_archiver import get_snapshot_archiver
+                brief = ""
+                try:
+                    brief = str(
+                        getattr(analysis, "signal_summary", None).headline_cn
+                    ) if getattr(analysis, "signal_summary", None) else ""
+                except Exception:
+                    brief = ""
+                get_snapshot_archiver().append(
+                    coin=ccy,
+                    snapshot=snapshot,
+                    execution_plan=state.execution_plan,
+                    ai_trader_report=state.ai_trader_report,
+                    final_decision=decision,
+                    price_at_capture=float(
+                        getattr(state.ticker, "last", 0) or decision.current_price
+                    ),
+                    ai_analysis_brief=brief,
+                )
+            except Exception:
+                logger.debug("[P2.4] snapshot archive failed", exc_info=True)
+        except Exception:
+            logger.warning("[D15] fuse_decisions failed | coin=%s", ccy, exc_info=True)
 
     async def run_ai_analysis(self, ccy: str) -> AIAnalysisResult:
         state = self._states[ccy]
@@ -1609,6 +1961,8 @@ class Engine:
         result = await self._analyzer.analyze(snapshot)
         state.ai_history.append(result)
         state.last_ai_ts = time.time()
+        # P1.3 · 供 _build_and_fuse_trader_report 复用（避免重复构建快照）
+        state._last_ai_snapshot = snapshot  # type: ignore[attr-defined]
         self._save_ai_history()
         return result
 

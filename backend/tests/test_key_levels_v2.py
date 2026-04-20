@@ -710,21 +710,26 @@ class TestHistoricalValidity:
 
 
 class TestBarrierScore:
+    """D05 修复后：barrier_score 只保留存活时间（0~8），不再消费 cascade_layers。
+
+    原因：cascade_layers 既被 cascade_risk 消费又被 barrier 消费 → 双重计数
+    （表现为 A 级信号几乎都伴随 60%+ 级联警告）。
+    """
+
     def test_zero_with_no_layers_no_age(self):
         lv = _mk_level()
         assert _calc_barrier_score(lv, now=1000) == 0.0
 
-    def test_cascade_layers_contribution(self):
+    def test_cascade_layers_no_longer_contribute(self):
+        """D05：cascade_layers 不再贡献 barrier_score"""
         lv = _mk_level(cascade_layers=3)
-        # 3 * 2.5 = 7.5
-        assert _calc_barrier_score(lv, now=1000) == pytest.approx(7.5, abs=1e-3)
+        # 无 first_seen_ts → 应为 0（旧逻辑会返回 7.5）
+        assert _calc_barrier_score(lv, now=1000) == 0.0
 
-    def test_cascade_layers_capped(self):
+    def test_cascade_layers_many_still_zero(self):
+        """D05：即使有 100 层，只要 first_seen_ts=0 也不加分"""
         lv = _mk_level(cascade_layers=100)
-        # 封顶 12
-        s = _calc_barrier_score(lv, now=1000)
-        # 无 age → 仅级联 12
-        assert s == pytest.approx(12.0, abs=1e-3)
+        assert _calc_barrier_score(lv, now=1000) == 0.0
 
     def test_age_bonus_full(self):
         now = int(time.time())
@@ -741,18 +746,18 @@ class TestBarrierScore:
         assert s == pytest.approx(4.0, abs=0.1)
 
     def test_first_seen_zero_no_age(self):
-        # first_seen_ts=0 表示无记录，不累加 age
+        """first_seen_ts=0 表示无记录；D05 修复后 cascade_layers 也不加分 → 0"""
         lv = _mk_level(first_seen_ts=0, cascade_layers=2)
         s = _calc_barrier_score(lv, now=int(time.time()))
-        # 仅级联 2*2.5=5
-        assert s == pytest.approx(5.0, abs=0.1)
+        assert s == 0.0
 
-    def test_combined_capped(self):
+    def test_max_is_age_only(self):
+        """D05：barrier_score 上限从 20 降至 8（仅存活时间维度）"""
         now = int(time.time())
         lv = _mk_level(cascade_layers=100, first_seen_ts=now - 60 * 86400)
         s = _calc_barrier_score(lv, now=now)
-        # 100 layers 封 12 + 60 天 age 封 8 → 20 封顶
-        assert s == pytest.approx(20.0, abs=0.5)
+        # age 封顶 8；cascade_layers 不再贡献
+        assert s == pytest.approx(8.0, abs=0.5)
 
 
 class TestFinalScore:
@@ -785,11 +790,12 @@ class TestFinalScore:
 
     def test_clamp_100(self):
         now = int(time.time())
+        # D05 修复后 barrier_score 上限 8；仍可组合触发 clamp
         lv = _mk_level(
             confluence_score=99.0, last_confirmed_ts=now,
-            historical_validity=1.0, barrier_score=20.0,
+            historical_validity=1.0, barrier_score=8.0,
         )
-        # 99 * 1.3 + 20 = 148.7 → clamp 100
+        # 99 * 1.3 + 8 = 136.7 → clamp 100
         assert _calc_final_score(lv, now) == 100.0
 
 

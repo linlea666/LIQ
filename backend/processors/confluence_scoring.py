@@ -273,18 +273,24 @@ def _calc_historical_validity(lv: KeyLevelV2) -> float:
 
 
 def _calc_barrier_score(lv: KeyLevelV2, now: int) -> float:
-    """0~20：结构屏障加分。
+    """0~8：结构屏障加分（仅存活时间维度）。
 
-    两部分：
-      A. 级联屏障 = cascade_layers * 2.5（封顶 12）：前方有多层清算簇，被扫取需更多资金
-      B. 存活时间  = min(age_days / 30, 1) * 8（封顶 8）：老关键位更被市场认可
+    修复历史（D05）：
+      旧版同时用 cascade_layers × 2.5（封顶 12）给 barrier 加分，又把同一批
+      clusters 计算为 cascade_risk 警告 → 造成 "A 级信号 + 级联风险 60%" 的
+      双重计数，用户无法判断是否要信任信号。
+
+      本次移除 cascade_layers 贡献，避免级联簇既"升档 A 级"又"警告踩踏"。
+      cascade_risk 继续在 UI / AI prompt 中作为独立风险指标展示；是否惩罚 
+      confluence_score 改由下游 Synthesizer / SafetyGate 按方向性决定。
+
+    当前仅保留：
+      存活时间 = min(age_days / 30, 1) * 8（封顶 8）：老关键位更被市场认可
     """
-    barrier = min(lv.cascade_layers * 2.5, 12.0)
-
-    if lv.first_seen_ts > 0:
-        age_days = max(0, (now - lv.first_seen_ts) / 86400.0)
-        barrier += min(age_days / 30.0, 1.0) * 8.0
-
+    if lv.first_seen_ts <= 0:
+        return 0.0
+    age_days = max(0, (now - lv.first_seen_ts) / 86400.0)
+    barrier = min(age_days / 30.0, 1.0) * 8.0
     return round(barrier, 2)
 
 
@@ -308,8 +314,9 @@ def _calc_final_score(lv: KeyLevelV2, now: int) -> float:
     设计意图：
       - 新增信号不"白得分"：仍以 confluence_score 为主干，barrier / validity 只是修饰
       - 历史验证多次 → 最多 +30% 乘数加成
-      - barrier 在高冷门位（但清算层很多）可提升到 B 档，但不足以冲到 S
+      - barrier 仅代表"存活时间"加分（最多 +8），老位更被市场认可
       - broken 位通过 historical_validity 自动降权（已在 _calc_historical_validity 里）
+      - 注：D05 修复后 barrier_score 理论上限从 20 降至 8（移除 cascade_layers 贡献）
     """
     time_mult = _final_time_decay_multiplier(lv, now)
     validity_mult = 1.0 + lv.historical_validity * 0.3

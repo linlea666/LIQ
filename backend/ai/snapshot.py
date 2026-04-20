@@ -388,4 +388,70 @@ def build_ai_snapshot(
         rule_stop_loss=rule_stop_loss,
         sniper_entries=sniper_entries,
         ladder_plans=ladder_plans,
+        **_collect_news_context(),
     )
+
+
+def _collect_news_context() -> dict:
+    """P1.2b · 从 news_brief / geo_risk / narrative tracker 抓取最新摘要。
+
+    返回可作为 AISnapshot 构造参数的 dict（任一模块缺失时降级为空值，
+    绝不阻断主快照构建）。
+    """
+    ctx: dict = {
+        "news_brief_text": "",
+        "news_brief_version": 0,
+        "news_brief_trigger": "",
+        "news_brief_updated_at": None,
+        "geo_overview": None,
+        "active_narratives": [],
+    }
+    try:
+        from processors.news_brief import get_current_brief
+        brief = get_current_brief()
+        if brief is not None:
+            import json as _json
+            payload = brief.model_dump(mode="json")
+            # 精简 json 字段：sections + themes + coverage
+            keep = {
+                "version": payload.get("version"),
+                "ts_range_start": payload.get("ts_range_start"),
+                "ts_range_end": payload.get("ts_range_end"),
+                "update_trigger": payload.get("update_trigger"),
+                "tldr_cn": payload.get("tldr_cn") or "",
+                "sections": payload.get("sections") or [],
+                "tracked_themes": payload.get("tracked_themes") or [],
+                "diff_from_prev_version": payload.get("diff_from_prev_version") or "",
+            }
+            ctx["news_brief_text"] = _json.dumps(keep, ensure_ascii=False, separators=(",", ":"))
+            ctx["news_brief_version"] = int(payload.get("version") or 0)
+            ctx["news_brief_trigger"] = str(payload.get("update_trigger") or "")
+            ctx["news_brief_updated_at"] = int(payload.get("updated_at") or 0) or None
+    except Exception:
+        pass
+
+    try:
+        from processors.geo_risk_tracker import get_geo_risk_tracker
+        overview = get_geo_risk_tracker().get_overview()
+        if overview is not None:
+            ctx["geo_overview"] = overview.model_dump(mode="json")
+    except Exception:
+        pass
+
+    try:
+        from processors.narrative_tracker import get_narrative_tracker
+        themes = get_narrative_tracker().get_active(limit=5)
+        ctx["active_narratives"] = [
+            {
+                "theme_id": t.theme_id,
+                "theme_name_cn": getattr(t, "theme_name_cn", "") or "",
+                "current_direction_bias": getattr(t, "current_direction_bias", "neutral"),
+                "current_intensity": getattr(t, "current_intensity", 0),
+                "flip_flop_count_24h": getattr(t, "flip_flop_count_24h", 0),
+            }
+            for t in themes
+        ]
+    except Exception:
+        pass
+
+    return ctx

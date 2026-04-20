@@ -86,6 +86,31 @@ class AIProviderConfig:
 
 
 @dataclass(frozen=True)
+class AINewsAgentConfig:
+    """D12 · 新闻智能 Agent 配置（共享主 AI 的 key，独立轻量模型/预算）"""
+    model: str = "deepseek-chat"
+    timeout_sec: int = 60
+    max_retries: int = 2
+    temperature: float = 0.2
+    max_tokens_structurer: int = 2500
+    max_tokens_brief: int = 1800
+    batch_size_blackswan: int = 1
+    batch_size_major: int = 3
+    batch_size_normal: int = 5
+    api_base: str = ""      # 空=沿用主 AI
+    api_key: str = ""       # 空=沿用主 AI
+    env_key: str = ""       # 若指定，优先从该环境变量读取 key
+    # ── P1.2b · 编排循环节律 ──
+    fetch_interval_sec: int = 600        # 新闻拉取 + 滤波 + 结构化（秒）
+    brief_interval_sec: int = 3600       # Rolling Brief 重写周期
+    backfill_interval_sec: int = 900     # 价格回填扫描周期
+    decay_interval_sec: int = 1800       # Narrative/Geo decay 周期
+    ledger_max_events: int = 500         # 账本最大条目
+    ledger_max_age_sec: int = 172800     # 账本最长保留 48h
+    blackswan_rewrite_brief: bool = True # 黑天鹅立即重写简报
+
+
+@dataclass(frozen=True)
 class AIConfig:
     active: str
     model: str
@@ -97,6 +122,7 @@ class AIConfig:
     api_key: str = ""
     api_base: str = ""
     providers: dict = field(default_factory=dict)
+    news_agent: AINewsAgentConfig = field(default_factory=AINewsAgentConfig)
 
 
 @dataclass(frozen=True)
@@ -234,6 +260,35 @@ def _build_settings(raw: dict) -> Settings:
     active = providers[active_provider]
     api_key = os.getenv(active.env_key, "") or os.getenv("AI_API_KEY", "")
 
+    news_agent_raw = ai_raw.get("news_agent", {}) or {}
+    news_env_key = str(news_agent_raw.get("env_key") or "").strip()
+    news_api_key = ""
+    if news_env_key:
+        news_api_key = os.getenv(news_env_key, "")
+    if not news_api_key:
+        news_api_key = api_key  # 沿用主 AI key（默认行为）
+    news_agent_cfg = AINewsAgentConfig(
+        model=str(news_agent_raw.get("model") or "deepseek-chat"),
+        timeout_sec=int(news_agent_raw.get("timeout_sec") or 60),
+        max_retries=int(news_agent_raw.get("max_retries") or 2),
+        temperature=float(news_agent_raw.get("temperature") or 0.2),
+        max_tokens_structurer=int(news_agent_raw.get("max_tokens_structurer") or 2500),
+        max_tokens_brief=int(news_agent_raw.get("max_tokens_brief") or 1800),
+        batch_size_blackswan=int(news_agent_raw.get("batch_size_blackswan") or 1),
+        batch_size_major=int(news_agent_raw.get("batch_size_major") or 3),
+        batch_size_normal=int(news_agent_raw.get("batch_size_normal") or 5),
+        api_base=str(news_agent_raw.get("api_base") or "").strip() or active.api_base,
+        api_key=news_api_key,
+        env_key=news_env_key,
+        fetch_interval_sec=int(news_agent_raw.get("fetch_interval_sec") or 600),
+        brief_interval_sec=int(news_agent_raw.get("brief_interval_sec") or 3600),
+        backfill_interval_sec=int(news_agent_raw.get("backfill_interval_sec") or 900),
+        decay_interval_sec=int(news_agent_raw.get("decay_interval_sec") or 1800),
+        ledger_max_events=int(news_agent_raw.get("ledger_max_events") or 500),
+        ledger_max_age_sec=int(news_agent_raw.get("ledger_max_age_sec") or 172800),
+        blackswan_rewrite_brief=bool(news_agent_raw.get("blackswan_rewrite_brief", True)),
+    )
+
     ai = AIConfig(
         active=active_provider,
         model=active.model,
@@ -245,6 +300,7 @@ def _build_settings(raw: dict) -> Settings:
         api_key=api_key,
         api_base=active.api_base,
         providers=providers,
+        news_agent=news_agent_cfg,
     )
 
     push = PushConfig(**raw["push"])

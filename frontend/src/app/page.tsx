@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import PriceBar from "@/components/TopBar/PriceBar";
 import CoinSelector from "@/components/TopBar/CoinSelector";
 import StatusBadges from "@/components/TopBar/StatusBadges";
+import DecisionHealthStrip from "@/components/TopBar/DecisionHealthStrip";
+import AlertBell from "@/components/TopBar/AlertBell";
 import AIButton from "@/components/TopBar/AIButton";
 import CoreFactors from "@/components/FactorCards/CoreFactors";
 import TabContainer from "@/components/MainView/TabContainer";
@@ -53,6 +56,15 @@ export default function Dashboard() {
           <div className="flex items-center gap-4">
             <StatusBadges />
             <ModeSelector />
+            <DecisionHealthStrip />
+            <AlertBell />
+            <Link
+              href="/replay"
+              className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 hover:text-slate-100 transition"
+              title="历史快照回放"
+            >
+              📼 回放
+            </Link>
             <AIButton />
           </div>
         </div>

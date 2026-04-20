@@ -415,6 +415,82 @@ export interface KeyLevelSnapshotV2 {
   weekly_strong_resistance: string | null;
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// L4 数学引擎输出：ExecutionPlan（对应后端 models/execution_plan.py）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type TrafficLight = "green" | "yellow" | "orange" | "red" | "gray";
+export type SafetyGateStatus = "pass" | "warn" | "block";
+export type MarketRegimeLabel =
+  | "trend_up"
+  | "trend_down"
+  | "range"
+  | "squeeze"
+  | "high_vol_chop"
+  | "extreme";
+export type TradingAction = "long" | "short" | "wait" | "avoid";
+export type SignalDirection = "bullish" | "bearish" | "neutral" | "potential_reversal";
+
+export interface ExecutionScoreBreakdown {
+  base: number;
+  tier_bonus: number;
+  confidence_bonus: number;
+  regime_alignment: number;
+  corroboration_bonus: number;
+  cascade_penalty: number;
+  rr_bonus: number;
+  backtest_bonus: number;
+  event_factor: number;
+  geo_risk_factor: number;
+  safety_gate_delta: number;
+  final_score: number;
+}
+
+export interface SafetyGateResultUI {
+  g1_extreme_vol: SafetyGateStatus;
+  g2_macro_event: SafetyGateStatus;
+  g3_liq_chaos: SafetyGateStatus;
+  g4_api_degrade: SafetyGateStatus;
+  g5_blackswan: SafetyGateStatus;
+  triggered: boolean;
+  block_reason: string;
+  warnings: string[];
+}
+
+export interface ExecutionPlan {
+  coin: string;
+  ts: number;
+  current_price: number;
+  regime: MarketRegimeLabel;
+  regime_confidence: number;
+  execution_score: number;
+  traffic_light: TrafficLight;
+  headline: string;
+  one_liner: string;
+  action: TradingAction;
+  direction: SignalDirection;
+  tier_hint: "S" | "A" | "B" | "C";
+  entry_zone_low: number | null;
+  entry_zone_high: number | null;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  rr_ratio: number | null;
+  position_size_pct: number | null;
+  expires_at: number | null;
+  breakdown: ExecutionScoreBreakdown;
+  safety_gates: SafetyGateResultUI;
+  corroborating_sources: string[];
+  historical_win_rate: number | null;
+  historical_sample_size: number;
+}
+
+export interface ExecutionPlanResponse {
+  ready: boolean;
+  coin?: string;
+  plan?: ExecutionPlan;
+}
+
 export interface MarketUpdate {
   coin: string;
   ts: number;
@@ -453,4 +529,499 @@ export interface MarketUpdate {
   macd?: Record<string, unknown>;
   boll?: Record<string, unknown>;
   news_count?: number;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P1.3 · L7 AITraderReport（AI 引擎独立交易员产出）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type Resonance = "low" | "medium" | "high";
+export type AgreementWithMath = "agree" | "caution" | "disagree";
+
+export interface AIFactorRow {
+  dimension: string;
+  value_display: string;
+  value_raw?: number | null;
+  signal: string;
+  direction: SignalDirection;
+  resonance: Resonance;
+  data_source_ref: string;
+  link_anchor: string;
+  confidence: number;
+}
+
+export interface AIFactorSection {
+  section_id: "A" | "B" | "C" | "D" | "E" | "F" | "G";
+  section_name_cn: string;
+  section_emoji: string;
+  rows: AIFactorRow[];
+  section_summary: string;
+  section_bias: SignalDirection;
+}
+
+export interface AIFactorMatrix {
+  sections: AIFactorSection[];
+  summary_line: string;
+  overall_bias: SignalDirection;
+  overall_confidence: "high" | "medium" | "low";
+  analysis_ts: number;
+  price_at_analysis: number;
+}
+
+export interface AIKeyLevelInterpretation {
+  primary_support_price: number | null;
+  primary_support_reason: string;
+  primary_resistance_price: number | null;
+  primary_resistance_reason: string;
+  trap_warning: string;
+  extra_levels: Array<{ price?: number; side?: string; reason?: string }>;
+}
+
+export interface AITradingPlan {
+  priority: number;
+  direction: TradingAction;
+  entry_zone_low: number | null;
+  entry_zone_high: number | null;
+  trigger_condition: string;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  rr_ratio: number | null;
+  position_suggestion_pct: number;
+  conviction: number;
+  tier_hint: "S" | "A" | "B" | "C";
+  invalidation: string;
+  related_narratives: string[];
+  reason: string;
+  aligned_with_math_engine: boolean;
+  alignment_note: string;
+}
+
+export interface AINarrativeImpact {
+  theme_id: string;
+  theme_name_cn: string;
+  ai_view_cn: string;
+  weight_on_current_plan: Resonance;
+}
+
+export interface AITraderReport {
+  coin: string;
+  ts: number;
+  price_at_analysis: number;
+  model: string;
+  thinking_tokens: number;
+  latency_ms: number;
+  market_view_cn: string;
+  bias: SignalDirection;
+  conviction: number;
+  key_level_interpretation: AIKeyLevelInterpretation;
+  trading_plans: AITradingPlan[];
+  narrative_impact: AINarrativeImpact[];
+  news_impact_summary_cn: string;
+  geo_risk_assessment_cn: string;
+  agreement_with_math_engine: AgreementWithMath;
+  agreement_notes_cn: string;
+  key_risks: string[];
+  factor_matrix: AIFactorMatrix | null;
+  scenario_analysis: Array<Record<string, unknown>>;
+  raw_text: string;
+  user_prompt: string;
+}
+
+export interface AITraderReportResponse {
+  ready: boolean;
+  coin?: string;
+  report?: AITraderReport;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P1.3 · L7.5 FinalDecision（双引擎融合层对外主视图）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type ConsensusLevel =
+  | "strong"
+  | "agree"
+  | "math_lead"
+  | "ai_lead"
+  | "conflict";
+
+export type RecommendedAction = "execute" | "reduce_size" | "wait" | "avoid";
+
+export interface EngineBrief {
+  engine_name: "math" | "ai";
+  score: number;
+  bias: SignalDirection;
+  action: TradingAction;
+  entry_hint: number | null;
+  stop_loss_hint: number | null;
+  tp1_hint: number | null;
+  rr_ratio: number | null;
+  position_pct: number;
+  summary_cn: string;
+}
+
+export interface DivergenceStats {
+  divergence_type: string;
+  sample_size: number;
+  math_win_rate: number;
+  ai_win_rate: number;
+  avg_delta_pct_24h: number;
+  winner_hint_cn: string;
+}
+
+export interface FinalDecision {
+  coin: string;
+  ts: number;
+  current_price: number;
+  final_score: number;
+  traffic_light: TrafficLight;
+  headline: string;
+  one_liner: string;
+  consensus_level: ConsensusLevel;
+  consensus_stars: number;
+  consensus_summary_cn: string;
+  math_brief: EngineBrief;
+  ai_brief: EngineBrief;
+  divergence_summary_cn: string;
+  historical_divergence: DivergenceStats | null;
+  recommended_action: RecommendedAction;
+  recommended_position_pct: number;
+  entry_zone_low: number | null;
+  entry_zone_high: number | null;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  rr_ratio: number | null;
+  underlying_math_plan_ref: string;
+  underlying_ai_plan_priority: number;
+  active_themes_count: number;
+  geo_risk_overall_level: number;
+  geo_risk_label: string;
+  has_blackswan_warning: boolean;
+  safety_gate_triggered: boolean;
+  safety_gate_reason: string;
+  expires_at: number | null;
+}
+
+export interface FinalDecisionResponse {
+  ready: boolean;
+  coin?: string;
+  decision?: FinalDecision;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P1.6 · DecisionTracker · D1-D17 全景灯
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type DecisionStatus =
+  | "pending"
+  | "in_progress"
+  | "ok"
+  | "warn"
+  | "failed"
+  | "skipped";
+
+export type OverallHealth =
+  | "all_ok"
+  | "partial"
+  | "degraded"
+  | "unhealthy";
+
+export interface DecisionRecord {
+  id: string;
+  title: string;
+  owner_module: string;
+  success_criteria: string;
+  status: DecisionStatus;
+  detail: string;
+  metrics: Record<string, unknown>;
+  last_update_ts: number;
+  last_ok_ts: number;
+  last_warn_ts: number;
+  last_fail_ts: number;
+  total_marks: number;
+  ok_count: number;
+  warn_count: number;
+  fail_count: number;
+}
+
+export interface DecisionSummary {
+  ts: number;
+  decisions: DecisionRecord[];
+  overall_health: OverallHealth;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P1.5 · 分歧回测样本（原始轨迹 + 聚合统计）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type DivergenceOutcome = "pending" | "resolved" | "expired";
+
+export interface DivergenceSampleRaw {
+  sample_id: string;
+  coin: string;
+  divergence_type: string;
+  math_action: string;
+  math_bias: string;
+  ai_action: string;
+  ai_bias: string;
+  price_at_record: number;
+  created_ts: number;
+
+  price_1h?: number | null;
+  price_2h?: number | null;
+  price_24h?: number | null;
+  ts_1h?: number | null;
+  ts_2h?: number | null;
+  ts_24h?: number | null;
+
+  resolved_ts?: number | null;
+  delta_pct_1h?: number | null;
+  delta_pct_2h?: number | null;
+  delta_pct_24h?: number | null;
+  math_win?: boolean | null;
+  ai_win?: boolean | null;
+  outcome: DivergenceOutcome;
+}
+
+export interface DivergenceStatsResponse {
+  ready: boolean;
+  coin: string;
+  stats: DivergenceStats[];
+  total_samples: number;
+  recent_samples: DivergenceSampleRaw[];
+  error?: string;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P1.8a · AI Quality Ledger
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type AIMatrixSource =
+  | "ai_json"
+  | "rule_fallback"
+  | "internal_conflict";
+
+export type AIPlansSource =
+  | "ai_json"
+  | "markdown"
+  | "sniper_fallback"
+  | "wait_placeholder";
+
+export type AIBiasVsText =
+  | "consistent"
+  | "conflict"
+  | "text_missing"
+  | "json_missing"
+  | "unknown";
+
+export type AIMathAgreement = "agree" | "caution" | "disagree" | "no_math_plan";
+
+export interface AIQualityRecord {
+  ts: number;
+  coin: string;
+  price_at_analysis: number;
+
+  matrix_source: AIMatrixSource;
+  plans_source: AIPlansSource;
+  json_valid: boolean;
+  json_invalid_reason: string;
+
+  overlay_fields: number;
+  ai_plans_count: number;
+  ai_extra_rows: number;
+  bias_vs_text: AIBiasVsText;
+
+  final_bias: string;
+  final_conviction: number;
+  math_agreement: AIMathAgreement;
+
+  latency_ms: number;
+  reasoning_tokens: number;
+  model: string;
+
+  notes?: string[];
+}
+
+export interface AIQualityStats {
+  coin: string;
+  sample_size: number;
+  window: number;
+
+  ai_json_hit_rate: number;
+  ai_plans_hit_rate: number;
+  bias_consistency_rate: number;
+  internal_conflict_rate: number;
+  math_agreement_rate: number;
+
+  avg_latency_ms: number;
+  avg_reasoning_tokens: number;
+  avg_overlay_fields: number;
+  avg_ai_plans: number;
+
+  first_ts: number;
+  last_ts: number;
+
+  trend_hint_cn: string;
+  top_invalid_reasons?: Array<{ reason: string; count: number }>;
+}
+
+export interface AIQualityResponse {
+  ready: boolean;
+  coin: string;
+  stats: AIQualityStats;
+  recent: AIQualityRecord[];
+  error?: string;
+}
+
+// ── P2.1 · Signal PnL 回放 ──────────────────────────
+
+export type PlanPnLOrigin = "math" | "ai" | "final" | "all";
+export type PlanPnLOutcome =
+  | "pending"
+  | "entry_filled"
+  | "tp1_hit"
+  | "tp2_hit"
+  | "sl_hit"
+  | "expired"
+  | "invalidated";
+
+export interface PlanPnLSample {
+  sample_id: string;
+  coin: string;
+  origin: "math" | "ai" | "final";
+  priority: number;
+  action: "long" | "short" | "wait";
+  tier: string;
+  regime: string;
+  entry_low: number;
+  entry_high: number | null;
+  stop_loss: number;
+  tp1: number | null;
+  tp2: number | null;
+  rr_ratio: number | null;
+  position_pct: number;
+  created_ts: number;
+  price_at_create: number;
+  entry_filled_ts: number | null;
+  entry_filled_price: number | null;
+  outcome: PlanPnLOutcome;
+  outcome_ts: number | null;
+  outcome_price: number | null;
+  r_multiple: number | null;
+  max_favorable_r: number;
+  max_adverse_r: number;
+  invalidation_reason?: string;
+}
+
+export interface SignalPnLStats {
+  coin: string;
+  origin: string;
+  tier: string;
+  sample_size: number;
+  window: number;
+  win_rate: number;
+  avg_r: number;
+  expectancy_r: number;
+  tp_hits: number;
+  sl_hits: number;
+  expired: number;
+  invalidated: number;
+  avg_mfe_r: number;
+  avg_mae_r: number;
+  entry_fill_rate: number;
+  trend_hint_cn: string;
+}
+
+export interface SignalPnLResponse {
+  ready: boolean;
+  coin: string;
+  stats: SignalPnLStats;
+  origin_breakdown: SignalPnLStats[];
+  tier_breakdown: SignalPnLStats[];
+  recent: PlanPnLSample[];
+  error?: string;
+}
+
+// ── P2.2 · Decision Health ─────────────────────────
+
+export type HealthOverall = "ok" | "warn" | "fail" | "pending";
+export type HealthEventKind =
+  | "degrade"
+  | "recover"
+  | "escalate"
+  | "de-escalate"
+  | "change";
+
+export interface HealthEvent {
+  ts: number;
+  id: string;
+  title: string;
+  from: string;
+  to: string;
+  kind: HealthEventKind;
+  detail: string;
+  metrics: Record<string, unknown>;
+}
+
+export interface HealthDegradedItem {
+  id: string;
+  title: string;
+  owner_module: string;
+  status: "warn" | "failed";
+  detail: string;
+  stuck_sec: number;
+  metrics: Record<string, unknown>;
+  last_update_ts: number;
+}
+
+export interface HealthSummaryResponse {
+  ts: number;
+  overall: HealthOverall;
+  counts: { green: number; yellow: number; red: number; pending: number };
+  ok_ids: string[];
+  warn_ids: string[];
+  fail_ids: string[];
+  pending_ids: string[];
+  degraded: HealthDegradedItem[];
+  events: HealthEvent[];
+}
+
+// ── P2.4 · 历史快照回放 ──────────────────────────
+
+export interface ReplayListItem {
+  ts: number;
+  coin: string;
+  price_at_capture: number;
+  ai_analysis_brief: string;
+  has_plan: boolean;
+  has_ai_report: boolean;
+  has_final: boolean;
+}
+
+export interface ReplayFrame {
+  ts: number;
+  coin: string;
+  price_at_capture: number;
+  ai_analysis_brief: string;
+  snapshot: Record<string, unknown>;
+  execution_plan: Record<string, unknown> | null;
+  ai_trader_report: Record<string, unknown> | null;
+  final_decision: Record<string, unknown> | null;
+}
+
+export interface ReplayListResponse {
+  ready: boolean;
+  count: number;
+  items: ReplayListItem[];
+  error?: string;
+}
+
+export interface ReplayFrameResponse {
+  ready: boolean;
+  frame: ReplayFrame;
+  error?: string;
 }

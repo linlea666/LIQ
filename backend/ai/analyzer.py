@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Optional
@@ -195,6 +196,9 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
                 rr=sp.rr, source="engine", logic=sp.logic,
             ))
 
+    # P1.7：提取附录中的结构化 JSON（若模型按新 prompt 产出）
+    matrix_json = _extract_matrix_json(raw_text)
+
     return AIAnalysisResult(
         coin=snapshot.coin,
         ts=int(time.time()),
@@ -214,7 +218,78 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         data_quality_feedback=_find_section("数据质量", "自检", "Data Quality"),
         raw_text=raw_text,
         user_prompt=user_prompt,
+        ai_matrix_json=matrix_json,
     )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# P1.7 · AITRADER_MATRIX_JSON 提取
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 匹配 ```AITRADER_MATRIX_JSON ... ``` 代码块
+# 宽容处理：标签大小写不敏感、允许空白和换行、允许 json/JSON 作为语言标记兜底
+_MATRIX_BLOCK_PATTERNS = [
+    re.compile(
+        r"```\s*AITRADER[_\s-]*MATRIX[_\s-]*JSON\s*\n(.*?)\n```",
+        re.DOTALL | re.IGNORECASE,
+    ),
+    # 兜底：若模型忘记标签，取最后一个 ```json ... ``` 块尝试解析
+    re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE),
+]
+
+
+def _extract_matrix_json(raw_text: str) -> Optional[dict]:
+    """从 AI 原始输出中提取 AITRADER_MATRIX_JSON 附录。
+
+    策略：
+      1. 优先匹配 `AITRADER_MATRIX_JSON` 语言标签（强信号）
+      2. 若无，尝试最后一个 `json` 标签块，且必须能解析为 dict 且含 "sections" 键
+      3. 任何解析异常 → 返回 None（下游 builder 自动回退规则路径）
+
+    不在此处做 schema 严格校验（留给 trader_report_builder 宽容处理），
+    只保证"能 json.loads 成 dict"这条底线。
+    """
+    if not raw_text:
+        return None
+
+    for pat in _MATRIX_BLOCK_PATTERNS:
+        matches = pat.findall(raw_text)
+        for block in reversed(matches):  # 取最后一个（正文之后的附录）
+            payload = _try_parse_json_block(block)
+            if payload is None:
+                continue
+            # 兜底 json 块必须显式含 sections 才算 matrix，避免误认其他 json
+            if pat is _MATRIX_BLOCK_PATTERNS[1] and "sections" not in payload:
+                continue
+            return payload
+    return None
+
+
+def _try_parse_json_block(block: str) -> Optional[dict]:
+    """尝试把一个 JSON 代码块文本解析为 dict。
+
+    容错处理：
+      - 去除可能残留的行内注释 `// ...`
+      - 去除尾随逗号 `, }` / `, ]`
+      - 仅接受顶层为 dict 的 payload
+    """
+    text = (block or "").strip()
+    if not text:
+        return None
+
+    # 去行内 // 注释（仅行首/空格后的 //，避免误伤 URL）
+    text = re.sub(r"(^|\s)//[^\n]*", "", text)
+    # 去尾随逗号
+    text = re.sub(r",(\s*[}\]])", r"\1", text)
+
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def _parse_signal_summary(text: str) -> SignalSummary | None:

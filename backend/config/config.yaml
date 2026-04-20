@@ -138,6 +138,31 @@ ai:
       api_base: "https://api.deepseek.com"
       env_key: "DEEPSEEK_API_KEY"
 
+  # D12 · 新闻智能 Agent（共享 DEEPSEEK_API_KEY，独立轻量 chat 模型）
+  # 负责 Layer 2 AI 结构化 + Layer 3c 滚动简报
+  # 与主 AI (reasoner) 并行运行，互不阻塞
+  news_agent:
+    model: "deepseek-chat"
+    timeout_sec: 60
+    max_retries: 2
+    temperature: 0.2
+    max_tokens_structurer: 2500  # Layer 2 结构化单批预算
+    max_tokens_brief: 1800       # Layer 3c 简报预算
+    batch_size_blackswan: 1      # 黑天鹅单条单发
+    batch_size_major: 3
+    batch_size_normal: 5
+    # api_base / env_key 默认沿用 providers.deepseek，可通过下面两项显式覆盖
+    api_base: ""   # 空=复用 providers.deepseek.api_base
+    env_key: ""    # 空=复用 providers.deepseek.env_key
+    # ── P1.2b · 编排循环节律 ──
+    fetch_interval_sec: 600          # 新闻源拉取 + 滤波 + 结构化（10 分钟一跳）
+    brief_interval_sec: 3600         # Rolling Brief 周期重写（1 小时）
+    backfill_interval_sec: 900       # 价格回填扫描（15 分钟）
+    decay_interval_sec: 1800         # Narrative / Geo 衰减（30 分钟）
+    ledger_max_events: 500           # 滚动账本最大条目
+    ledger_max_age_sec: 172800       # 滚动账本最长保留 48h
+    blackswan_rewrite_brief: true    # 黑天鹅立即重写简报
+
 push:
   ticker_interval_ms: 1000
   factor_cards_interval_ms: 5000

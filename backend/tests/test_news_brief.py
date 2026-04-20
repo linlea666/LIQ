@@ -1,0 +1,361 @@
+"""D09 news_brief 单测（mock analyzer）"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+
+import pytest
+
+from models.geo_risk import GeoRiskOverview
+from models.narrative import NarrativeTheme
+from models.news_brief import NewsBrief, NewsBriefSection
+from models.news_event import (
+    AssetImpact, EnrichedNewsEvent, MarketEventSignal, RawNewsItem,
+)
+from processors.news_brief import (
+    generate_brief, get_current_brief, reset_current_brief, set_current_brief,
+    _normalize_sections, _parse_brief_response, _extract_json_object,
+    _diff_briefs, _bullet_lines,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset():
+    reset_current_brief()
+    yield
+    reset_current_brief()
+
+
+# ── 测试辅助 ──
+
+class MockAnalyzer:
+    def __init__(self, responses=None, raise_on_call=0):
+        self.responses = list(responses or [])
+        self.calls = []
+        self.raise_on_call = raise_on_call
+        self._count = 0
+
+    async def call_chat(self, *, system_prompt, user_prompt, temperature=0.2, max_tokens=1500):
+        self._count += 1
+        self.calls.append({"system": system_prompt, "user": user_prompt, "max_tokens": max_tokens})
+        if self.raise_on_call and self._count == self.raise_on_call:
+            raise RuntimeError("mock brief failure")
+        text = self.responses.pop(0) if self.responses else "{}"
+        return text, {"tokens": 400, "latency_ms": 80, "model": "deepseek-chat"}
+
+
+def _enriched(
+    event_id: str = "e1",
+    ts: int = None,
+    direction: str = "bullish",
+    tier: str = "normal",
+    theme: str = "Fed_Rate_Policy",
+    impact: int = 3,
+    summary: str = "利好",
+) -> EnrichedNewsEvent:
+    ts = ts or int(time.time())
+    return EnrichedNewsEvent(
+        raw=RawNewsItem(
+            source_type="okx",
+            source_author="BlockBeats",
+            source_reliability=0.9,
+            external_id=event_id,
+            publish_time=ts * 1000,
+            fetch_time=ts,
+            title=summary,
+            content="...",
+            lang="zh",
+        ),
+        structured=MarketEventSignal(
+            event_id=event_id,
+            ts=ts,
+            expires_at=ts + 86400,
+            target="BTC",
+            direction=direction,
+            first_order_impact=summary,
+            impact_score=impact,
+            confidence=0.8,
+            horizon="short",
+            narrative_theme=theme,
+            risk_type="macro_economic",
+            tier=tier,
+            summary_cn=summary,
+            impact_on_assets=[AssetImpact(asset="BTC", direction=direction, magnitude="medium")],
+        ),
+    )
+
+
+def _theme(theme_id: str = "Fed_Rate_Policy", name: str = "Fed 政策") -> NarrativeTheme:
+    now = int(time.time())
+    return NarrativeTheme(
+        theme_id=theme_id,
+        theme_name_cn=name,
+        category="macro_policy",
+        first_seen_ts=now - 3600,
+        last_seen_ts=now - 100,
+        event_count_24h=3,
+        flip_flop_count_24h=1,
+        current_direction_bias="bullish",
+        current_intensity=3,
+        trend="active",
+    )
+
+
+def _geo_overview(level: int = 2) -> GeoRiskOverview:
+    return GeoRiskOverview(
+        ts=int(time.time()),
+        overall_level=level,
+        overall_label="TENSION" if level == 2 else "PEACE",
+        overall_emoji="🟠" if level == 2 else "🟢",
+        overall_summary_cn="全球风险中等",
+        active_themes=[],
+    )
+
+
+def _brief_json(**overrides) -> str:
+    obj = {
+        "tldr_cn": "宏观偏多，地缘中等",
+        "sections": [
+            {"section_id": "macro", "section_title_cn": "宏观", "bullets": ["美联储降息预期升温", "CPI 温和"]},
+            {"section_id": "regulatory", "section_title_cn": "监管", "bullets": ["SEC 批准新 ETF"]},
+            {"section_id": "onchain", "section_title_cn": "链上", "bullets": []},
+            {"section_id": "risk", "section_title_cn": "风险", "bullets": ["中东局势紧张"]},
+        ],
+        "tracked_themes": [
+            {
+                "theme_id": "Fed_Rate_Policy",
+                "theme_name_cn": "Fed 政策",
+                "current_stance_cn": "偏多",
+                "flip_flop_count_24h": 1,
+                "relevance_score": 0.8,
+            }
+        ],
+    }
+    obj.update(overrides)
+    return json.dumps(obj, ensure_ascii=False)
+
+
+# ── 单测 ──
+
+def test_generate_full_brief_first_time():
+    events = [_enriched("e1"), _enriched("e2", direction="bearish", summary="利空")]
+    themes = [_theme()]
+    geo = _geo_overview(level=2)
+    analyzer = MockAnalyzer(responses=[_brief_json()])
+    brief = asyncio.run(generate_brief(
+        events_24h=events, themes=themes, geo_overview=geo,
+        prev_brief=None, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert brief.version == 1
+    assert brief.based_on_events_count == 2
+    assert brief.tldr_cn == "宏观偏多，地缘中等"
+    assert len(brief.sections) == 4
+    macro = next(s for s in brief.sections if s.section_id == "macro")
+    assert len(macro.bullets) == 2
+    assert brief.char_count > 0
+    assert brief.token_estimate > 0
+    assert brief.update_trigger == "scheduled"
+    assert brief.diff_from_prev_version == ""  # 无 prev → 空
+
+
+def test_blackswan_forces_full_rewrite():
+    """有 prev_brief 但 trigger=blackswan 时 → 走 full prompt"""
+    prev = NewsBrief(
+        version=3, updated_at=int(time.time()) - 600,
+        tldr_cn="旧简报",
+        sections=_normalize_sections(None),
+        based_on_events_count=5,
+    )
+    set_current_brief(prev)
+    analyzer = MockAnalyzer(responses=[_brief_json(tldr_cn="新简报·黑天鹅")])
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e99", tier="blackswan", direction="bearish")],
+        themes=[_theme()],
+        geo_overview=_geo_overview(level=4),
+        prev_brief=prev,
+        analyzer=analyzer,
+        trigger="blackswan",
+    ))
+    assert brief.version == 4
+    assert brief.update_trigger == "blackswan"
+    assert brief.tldr_cn == "新简报·黑天鹅"
+    # 调用的 prompt 不应含 "旧简报" 相关 incremental 特征
+    user_prompt = analyzer.calls[0]["user"]
+    assert "过去 24h 结构化事件" in user_prompt  # full prompt 标记
+
+
+def test_incremental_selects_only_new_events():
+    now = int(time.time())
+    prev = NewsBrief(
+        version=2, updated_at=now - 1000, tldr_cn="旧",
+        sections=_normalize_sections(None), based_on_events_count=2,
+    )
+    # 老事件 (< prev.updated_at) + 新事件 (> prev.updated_at)
+    old_ev = _enriched("e_old", ts=now - 2000)
+    new_ev = _enriched("e_new", ts=now - 500)
+    analyzer = MockAnalyzer(responses=[_brief_json(tldr_cn="增量合并")])
+    brief = asyncio.run(generate_brief(
+        events_24h=[old_ev, new_ev],
+        themes=[_theme()], geo_overview=_geo_overview(),
+        prev_brief=prev, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert brief.version == 3
+    assert brief.update_trigger == "scheduled"
+    # 增量 prompt 标志
+    user_prompt = analyzer.calls[0]["user"]
+    assert "旧简报" in user_prompt or "【旧简报" in user_prompt
+    assert "e_new" in user_prompt
+    # old_ev 不应出现在新增事件部分
+    assert user_prompt.count("e_old") == 0
+
+
+def test_diff_generated_when_prev_exists():
+    now = int(time.time())
+    prev = NewsBrief(
+        version=1, updated_at=now - 1000, tldr_cn="旧 tldr",
+        sections=[
+            NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["旧条目"]),
+            NewsBriefSection(section_id="regulatory", section_title_cn="监管", bullets=[]),
+            NewsBriefSection(section_id="onchain", section_title_cn="链上", bullets=[]),
+            NewsBriefSection(section_id="risk", section_title_cn="风险", bullets=[]),
+        ],
+        based_on_events_count=1,
+    )
+    analyzer = MockAnalyzer(responses=[_brief_json(tldr_cn="全新 tldr")])
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e1")],
+        themes=[_theme()], geo_overview=_geo_overview(),
+        prev_brief=prev, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert brief.diff_from_prev_version != ""
+    # diff 应包含 tldr 变化
+    assert "旧 tldr" in brief.diff_from_prev_version or "全新 tldr" in brief.diff_from_prev_version
+
+
+def test_analyzer_failure_uses_fallback():
+    prev = NewsBrief(
+        version=5, updated_at=int(time.time()) - 100, tldr_cn="保留旧",
+        sections=_normalize_sections(None), based_on_events_count=3,
+        model_used="prev_model",
+    )
+    analyzer = MockAnalyzer(responses=[], raise_on_call=1)
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e1")],
+        themes=[_theme()], geo_overview=_geo_overview(),
+        prev_brief=prev, analyzer=analyzer, trigger="scheduled",
+    ))
+    # 版本仍然推进
+    assert brief.version == 6
+    assert "AI 失败" in brief.tldr_cn
+    assert brief.model_used == "fallback"
+
+
+def test_first_time_analyzer_failure_returns_placeholder():
+    analyzer = MockAnalyzer(responses=[], raise_on_call=1)
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e1")],
+        themes=[], geo_overview=_geo_overview(),
+        prev_brief=None, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert brief.version == 1
+    assert brief.model_used == "fallback"
+    assert "首次生成失败" in brief.tldr_cn
+
+
+def test_sections_always_4_in_order():
+    # AI 只返回 2 个板块 → 其余自动补全为空
+    partial_json = json.dumps({
+        "tldr_cn": "test",
+        "sections": [
+            {"section_id": "macro", "section_title_cn": "宏观", "bullets": ["x"]},
+            {"section_id": "risk", "section_title_cn": "风险", "bullets": ["y"]},
+        ],
+        "tracked_themes": [],
+    })
+    analyzer = MockAnalyzer(responses=[partial_json])
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e1")],
+        themes=[], geo_overview=_geo_overview(),
+        prev_brief=None, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert [s.section_id for s in brief.sections] == ["macro", "regulatory", "onchain", "risk"]
+    assert len(next(s for s in brief.sections if s.section_id == "macro").bullets) == 1
+    assert len(next(s for s in brief.sections if s.section_id == "regulatory").bullets) == 0
+
+
+def test_extract_json_object_robust():
+    assert _extract_json_object('{"a":1}') == {"a": 1}
+    assert _extract_json_object('```json\n{"b":2}\n```') == {"b": 2}
+    assert _extract_json_object('random text {"c":3} trail') == {"c": 3}
+    assert _extract_json_object("not json at all") == {}
+    assert _extract_json_object("") == {}
+
+
+def test_parse_brief_response_clamps_relevance():
+    raw = json.dumps({
+        "tldr_cn": "",
+        "sections": [],
+        "tracked_themes": [
+            {"theme_id": "x", "relevance_score": 5.0},  # 超界
+            {"theme_id": "y", "relevance_score": -1.0},
+        ],
+    })
+    b = _parse_brief_response(raw, base_events_count=0, trigger="scheduled")
+    scores = {t.theme_id: t.relevance_score for t in b.tracked_themes}
+    assert scores["x"] == 1.0
+    assert scores["y"] == 0.0
+
+
+def test_current_brief_singleton():
+    assert get_current_brief() is None
+    b = NewsBrief(version=1, tldr_cn="x", updated_at=int(time.time()))
+    set_current_brief(b)
+    got = get_current_brief()
+    assert got is not None and got.tldr_cn == "x"
+
+
+def test_max_chars_shrink_pass_triggers_second_call():
+    """生成的 brief 字符数超过 max_chars 时应触发第二次 shrink 调用"""
+    # 生成一个巨大的首轮 brief（100 条 bullets）
+    huge_bullets = [f"要点{i}" * 20 for i in range(100)]  # 故意超大
+    big_json = json.dumps({
+        "tldr_cn": "t",
+        "sections": [
+            {"section_id": "macro", "section_title_cn": "宏观", "bullets": huge_bullets},
+            {"section_id": "regulatory", "section_title_cn": "监管", "bullets": []},
+            {"section_id": "onchain", "section_title_cn": "链上", "bullets": []},
+            {"section_id": "risk", "section_title_cn": "风险", "bullets": []},
+        ],
+        "tracked_themes": [],
+    })
+    small_json = _brief_json(tldr_cn="已精简")
+
+    analyzer = MockAnalyzer(responses=[big_json, small_json])
+    brief = asyncio.run(generate_brief(
+        events_24h=[_enriched("e1")],
+        themes=[], geo_overview=_geo_overview(),
+        prev_brief=None, analyzer=analyzer, trigger="scheduled",
+        max_chars=800,
+    ))
+    # 两次调用都发生了
+    assert len(analyzer.calls) == 2
+    # 第二次 shrink 后结果应远小于第一次
+    assert brief.tldr_cn == "已精简"
+
+
+def test_bullet_lines_diff():
+    b1 = NewsBrief(
+        version=1, updated_at=0, tldr_cn="A",
+        sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["x", "y"])],
+    )
+    b2 = NewsBrief(
+        version=2, updated_at=0, tldr_cn="B",
+        sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["x", "z"])],
+    )
+    lines1 = _bullet_lines(b1)
+    lines2 = _bullet_lines(b2)
+    assert lines1 != lines2
+    d = _diff_briefs(b1, b2)
+    assert d != ""

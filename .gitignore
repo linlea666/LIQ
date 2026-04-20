@@ -14,3 +14,13 @@ backend/data/api_cache.json
 backend/data/api_cache.json.tmp
 backend/data/ai_history.json
 backend/data/ai_history.json.tmp
+# 运行时生成数据（P1/P2）
+backend/data/news_ledger.json
+backend/data/signal_pnl.json
+backend/data/signal_pnl_archive.jsonl
+backend/data/divergence_store.json
+backend/data/ai_quality_ledger.json
+backend/data/plan_backtest.json
+backend/data/replay/
+# 本地 Cursor MCP 配置（机器相关绝对路径）
+.cursor/mcp.json

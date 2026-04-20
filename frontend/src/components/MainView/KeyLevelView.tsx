@@ -14,6 +14,8 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import StrongLevelsCard from "./StrongLevelsCard";
 import MarketStructureBadge from "./MarketStructureBadge";
+import ExecutionPlanCard from "./ExecutionPlanCard";
+import FinalDecisionCard from "./FinalDecisionCard";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -68,6 +70,10 @@ export default function KeyLevelView() {
   return (
     <div className="space-y-4 max-w-4xl">
       <MarketStructureBadge />
+      {/* P1.4 · L7.5 双引擎融合最终决策（置顶，代表对外最终结论） */}
+      <FinalDecisionCard coin={coin} />
+      {/* D06 · 数学引擎 L4 执行计划（红绿灯 + 仓位 + 一句话） */}
+      <ExecutionPlanCard coin={coin} />
       <StructureSummary kl={kl} coin={coin} />
       <BacktestStatsCard coin={coin} />
       <KLHistoryLinks coin={coin} />

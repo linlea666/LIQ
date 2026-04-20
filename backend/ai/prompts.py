@@ -236,9 +236,151 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
   - **TP2 = 远目标（吃满点）**：强制 ≥ 1:{min_rr:.1f} 的终极目标，离入场价**远**
   - 若出现 TP1 比 TP2 更远（价格上），一律判定为引擎数据异常，**严禁**原样输出到§四方案，应在§八「数据冲突」里标注并舍弃该方案
   - R:R ≥ 1:{min_rr:.1f} 的硬约束**以 TP2 为准**（TP2 是负责兜底 R:R 的远目标）
+
+---
+
+## 附录：结构化 JSON 输出（必填）
+
+在 markdown 正文**全部输出完毕后**，追加一个独立代码块，标签恰好为 `AITRADER_MATRIX_JSON`。
+**这是系统解析字段，不是展示内容**。JSON **必须**能被 `json.loads` 直接解析（禁止注释、禁止尾随逗号、字符串用双引号）。
+若某字段实在无数据，用 `null` 或空字符串占位，**不要省略键**。
+
+```AITRADER_MATRIX_JSON
+{{
+  "bias": "bullish | bearish | neutral | potential_reversal",
+  "conviction": 0-100,
+  "matrix_summary_cn": "一句话：当前是 xxx 局面，关键变量是 xxx",
+  "sections": [
+    {{
+      "section_id": "A",
+      "section_name_cn": "宏观联动",
+      "section_emoji": "🌐",
+      "section_bias": "bullish | bearish | neutral",
+      "section_summary_cn": "该板块结论一句话，必须跨 ≥2 维推理得出",
+      "rows": [
+        {{
+          "dimension": "DXY",
+          "signal_cn": "用人话写：DXY 98.2 回落 0.3% · 利好 risk-on 资产",
+          "direction": "bullish | bearish | neutral",
+          "resonance": "high | medium | low"
+        }}
+      ]
+    }}
+    // B·资金流 / C·衍生品 / D·技术面 / E·新闻叙事 / F·地缘风险 / G·双引擎共识 依次补齐
+  ],
+  "trading_plans": [
+    {{
+      "priority": 1,
+      "direction": "long | short | wait",
+      "entry_low": 72300.0,
+      "entry_high": 72450.0,
+      "stop_loss": 71400.0,
+      "tp1": 73800.0,
+      "tp2": 75200.0,
+      "rr_ratio": 2.4,
+      "conviction": 72,
+      "tier_hint": "A | B | C",
+      "position_suggestion_pct": 30,
+      "trigger_condition": "价格回踩 §9g 支撑 72300 + 1h CHoCH 确认",
+      "invalidation": "跌破 71400 即立即止损",
+      "reason": "80 字内核心理由，跨维度推理"
+    }}
+    // 最多 3 个：priority=1 主 / priority=2,3 备选；确实无机会则返回 [] 空数组
+  ],
+  "key_risks": [
+    "用人话列出 1-3 条具体风险（如：'71,800 簇密集，止损设 71,400 也可能滑点'）"
+  ]
+}}
+```
+
+**填写约束**：
+- `sections` 必须恰好 7 个，`section_id` 依次 `A/B/C/D/E/F/G`
+- `rows` 每个板块 **≥1 条**；单行 `signal_cn` ≤ 60 字；`direction` 必须是三选一枚举值之一
+- `resonance` 反映"这个单维信号在当前全局上的确信强度"：
+  - `high` = 与 ≥2 维共振、数据源可信度 L1/L2
+  - `medium` = 中性偏向、L3 级别或有冲突
+  - `low` = 单维单薄、疑似异常值、L5 或未提供
+- `section_bias`/`bias` 与 §一叙事链、§四交易计划保持**严格一致**（出现反向即系统判为内部矛盾）
+- `conviction` 与 §一 `置信度：高/中/低` 对齐：高=75-90、中=55-75、低=30-55；观望=40 以下
+- G · 双引擎共识：rows 至少 2 条（"数学引擎" + "AI Trader"），direction 反映对齐状态
+- `trading_plans`（**必填数组，≤3 条**）：
+  - 与 §四交易计划表**严格一致**（数值、方向、止损、R:R）
+  - `direction="wait"` 时，价格字段用 `null`
+  - `rr_ratio` 以 TP2 为准，须 ≥ 1:{min_rr:.1f}
+  - **冲突处理**：若 §四某档无合法方案，对应 priority 条目省略；若全部无方案，返回 `[]`
+  - 这是系统下单参考的"权威源"，规则层只在 JSON 缺失或非法时兜底
+- `key_risks`（**可选数组**，≤5 条）：与 §五相比，此处用更具体的措辞（含具体价位/数值），供系统直接在前端展示
+
+**禁止**：
+- ❌ 在此代码块之外写任何 JSON（会导致解析歧义）
+- ❌ 把 markdown 的所有细节复制进 JSON（只提取"方向判断"元信息，不要把 §二价位/§四价格塞进 JSON）
+- ❌ `section_summary_cn` 里直接抄"A 板块"/"B 板块"这种标签——必须是有推理的一句话
 """
 
 
+
+
+def _append_news_context(lines: list[str], snapshot: dict) -> None:
+    """在 user prompt 末尾追加「新闻情报」板块（有值才追加，向后兼容）。
+
+    来源：news_agent 每小时/黑天鹅触发生成的 Rolling Brief + GeoRisk Overview。
+    目的：把 24h 叙事"记忆"注入主 AI，避免每次重头消化原始新闻。
+    """
+    brief_text = (snapshot.get("news_brief_text") or "").strip()
+    geo = snapshot.get("geo_overview") or {}
+    active_narr = snapshot.get("active_narratives") or []
+
+    if not brief_text and not geo and not active_narr:
+        return
+
+    lines.append("")
+    lines.append("### 13. 新闻情报（24h 滚动 · 新闻 Agent 产出）")
+
+    if brief_text:
+        version = snapshot.get("news_brief_version") or 0
+        trigger = snapshot.get("news_brief_trigger") or "scheduled"
+        updated = snapshot.get("news_brief_updated_at") or 0
+        lines.append(
+            f"- Rolling Brief v{version} trigger={trigger} updated_at={updated}"
+        )
+        # brief 本身是结构化 JSON 文本；直接贴给 AI（≤3000 字符由 news_brief 层保证）
+        lines.append("```json")
+        lines.append(brief_text[:3200])
+        lines.append("```")
+
+    if geo:
+        lvl = int(geo.get("overall_level", 0) or 0)
+        label = geo.get("overall_label", "PEACE")
+        emoji = geo.get("overall_emoji", "🟢")
+        summary = geo.get("overall_summary_cn", "")
+        lines.append(
+            f"- 地缘全局：{emoji} {label} · level={lvl}/5 · "
+            f"escalation_24h={geo.get('escalation_count_24h', 0)} "
+            f"blackswan_24h={bool(geo.get('has_blackswan_24h', False))}"
+        )
+        if summary:
+            lines.append(f"  摘要：{summary[:80]}")
+        if geo.get("suggest_safety_gate_block"):
+            lines.append("  ⚠ SafetyGate 建议阻断新开仓")
+        cap = geo.get("suggest_position_cap_pct")
+        if cap is not None:
+            lines.append(f"  ⚠ 建议仓位上限 {cap}%")
+
+    if active_narr:
+        lines.append("- 活跃叙事主题（≤5）：")
+        for t in active_narr[:5]:
+            ff = int(t.get("flip_flop_count_24h", 0) or 0)
+            ff_flag = f" ⚠反复{ff}次" if ff >= 2 else ""
+            lines.append(
+                f"  - {t.get('theme_id', '?')} ({t.get('theme_name_cn', '')}): "
+                f"bias={t.get('current_direction_bias', 'neutral')} "
+                f"intensity={t.get('current_intensity', 0)}/5{ff_flag}"
+            )
+
+    lines.append(
+        "- 【使用规则】§一须纳入新闻叙事大方向；§四若与新闻强烈冲突须给出理由；"
+        "flip-flop 主题权重减半；geo level≥4 时禁止新开仓。"
+    )
 
 
 def build_user_prompt(snapshot: dict) -> str:
@@ -1360,6 +1502,9 @@ def build_user_prompt(snapshot: dict) -> str:
                 )
                 for w in sig.get("warnings", []):
                     lines.append(f"    ⚠ {w}")
+
+    # ── P1.2b · 新闻简报 + 地缘 + 活跃叙事（有值才追加） ──
+    _append_news_context(lines, snapshot)
 
     lines.append("")
     lines.append("请基于以上数据输出，**必须包含八个章节**（一~八），第四节「交易计划」按三档结构输出（短线/中线/远线），第八节「数据质量与自检」对输入数据做诊断。")

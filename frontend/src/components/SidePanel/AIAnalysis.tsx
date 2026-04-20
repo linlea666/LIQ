@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useMarketStore } from "@/stores/marketStore";
 import { formatTime } from "@/lib/format";
+import AITraderMatrixCard from "@/components/MainView/AITraderMatrixCard";
 
 function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
@@ -65,6 +66,9 @@ export default function AIAnalysis() {
 
         {aiResult && !aiLoading && (
           <div className="space-y-4">
+            {/* P1.4 · AI 交易员完整看盘表（7 板块 + 交易计划 + 关键位解读） */}
+            <AITraderMatrixCard coin={coin} />
+
             <div className="flex items-center justify-between">
               <div className="text-xs text-slate-500">
                 分析时间: {formatTime(aiResult.ts)} | 价格: ${aiResult.price_at_analysis.toLocaleString()}

@@ -36,7 +36,10 @@ _DEFAULT_CFG: dict = {
     "level_expire_sec": 86400,
     "sweep_proximity_pct": 2.0,
     "cascade_weight_cap_m": 20.0,
-    "cascade_norm": 50.0,
+    # cascade_norm 作为 risk_score 的归一化分母：值越大 → cascade_risk 越小
+    # 经验校准：120.0 下多数 BTC 关键位的 cascade_risk 落在 0-0.6 区间（健康范围）
+    # 用户可通过 config.yaml 覆盖（历史值 600 也有效，会进一步降低 risk 数值）
+    "cascade_norm": 120.0,
     "signal_expire_sec": 14400,  # 4H
     # ── Commit 4：质量标注（博主方法论）──
     "bounce_vol_proactive_mult": 1.5,   # 主动吸筹的量能倍率（>= 近20根均量的 1.5×）
@@ -127,7 +130,52 @@ def run_tracker_v2(
 
     snapshot.signals = signals
     snapshot.active_count = sum(1 for lv in snapshot.levels if lv.state != "idle")
+
+    # ── D05 · cascade_risk 修复落实追踪 ──
+    _report_cascade_health(snapshot, cfg)
+
     return snapshot
+
+
+def _report_cascade_health(snapshot: KeyLevelSnapshotV2, cfg: dict) -> None:
+    """D05：采样当前 tracker 产出中 A 级信号的 cascade_risk 分布并上报。
+
+    目的：
+      修复前（双重计数）：几乎所有 A 级信号 cascade_risk>60% 概率 >60%
+      修复后（移除 barrier 贡献）：同一数据下 A 级信号占比会降低，
+                                    且剩下的 A 级 cascade>60% 占比应显著下降
+    失败不影响主流程（tracker 内部已兜底）。
+    """
+    try:
+        from utils.decision_tracker import D, get_tracker
+
+        a_signals = [s for s in snapshot.signals if s.confidence == "A"]
+        a_total = len(a_signals)
+        a_cascade_gt60 = 0
+        if a_total > 0:
+            # 信号本身不带 cascade_risk，需从 levels 反查
+            price_to_lv = {lv.price: lv for lv in snapshot.levels}
+            for s in a_signals:
+                lv = price_to_lv.get(s.level_price)
+                if lv and lv.cascade_risk >= 0.6:
+                    a_cascade_gt60 += 1
+
+        barrier_max = max((lv.barrier_score for lv in snapshot.levels), default=0.0)
+        cfg_cascade_norm = float(cfg.get("cascade_norm", 120.0))
+        user_override = cfg_cascade_norm != 120.0
+
+        get_tracker().mark(
+            D.D05_CASCADE_FIX,
+            status="ok",
+            cfg_cascade_norm=cfg_cascade_norm,
+            user_override=user_override,
+            a_tier_count=a_total,
+            a_tier_cascade_gt60=a_cascade_gt60,
+            a_tier_cascade_gt60_pct=(a_cascade_gt60 / a_total) if a_total else 0.0,
+            barrier_max=barrier_max,
+        )
+    except Exception as e:  # noqa: BLE001 — tracker 不影响主流程
+        logger.debug("D05 cascade health report failed: %s", e)
 
 
 def _calc_atr_factor(atr: float, price: float) -> float:
@@ -434,7 +482,8 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
     lv.cascade_total_usd = sum(c.total_usd for c in clusters[:5])
 
     weight_cap = cfg.get("cascade_weight_cap_m", 20.0)
-    norm = cfg.get("cascade_norm", 200.0)
+    # fallback 与 _DEFAULT_CFG 保持一致（避免 cfg 丢失该键时出现 4x 偏差）
+    norm = cfg.get("cascade_norm", 120.0)
     risk_score = 0.0
     prev_price = lv.price
     for c in clusters[:5]:

@@ -281,6 +281,14 @@ class AISnapshot(BaseModel):
     td_sequential_direction: str = ""
     poll_failures: dict[str, str] = {}
 
+    # ── P1.2b · 新闻与地缘注入（optional；AI prompt 在有值时追加板块） ──
+    news_brief_text: str = ""                  # Rolling 简报文本（≤3000 chars）
+    news_brief_version: int = 0
+    news_brief_trigger: str = ""               # "scheduled" / "blackswan" / "user"
+    news_brief_updated_at: Optional[int] = None
+    geo_overview: Optional[dict] = None        # GeoRiskOverview.model_dump() 精简版
+    active_narratives: list[dict] = []          # [{theme_id, name_cn, direction, intensity, flip_flop_24h}]
+
 
 class SignalSummary(BaseModel):
     """AI 一句话结论的结构化表达"""
@@ -317,7 +325,7 @@ class TradingPlanEntry(BaseModel):
 
 
 class BacktestStats(BaseModel):
-    """轻量级回测统计摘要"""
+    """轻量级回测统计摘要（前置声明，供 AISnapshot 引用）"""
     coin: str = ""
     ts: int = 0
     total_signals: int = 0
@@ -353,3 +361,8 @@ class AIAnalysisResult(BaseModel):
     data_quality_feedback: str = ""
     raw_text: str
     user_prompt: str = ""
+
+    # P1.7 · Prompt 升级附录：AI 产出的结构化 Factor Matrix / bias / conviction 等
+    # 与 markdown 正文配对输出，供 trader_report_builder 优先采用；
+    # 缺失或非法时 builder 自动回退到规则推断（零破坏）
+    ai_matrix_json: Optional[dict] = None
