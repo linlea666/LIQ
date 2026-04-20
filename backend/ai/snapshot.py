@@ -410,23 +410,36 @@ def _collect_news_context() -> dict:
         from processors.news_brief import get_current_brief
         brief = get_current_brief()
         if brief is not None:
-            import json as _json
-            payload = brief.model_dump(mode="json")
-            # 精简 json 字段：sections + themes + coverage
-            keep = {
-                "version": payload.get("version"),
-                "ts_range_start": payload.get("ts_range_start"),
-                "ts_range_end": payload.get("ts_range_end"),
-                "update_trigger": payload.get("update_trigger"),
-                "tldr_cn": payload.get("tldr_cn") or "",
-                "sections": payload.get("sections") or [],
-                "tracked_themes": payload.get("tracked_themes") or [],
-                "diff_from_prev_version": payload.get("diff_from_prev_version") or "",
-            }
-            ctx["news_brief_text"] = _json.dumps(keep, ensure_ascii=False, separators=(",", ":"))
-            ctx["news_brief_version"] = int(payload.get("version") or 0)
-            ctx["news_brief_trigger"] = str(payload.get("update_trigger") or "")
-            ctx["news_brief_updated_at"] = int(payload.get("updated_at") or 0) or None
+            # ─────────────────────────────────────────────────────────────
+            # P0-3 · events=0 熔断：当简报没有任何真实事件支撑时
+            #   不注入 news_brief_text 到主 AI prompt（防止虚构新闻污染决策）
+            #   仍保留 version / trigger / updated_at 作为元数据，便于前端展示
+            # ─────────────────────────────────────────────────────────────
+            based_on = int(getattr(brief, "based_on_events_count", 0) or 0)
+            if based_on <= 0:
+                ctx["news_brief_text"] = ""
+                ctx["news_brief_version"] = int(getattr(brief, "version", 0) or 0)
+                ctx["news_brief_trigger"] = str(getattr(brief, "update_trigger", "") or "")
+                ctx["news_brief_updated_at"] = int(getattr(brief, "updated_at", 0) or 0) or None
+            else:
+                import json as _json
+                payload = brief.model_dump(mode="json")
+                # 精简 json 字段：sections + themes + coverage
+                keep = {
+                    "version": payload.get("version"),
+                    "ts_range_start": payload.get("ts_range_start"),
+                    "ts_range_end": payload.get("ts_range_end"),
+                    "update_trigger": payload.get("update_trigger"),
+                    "based_on_events_count": based_on,
+                    "tldr_cn": payload.get("tldr_cn") or "",
+                    "sections": payload.get("sections") or [],
+                    "tracked_themes": payload.get("tracked_themes") or [],
+                    "diff_from_prev_version": payload.get("diff_from_prev_version") or "",
+                }
+                ctx["news_brief_text"] = _json.dumps(keep, ensure_ascii=False, separators=(",", ":"))
+                ctx["news_brief_version"] = int(payload.get("version") or 0)
+                ctx["news_brief_trigger"] = str(payload.get("update_trigger") or "")
+                ctx["news_brief_updated_at"] = int(payload.get("updated_at") or 0) or None
     except Exception:
         pass
 

@@ -1,9 +1,55 @@
-"""AI Prompt 模板管理（方案C：合规底座 + 狙击挂单硬交付 + 教练视角）"""
+"""AI Prompt 模板管理（方案C：合规底座 + 狙击挂单硬交付 + 教练视角）
+
+P1-4 · Prompt 模式切换（环境变量 LIQ_PROMPT_MODE）：
+    - ``strict``（默认，与历史完全一致）：保留全部"铁律/必须/严禁"硬约束
+    - ``heuristic`` / ``soft`` / ``coach``：在 system prompt 前置一段提示，
+      告诉 AI 把后续"铁律"视为启发原则，允许在证据充分时偏离；输出格式/
+      JSON 解析仍然强制。**只做前缀，原文 100% 保留** ——满足原则 6 可回退。
+"""
 
 from __future__ import annotations
 
+import logging
+import os
+
 from config.settings import get_settings
 from processors.level_discovery import fmt_usd_cn
+
+_logger = logging.getLogger(__name__)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Prompt 模式开关（P1-4）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_HEURISTIC_PREFIX = """【Prompt 模式：heuristic ·启发式教练模式】
+本次会话中，后续章节出现的"铁律 / 必须 / 严禁 / 绝不 / 禁止 / 不得"等词语，
+请理解为"经验上的强启发原则"，而非必须一票否决的硬规则。你是资深交易员，
+当证据链明显违反某条启发时，有权做出合理调整并说明理由（例如"本次破例原因：
+L1 资金面 + L3 结构 双共振，虽违背 §9i 1h 结构，但多维压过单维"）。
+
+**以下两类仍须严格遵守**（这些不是启发，是系统契约）：
+1. 输出格式章节：§一-§八的标题、表格结构、价格区间"小值-大值"排序
+2. 附录 JSON 代码块：`AITRADER_MATRIX_JSON` 块必须存在且能被 json.loads 解析
+
+以下开始正文——
+
+"""
+
+
+_VALID_HEURISTIC_MODES = {"heuristic", "soft", "coach"}
+_VALID_STRICT_MODES = {"strict", ""}
+
+
+def _get_prompt_mode() -> str:
+    raw = (os.getenv("LIQ_PROMPT_MODE") or "strict").strip().lower()
+    if raw in _VALID_HEURISTIC_MODES:
+        return "heuristic"
+    if raw not in _VALID_STRICT_MODES:
+        _logger.warning(
+            "LIQ_PROMPT_MODE=%r 不是合法值，回退至 strict（默认）", raw,
+        )
+    return "strict"
 
 
 def _fmt_usd_for_prompt(usd: float, signed: bool = False) -> str:
@@ -17,7 +63,19 @@ def _min_sniper_rr() -> float:
 
 
 def build_system_prompt() -> str:
-    """动态注入与配置一致的 R:R 下限，避免与规则引擎口径漂移。"""
+    """动态注入与配置一致的 R:R 下限，避免与规则引擎口径漂移。
+
+    P1-4：根据 LIQ_PROMPT_MODE 决定是否在前面追加 heuristic 前缀。
+    默认 strict（与历史完全一致），切到 heuristic 可观察 AI 是否更有主见。
+    """
+    core = _build_strict_system_prompt()
+    mode = _get_prompt_mode()
+    if mode == "heuristic":
+        return _HEURISTIC_PREFIX + core
+    return core
+
+
+def _build_strict_system_prompt() -> str:
     min_rr = _min_sniper_rr()
     return f"""你是一位管理$5亿级永续合约基金的实盘交易员兼教练，10年加密衍生品经验。你不是在写研报，你是在给即将下单的高杠杆交易员做最后的战前推演。
 

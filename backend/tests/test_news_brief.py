@@ -345,6 +345,88 @@ def test_max_chars_shrink_pass_triggers_second_call():
     assert brief.tldr_cn == "已精简"
 
 
+def test_generate_brief_circuit_break_when_events_empty():
+    """P0-3 · events=0 时必须熔断：绝不调 analyzer，绝不生成虚构内容。"""
+    analyzer = MockAnalyzer(responses=[_brief_json(tldr_cn="不应出现的文本")])
+    brief = asyncio.run(generate_brief(
+        events_24h=[],
+        themes=[_theme()],
+        geo_overview=_geo_overview(level=3),
+        prev_brief=None,
+        analyzer=analyzer,
+        trigger="scheduled",
+    ))
+    # analyzer 不应被调用
+    assert len(analyzer.calls) == 0
+    # brief 是空占位，based_on_events_count=0，tldr 留空
+    assert brief.based_on_events_count == 0
+    assert brief.tldr_cn == ""
+    assert brief.model_used == "skipped_no_events"
+    assert all(len(s.bullets) == 0 for s in brief.sections)
+
+
+def test_collect_news_context_skips_inject_when_events_zero():
+    """P0-3 · _collect_news_context 必须在 based_on_events=0 时 不 注入 brief_text。"""
+    from ai.snapshot import _collect_news_context
+
+    reset_current_brief()
+    brief = NewsBrief(
+        version=3, updated_at=int(time.time()), tldr_cn="本应不被注入",
+        sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["x"])],
+        based_on_events_count=0,
+        model_used="skipped_no_events",
+    )
+    set_current_brief(brief)
+    try:
+        ctx = _collect_news_context()
+        # 绝不把 tldr / sections 传给主 prompt
+        assert ctx["news_brief_text"] == ""
+        # 但元数据保留（前端可显示"本轮无事件"）
+        assert ctx["news_brief_version"] == 3
+    finally:
+        reset_current_brief()
+
+
+def test_collect_news_context_injects_when_events_present():
+    """P0-3 · 对照组：有事件支撑时 brief_text 必须正常注入。"""
+    from ai.snapshot import _collect_news_context
+
+    reset_current_brief()
+    brief = NewsBrief(
+        version=5, updated_at=int(time.time()), tldr_cn="有真实事件",
+        sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["x"])],
+        based_on_events_count=4,
+        model_used="deepseek-chat",
+    )
+    set_current_brief(brief)
+    try:
+        ctx = _collect_news_context()
+        assert ctx["news_brief_text"] != ""
+        assert "有真实事件" in ctx["news_brief_text"]
+        assert ctx["news_brief_version"] == 5
+    finally:
+        reset_current_brief()
+
+
+def test_generate_brief_circuit_break_preserves_version_chain():
+    """P0-3 · events=0 熔断不破坏 version 单调递增（防止前端卡死）。"""
+    prev = NewsBrief(
+        version=7, updated_at=int(time.time()) - 3600, tldr_cn="old",
+        sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["old bullet"])],
+        based_on_events_count=3,
+    )
+    analyzer = MockAnalyzer(responses=[])
+    brief = asyncio.run(generate_brief(
+        events_24h=[],
+        themes=[], geo_overview=_geo_overview(level=0),
+        prev_brief=prev, analyzer=analyzer, trigger="scheduled",
+    ))
+    assert brief.version == 8
+    assert brief.based_on_events_count == 0
+    assert brief.model_used == "skipped_no_events"
+    assert len(analyzer.calls) == 0
+
+
 def test_bullet_lines_diff():
     b1 = NewsBrief(
         version=1, updated_at=0, tldr_cn="A",

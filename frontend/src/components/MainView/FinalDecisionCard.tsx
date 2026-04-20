@@ -42,6 +42,7 @@ const CONSENSUS_LABEL: Record<ConsensusLevel, { text: string; color: string }> =
   math_lead: { text: "数学引擎主导", color: "text-blue-300" },
   ai_lead: { text: "AI 主导", color: "text-purple-300" },
   conflict: { text: "分歧", color: "text-orange-300" },
+  both_wait: { text: "双方观望", color: "text-slate-300" },
 };
 
 const ACTION_LABEL: Record<RecommendedAction, { text: string; color: string }> = {

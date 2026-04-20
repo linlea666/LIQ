@@ -2,18 +2,20 @@
 
 职责：
   - 接收数学引擎 ExecutionPlan + AI 引擎 AITraderReport
-  - 判断共识等级 (strong / agree / math_lead / ai_lead / conflict)
+  - 判断共识等级 (strong / agree / math_lead / ai_lead / conflict / both_wait)
   - 产出 FinalDecision（对外主视图）
 
 共识规则：
-  strong   — 两引擎同向 + math.final_score >= 75 且 ai.conviction >= 75
-  agree    — 两引擎同向（数学 bias 与 AI bias 一致）
-  math_lead — AI 观望 (bias=neutral) 且数学引擎有明确方向
+  strong    — 两引擎同向 + math.final_score >= 75 且 ai.conviction >= 75
+  agree     — 两引擎同向（数学 bias 与 AI bias 一致且均非观望态）
+  math_lead — AI 观望 (bias=neutral 或 action=wait) 且数学引擎有明确方向
   ai_lead   — 数学引擎观望 但 AI 有明确方向
   conflict  — 两引擎反向
+  both_wait — 两引擎都在观望（P0-1 · 严禁被旧逻辑误判为 agree → execute）
 
 分歧处理：
-  - conflict → recommended_action = reduce_size 或 wait
+  - conflict  → recommended_action = reduce_size 或 wait
+  - both_wait → recommended_action = wait（强制 0 仓位，不派发任何参数）
   - 历史上此类分歧谁胜率高 → divergence_summary 展示（来自 backtest 闭环）
   - 若 safety_gate 已触发 → final action 强制 avoid
 
@@ -190,21 +192,33 @@ def _ai_brief(report: AITraderReport) -> EngineBrief:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _classify_consensus(math_brief: EngineBrief, ai_brief: EngineBrief) -> str:
-    m_dir = math_brief.bias
-    a_dir = ai_brief.bias
+    """P0-1 · 共识判定修正。
 
-    if _is_conflict(m_dir, a_dir):
+    旧逻辑只看 bias，导致 (math.bias=neutral,action=wait) + (ai.bias=neutral,action=wait)
+    被归入 "agree" → 下游 _derive_action 按 agree 分支强制 execute 开仓。
+    修正：任一方 bias=neutral 或 action=wait 都视为 "观望"：
+      - 两方观望 → both_wait（新引入，下游强制 wait）
+      - 一方观望 + 另一方有方向 → *_lead（按有方向的一侧定向，下游 reduce_size）
+      - 两方都有明确方向且反向 → conflict
+      - 两方都有明确方向且同向 → agree / strong
+    """
+    m_bias, a_bias = math_brief.bias, ai_brief.bias
+    m_act, a_act = math_brief.action, ai_brief.action
+
+    if _is_conflict(m_bias, a_bias):
         return "conflict"
 
-    if m_dir == "neutral" and a_dir != "neutral":
-        return "ai_lead"
-    if a_dir == "neutral" and m_dir != "neutral":
-        return "math_lead"
-    if m_dir == "neutral" and a_dir == "neutral":
-        # 两方都观望 · 归入 agree（都说 wait 也是一致）
-        return "agree"
+    m_waiting = (m_bias == "neutral") or (m_act == "wait")
+    a_waiting = (a_bias == "neutral") or (a_act == "wait")
 
-    # 到此：两方方向一致
+    if m_waiting and a_waiting:
+        return "both_wait"
+    if m_waiting:
+        return "ai_lead"
+    if a_waiting:
+        return "math_lead"
+
+    # 两方都有明确方向且同向
     if math_brief.score >= 75.0 and ai_brief.score >= 75.0:
         return "strong"
     return "agree"
@@ -219,6 +233,8 @@ def _consensus_stars(consensus: str, score_delta: float) -> int:
         return 3
     if consensus == "conflict":
         return 1
+    if consensus == "both_wait":
+        return 2  # 非交易态，但也不是分歧，给 2 星
     return 2
 
 
@@ -240,6 +256,9 @@ def _compute_final_score(
         base = a * 0.85
     elif consensus == "conflict":
         base = min(m, a) - 10.0
+    elif consensus == "both_wait":
+        # 两方观望：用较小值，避免虚高诱导用户
+        base = min(m, a)
     else:
         base = (m + a) / 2.0
     return max(0.0, min(100.0, base))
@@ -260,7 +279,7 @@ def _merge_entry_params(
     empty = {"entry_zone_low": None, "entry_zone_high": None,
              "stop_loss": None, "tp1": None, "tp2": None, "rr_ratio": None}
 
-    if consensus == "conflict":
+    if consensus in {"conflict", "both_wait"}:
         return empty
 
     ai_primary: Optional[AITradingPlan] = None
@@ -366,6 +385,9 @@ def _compose_headline(
     elif consensus == "conflict":
         headline = f"🟠 双引擎分歧 · 建议{'减仓' if action == 'reduce_size' else '等待'}"
         one = f"方向相反 · {'降仓对冲' if action == 'reduce_size' else '等待明朗'}"
+    elif consensus == "both_wait":
+        headline = f"⚪ 双引擎均观望 · 分数 {final_score:.0f}"
+        one = "两引擎都无明确方向 · 不建议开仓"
     else:
         headline = f"⚪ 观望 · 分数 {final_score:.0f}"
         one = "信号不足"
@@ -433,6 +455,11 @@ def _derive_action(
             action = "wait"
             pos = 0.0
             direction = "neutral"
+    elif consensus == "both_wait":
+        # P0-1 · 两引擎均观望时强制 wait，绝不派发仓位
+        action = "wait"
+        pos = 0.0
+        direction = "neutral"
     else:
         action = "wait"
         pos = 0.0
@@ -551,6 +578,8 @@ def _consensus_summary_cn(
         return f"AI {ai_brief.bias}·{a_score:.0f} / 数学观望 · 小仓位参与"
     if consensus == "conflict":
         return f"分歧 · 数学 {math_brief.bias}·{m_score:.0f} vs AI {ai_brief.bias}·{a_score:.0f}"
+    if consensus == "both_wait":
+        return f"两引擎均无方向 · 数学 {m_score:.0f} / AI {a_score:.0f} · 建议观望"
     return f"math {m_score:.0f} / ai {a_score:.0f}"
 
 

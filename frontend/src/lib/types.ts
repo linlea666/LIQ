@@ -644,7 +644,8 @@ export type ConsensusLevel =
   | "agree"
   | "math_lead"
   | "ai_lead"
-  | "conflict";
+  | "conflict"
+  | "both_wait";
 
 export type RecommendedAction = "execute" | "reduce_size" | "wait" | "avoid";
 

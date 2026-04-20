@@ -38,6 +38,7 @@ from processors.key_level_tracker_v2 import (
     _volume_confirms_break, _oi_confirms_break, _find_opposite_target,
     _generate_scalp_signal, _DEFAULT_CFG,
     _assess_bounce_quality, _assess_breakout_stage,
+    _closed_bar_confirms_break,
 )
 
 
@@ -325,6 +326,102 @@ class TestTrackerV2:
         assert _oi_confirms_break(0) is True
         assert _oi_confirms_break(-2.0) is True
         assert _oi_confirms_break(-4.0) is False
+
+    # ── P1-1 · 收盘价确认 ──────────────────────────────────────────
+    @staticmethod
+    def _bar(ts: int, close: float, high: float = None, low: float = None) -> CandleData:
+        return CandleData(
+            coin="BTC", ts=ts,
+            o=close, h=high if high is not None else close + 50,
+            l=low if low is not None else close - 50, c=close, vol=100,
+        )
+
+    def test_closed_bar_disabled_always_passes(self):
+        """require_closed=False → 与旧行为一致，直接放行。"""
+        lv = KeyLevelV2(price=100_000, side="support")
+        assert _closed_bar_confirms_break(None, lv, True, 0.3, require_closed=False) is True
+        assert _closed_bar_confirms_break([], lv, True, 0.3, require_closed=False) is True
+
+    def test_closed_bar_insufficient_data_passes(self):
+        """require_closed=True 但数据不足时必须放行（避免数据降级卡死状态机）。"""
+        lv = KeyLevelV2(price=100_000, side="support")
+        assert _closed_bar_confirms_break(None, lv, True, 0.3, require_closed=True) is True
+        single = [self._bar(ts=1000, close=100_000)]
+        assert _closed_bar_confirms_break(single, lv, True, 0.3, require_closed=True) is True
+
+    def test_closed_bar_confirms_real_support_break(self):
+        """最近已收盘 bar close 跌破支撑 → 允许升 broken。"""
+        lv = KeyLevelV2(price=100_000, side="support")
+        candles = [
+            self._bar(ts=1000, close=100_000),
+            self._bar(ts=2000, close=99_500),   # 已收盘的 [-2]，深度 0.3% 要求 < 99_700
+            self._bar(ts=3000, close=99_800),   # 未收盘的 [-1]（会被排除）
+        ]
+        assert _closed_bar_confirms_break(candles, lv, True, 0.3, require_closed=True) is True
+
+    def test_closed_bar_rejects_wick_only_break(self):
+        """仅未收盘 bar 拔出影线、最近已收盘 close 仍在关键位上方 → 拒绝升 broken。
+
+        这是"假破位拔毛"场景：tick 看到破，但 15m 收盘实际没破。
+        """
+        lv = KeyLevelV2(price=100_000, side="support")
+        candles = [
+            self._bar(ts=1000, close=100_000),
+            self._bar(ts=2000, close=100_050),   # 已收盘仍在关键位上方
+            self._bar(ts=3000, close=99_400),    # 未收盘 bar
+        ]
+        assert _closed_bar_confirms_break(candles, lv, True, 0.3, require_closed=True) is False
+
+    def test_closed_bar_confirms_resistance_break(self):
+        lv = KeyLevelV2(price=100_000, side="resistance")
+        candles = [
+            self._bar(ts=1000, close=100_000),
+            self._bar(ts=2000, close=100_500),   # 已收盘突破阻力
+            self._bar(ts=3000, close=100_100),
+        ]
+        assert _closed_bar_confirms_break(candles, lv, False, 0.3, require_closed=True) is True
+
+    def test_tracker_blocks_testing_to_broken_without_closed_bar(self):
+        """集成测试：所有突破条件满足但最近已收盘 bar 未破 → 保持 testing。"""
+        lv = KeyLevelV2(
+            price=100_000, side="support", state="testing",
+            state_ts=int(time.time()) - 1000,
+            break_start_ts=int(time.time()) - 400,  # 超过 break_confirm_sec=300
+            test_count=1,
+        )
+        snap = _make_snapshot([lv], price=99_400, atr=500)
+        candles = [
+            self._bar(ts=1000, close=100_000),
+            self._bar(ts=2000, close=100_020),   # 最近已收盘仍在关键位上方
+            self._bar(ts=3000, close=99_400),    # 未收盘 bar
+        ]
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            taker_buy_vol=50, taker_sell_vol=200, oi_change_pct_1h=2.0,
+            candles_15m=candles,
+        )
+        assert snap.levels[0].state == "testing"
+
+    def test_tracker_allows_testing_to_broken_with_closed_bar(self):
+        """集成测试：所有条件满足 + 已收盘 bar close 真正穿透 → 升 broken。"""
+        lv = KeyLevelV2(
+            price=100_000, side="support", state="testing",
+            state_ts=int(time.time()) - 1000,
+            break_start_ts=int(time.time()) - 400,
+            test_count=1,
+        )
+        snap = _make_snapshot([lv], price=99_400, atr=500)
+        candles = [
+            self._bar(ts=1000, close=100_000),
+            self._bar(ts=2000, close=99_500),    # 已收盘穿透阈值
+            self._bar(ts=3000, close=99_400),
+        ]
+        snap = run_tracker_v2(
+            snap, liq_map=None, sweep_events_1h=[],
+            taker_buy_vol=50, taker_sell_vol=200, oi_change_pct_1h=2.0,
+            candles_15m=candles,
+        )
+        assert snap.levels[0].state == "broken"
 
     def test_find_opposite_target_long(self):
         lv = KeyLevelV2(price=100_000, side="support")

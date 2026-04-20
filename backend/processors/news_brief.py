@@ -90,6 +90,31 @@ async def generate_brief(
     news_cfg = get_settings().ai.news_agent
     max_tokens = int(news_cfg.max_tokens_brief)
 
+    # ─────────────────────────────────────────────────────────────
+    # P0-3 · events=0 严格熔断：没有任何可用事件时，绝不调 AI 产出简报。
+    #   旧行为：即使 events=[] 也发 prompt，AI 可能基于 themes/geo 编造
+    #   伪"新闻"进入主 AI prompt → 决策污染。
+    #   新行为：直接构造一条空简报（based_on_events_count=0），
+    #   并通过 snapshot 侧的过滤阻止注入主 AI prompt。
+    # ─────────────────────────────────────────────────────────────
+    if not events_24h:
+        logger.info(
+            "[D09] circuit-break · events=0 · skip AI brief generation "
+            "(trigger=%s · prev_version=%s)",
+            trigger, (prev_brief.version if prev_brief else 0),
+        )
+        empty = _empty_brief_no_events(prev_brief, trigger, now)
+        prev_version = prev_brief.version if prev_brief else 0
+        empty.version = prev_version + 1
+        empty.prev_version_updated_at = prev_brief.updated_at if prev_brief else None
+        empty.update_trigger = trigger
+        empty.based_on_events_count = 0
+        empty.char_count = _text_len(empty)
+        empty.token_estimate = max(1, int(empty.char_count / 2.5))
+        empty.diff_from_prev_version = _diff_briefs(prev_brief, empty) if prev_brief else ""
+        _mark_d09(empty)
+        return empty
+
     is_incremental = (
         prev_brief is not None
         and trigger == "scheduled"
@@ -366,6 +391,36 @@ def _extract_json_object(text: str) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 兜底 / 诊断
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _empty_brief_no_events(
+    prev: Optional[NewsBrief],
+    trigger: str,
+    now: int,
+) -> NewsBrief:
+    """P0-3 · events=0 熔断专用空简报。
+
+    关键差异（与 _fallback_brief 区别）：
+      - _fallback_brief 用于"AI 调用失败"，会保留 prev 内容 → 不适合"根本没有事件"场景
+      - _empty_brief_no_events 明确返回空 sections，告诉下游"本轮无可信数据源"
+        这样主 AI prompt 层可以据此完全跳过新闻板块
+    """
+    return NewsBrief(
+        version=0,  # 外层 +1
+        updated_at=now,
+        ts_range_start=now - 86400,
+        ts_range_end=now,
+        coverage_hours=24.0,
+        sections=_normalize_sections(None),  # 4 个空 section 占位
+        tldr_cn="",  # 明确留空，禁止任何兜底文本
+        tracked_themes=[],
+        char_count=0,
+        token_estimate=0,
+        update_trigger=trigger,
+        based_on_events_count=0,
+        model_used="skipped_no_events",
+        generation_cost_ms=0,
+    )
+
 
 def _fallback_brief(
     prev: Optional[NewsBrief],

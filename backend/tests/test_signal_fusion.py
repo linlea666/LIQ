@@ -144,10 +144,23 @@ class TestConsensusClassify:
         report = _mk_report(bias="bearish", direction="short", conviction=65)
         assert _classify_consensus(_math_brief(plan), _ai_brief(report)) == "conflict"
 
-    def test_both_neutral_is_agree(self):
+    def test_both_neutral_is_both_wait(self):
+        """P0-1 · 两方都观望必须归入 both_wait，不再误判为 agree。"""
         plan = _mk_plan(direction="neutral", action="wait", score=45)
         report = _mk_report(bias="neutral", direction="wait", conviction=40)
-        assert _classify_consensus(_math_brief(plan), _ai_brief(report)) == "agree"
+        assert _classify_consensus(_math_brief(plan), _ai_brief(report)) == "both_wait"
+
+    def test_bias_same_but_ai_waits_downgrades_to_math_lead(self):
+        """P0-1 · AI 有 bias 但建议 wait（未就绪）→ 不应归为 agree，应 math_lead。"""
+        plan = _mk_plan(direction="bullish", action="long", score=70)
+        report = _mk_report(bias="bullish", direction="wait", conviction=55)
+        assert _classify_consensus(_math_brief(plan), _ai_brief(report)) == "math_lead"
+
+    def test_bias_same_but_math_waits_downgrades_to_ai_lead(self):
+        """P0-1 · 数学 bias=bullish 但 action=wait → ai_lead。"""
+        plan = _mk_plan(direction="bullish", action="wait", score=55)
+        report = _mk_report(bias="bullish", direction="long", conviction=70)
+        assert _classify_consensus(_math_brief(plan), _ai_brief(report)) == "ai_lead"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -288,6 +301,18 @@ class TestFuseDecisions:
         assert decision.consensus_level == "conflict"
         assert decision.recommended_action == "reduce_size"
         assert decision.recommended_position_pct > 0
+
+    def test_both_wait_forces_wait_no_fake_execute(self):
+        """P0-1 · 双方 neutral/wait 时必须产生 wait（旧 bug 会 execute 20% 仓位）。"""
+        plan = _mk_plan(direction="neutral", action="wait", score=45)
+        report = _mk_report(bias="neutral", direction="wait", conviction=40)
+        decision = fuse_decisions("BTC", plan, report)
+        assert decision.consensus_level == "both_wait"
+        assert decision.recommended_action == "wait"
+        assert decision.recommended_position_pct == 0.0
+        assert decision.entry_zone_low is None
+        assert decision.entry_zone_high is None
+        assert decision.stop_loss is None
 
     def test_safety_gate_block_forces_avoid(self):
         plan = _mk_plan(score=80, safety_block=True)

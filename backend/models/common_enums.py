@@ -92,6 +92,7 @@ ConsensusLevel = Literal[
     "math_lead",  # AI 观望，数学引擎有方向
     "ai_lead",    # 数学引擎观望，AI 有方向
     "conflict",   # 两引擎反向（分歧）
+    "both_wait",  # 两引擎均无方向/均建议 wait（非交易态，禁止强制 execute）
 ]
 
 

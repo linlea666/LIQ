@@ -32,6 +32,11 @@ _DEFAULT_CFG: dict = {
     "bounce_pct": 1.0,
     "break_confirm_sec": 300,
     "break_depth_pct": 0.3,
+    # P1-1 · 收盘价确认开关：testing/swept → broken 必须等一根已收盘 15m
+    # bar 的 close 真正突破过 level ± break_depth_pct。开启后可过滤掉
+    # tick 扫动 + 秒级假突破，从根本消灭"拔毛行情"误触发。
+    # 配置为 False 时行为与 V2 原版一致（只看 tick price），便于灰度。
+    "break_require_closed_bar": True,
     "flip_zone_pct": 0.5,
     "level_expire_sec": 86400,
     "sweep_proximity_pct": 2.0,
@@ -88,7 +93,8 @@ def run_tracker_v2(
     for lv in snapshot.levels:
         _update_distance(lv, price)
         _transition(lv, price, atr, atr_factor, sweep_events_1h,
-                    taker_buy_vol, taker_sell_vol, oi_change_pct_1h, cfg, now)
+                    taker_buy_vol, taker_sell_vol, oi_change_pct_1h,
+                    candles_15m, cfg, now)
 
     # 级联风险
     if liq_map:
@@ -203,6 +209,7 @@ def _transition(
     taker_buy: float,
     taker_sell: float,
     oi_change_pct: float,
+    candles_15m: list[CandleData] | None,
     cfg: dict,
     now: int,
 ):
@@ -212,6 +219,7 @@ def _transition(
     bounce_pct = cfg["bounce_pct"] * atr_factor
     break_depth_pct = cfg["break_depth_pct"] * atr_factor
     break_confirm_sec = cfg["break_confirm_sec"]
+    require_closed = bool(cfg.get("break_require_closed_bar", True))
     flip_zone_pct = cfg["flip_zone_pct"] * atr_factor
 
     is_support = lv.side == "support"
@@ -242,7 +250,7 @@ def _transition(
             _set_state(lv, "swept", now)
             return
 
-        # 量价突破确认：时间 + 成交量放大 + OI 变化方向
+        # 量价突破确认：时间 + 成交量放大 + OI 变化方向 + (P1-1) 已收盘 bar 穿透
         if _is_broken(lv, price, break_depth_pct):
             if lv.break_start_ts == 0:
                 lv.break_start_ts = now
@@ -250,7 +258,10 @@ def _transition(
                 time_ok = (now - lv.break_start_ts) >= break_confirm_sec
                 vol_ok = _volume_confirms_break(is_support, taker_buy, taker_sell)
                 oi_ok = _oi_confirms_break(oi_change_pct)
-                if time_ok and vol_ok and oi_ok:
+                closed_ok = _closed_bar_confirms_break(
+                    candles_15m, lv, is_support, break_depth_pct, require_closed,
+                )
+                if time_ok and vol_ok and oi_ok and closed_ok:
                     _set_state(lv, "broken", now)
                     return
         else:
@@ -268,7 +279,10 @@ def _transition(
             elif (now - lv.break_start_ts) >= break_confirm_sec:
                 vol_ok = _volume_confirms_break(is_support, taker_buy, taker_sell)
                 oi_ok = _oi_confirms_break(oi_change_pct)
-                if vol_ok and oi_ok:
+                closed_ok = _closed_bar_confirms_break(
+                    candles_15m, lv, is_support, break_depth_pct, require_closed,
+                )
+                if vol_ok and oi_ok and closed_ok:
                     _set_state(lv, "broken", now)
         else:
             lv.break_start_ts = 0
@@ -423,6 +437,40 @@ def _is_broken(lv: KeyLevelV2, price: float, depth_pct: float) -> bool:
         return price < lv.price * (1 - depth_pct / 100)
     else:
         return price > lv.price * (1 + depth_pct / 100)
+
+
+def _closed_bar_confirms_break(
+    candles: list[CandleData] | None,
+    lv: KeyLevelV2,
+    is_support: bool,
+    depth_pct: float,
+    require_closed: bool,
+) -> bool:
+    """P1-1 · 检查最近一根**已收盘** 15m bar 的 close 是否真的穿透 level。
+
+    语义：
+      - `require_closed=False`：老行为，直接放行（不做收盘确认）
+      - `require_closed=True` 但 candles 数据不足：保守放行（避免数据缺失时卡死状态机）
+      - 正常情况下取 `candles[-2]`（通常 `[-1]` 是当前未收盘 bar），检查其 close
+        是否满足破位阈值；满足才允许升 broken
+    """
+    if not require_closed:
+        return True
+    if not candles or len(candles) < 2:
+        # 数据不足 → 保守放行；避免数据降级时整条状态机不可用
+        return True
+    if lv.price <= 0:
+        return False
+
+    # candles[-1] 一般是当前未收盘 bar，必须排除；用 candles[-2] 做闭口确认
+    last_closed = candles[-2]
+    close = getattr(last_closed, "close", None)
+    if close is None or close <= 0:
+        return False
+
+    if is_support:
+        return close < lv.price * (1 - depth_pct / 100)
+    return close > lv.price * (1 + depth_pct / 100)
 
 
 def _volume_confirms_break(is_support: bool, taker_buy: float, taker_sell: float) -> bool:
