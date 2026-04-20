@@ -403,6 +403,7 @@ export type TEAIAlignment =
   | "agree"
   | "partial_disagree"
   | "strong_disagree"
+  | "neutral"
   | "insufficient";
 
 export type TEAIScenario =
@@ -413,6 +414,62 @@ export type TEAIScenario =
   | "reversal_confirmed"
   | "choppy_range"
   | "unclear";
+
+// ── AI 审计员定位新增：趋势评估 ───────────────────────
+export type TEPrimaryTrend = "uptrend" | "downtrend" | "sideways" | "transition";
+export type TEMomentumQuality =
+  | "fuel_full"
+  | "fuel_adequate"
+  | "fuel_fading"
+  | "fuel_exhausted"
+  | "unclear";
+export type TEMomentumDirection =
+  | "accelerating"
+  | "stable"
+  | "decelerating"
+  | "unclear";
+
+export interface TETrendAssessment {
+  primary_trend: TEPrimaryTrend;
+  momentum_quality: TEMomentumQuality;
+  momentum_direction: TEMomentumDirection;
+  health_summary_cn: string;
+  evidence_cn: string;
+}
+
+// ── 关键位投射 ────────────────────────────────────────
+export type TEBreakLikelihood =
+  | "very_likely"
+  | "likely"
+  | "uncertain"
+  | "unlikely"
+  | "very_unlikely"
+  | "insufficient";
+
+export type TEDirectionTested = "resistance" | "support" | "both" | "none";
+
+export interface TELevelProjection {
+  target_level: number | null;
+  direction_tested: TEDirectionTested;
+  break_likelihood: TEBreakLikelihood;
+  break_conviction: number;
+  reasoning_cn: string;
+  if_break_cn: string;
+  if_fail_cn: string;
+}
+
+// ── 交易倾向 ──────────────────────────────────────────
+export type TETradeDirection = "long" | "short" | "neutral" | "avoid";
+export type TETradeStrength = "probe" | "standard" | "strong" | "none";
+
+export interface TETradeBias {
+  direction: TETradeDirection;
+  strength: TETradeStrength;
+  entry_zone_cn: string;
+  invalidation_cn: string;
+  timeframe_cn: string;
+  why_cn: string;
+}
 
 export interface TEAIInterpretation {
   coin: string;
@@ -427,9 +484,13 @@ export interface TEAIInterpretation {
   reasoning_tokens: number;
   summary_cn: string;
   scenario: TEAIScenario;
+  trend_assessment: TETrendAssessment | null;
+  level_projection: TELevelProjection | null;
+  trade_bias: TETradeBias | null;
   conflict_resolution: string;
   traps: string[];
   triggers_to_watch: string[];
+  independent_view: string;
   action_suggestion: string;
   confidence: number;
   alignment_with_rules: TEAIAlignment;

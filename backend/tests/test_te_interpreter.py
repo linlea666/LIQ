@@ -26,6 +26,8 @@ sys.path.insert(0, str(ROOT))
 
 from ai.te_interpreter import (
     TEInterpreter,
+    _collect_allowed_prices,
+    _compact_key_levels,
     _extract_json,
     _fingerprint,
     _parse_ai_json,
@@ -413,6 +415,235 @@ async def test_public_helpers_for_async_polling():
     assert got is not None
     assert got.cache_hit is True
     assert got.summary_cn == "test"
+
+
+# ──────────────────────────────────────────────────
+# 6. Phase 2 · key_levels 压缩 + 新字段 + 白名单
+# ──────────────────────────────────────────────────
+
+def _make_kl_snapshot() -> dict:
+    """模拟 KeyLevelSnapshotV2.model_dump() 的精简版。"""
+    return {
+        "ts": int(time.time()),
+        "current_price": 76109.0,
+        "atr": 600.0,
+        "levels": [
+            {
+                "price": 76948.21, "side": "resistance", "strength_tier": "S",
+                "distance_pct": 1.10, "state": "idle",
+                "sources": ["liq_cluster", "swing_high"],
+                "source_count": 3, "historical_validity": 0.72, "bounce_count": 3,
+                "pattern_detected": "", "final_score": 88.5,
+                "note": "牛市支撑带上沿", "timeframe": "4H",
+                "category": "strong_resistance",
+            },
+            {
+                "price": 74973.0, "side": "support", "strength_tier": "S",
+                "distance_pct": -1.49, "state": "idle",
+                "sources": ["liq_cluster", "psych_level"],
+                "source_count": 2, "historical_validity": 0.0, "bounce_count": 0,
+                "pattern_detected": "", "final_score": 82.0,
+                "note": "清算密集区 + 心理关口", "timeframe": "1D",
+                "category": "strong_support",
+            },
+            {
+                "price": 74577.23, "side": "support", "strength_tier": "S",
+                "distance_pct": -2.01, "state": "idle",
+                "sources": ["liq_cluster", "ema200"],
+                "source_count": 2, "historical_validity": 0.3, "bounce_count": 1,
+                "pattern_detected": "", "final_score": 80.0,
+                "note": "清算密集区", "timeframe": "1D",
+                "category": "strong_support",
+            },
+            {
+                "price": 73500.0, "side": "support", "strength_tier": "B",  # 非 S/A 应被过滤
+                "distance_pct": -3.43, "state": "idle",
+                "sources": ["fib_0618"], "source_count": 1,
+                "historical_validity": 0.0, "bounce_count": 0,
+                "pattern_detected": "", "final_score": 55.0,
+                "note": "弱", "timeframe": "1D",
+                "category": "moderate_support",
+            },
+        ],
+        "bull_bear_line": {
+            "current_regime": "bull",
+            "regime_reason": "价在 SMA200d 上方 + 云层上方",
+            "sma200d": 70300.0,
+            "ichimoku_cloud_top": 70569.32,
+            "ichimoku_cloud_bottom": 69555.50,
+        },
+        "breakout_zone": {
+            "bb_squeeze": True,
+            "squeeze_direction": "up",
+            "bb_upper": 76500.0,
+            "bb_lower": 75200.0,
+            "note": "BBW 压缩",
+        },
+        "daily_strong_support": "$74,577.23",
+        "daily_strong_resistance": "$78,207.01",
+        "weekly_strong_support": "$69,555.50",
+        "weekly_strong_resistance": None,
+        "structure_summary": "价在牛市支撑带下方",
+        "nearest_strong_support": 74973.0,
+        "nearest_strong_resistance": 76948.21,
+    }
+
+
+def test_compact_key_levels_keeps_only_s_a_tier():
+    kl = _make_kl_snapshot()
+    compact = _compact_key_levels(kl, current_price=76109.0)
+    assert compact is not None
+    # B 级应被过滤
+    all_prices = {lv["price"] for lv in compact["strong_resistances"] + compact["strong_supports"]}
+    assert 73500.0 not in all_prices
+    # S 级保留
+    assert 76948.21 in all_prices
+    assert 74973.0 in all_prices
+    # 按距离排序（最近的在前）
+    assert compact["strong_supports"][0]["price"] == 74973.0
+    # 最多 3 档
+    assert len(compact["strong_supports"]) <= 3
+    # 牛熊分界线透传
+    assert compact["bull_bear_line"]["regime"] == "bull"
+    # 挤压带保留
+    assert compact["breakout_zone"]["direction"] == "up"
+    # 多周期级位字符串透传
+    assert compact["daily_strong_resistance"] == "$78,207.01"
+
+
+def test_compact_key_levels_returns_none_on_empty():
+    assert _compact_key_levels(None, 76109.0) is None
+    # 空结构也能容错
+    empty = _compact_key_levels({}, 76109.0)
+    assert empty is not None
+    assert empty["strong_resistances"] == []
+    assert empty["strong_supports"] == []
+
+
+def test_collect_allowed_prices_includes_string_levels():
+    kl = _compact_key_levels(_make_kl_snapshot(), 76109.0)
+    prices = _collect_allowed_prices(kl)
+    # S 级现价
+    assert 76948.21 in prices
+    # 字符串形式的多周期级位也应被解析
+    assert 74577.23 in prices
+    assert 78207.01 in prices
+    assert 69555.5 in prices
+
+
+def test_parse_level_projection_valid_price_accepted():
+    kl = _compact_key_levels(_make_kl_snapshot(), 76109.0)
+    raw = json.dumps({
+        "summary_cn": "多头动能足",
+        "level_projection": {
+            "target_level": 76948.21,  # 合法价位
+            "direction_tested": "resistance",
+            "break_likelihood": "likely",
+            "break_conviction": 0.68,
+            "reasoning_cn": "动能 + 共振",
+            "if_break_cn": "目标 $78,207.01",
+            "if_fail_cn": "回测 $74,973.00",
+        },
+    })
+    parsed, err = _parse_ai_json(raw, "", key_levels=kl)
+    assert err is None
+    lp = parsed["level_projection"]
+    assert lp["target_level"] == 76948.21
+    assert lp["direction_tested"] == "resistance"
+    assert lp["break_likelihood"] == "likely"
+    assert 0.67 <= lp["break_conviction"] <= 0.69
+
+
+def test_parse_level_projection_fake_price_degrades():
+    """AI 编造一个 key_levels 里没有的价位 → 强制降级为 none/insufficient。"""
+    kl = _compact_key_levels(_make_kl_snapshot(), 76109.0)
+    raw = json.dumps({
+        "summary_cn": "测试",
+        "level_projection": {
+            "target_level": 76800.0,  # 不在白名单里
+            "direction_tested": "resistance",
+            "break_likelihood": "very_likely",
+            "break_conviction": 0.9,
+        },
+    })
+    parsed, _ = _parse_ai_json(raw, "", key_levels=kl)
+    lp = parsed["level_projection"]
+    assert lp["target_level"] is None
+    assert lp["direction_tested"] == "none"
+    assert lp["break_likelihood"] == "insufficient"
+
+
+def test_parse_trend_assessment_and_trade_bias():
+    raw = json.dumps({
+        "summary_cn": "上涨趋势健康",
+        "trend_assessment": {
+            "primary_trend": "uptrend",
+            "momentum_quality": "fuel_adequate",
+            "momentum_direction": "stable",
+            "health_summary_cn": "上涨趋势，动能足",
+            "evidence_cn": "RSI=65.5 + 价距 EMA20 +3.4σ + FVG 多1空0",
+        },
+        "trade_bias": {
+            "direction": "long",
+            "strength": "probe",
+            "entry_zone_cn": "76200-76500 回踩",
+            "invalidation_cn": "跌破 74973（S 级支撑）",
+            "timeframe_cn": "4-12 小时",
+            "why_cn": "多周期共振 + 挤压向上",
+        },
+        "independent_view": "OI 与 CVD 未完全同步，疑有诱空",
+    })
+    parsed, _ = _parse_ai_json(raw, "", key_levels=None)
+    ta = parsed["trend_assessment"]
+    assert ta["primary_trend"] == "uptrend"
+    assert ta["momentum_quality"] == "fuel_adequate"
+    assert "RSI=65.5" in ta["evidence_cn"]
+    tb = parsed["trade_bias"]
+    assert tb["direction"] == "long"
+    assert tb["strength"] == "probe"
+    assert "74973" in tb["invalidation_cn"]
+    assert "诱空" in parsed["independent_view"]
+
+
+def test_parse_neutral_alignment_accepted():
+    """neutral 是新增合法对齐值，应正常通过。"""
+    raw = json.dumps({
+        "summary_cn": "独立观察",
+        "alignment_with_rules": "neutral",
+        "alignment_reason": "既不支持也不反对规则",
+    })
+    parsed, _ = _parse_ai_json(raw, "", key_levels=None)
+    assert parsed["alignment_with_rules"] == "neutral"
+
+
+def test_parse_unknown_trend_fields_fallback_to_defaults():
+    raw = json.dumps({
+        "trend_assessment": {
+            "primary_trend": "wild",   # 非法
+            "momentum_quality": "yolo",  # 非法
+            "momentum_direction": "turbo",  # 非法
+        },
+    })
+    parsed, _ = _parse_ai_json(raw, "", key_levels=None)
+    ta = parsed["trend_assessment"]
+    assert ta["primary_trend"] == "transition"
+    assert ta["momentum_quality"] == "unclear"
+    assert ta["momentum_direction"] == "unclear"
+
+
+def test_fingerprint_includes_key_levels():
+    """key_levels 变化（S/A 级位价格集合）应改变指纹，避免缓存错位。"""
+    s = _make_signal()
+    kl1 = _make_kl_snapshot()
+    kl2 = _make_kl_snapshot()
+    # 改动一个 S 级位的价格（>100 美元）
+    kl2["levels"][0]["price"] = 77500.0
+    fp1 = _fingerprint("BTC", s, kl1)
+    fp2 = _fingerprint("BTC", s, kl2)
+    assert fp1 != fp2
+    # 无 key_levels 和有 key_levels 也应不同
+    fp_no_kl = _fingerprint("BTC", s, None)
+    assert fp_no_kl != fp1
 
 
 def test_shadow_log_skips_thinking_when_empty(tmp_path, monkeypatch):

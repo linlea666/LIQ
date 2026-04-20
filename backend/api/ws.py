@@ -88,7 +88,15 @@ async def subscribe(sid, data):
             if state and state.trend_exhaustion:
                 from ai.te_interpreter import get_te_interpreter
                 interpreter = get_te_interpreter()
-                fp = interpreter.compute_fingerprint(coin, state.trend_exhaustion.model_dump())
+                signal_dict = state.trend_exhaustion.model_dump()
+                # key_levels 参与指纹计算，保持与 POST /ai_interpret 一致
+                kl_dict = None
+                if state.key_level_snapshot_v2:
+                    try:
+                        kl_dict = state.key_level_snapshot_v2.model_dump()
+                    except Exception:
+                        kl_dict = None
+                fp = interpreter.compute_fingerprint(coin, signal_dict, kl_dict)
                 cached = interpreter.peek_cache(fp)
                 if cached is not None:
                     await sio.emit("te_ai_result", cached.model_dump(), to=sid)

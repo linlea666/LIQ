@@ -777,7 +777,14 @@ async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
     signal_dict = state.trend_exhaustion.model_dump()
     price = float(state.ticker.last) if state.ticker else 0.0
     atr = float(state.atr or 0.0)
-    fp = interpreter.compute_fingerprint(coin_upper, signal_dict)
+    # 关键位快照：AI 做 level_projection / trade_bias invalidation 的数据源
+    key_levels_dict: Optional[dict] = None
+    if state.key_level_snapshot_v2:
+        try:
+            key_levels_dict = state.key_level_snapshot_v2.model_dump()
+        except Exception:
+            key_levels_dict = None
+    fp = interpreter.compute_fingerprint(coin_upper, signal_dict, key_levels_dict)
 
     from api.ws import push_to_coin
     from monitoring.te_ai_log import log_interpretation
@@ -810,7 +817,9 @@ async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
         try:
             result = await interpreter.interpret(
                 coin=coin_upper, signal_dict=signal_dict,
-                price=price, atr=atr, force=force,
+                price=price, atr=atr,
+                key_levels_dict=key_levels_dict,
+                force=force,
             )
             # WS 推送结果（成功或 AI 自身带 error 都走 te_ai_result）
             try:
@@ -870,7 +879,13 @@ async def te_ai_interpret_peek(coin: str):
     from ai.te_interpreter import get_te_interpreter
     interpreter = get_te_interpreter()
     signal_dict = state.trend_exhaustion.model_dump()
-    fp = interpreter.compute_fingerprint(coin_upper, signal_dict)
+    key_levels_dict: Optional[dict] = None
+    if state.key_level_snapshot_v2:
+        try:
+            key_levels_dict = state.key_level_snapshot_v2.model_dump()
+        except Exception:
+            key_levels_dict = None
+    fp = interpreter.compute_fingerprint(coin_upper, signal_dict, key_levels_dict)
     cached = interpreter.peek_cache(fp)
     if cached is None:
         raise HTTPException(404, "No cached interpretation for current signal")
