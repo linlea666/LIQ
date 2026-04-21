@@ -210,6 +210,11 @@ class AISnapshot(BaseModel):
     # overall_reason_cn 可在冲突解析阶段做"续航 vs 衰竭"二择。
     trend_exhaustion: Optional[dict] = None
 
+    # 规则引擎 8 维方向共识汇总（DirectionVoteSummary.model_dump()）
+    # AI 读取 dominant_direction / weighted_score / consensus_level + 8 维 votes 明细，
+    # 在 §十 终审员阶段作为"规则侧一眼结论"。
+    direction_vote: Optional[dict] = None
+
     # 清算热力图摘要（价格-时间维度密度峰值）
     liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
 

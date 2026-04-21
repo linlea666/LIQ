@@ -110,6 +110,9 @@ class CoinState:
         # 趋势衰竭信号（Phase 1，独立 processor，与 range_signal / key_level_v2 正交）
         from models.trend_exhaustion import TrendExhaustionSignal as _TrendExhaustionSignal
         self.trend_exhaustion: Optional[_TrendExhaustionSignal] = None
+        # 规则引擎 8 维方向共识（独立 processor，纯聚合既有字段，零 I/O）
+        from models.direction_vote import DirectionVoteSummary as _DirectionVoteSummary
+        self.direction_vote: Optional[_DirectionVoteSummary] = None
         # L4 ExecutionPlan（D02 数学引擎主输出）
         from models.execution_plan import ExecutionPlan as _ExecutionPlan
         self.execution_plan: Optional[_ExecutionPlan] = None
@@ -1176,6 +1179,16 @@ class Engine:
         except Exception:
             logger.debug("[TE-Shadow] record failed", exc_info=True)
 
+        # ── 规则引擎 8 维方向共识（纯聚合：结构/MTF/动能/箱体/关键位/资金流/仓位/衰竭）──
+        # 依赖前置：market_structure（1h/1d/1w）/ rsi_14 / macd_data / range_signal /
+        #           key_level_snapshot_v2 / cvd_contract / taker_flow / oi / funding /
+        #           net_position_trend / trend_exhaustion —— 本轮 _recompute 均已完成。
+        try:
+            from processors.direction_vote import compute_direction_vote
+            state.direction_vote = compute_direction_vote(state)
+        except Exception:
+            logger.debug("[DV] compute_direction_vote failed", exc_info=True)
+
         # ── L3 SignalBus ingest：把 KeyLevelSignal 投射为 CandidateSignal ──
         try:
             from processors.signal_bus import get_bus, adapt_key_level_signal
@@ -2028,6 +2041,9 @@ class Engine:
             market_structure_1w=state.market_structure_1w,
             trend_exhaustion=(
                 state.trend_exhaustion.model_dump() if state.trend_exhaustion else None
+            ),
+            direction_vote=(
+                state.direction_vote.model_dump() if state.direction_vote else None
             ),
         )
 

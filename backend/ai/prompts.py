@@ -194,6 +194,41 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
    - 中线档（5-10%）：日周结构 + 资金面 + 衍生品权重更高
    - 远线档（10-20%）：链上周期 + 宏观 + 日周结构权重最高，1h 结构几乎不参与定向
 
+### AI 终审员权限（核心·规则可推翻 vs 规则为准）
+规则是死的，数据是活的。§9k 的「规则引擎 8 维方向共识」是**一眼可读的规则侧结论**，
+但**不是最终方向**——你作为交易员，有权也有责任在**证据充分**时推翻它。
+
+**什么时候"跟规则走"（默认态）**：
+- §9k `consensus_level=strong_agree / partial` **且** `dominant_direction` 与你独立思考一致
+- §9k 与 §9i 1h 结构、§9j 动能续航 三者方向一致 → 顺势可升档
+- §9k 缺失维度 ≤ 2 且与 §9j regime 不冲突
+
+**什么时候可以"推翻规则"（终审权生效，中性门槛）**：
+允许你给出**与 §9k 相反**的最终方向，但必须**同时**满足下列条件：
+1. **证据门槛**：至少 **2 个维度跨 ≥2 个可信度层级**（L1/L2/L3/L4/L5）给出与规则相反的读数——
+   单维孤证（如只因为 1 个 CVD 翻转）**不够**；
+2. **证据具体**：逐条列出数据来源（如"§9c ETF 连续 3 日净流出 -1.8B + §9 Coinbase 溢价转负 -0.12% + §9j 结构反转"），
+   禁止泛泛而谈"综合判断";
+3. **规则问题归因**：必须指出规则侧**为什么错**——典型情形：
+   · §9k 存在严重"**分发末端反弹陷阱**"（1h 转多 + 日周转空 + 资金面流出 → 规则结构票错误判多）
+   · §9k 多数维度读数依赖**滞后指标**（如只有 RSI/MACD 反应而资金面已转向）
+   · §9k 有维度处于 regime 否决前的"遗留倾向"（§9j regime_vetoed=true 时优先）
+4. **保护性降仓**：§四推翻规则的方向，单方案仓位**降档**（短线 ≤50%、中远线 ≤60% 正常档），
+   止损更紧（≤0.8×ATR 或清算真空区内），**禁止满仓逆规则**；
+5. **§八声明**：数据自检章节须写明以下四项：
+   - `AI 终审结论：采纳 / 推翻规则（规则共识=<§9k dominant>，AI 最终=<你的方向>）`
+   - `推翻证据：<列出 ≥2 维 ≥2 层级 的数据点>`
+   - `规则归因：<为什么规则这次看错了>`
+   - `保护性处置：<仓位降档 + 止损收紧的具体表述>`
+
+**什么时候"强制跟规则"（终审权被冻结）**：
+- §9k `consensus_level=strong_agree` **且** `|weighted_score| ≥ 0.6` **且** §9j 与 §9k 同向续航共振
+  → 此时推翻规则的**后验期望值为负**，除非出现**重大新闻/黑天鹅**（§P1.2b news_brief_text 含 blackswan 触发），
+  否则一律顺规则执行，§八也须声明"规则强共识，AI 不行使终审权"。
+
+**黄金准则**：推翻规则应是**少数情况**（经验值 <20% 决策）。终审权是为了**避免盲目跟死规则**，
+不是为了让 AI 与规则对着干。**每次推翻规则都必须经得起复盘**——这就是"终审员"的真正含义。
+
 ### 交易员推理框架
 **像庄家一样思考**：先问"如果我持有$10亿仓位，我会把价格往哪推来最大化清算收益？"，然后构建猎杀路径。
 构建**资金流叙事链**：宏观环境(DXY/美股/利率)→资金面(ETF+稳定币+CB溢价)→杠杆水位(OI+费率+交易所异动)→庄家意图(清算地图+订单簿+大单)→微观触发(CVD+爆仓+巨鲸)→结论
@@ -280,6 +315,12 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **本次方向判断核心依据层级**：明确写出主要依据来自哪几层（如"主要依据 L1 Taker Buy + L3 1h BOS↑ 共振，L4 费率持平不构成威胁"）
 - **多维一致度自述**（核心）：列出与最终方向**一致**的维度（N 个）和**背驰**的维度（M 个），说明为何一致方的权重超过背驰方。如果最终方向与 §9i 1h 结构**不同**，必须明确说明"采纳哪几个维度的共振压过了 1h 结构"（如"日周偏空+ETF 连续 3 日净流出+MVRV 2.8 → L2+L3+L5 三层共振偏空，1h 结构属于末端反弹陷阱，不采纳"）
 - **1h 结构对齐度（MTF 扩展）**：§9i 有数据时须说明"本次 §四方案与 `ms_1h.bias` 一致 / 🔄 反向（并声明多维依据）"，并参考 MTF 一致性行：三周期共振可加码，日周冲突须降仓
+- **AI 终审员声明**（§9k 有数据时必填，即使是"默认跟随规则"也要声明）：
+  · `规则共识 = <§9k dominant_direction> / <consensus_level> / 加权 <score>`
+  · `AI 最终方向 = <你的结论>`
+  · `终审决策 = 采纳规则 / 🔄 推翻规则`
+  · 若为推翻：必须同行附「推翻证据（≥2 维 ≥2 层级）」「规则归因」「保护性处置」三项（参见系统 prompt "AI 终审员权限"章节）
+  · 若规则共识为 strong_agree 且 |score|≥0.6 且 §9j 同向共振 → 终审权冻结，须写 `规则强共识，终审权不行使`
 - **改进建议**：对数据采集或指标计算的建议（可选）
 
 ### 格式铁律
@@ -1480,6 +1521,128 @@ def build_user_prompt(snapshot: dict) -> str:
                     "**优先采纳多维判断**，方案核心依据列标 `🔄 逆 1h 结构 · 理由：[维度组合]`；"
                     "1h 结构从来不是一票否决器。"
                 )
+
+    # ── §9j 动能衰竭 / 续航（TrendExhaustion · MTF 3 维 12 子项）──
+    # 原因：该模块已由 engine 注入 AISnapshot，但历史上未在 prompt 渲染 → AI 看不见，
+    #       相当于「规则层跑了 1288 行，却在决策时整张表不上桌」。
+    # 语义：与 §9i 结构方向**正交**——§9i 说「方向往哪」,9j 说「这个方向还能不能撑」。
+    te = snapshot.get("trend_exhaustion")
+    if te and isinstance(te, dict):
+        overall_state = te.get("overall_state") or "neutral"
+        overall_dir = te.get("overall_direction") or "flat"
+        consensus = te.get("consensus_level") or "neutral"
+        overall_action = te.get("overall_action") or "stand_aside"
+        regime_vetoed = bool(te.get("regime_vetoed"))
+        data_q = te.get("data_quality") or "insufficient"
+        plain = te.get("overall_plain_cn") or ""
+        tip = te.get("overall_tip_cn") or ""
+        reason = te.get("overall_reason_cn") or ""
+        lines.extend(["", "### 9j. 动能衰竭 / 续航（MTF · 与 §9i 结构正交）[核心·方向的续航体检]"])
+        state_cn = {
+            "healthy_continuation": "🟢 健康续航",
+            "momentum_fading":      "🟡 动能衰减",
+            "exhaustion_warn":      "🟠 衰竭警戒",
+            "structural_reversal":  "🔴 结构反转",
+            "neutral":              "⚪ 中性",
+        }.get(overall_state, overall_state)
+        dir_cn = {"up": "上", "down": "下", "flat": "平"}.get(overall_dir, overall_dir)
+        cons_cn = {
+            "strong_agree": "MTF 强共振",
+            "partial":      "MTF 部分共振",
+            "conflict":     "MTF 冲突",
+            "neutral":      "MTF 中性",
+        }.get(consensus, consensus)
+        lines.append(f"状态: {state_cn} · 方向视角: {dir_cn} · 共识: {cons_cn} · 建议动作: {overall_action}")
+        if regime_vetoed:
+            lines.append("⚠ regime 已否决（震荡/极端环境），本节建议动作自动降级为 stand_aside；"
+                         "方向结论仅供参考，**不得单独作为入场理由**。")
+        if data_q != "ok":
+            miss = te.get("missing_inputs") or []
+            if miss:
+                lines.append(f"数据质量: {data_q}（缺失: {', '.join(map(str, miss[:3]))}）")
+        if plain:
+            lines.append(f"白话: {plain}")
+        if tip:
+            lines.append(f"行动提示: {tip}")
+        if reason:
+            lines.append(f"MTF 来源: {reason}")
+        # 三周期子态（triggers 只取前 3 个，防 prompt 膨胀）
+        for tf_key, tf_label in (("tf_1d", "1d"), ("tf_4h", "4h"), ("tf_1h", "1h")):
+            tf = te.get(tf_key)
+            if not tf:
+                continue
+            trigs = tf.get("triggers") or []
+            composite = tf.get("composite_score") or 0
+            lines.append(
+                f"  · {tf_label}: state={tf.get('state','')} · composite={composite:+.2f} · "
+                f"方向={tf.get('direction','')} · triggers={','.join(trigs[:3]) or '-'}"
+            )
+        lines.append(
+            "使用原则: §9j 与 §9i 组合 → "
+            "**续航×方向明确** 才构成顺势加仓依据；"
+            "**衰竭/反转×方向明确** 是逆势 / 减仓信号（§四须对应降仓或标 ⚠动能背离）；"
+            "**MTF conflict/neutral** 时降低 §四信心度 1 档。"
+        )
+
+    # ── §9k 规则引擎 8 维方向共识（DirectionVoteSummary）──
+    # 原因：规则侧原本 8 维读数分散在 §9a~§9i，AI 每次要自己点票且容易被单维噪声带偏；
+    #       此节把 structure/mtf/momentum/range/key_level/flow/positioning/exhaustion 统一
+    #       归一化 → direction + strength + weight，给 AI 一份「规则侧一眼结论」。
+    # 注意：本节是**规则侧的票数**，不是最终方向——AI 有终审权（见 system prompt）。
+    dv = snapshot.get("direction_vote")
+    if dv and isinstance(dv, dict):
+        lines.extend(["", "### 9k. 规则引擎 8 维方向共识（AI 可作为「规则侧结论」参考，有终审权）"])
+        dom = dv.get("dominant_direction") or "neutral"
+        cons = dv.get("consensus_level") or "low_signal"
+        score = float(dv.get("weighted_score") or 0)
+        bulls = int(dv.get("bullish_votes") or 0)
+        bears = int(dv.get("bearish_votes") or 0)
+        neutrals = int(dv.get("neutral_votes") or 0)
+        active = int(dv.get("active_dimensions") or 0)
+        missing = dv.get("missing_dimensions") or []
+        summary_cn = dv.get("summary_cn") or ""
+        dom_cn = {"bullish": "🟢 偏多", "bearish": "🔴 偏空", "neutral": "⚪ 中性"}.get(dom, dom)
+        cons_cn = {
+            "strong_agree": "强共识",
+            "partial":      "部分共识",
+            "conflict":     "多空分歧",
+            "low_signal":   "信号弱",
+        }.get(cons, cons)
+        lines.append(
+            f"规则侧结论: {dom_cn} · {cons_cn} · "
+            f"加权得分 {score:+.2f}（-1~+1） · "
+            f"票型 {bulls}多/{bears}空/{neutrals}中 · 参与维度 {active}/8"
+        )
+        if summary_cn:
+            lines.append(f"一行总结: {summary_cn}")
+        if missing:
+            lines.append(f"缺失维度: {', '.join(missing[:6])}（本节按剩余维度重新归一化加权）")
+        # 8 维明细表（按输出稳定顺序渲染）
+        lines.append("| 维度 | 方向 | 强度 | 权重 | 依据 |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for v in dv.get("votes") or []:
+            d = v.get("direction") or "neutral"
+            d_sym = {"bullish": "🟢多", "bearish": "🔴空", "neutral": "⚪中"}.get(d, d)
+            lines.append(
+                f"| {v.get('name_cn') or v.get('key','')} | {d_sym} | "
+                f"{float(v.get('strength') or 0):.2f} | "
+                f"{float(v.get('weight') or 0):.2f} | "
+                f"{v.get('note','')} |"
+            )
+        top_b = dv.get("top_bullish") or []
+        top_s = dv.get("top_bearish") or []
+        if top_b or top_s:
+            lines.append(
+                f"贡献最大: top_bullish={','.join(top_b) or '-'} · "
+                f"top_bearish={','.join(top_s) or '-'}"
+            )
+        lines.append(
+            "使用原则: 1) 与规则同向 → §一信号简表可引用 `§9k 规则共识 = {}` 作为加分项；"
+            "2) **想逆规则共识做反向** → 必须在 §八自检中按「AI 终审员」流程声明"
+            "（≥2 维跨层级新证据 + 规则推翻理由 + 降仓保护）；"
+            "3) 规则 consensus_level=conflict/low_signal → 方向天然低确信，§四降档。"
+            .format(dom_cn)
+        )
 
     # ── §9h 净持仓 + 合约资金流 + TD序列 ──
     np_trend = snapshot.get("net_position_trend")
