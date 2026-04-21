@@ -131,11 +131,11 @@ class AIAnalyzer:
                     )
                     raise
 
-        result = _parse_ai_output(raw_text, snapshot, user_prompt)
+        result = _parse_ai_output(raw_text, snapshot, user_prompt, system_prompt)
         return result
 
 
-def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "") -> AIAnalysisResult:
+def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "", system_prompt: str = "") -> AIAnalysisResult:
     """
     解析 AI 输出文本为结构化结果。
     即使解析部分失败，也保留 raw_text 作为降级展示。
@@ -218,6 +218,7 @@ def _parse_ai_output(raw_text: str, snapshot: AISnapshot, user_prompt: str = "")
         data_quality_feedback=_find_section("数据质量", "自检", "Data Quality"),
         raw_text=raw_text,
         user_prompt=user_prompt,
+        system_prompt=system_prompt,
         ai_matrix_json=matrix_json,
     )
 

@@ -377,6 +377,9 @@ class AIAnalysisResult(BaseModel):
     data_quality_feedback: str = ""
     raw_text: str
     user_prompt: str = ""
+    # v2 · 完整 AI 交互过程可追溯：把 system_prompt（含 AI 终审员权限定义、
+    # 8 维裁决框架、输出格式契约等）也持久化，供 /api/ai/detail 完整回放
+    system_prompt: str = ""
 
     # P1.7 · Prompt 升级附录：AI 产出的结构化 Factor Matrix / bias / conviction 等
     # 与 markdown 正文配对输出，供 trader_report_builder 优先采用；
