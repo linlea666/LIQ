@@ -915,7 +915,7 @@ def _compute_single_tf(
     if ctx.direction == "flat":
         state_val: ExhaustionState = "neutral"
         action = "stand_aside"
-        reason = "方向未定（无 1d/4h 结构），保持观望"
+        reason = "日线结构处于震荡/过渡（direction=ranging 或 transitioning），衰竭模块对无趋势市场强制空仓观望"
     else:
         triggers_hit = [s.key for s in d3_subs if abs(s.score) >= 0.5]
         if composite >= _TH_HEALTHY:

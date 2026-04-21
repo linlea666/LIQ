@@ -291,6 +291,7 @@ export default function TrendExhaustionView() {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showWhy, setShowWhy] = useState(false);
+  const [showTFGroup, setShowTFGroup] = useState(false);
   const toggle = (tf: string) => setExpanded((e) => ({ ...e, [tf]: !e[tf] }));
 
   const tfCards = useMemo(() => {
@@ -315,6 +316,11 @@ export default function TrendExhaustionView() {
   const overallMeta = STATE_MAP[te.overall_state];
   const consensusMeta = CONSENSUS_MAP[te.consensus_level];
   const actionMeta = ACTION_MAP[te.overall_action];
+
+  // direction=flat 且非 vetoed + 非数据不足 → 解释「三周期为什么全 0」
+  // （vetoed 有独立横条；insufficient 有独立提示；只处理这第三类"日线 ranging/transitioning"场景）
+  const isFlatStandAside =
+    direction === "flat" && !vetoed && te.data_quality !== "insufficient";
 
   const plain =
     te.overall_plain_cn && te.overall_plain_cn.trim().length > 0
@@ -389,25 +395,63 @@ export default function TrendExhaustionView() {
         )}
       </div>
 
+      {/* ── [2.5] direction=flat 诊断说明条（小白不懵） ─────────── */}
+      {isFlatStandAside && (
+        <div className="rounded-lg border border-sky-500/40 bg-sky-500/5 p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-lg leading-none mt-0.5">ℹ</span>
+            <div className="flex-1 text-[12px] text-sky-100/90 leading-relaxed">
+              <div className="font-semibold text-sky-200 mb-1">
+                三周期分解全 0 是正常的，不是 bug
+              </div>
+              <div className="text-sky-100/80">
+                日线结构当前处于 <span className="font-mono text-amber-300">ranging/transitioning</span>（震荡或过渡），
+                衰竭模块对无趋势市场强制空仓观望。此时规则端所有 sub score 会被归零，但原始数值（RSI / MACD / 价距 EMA20 等）仍保留在 note 里。
+              </div>
+              <div className="mt-1.5 text-[11px] text-sky-200/70">
+                👉 此时建议看：<span className="text-slate-200">关键位模块</span>（S 级强支撑/阻力）· <span className="text-slate-200">箱体信号</span>（震荡高低沿）· <span className="text-slate-200">AI 深度解读</span>（AI 会基于原始数值独立判断）
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── [3] 三周期分解（进阶/专业模式或有数据时展示） ─────── */}
       {(displayMode === "pro" || tfCards.length > 0) && !vetoed && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">三周期分解</div>
-            {displayMode === "beginner" && (
-              <div className="text-[10px] text-slate-600">（进阶内容，看不懂可忽略）</div>
-            )}
+            <div className="text-xs text-slate-500">
+              三周期分解
+              {isFlatStandAside && (
+                <span className="ml-2 text-[10px] text-slate-600">（全 0 占位，默认折叠）</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {displayMode === "beginner" && !isFlatStandAside && (
+                <div className="text-[10px] text-slate-600">（进阶内容，看不懂可忽略）</div>
+              )}
+              {isFlatStandAside && (
+                <button
+                  onClick={() => setShowTFGroup((v) => !v)}
+                  className="text-[11px] text-slate-400 hover:text-slate-200 underline underline-offset-2"
+                >
+                  {showTFGroup ? "收起" : "仍要查看原始读数"}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="grid grid-cols-1 gap-2">
-            {tfCards.map((s) => (
-              <TFCard
-                key={s.tf}
-                state={s}
-                expanded={!!expanded[s.tf]}
-                onToggle={() => toggle(s.tf)}
-              />
-            ))}
-          </div>
+          {(!isFlatStandAside || showTFGroup) && (
+            <div className="grid grid-cols-1 gap-2">
+              {tfCards.map((s) => (
+                <TFCard
+                  key={s.tf}
+                  state={s}
+                  expanded={!!expanded[s.tf]}
+                  onToggle={() => toggle(s.tf)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

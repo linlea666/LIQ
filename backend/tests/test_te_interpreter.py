@@ -891,3 +891,28 @@ def test_system_prompt_confidence_has_downgrade_triggers():
     assert "不得 > 0.55" in _SYSTEM_PROMPT
     assert "不得 > 0.5" in _SYSTEM_PROMPT
     assert "不得 > 0.45" in _SYSTEM_PROMPT
+
+
+def test_system_prompt_has_flat_direction_guidance():
+    """direction=flat 场景：规则引擎把 sub.score 强制归 0 时，AI 必须知道
+    改去读 note 原文而不是被 score=0 误导为"证据不足"。
+
+    注意：此段只约束「认知层」——告诉 AI 怎么读数据；不约束「决策层」——
+    最终方向 / alignment / trade_bias 完全由 AI 自主判断（若 note + 五类扩展数据
+    真的指向明确方向，AI 应当敢给 strong_disagree）。
+    """
+    # 认知层三要素必须在
+    assert 'tf.*.direction == "flat"' in _SYSTEM_PROMPT or "direction==flat" in _SYSTEM_PROMPT
+    assert "score 强制归 0" in _SYSTEM_PROMPT or "sub.score 强制归 0" in _SYSTEM_PROMPT
+    assert "只看 sub.note" in _SYSTEM_PROMPT or "请忽略 sub.score" in _SYSTEM_PROMPT
+    # 五类扩展数据的权重提示必须在
+    assert "key_levels" in _SYSTEM_PROMPT and "market_structure" in _SYSTEM_PROMPT
+    assert "不受 flat 影响" in _SYSTEM_PROMPT or "权重调高" in _SYSTEM_PROMPT
+    # 明确声明"认知层而非决策层"，避免未来 PR 又把方向限制塞回来
+    flat_block_start = _SYSTEM_PROMPT.find("direction == \"flat\"")
+    if flat_block_start == -1:
+        flat_block_start = _SYSTEM_PROMPT.find("direction==flat")
+    flat_block = _SYSTEM_PROMPT[flat_block_start : flat_block_start + 1500]
+    assert "独立判断" in flat_block or "自主判断" in flat_block, (
+        "flat 段必须明确'决策由 AI 自主判断'，不得加硬性方向限制"
+    )
