@@ -244,6 +244,8 @@ export interface AIAnalysisResult {
   data_quality_feedback?: string;
   raw_text: string;
   user_prompt?: string;
+  /** v2 · 完整 AI 交互过程：含 AI 人设/裁决框架/终审员权限/输出契约 */
+  system_prompt?: string;
   signal_summary?: SignalSummary | null;
 }
 

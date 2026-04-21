@@ -366,6 +366,13 @@ export default function AIDetailPage() {
           </Card>
         )}
 
+        {/* AI 交互过程原文（v2：完整三件套可追溯） */}
+        <PromptInspectorCard
+          systemPrompt={data.system_prompt || ""}
+          userPrompt={data.user_prompt || ""}
+          rawText={data.raw_text || ""}
+        />
+
         {/* Footer */}
         <div className="text-center text-xs text-slate-600 py-6 border-t border-slate-800">
           LIQ 防猎杀数据大屏 · AI 分析报告 · {formatFullTime(data.ts)}
@@ -385,6 +392,148 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
         {children}
       </div>
     </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AI 交互过程三件套查看器（system / user / raw response）
+// 默认折叠；每段独立展开、独立复制。system_prompt 为空时降级提示
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function PromptInspectorCard({
+  systemPrompt,
+  userPrompt,
+  rawText,
+}: {
+  systemPrompt: string;
+  userPrompt: string;
+  rawText: string;
+}) {
+  const items: Array<{
+    key: string;
+    icon: string;
+    title: string;
+    desc: string;
+    content: string;
+    emptyHint: string;
+  }> = [
+    {
+      key: "system",
+      icon: "🧭",
+      title: "System Prompt（AI 人设/裁决框架/终审员权限）",
+      desc: "定义 AI 角色、L1-L5 数据层级、8 维裁决、AI 终审员推翻规则的条件、输出格式契约",
+      content: systemPrompt,
+      emptyHint: "未记录（此条分析早于 v2 system_prompt 持久化改造，仅下一轮起生效）",
+    },
+    {
+      key: "user",
+      icon: "📥",
+      title: "User Prompt（本轮喂给 AI 的完整数据）",
+      desc: "§1 快照/清算 → §2 CVD → §9c 链上 → §9j 动能衰竭 → §9k 规则 8 维共识 → §13 新闻简报",
+      content: userPrompt,
+      emptyHint: "未记录",
+    },
+    {
+      key: "raw",
+      icon: "📤",
+      title: "Raw Response（AI 返回的原始 markdown 原文）",
+      desc: "§一叙事 → §二价位 → §四交易计划 → §八数据自检（含终审员声明） + AITRADER_MATRIX_JSON 代码块",
+      content: rawText,
+      emptyHint: "无",
+    },
+  ];
+
+  return (
+    <Card title="🛰️ AI 交互过程原文（System · User · Raw Response）">
+      <div className="space-y-3">
+        <div className="text-xs text-slate-500 -mt-1">
+          点击任意一项展开查看完整原文；用于完整复盘 AI 在本次分析里"看到了什么、想了什么、输出了什么"
+        </div>
+        {items.map((it) => (
+          <PromptSection
+            key={it.key}
+            icon={it.icon}
+            title={it.title}
+            desc={it.desc}
+            content={it.content}
+            emptyHint={it.emptyHint}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function PromptSection({
+  icon,
+  title,
+  desc,
+  content,
+  emptyHint,
+}: {
+  icon: string;
+  title: string;
+  desc: string;
+  content: string;
+  emptyHint: string;
+}) {
+  const [copyLabel, setCopyLabel] = useState("📋 复制");
+  const chars = content ? content.length : 0;
+  const isEmpty = !content;
+
+  return (
+    <details className="group border border-slate-800 rounded-lg overflow-hidden bg-slate-950/40">
+      <summary className="cursor-pointer select-none px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/40 transition">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm shrink-0">{icon}</span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-slate-200 truncate">{title}</div>
+            <div className="text-[10px] text-slate-500 truncate">{desc}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded border ${
+              isEmpty
+                ? "text-slate-600 border-slate-800"
+                : "text-blue-400 border-blue-900/60 bg-blue-950/30"
+            }`}
+          >
+            {isEmpty ? "无内容" : `${chars.toLocaleString()} chars`}
+          </span>
+          <span className="text-[10px] text-slate-500 group-open:hidden">展开</span>
+          <span className="text-[10px] text-slate-500 hidden group-open:inline">收起</span>
+        </div>
+      </summary>
+      <div className="px-3 pb-3 pt-1 border-t border-slate-800">
+        {isEmpty ? (
+          <div className="text-[11px] text-slate-600 italic px-1 py-2">{emptyHint}</div>
+        ) : (
+          <>
+            <div className="flex justify-end mb-1.5">
+              <button
+                onClick={() => {
+                  copyToClipboard(content)
+                    .then(() => {
+                      setCopyLabel("✅ 已复制");
+                      setTimeout(() => setCopyLabel("📋 复制"), 1500);
+                    })
+                    .catch(() => {
+                      setCopyLabel("❌ 失败");
+                      setTimeout(() => setCopyLabel("📋 复制"), 1500);
+                    });
+                }}
+                className="text-[10px] px-2 py-0.5 border border-slate-700 rounded hover:border-slate-500 hover:text-white text-slate-400 transition"
+              >
+                {copyLabel}
+              </button>
+            </div>
+            <pre className="max-h-96 overflow-auto p-2.5 bg-slate-950 border border-slate-800 rounded text-[10px] leading-relaxed text-slate-400 whitespace-pre-wrap break-words">
+              {content}
+            </pre>
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 
