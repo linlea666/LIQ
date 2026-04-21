@@ -123,7 +123,10 @@ engine:
 
 ai:
   active: "deepseek"
-  timeout_sec: 300
+  # deepseek-reasoner 的 reasoning 阶段极耗时（实测 reasoning_tok=5048 可触达 443s）
+  # 300s 曾观测到 BTC 首轮 443s 成功（httpx read_timeout 语义宽松），但无法依赖
+  # 600s = 在 reasoning 深度推理场景下留足裕度；稳态下仍以 240-320s 完成
+  timeout_sec: 600
   max_retries: 2
   cooldown_sec: 30
   max_history: 500
