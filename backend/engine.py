@@ -1662,6 +1662,25 @@ class Engine:
         state = self._states.get(ccy)
         return bool(state and state.cycle_position is not None)
 
+    def _has_news_brief(self) -> bool:
+        """软指标：真实新闻简报是否已生成（排除 bootstrap 种子）。
+
+        bootstrap 种子 `model_used="bootstrap"` 且 `based_on_events_count=0`，
+        此时 AI 看到的新闻叙事段落是"预热中"占位，会降低首轮分析质量。
+        真实 brief 出现后（news_agent_loop 完成首批 events enrich + 调用 news_analyzer）
+        `based_on_events_count>0` 或 `model_used!=bootstrap`，即认为已就绪。
+        """
+        try:
+            from processors.news_brief import get_current_brief
+            brief = get_current_brief()
+            if brief is None:
+                return False
+            if (brief.model_used or "").lower() == "bootstrap":
+                return False
+            return (brief.based_on_events_count or 0) > 0
+        except Exception:
+            return False
+
     async def _auto_ai_loop(self, interval_sec: int) -> None:
         """定时自动触发 AI 分析（所有支持的币种）。
 
@@ -1695,12 +1714,27 @@ class Engine:
             await asyncio.sleep(30)
             cps_grace += 30
 
+        # 新闻简报优雅等待：最多额外 120s，避免首轮 AI 跑在 bootstrap 种子上
+        # （news_agent_loop 通常 5-15 分钟内完成 v1，但冷启动期常见 60-120s 已可交付）
+        news_grace_max = 120
+        news_grace = 0
+        while self._running and news_grace < news_grace_max:
+            if self._has_news_brief():
+                break
+            logger.info(
+                "Auto AI grace-wait for news brief | waited=%ds (max=%ds)",
+                news_grace, news_grace_max,
+            )
+            await asyncio.sleep(20)
+            news_grace += 20
+
         logger.info(
-            "Auto AI analysis loop started | interval=%ds data_ready=%s cps_ready=%s waited=%ds",
+            "Auto AI analysis loop started | interval=%ds data_ready=%s cps_ready=%s news_ready=%s waited=%ds",
             interval_sec,
             self._is_coin_data_ready(default),
             self._has_cycle_data(default),
-            waited + cps_grace,
+            self._has_news_brief(),
+            waited + cps_grace + news_grace,
         )
         while self._running:
             for ccy in self._settings.supported_coins:
