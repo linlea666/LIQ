@@ -410,6 +410,13 @@ def calc_whale_direction(wd: WhaleData | None) -> str:
     return "中性"
 
 
+# P0.6 · "巨鲸"活动的最小有意义金额门槛。
+# 背景：上游 Coinglass whale API 偶尔返回 valueUsd 字段缺失 / amount_usd=0 的条目，
+# 聚合排序后"Top 3 巨鲸"变成 3 条 $0 转账，既污染 AI 的巨鲸追踪判断，也浪费 token。
+# 行业约定"巨鲸"起步 $100k，取 1e5 作为硬门槛；低于此值不参与流向聚合和 Top 排行。
+MIN_WHALE_TRANSFER_USD = 100_000.0
+
+
 def calc_whale_transfer_flows(wd: WhaleData | None) -> dict:
     """按 USD 金额聚合巨鲸转账流向，解决 AI 反馈"仅有笔数缺金额"的问题。
 
@@ -417,7 +424,7 @@ def calc_whale_transfer_flows(wd: WhaleData | None) -> dict:
     - inflow_usd: 流入交易所总额（to_label 包含 exchange）
     - outflow_usd: 流出交易所总额（from_label 包含 exchange）
     - net_usd: inflow - outflow（正 = 净充入交易所 = 偏空）
-    - top_transfers: 前 3 大转账详情（含方向/金额/交易所标签）
+    - top_transfers: 前 3 大转账详情（含方向/金额/交易所标签，强制 ≥ $100k）
     """
     empty = {
         "inflow_usd": 0.0,
@@ -432,6 +439,9 @@ def calc_whale_transfer_flows(wd: WhaleData | None) -> dict:
     outflow_usd = 0.0
     enriched: list[dict] = []
     for t in wd.transfers:
+        # P0.6 · 低于 $100k 的条目（含 valueUsd 缺失得 0 的异常上游）直接丢弃
+        if t.amount_usd is None or t.amount_usd < MIN_WHALE_TRANSFER_USD:
+            continue
         to_label = (t.to_label or "").lower()
         from_label = (t.from_label or "").lower()
         to_is_ex = "exchange" in to_label

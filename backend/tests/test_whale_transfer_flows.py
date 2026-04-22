@@ -219,6 +219,72 @@ def test_section_8e_empty_renders_friendly_fallback():
     assert "常态信号" in up
 
 
+# ─────────── P0.6 · $0 / <$100k 过滤 ───────────
+
+def test_zero_amount_transfers_filtered_from_aggregate():
+    """P0.6 · amount_usd=0 的条目不进入流向聚合或 Top。"""
+    wd = _wd(
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=0,
+                      from_label="wallet", to_label="binance exchange"),
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=0,
+                      from_label="coinbase exchange", to_label="wallet"),
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=2_000_000,
+                      from_label="wallet", to_label="okx exchange"),
+    )
+    flows = calc_whale_transfer_flows(wd)
+    assert flows["inflow_usd"] == 2_000_000.0
+    assert flows["outflow_usd"] == 0.0
+    assert len(flows["top_transfers"]) == 1
+    assert flows["top_transfers"][0]["amount_usd"] == 2_000_000
+
+
+def test_below_100k_transfers_filtered():
+    """P0.6 · <$100k 的小额转账被视为噪声，不入 Top。"""
+    wd = _wd(
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=50_000,
+                      from_label="wallet", to_label="binance exchange"),
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=99_999,
+                      from_label="wallet", to_label="okx exchange"),
+        WhaleTransfer(ts=0, symbol="BTC", amount_usd=150_000,
+                      from_label="wallet", to_label="coinbase exchange"),
+    )
+    flows = calc_whale_transfer_flows(wd)
+    # 只有 150k 那笔通过门槛
+    assert flows["inflow_usd"] == 150_000.0
+    assert len(flows["top_transfers"]) == 1
+
+
+def test_prompt_display_layer_drops_residual_zero_entries():
+    """P0.6 · 展示层兜底：即便 snapshot 里已含 $0 条目（旧缓存 / 其他路径），
+    渲染时也不显示 $0 的"Top 转账"条目。"""
+    snapshot = {
+        "coin": "BTC",
+        "price": 75000.0,
+        "high_24h": 76000,
+        "low_24h": 74000,
+        "whale_hl_alerts_count": 0,
+        "whale_transfers_count": 3,
+        "whale_hl_positions": [],
+        "whale_transfer_inflow_usd": 200_000,
+        "whale_transfer_outflow_usd": 0,
+        "whale_transfer_net_usd": 200_000,
+        "whale_top_transfers": [
+            {"direction": "inflow", "amount_usd": 0,
+             "from_label": "wallet", "to_label": "binance exchange"},
+            {"direction": "inflow", "amount_usd": 0,
+             "from_label": "wallet", "to_label": "okx exchange"},
+            {"direction": "inflow", "amount_usd": 200_000,
+             "from_label": "wallet", "to_label": "coinbase exchange"},
+        ],
+    }
+    up = build_user_prompt(snapshot)
+    assert "### 8e. 巨鲸追踪" in up
+    # 有 1 笔合法转账，必须展示它
+    assert "coinbase exchange" in up or "200" in up
+    # 不得出现 "$0" 的 Top 条目
+    assert "  - $0" not in up
+
+
 def test_section_8e_populated_renders_without_fallback():
     """§8e 有活跃数据时不应出现降级提示。"""
     snapshot = {

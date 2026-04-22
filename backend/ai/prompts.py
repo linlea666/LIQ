@@ -1044,7 +1044,12 @@ def build_user_prompt(snapshot: dict) -> str:
                     lines.append(f"  → 净流向规模较小，方向弱信号{'(偏空)' if w_net > 0 else '(偏多)'}")
             else:
                 lines.append(f"链上巨鲸转账: {w_transfers}笔 (转账标签为钱包间转账，未涉及交易所充提)")
-            if w_top:
+            # P0.6 · 展示层兜底过滤（防历史缓存/其他源绕过根因侧 MIN_WHALE_TRANSFER_USD）
+            w_top_filtered = [
+                t for t in (w_top or [])
+                if float(t.get("amount_usd") or 0) >= 100_000
+            ]
+            if w_top_filtered:
                 lines.append("Top 转账（按金额排序）:")
                 direction_zh = {
                     "inflow": "充入交易所",
@@ -1052,7 +1057,7 @@ def build_user_prompt(snapshot: dict) -> str:
                     "ex_to_ex": "交易所间调拨",
                     "wallet_to_wallet": "钱包间转账",
                 }
-                for t in w_top:
+                for t in w_top_filtered:
                     lines.append(
                         f"  - {_fmt_usd_for_prompt(t.get('amount_usd', 0))} "
                         f"{direction_zh.get(t.get('direction', ''), t.get('direction', ''))} "
