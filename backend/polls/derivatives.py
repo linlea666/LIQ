@@ -508,18 +508,29 @@ async def poll_net_position(
         state.net_position_latest = vals[-1]
         if len(vals) >= 2:
             state.net_position_change_24h = vals[-1] - vals[0]
-        if len(vals) >= 4:
-            recent_avg = sum(vals[-4:]) / 4
-            older_avg = sum(vals[:4]) / 4
-            diff = recent_avg - older_avg
-            base = max(abs(older_avg), 1e-9)
-            pct_change = diff / base
-            if pct_change > 0.05:
-                state.net_position_trend = "上升(多头增仓)"
-            elif pct_change < -0.05:
-                state.net_position_trend = "下降(多头减仓)"
+        # P0.2 · 趋势标签与展示端点差同源（防"下降(多头减仓) + 43.7% 显著增持"自相矛盾）
+        # 旧版用"滚动均值差"，与 prompt 侧用"端点差"计算的百分比不同源，曲线形态特殊时方向打架。
+        # 新版：统一用 24h 端点差符号 + 5%/2% 显著性阈值（与 prompt 侧展示口径一致）。
+        if state.net_position_change_24h is not None and len(vals) >= 2:
+            diff = float(state.net_position_change_24h)
+            # 分母口径与 prompt 侧完全一致：24h 两端绝对值较大者（防方向翻转期分母接近 0）
+            base = max(abs(float(vals[-1])), abs(float(vals[0])))
+            if base < 1.0:
+                # 基数过小（方向翻转/接近零持仓）：只按符号定方向，不加显著性修饰
+                if diff > 0:
+                    state.net_position_trend = "上升(多头增仓)"
+                elif diff < 0:
+                    state.net_position_trend = "下降(多头减仓)"
+                else:
+                    state.net_position_trend = "持平"
             else:
-                state.net_position_trend = "持平"
+                pct = diff / base
+                if pct > 0.05:
+                    state.net_position_trend = "上升(多头增仓)"
+                elif pct < -0.05:
+                    state.net_position_trend = "下降(多头减仓)"
+                else:
+                    state.net_position_trend = "持平"
     except Exception:
         logger.warning("poll_net_position failed", exc_info=True)
         state.poll_failures["net_position"] = "API调用失败"
