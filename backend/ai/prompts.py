@@ -1165,7 +1165,21 @@ def build_user_prompt(snapshot: dict) -> str:
         lines.append(f"BTC ETF 3日净流: {_fmt_usd_for_prompt(etf_3d)} ({snapshot.get('etf_trend', '')})")
     etf_days = snapshot.get("etf_recent_days", [])
     if etf_days:
-        day_strs = [f"{d.get('date', '?')}: {_fmt_usd_for_prompt(d.get('total_net', 0))}" for d in etf_days[:5]]
+        # P1.1 · ETF 当日 $0 很可能是"尚未收盘"的 pending，不是真实流入。
+        # 调用 DataMeta 推断当日/历史日的状态，pending 行追加标签消除 AI 把 0
+        # 误读为"资金面转空"的陷阱。
+        import time as _time
+        from models.data_meta import infer_etf_daily_status
+        now_ts = int(_time.time())
+        day_strs = []
+        for d in etf_days[:5]:
+            date_str = d.get("date", "?")
+            net = d.get("total_net", 0) or 0
+            meta = infer_etf_daily_status(date_str, net, now_ts)
+            suffix = ""
+            if meta.status == "pending":
+                suffix = f" ⏳ {meta.describe_cn()}"
+            day_strs.append(f"{date_str}: {_fmt_usd_for_prompt(net)}{suffix}")
         lines.append(f"ETF 每日明细: {' | '.join(day_strs)}")
     max_pain = snapshot.get("btc_max_pain")
     if max_pain:
