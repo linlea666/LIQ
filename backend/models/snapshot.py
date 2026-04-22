@@ -380,6 +380,10 @@ class AIAnalysisResult(BaseModel):
     # v2 · 完整 AI 交互过程可追溯：把 system_prompt（含 AI 终审员权限定义、
     # 8 维裁决框架、输出格式契约等）也持久化，供 /api/ai/detail 完整回放
     system_prompt: str = ""
+    # 2026-04-22 · 跨模型对照切片：已剥除我方规则侧结论 / 指令 / 输出格式要求
+    # 专供用户将本次完整行情数据复制到 Claude / Gemini / GPT-4 / Kimi 等
+    # 其他 AI 做独立方向判断，对比模型准确率。持久化保证任意一次分析都可回放。
+    data_snapshot_prompt: str = ""
 
     # P1.7 · Prompt 升级附录：AI 产出的结构化 Factor Matrix / bias / conviction 等
     # 与 markdown 正文配对输出，供 trader_report_builder 优先采用；

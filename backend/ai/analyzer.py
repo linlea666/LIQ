@@ -11,7 +11,11 @@ import traceback
 
 from openai import AsyncOpenAI
 
-from ai.prompts import build_system_prompt, build_user_prompt
+from ai.prompts import (
+    build_data_snapshot_prompt,
+    build_system_prompt,
+    build_user_prompt,
+)
 from config.settings import get_settings
 from models.snapshot import AIAnalysisResult, AISnapshot, SignalSummary, SniperPlan, TradingPlanEntry
 
@@ -53,11 +57,25 @@ class AIAnalyzer:
         user_prompt = build_user_prompt(snapshot_dict)
 
         system_prompt = build_system_prompt()
+        # 2026-04-22 · 跨模型对照切片：生成与 user_prompt 同源但已剥除
+        # 规则侧结论 / 指令 / 输出格式要求的纯数据版，供前端"AI 交互过程原文"
+        # 卡片第四项展示，让用户可一键复制到其他 AI 做独立方向判断。
+        # 本生成是旁路（不影响主链路 API 调用），失败也不影响 AI 分析本身。
+        try:
+            data_snapshot_prompt = build_data_snapshot_prompt(snapshot_dict)
+        except Exception as e:
+            logger.warning(
+                "build_data_snapshot_prompt failed (non-fatal) | coin=%s err=%s",
+                snapshot.coin, e,
+            )
+            data_snapshot_prompt = ""
+
         logger.info(
             "AI analysis started | coin=%s price=%.2f | "
-            "system_prompt=%d chars | user_prompt=%d chars | model=%s timeout=%ds",
+            "system_prompt=%d chars | user_prompt=%d chars | "
+            "data_snapshot=%d chars | model=%s timeout=%ds",
             snapshot.coin, snapshot.price,
-            len(system_prompt), len(user_prompt),
+            len(system_prompt), len(user_prompt), len(data_snapshot_prompt),
             self._model, self._timeout,
         )
 
@@ -132,6 +150,7 @@ class AIAnalyzer:
                     raise
 
         result = _parse_ai_output(raw_text, snapshot, user_prompt, system_prompt)
+        result.data_snapshot_prompt = data_snapshot_prompt
         return result
 
 

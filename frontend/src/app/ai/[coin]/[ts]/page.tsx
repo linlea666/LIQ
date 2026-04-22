@@ -366,11 +366,12 @@ export default function AIDetailPage() {
           </Card>
         )}
 
-        {/* AI 交互过程原文（v2：完整三件套可追溯） */}
+        {/* AI 交互过程原文（v2：完整三件套 + 跨模型对照用纯数据切片） */}
         <PromptInspectorCard
           systemPrompt={data.system_prompt || ""}
           userPrompt={data.user_prompt || ""}
           rawText={data.raw_text || ""}
+          dataSnapshotPrompt={data.data_snapshot_prompt || ""}
         />
 
         {/* Footer */}
@@ -396,17 +397,19 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// AI 交互过程三件套查看器（system / user / raw response）
+// AI 交互过程查看器（system / user / raw response + 跨模型对照用纯数据切片）
 // 默认折叠；每段独立展开、独立复制。system_prompt 为空时降级提示
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function PromptInspectorCard({
   systemPrompt,
   userPrompt,
   rawText,
+  dataSnapshotPrompt,
 }: {
   systemPrompt: string;
   userPrompt: string;
   rawText: string;
+  dataSnapshotPrompt: string;
 }) {
   const items: Array<{
     key: string;
@@ -415,6 +418,7 @@ function PromptInspectorCard({
     desc: string;
     content: string;
     emptyHint: string;
+    highlight?: boolean;
   }> = [
     {
       key: "system",
@@ -440,13 +444,27 @@ function PromptInspectorCard({
       content: rawText,
       emptyHint: "无",
     },
+    {
+      key: "data",
+      icon: "📊",
+      title: "跨模型对照数据切片（纯数据 · 无规则 · 无指令）",
+      desc:
+        "已剥除 §9k 规则共识 / §10 规则引擎预计算 / §11 引擎方案及所有输出格式指令；" +
+        "保留完整行情/衍生品/链上/结构/关键位/新闻数据 — 复制粘贴到 Claude/Gemini/GPT/Kimi 做独立方向判断对比",
+      content: dataSnapshotPrompt,
+      emptyHint:
+        "未记录（此条分析早于 2026-04-22 跨模型对照切片改造，下一轮 AI 分析起生效）",
+      highlight: true,
+    },
   ];
 
   return (
-    <Card title="🛰️ AI 交互过程原文（System · User · Raw Response）">
+    <Card title="🛰️ AI 交互过程原文（System · User · Raw Response · 跨模型对照数据切片）">
       <div className="space-y-3">
         <div className="text-xs text-slate-500 -mt-1">
-          点击任意一项展开查看完整原文；用于完整复盘 AI 在本次分析里"看到了什么、想了什么、输出了什么"
+          点击任意一项展开查看完整原文；前三项用于复盘本次 AI &ldquo;看到了什么、想了什么、输出了什么&rdquo;；
+          第四项为已剥离我方规则/指令的<span className="text-emerald-400 font-semibold">纯数据切片</span>，
+          专供你一键复制给其他 AI 做独立判断，对比哪家模型的方向判断更准。
         </div>
         {items.map((it) => (
           <PromptSection
@@ -456,6 +474,7 @@ function PromptInspectorCard({
             desc={it.desc}
             content={it.content}
             emptyHint={it.emptyHint}
+            highlight={it.highlight}
           />
         ))}
       </div>
@@ -469,19 +488,31 @@ function PromptSection({
   desc,
   content,
   emptyHint,
+  highlight,
 }: {
   icon: string;
   title: string;
   desc: string;
   content: string;
   emptyHint: string;
+  highlight?: boolean;
 }) {
   const [copyLabel, setCopyLabel] = useState("📋 复制");
   const chars = content ? content.length : 0;
   const isEmpty = !content;
 
+  // highlight 变体给"跨模型对照数据切片"用 emerald 色调区分，暗示核心用途
+  const borderClass = highlight
+    ? "border-emerald-900/60"
+    : "border-slate-800";
+  const charBadgeClass = isEmpty
+    ? "text-slate-600 border-slate-800"
+    : highlight
+      ? "text-emerald-400 border-emerald-900/60 bg-emerald-950/30"
+      : "text-blue-400 border-blue-900/60 bg-blue-950/30";
+
   return (
-    <details className="group border border-slate-800 rounded-lg overflow-hidden bg-slate-950/40">
+    <details className={`group border rounded-lg overflow-hidden bg-slate-950/40 ${borderClass}`}>
       <summary className="cursor-pointer select-none px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/40 transition">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm shrink-0">{icon}</span>
@@ -491,13 +522,7 @@ function PromptSection({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span
-            className={`text-[10px] px-2 py-0.5 rounded border ${
-              isEmpty
-                ? "text-slate-600 border-slate-800"
-                : "text-blue-400 border-blue-900/60 bg-blue-950/30"
-            }`}
-          >
+          <span className={`text-[10px] px-2 py-0.5 rounded border ${charBadgeClass}`}>
             {isEmpty ? "无内容" : `${chars.toLocaleString()} chars`}
           </span>
           <span className="text-[10px] text-slate-500 group-open:hidden">展开</span>

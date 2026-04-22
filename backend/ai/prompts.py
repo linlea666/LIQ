@@ -1952,3 +1952,114 @@ def build_user_prompt(snapshot: dict) -> str:
     scalp_note = " 8) §11d有 scalp 信号时，§四短线档须**逐条**给出「采纳/否决」判定（不重新规划参数）" if has_kl and any(s.get("action","").startswith("scalp_") for s in kl.get("signals", [])) else ""
     lines.append("重点：1) 每个方案止损须含防猎杀说明 2) 宏观-微观一致 3) §四交易决策以**期望值**（胜率×盈亏比）为核心，软底线 rr≥1.0；规则引擎方案已按 ≥1:{:.1f} 预过滤 4) 引擎未覆盖的档位AI可自主构建标注⚡AI推断{}{}{}{}".format(min_rr, cps_note, range_note, kl_note, scalp_note))
     return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 跨模型对照用「纯数据切片」（不含我方规则/指令/预设结论）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 设计背景（用户诉求，2026-04-22）：
+#   将同一份行情快照喂给 Claude / Gemini / GPT-4 / Kimi 等多家模型各自独立分析，
+#   对比谁的方向判断更准。为此需要一份"**无我方偏置**"的数据切片：
+#     - ❌ 不能用 system_prompt（含 L7 人设 + 8 维投票框架，会污染对照）
+#     - ❌ 不能用 user_prompt（末尾含"必须包含八个章节 / 重点"等输出指令）
+#     - ❌ 不能含 §9k direction_vote / §10 rule_engine / §11 sniper+ladder
+#          这些规则侧**结论**（按用户决策 3 剔除，防带跑其他 AI）
+#
+# 保留 / 剥离策略（用户决策 1&2 保留；决策 3 剔除）：
+#   ✅ 保留：字段值、单位、字段语义说明、[数据说明]/[字段语义]/⚠ 异常告警
+#   ❌ 剥离：整段 §9k / §10 / §11 / 11a-11d；头部【引擎约束】；
+#          尾部"请基于以上数据..."/"重点：..."；§13"- 【使用规则】"行
+#
+# 稳健性：基于段落锚点（### N. / 关键前缀）切片，而非硬编码行号；
+#        prompts.py 内部渲染顺序稳定（至少半年内无重构计划），切片与之解耦。
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import re as _re
+
+
+# 整段剥除的 section id（匹配 "### 9k." / "### 10." / "### 11." 开头）
+# 9k = direction_vote 规则 8 维共识
+# 10 = 规则引擎预计算（rule_supports/resistances/stop_loss）
+# 11 = 引擎交易方案（sniper_entries + ladder_plans + scalp；含 11a-11d 子段）
+_DATA_SNAPSHOT_DROP_SECTIONS = {"9k", "10", "11"}
+
+# 段落标题正则：捕获 "### 9k.xxx" / "### 10. xxx" / "### 11a. xxx"（宽松）
+_SECTION_HEADING_RE = _re.compile(r"^###\s+(\d+[a-z]?)[.\s]")
+
+# 单行剥除的前缀（不属任何整段，但污染明显）
+_DATA_SNAPSHOT_DROP_LINE_PREFIXES = (
+    "【引擎约束】",             # user_prompt 头部的规则引擎前置约束
+    "请基于以上数据输出",       # user_prompt 尾部的章节指令
+    "重点：",                   # user_prompt 尾部的决策口径指令
+    "- 【使用规则】",           # §13 新闻情报段的规则用法指令
+    "使用原则:",                # §9j 段尾『使用原则: §9j 与 §9i 组合 → ...』方法论指导
+)
+
+
+def build_data_snapshot_prompt(snapshot: dict) -> str:
+    """生成"纯数据切片"供其他 AI（Claude / Gemini / GPT-4 ...）独立分析。
+
+    与 build_user_prompt 共用数据渲染源（避免字段漂移 / 双写维护），
+    在产物上按段落锚点剥除**我方规则结论**与**输出格式指令**。
+
+    返回值是纯 markdown 文本；末尾附一条中性任务说明，不含任何决策规则。
+
+    为什么不另起炉灶重写：
+      - prompts.py 已经把 snapshot 里几十个字段的格式化逻辑写得很细
+        （单位、异常告警、时区换算、pending 标注 ...），重写必然复读且易漂移
+      - 当前"剥离 3 大 section + 少数指令行"的粒度，用锚点切片最轻量
+      - 反向说：若未来 prompts.py 大改版，测试会第一时间发现（见
+        tests/test_data_snapshot_prompt.py 的 section-coverage 断言）
+    """
+    full = build_user_prompt(snapshot)
+
+    kept: list[str] = []
+    skip_until_next_section = False
+
+    for line in full.split("\n"):
+        stripped = line.lstrip()  # 允许标题本身有前导空格（目前无，但留容错）
+
+        # 1. 遇到新 section 标题 → 决定是否切换 skip 状态
+        m = _SECTION_HEADING_RE.match(stripped)
+        if m:
+            sid = m.group(1)  # "9k" / "10" / "11" / "9g" / "13" ...
+            # 注：§11 的子段 11a/11b/11c/11d 在 prompt 里是 **粗体** 而非 ### 标题，
+            # 它们会自然随 §11 被 skip_until_next_section 吞掉直到 §13 新闻出现，
+            # 因此 set 只需存完整主 section id，无需枚举 11a-11d。
+            if sid in _DATA_SNAPSHOT_DROP_SECTIONS:
+                skip_until_next_section = True
+                continue
+            # 遇到其他 ### 标题（或 Drop 段之后的下一段）→ 恢复输出
+            skip_until_next_section = False
+
+        # 2. 整段 skip 期间：无条件丢弃
+        if skip_until_next_section:
+            continue
+
+        # 3. 单行黑名单（头部/尾部的规则/指令行）
+        if any(stripped.startswith(p) for p in _DATA_SNAPSHOT_DROP_LINE_PREFIXES):
+            continue
+
+        kept.append(line)
+
+    # 4. 末尾加中性任务说明（代替被剥掉的"请基于以上数据 + 重点"）
+    kept.append("")
+    kept.append("---")
+    kept.append("## 分析任务")
+    kept.append(
+        "以上为当前 BTC/USDT 完整行情数据快照（含多时间框架 K 线 / CVD / "
+        "清算地图 / OI / 资金费率 / 多空比 / 订单簿 / 巨鲸 / ETF / "
+        "链上周期 / 市场结构 / 关键位 / 新闻叙事 ...）。"
+    )
+    kept.append(
+        "请基于以上数据独立给出你的方向判断、关键位、交易计划与风险评估——"
+        "**不受任何预设规则、投票框架或输出格式约束**，按你自己的方法论自由展开。"
+    )
+    kept.append("")
+    kept.append(
+        "> 数据说明：本切片已剥除我方系统的规则侧预设结论"
+        "（含引擎预计算、方向共识投票、预生成交易方案），"
+        "仅保留原始数据与字段语义注解，不干扰你的独立判断。"
+    )
+
+    return "\n".join(kept)

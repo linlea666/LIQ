@@ -246,6 +246,12 @@ export interface AIAnalysisResult {
   user_prompt?: string;
   /** v2 · 完整 AI 交互过程：含 AI 人设/裁决框架/终审员权限/输出契约 */
   system_prompt?: string;
+  /**
+   * 2026-04-22 · 跨模型对照切片：已剥除我方规则侧结论 / 指令 / 输出格式要求的
+   * 纯数据版 prompt，供用户一键复制到 Claude / Gemini / GPT-4 / Kimi 等其他 AI
+   * 做独立方向判断，对比模型准确率。
+   */
+  data_snapshot_prompt?: string;
   signal_summary?: SignalSummary | null;
 }
 
