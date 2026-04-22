@@ -33,10 +33,19 @@ def test_today_zero_flagged_as_pending():
     assert "尚未收盘" in meta.pending_reason
 
 
-def test_today_nonzero_flagged_as_fresh():
+def test_today_nonzero_still_pending_p0_8():
+    """P0.8 HIGH-2 修正：当日非零金额亦须 pending（盘中快照非终值）。
+
+    旧行为（P1.1）：当日 total_net != 0 → fresh。
+    问题：ETF 当日盘中会给出预估流入快照（如 $1.5 亿 / $2.5 亿），
+    AI 会把盘中快照当收盘终值据此决策。实盘铁律：美股未收盘，
+    当日所有 ETF 数据均不可靠。因此无论金额多少，date==today 即 pending。
+    """
     now = int(time.time())
     meta = infer_etf_daily_status(_today_str(now), 2.5e8, now)
-    assert meta.status == "fresh"
+    assert meta.status == "pending"
+    assert "尚未收盘" in meta.pending_reason
+    assert "盘中快照非终值" in meta.pending_reason
 
 
 def test_yesterday_zero_not_flagged_as_pending():
@@ -66,7 +75,11 @@ def test_prompt_etf_today_zero_marked_with_pending_label():
     assert "今日美股 ETF 尚未收盘" in out
 
 
-def test_prompt_etf_today_nonzero_no_pending_label():
+def test_prompt_etf_today_nonzero_also_pending_p0_8():
+    """P0.8 HIGH-2 修正：当日非零金额 prompt 仍应标 ⏳ pending。
+
+    旧测断言"⏳ not in"，对应 P1.1 的放行行为；P0.8 后须全部标注。
+    """
     now = int(time.time())
     snap = {
         "coin": "BTC", "price": 75000.0, "high_24h": 76000, "low_24h": 74000,
@@ -75,5 +88,5 @@ def test_prompt_etf_today_nonzero_no_pending_label():
         ],
     }
     out = build_user_prompt(snap)
-    # 今日 nonzero 不应触发 pending
-    assert "⏳" not in out[out.find("ETF"):out.find("ETF") + 200]
+    assert "⏳" in out, "P0.8: 当日非零金额也须 ⏳ pending"
+    assert "盘中快照非终值" in out

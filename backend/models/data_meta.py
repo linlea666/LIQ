@@ -66,20 +66,34 @@ def infer_etf_daily_status(date_str: str, total_net: float,
     """为 ETF 当日明细推断 DataMeta。
 
     规则（美股 ETF 结算约在美东 16:30 ≈ 次日 UTC 20:30 前后完成聚合）：
-    1. date == 今日 UTC 且 total_net == 0 → pending("今日尚未收盘，0 非真实流入")
-    2. date == 今日 UTC 且 total_net != 0 → fresh（当日已有成交）
-    3. date < 今日 UTC → fresh（历史日，正常）
+    1. date == 今日 UTC → **无条件 pending**（无论金额多少，当日均未收盘）
+       - 之所以不再用 "total_net ≈ 0 才标 pending" 的老条件，是因为：
+         · ETF 当日盘中会有预估流入快照（如 $1千万 / $3千万），不是真实终值
+         · 交易员看到非零数字会以为是当日收盘终值而据此调整方向 / 仓位
+         · 实盘中"美股未收盘 → 当日所有 ETF 数据都不可靠"是铁律
+       - 金额大小不是判定依据，时间上是"今日"就足以 pending
+    2. date < 今日 UTC → fresh（历史日，已收盘终值）
+
+    本方法由 P0.8 HIGH-2 改造，覆盖 P1.1 的判定条件过严 bug。
     """
-    import time
     from datetime import datetime, timezone
 
     today = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%Y-%m-%d")
-    if date_str == today and abs(float(total_net or 0)) < 1.0:
+    if date_str == today:
+        amount_hint = ""
+        try:
+            net_f = float(total_net or 0)
+            if abs(net_f) >= 1.0:
+                amount_hint = "，盘中快照非终值"
+            else:
+                amount_hint = "，0 可能非真实流入"
+        except (TypeError, ValueError):
+            amount_hint = ""
         return DataMeta(
             as_of=as_of_ts or now_ts,
             staleness_sec=0,
             status="pending",
-            pending_reason="今日美股 ETF 尚未收盘，0 可能非真实流入",
+            pending_reason=f"今日美股 ETF 尚未收盘{amount_hint}",
             source="coinglass-v4",
         )
     # 其余情况保持 fresh

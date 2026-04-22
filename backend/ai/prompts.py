@@ -339,7 +339,7 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 - **资金费率方向**：正费率=多头付钱给空头=**多头拥挤**（轧多风险）；负费率=空头付钱给多头=**空头拥挤**（轧空风险）。绝对不可写反。
 - **TP1 / TP2 语义铁律**：
   - **TP1 = 近目标（部分止盈点）**：对侧清算磁吸 / POC / 第一阻力支撑，通常 R:R 在 1.0-2.0 区间，离入场价**近**
-  - **TP2 = 远目标（吃满点）**：软底线 R:R ≥ 1.0，期望值（胜率 × 盈亏比）越高越优；通常参考 ≥ 1:{min_rr:.1f}
+  - **TP2 = 远目标（吃满点）**：软底线 R:R ≥ 1.0，由 AI 综合期望值（胜率 × 盈亏比）自主取舍
   - 若出现 TP1 比 TP2 更远（价格上），一律判定为引擎数据异常，**严禁**原样输出到§四方案，应在§八「数据冲突」里标注并舍弃该方案
   - R:R 校验**以 TP2 为准**（TP2 是负责兜底 R:R 的远目标）
 
@@ -887,6 +887,13 @@ def build_user_prompt(snapshot: dict) -> str:
     bid_tot = float(snapshot.get("orderbook_bid_total_usd") or 0)
     ask_tot = float(snapshot.get("orderbook_ask_total_usd") or 0)
     ob_spread = float(snapshot.get("orderbook_spread_pct") or 0)
+    # P0.8 HIGH-1 · spread 极端异常值展示层兜底
+    # 根因：聚合深度接口偶发 stale tick / 交易所错位 / 小数位错位，输出如
+    # "盘口价差 +41.76%" 的离谱数值（BTC 正常 spread <0.05%）。
+    # 若不标告警直接展示，AI 会据此推出"流动性极差 → 全部方案 wait"的错误结论。
+    # 这里按铁律"数据异常值怀疑"统一给 AI 发信号：该字段权重降至最低。
+    _OB_SPREAD_EXTREME_THRESHOLD = 1.0  # 1% = BTC 场景下绝对不正常（实盘通常 <0.05%）
+    spread_is_extreme = abs(ob_spread) > _OB_SPREAD_EXTREME_THRESHOLD
     # P0.3 · 真实"买卖力差"= 买卖总量不对称度，不是买一/卖一价差(spread)
     # 旧版错把 orderbook_spread_pct（spread = 衡量流动性紧致度）当作买卖力差展示，
     # 会出现"买盘$3.1B / 卖盘$3.2B → 买卖力差 +2.73%"这种符号/量级都荒谬的结果。
@@ -900,7 +907,12 @@ def build_user_prompt(snapshot: dict) -> str:
         "",
         "### 6. 订单簿聚合深度 [数据源: Coinglass · 聚合 Binance/OKX/Bybit 订单簿快照]",
         f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {bid_ask_skew_pct:+.2f}%（(买-卖)/(买+卖)）",
-        f"盘口价差 spread: {ob_spread:+.4f}%（买一/卖一价差，衡量流动性紧致度，非买卖力对比）",
+        (
+            f"盘口价差 spread: {ob_spread:+.4f}%（买一/卖一价差，衡量流动性紧致度，非买卖力对比）"
+            + (" ⚠ 极端异常值（BTC 场景正常 <0.05%，疑似 stale tick / 接口错位），"
+               "不得作为流动性或方向判断依据，权重降至最低"
+               if spread_is_extreme else "")
+        ),
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
         "说明: 本节仅含聚合深度总额。具体的大额挂单/墙体请参见 §8d「大单追踪」。",
     ])
