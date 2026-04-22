@@ -814,9 +814,20 @@ def build_user_prompt(snapshot: dict) -> str:
     ls_long = snapshot.get("ls_ratio_long_pct")
     ls_short = snapshot.get("ls_ratio_short_pct")
     ls_chg24 = snapshot.get("ls_ratio_change_24h")
+    # P0.3 · 多空比变化量（ls_chg24）是 ratio 数值差（今 2.23 ↔ 昨 2.20 → +0.0273），
+    # 非百分比。旧展示仅写 "24h变化: +0.0273"，AI 易误读为 "+2.73%" 并与 §6 买卖力差串味。
+    # 这里显式标注"比值差"并同步给出等效百分比，彻底消除二义性。
+    def _fmt_ls_chg(base: float | None, chg: float | None) -> str:
+        if chg is None:
+            return ""
+        if base is not None and abs(base) > 1e-6:
+            eff_pct = chg / base * 100.0
+            return f" | 24h 比值差 {chg:+.4f}(≈ {eff_pct:+.2f}% 环比, 非买卖力差)"
+        return f" | 24h 比值差 {chg:+.4f}(比值差, 非百分比)"
+
     if ls is not None:
         pct_str = f" (多{ls_long:.1f}%/空{ls_short:.1f}%)" if ls_long is not None else ""
-        chg_str = f" | 24h变化: {ls_chg24:+.4f}" if ls_chg24 is not None else ""
+        chg_str = _fmt_ls_chg(ls, ls_chg24)
         lines.append(f"全局账户多空比: {ls:.2f}{pct_str}{chg_str} ({snapshot.get('ls_ratio_interpretation', '')})")
     else:
         lines.append("全局账户多空比: 数据暂缺")
@@ -828,7 +839,7 @@ def build_user_prompt(snapshot: dict) -> str:
     if ls_ta is not None:
         ta_label = "大户偏多" if ls_ta > 1.1 else ("大户偏空" if ls_ta < 0.9 else "大户中性")
         pct_str = f" (多{ta_long:.1f}%/空{ta_short:.1f}%)" if ta_long is not None else ""
-        chg_str = f" | 24h变化: {ta_chg24:+.4f}" if ta_chg24 is not None else ""
+        chg_str = _fmt_ls_chg(ls_ta, ta_chg24)
         lines.append(f"大户账户多空比: {ls_ta:.2f}{pct_str}{chg_str} → {ta_label}")
     if ls_tp is not None:
         tp_label = "大户持仓偏多" if ls_tp > 1.1 else ("大户持仓偏空" if ls_tp < 0.9 else "大户持仓中性")
@@ -849,13 +860,20 @@ def build_user_prompt(snapshot: dict) -> str:
     bid_tot = float(snapshot.get("orderbook_bid_total_usd") or 0)
     ask_tot = float(snapshot.get("orderbook_ask_total_usd") or 0)
     ob_spread = float(snapshot.get("orderbook_spread_pct") or 0)
+    # P0.3 · 真实"买卖力差"= 买卖总量不对称度，不是买一/卖一价差(spread)
+    # 旧版错把 orderbook_spread_pct（spread = 衡量流动性紧致度）当作买卖力差展示，
+    # 会出现"买盘$3.1B / 卖盘$3.2B → 买卖力差 +2.73%"这种符号/量级都荒谬的结果。
+    bid_ask_skew_pct = 0.0
+    if (bid_tot + ask_tot) > 0:
+        bid_ask_skew_pct = (bid_tot - ask_tot) / (bid_tot + ask_tot) * 100.0
     # §6 只展示"聚合深度"——这是 Coinglass 订单簿快照的真实产出
     # 大单/墙体详情统一移到 §8d「大单追踪」，避免同一份 large_orders 数据
     # 在两个板块重复展示造成 AI 困惑
     lines.extend([
         "",
         "### 6. 订单簿聚合深度 [数据源: Coinglass · 聚合 Binance/OKX/Bybit 订单簿快照]",
-        f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {ob_spread:+.2f}%",
+        f"近档位合计深度(USD): 买盘 {_fmt_usd_for_prompt(bid_tot)} / 卖盘 {_fmt_usd_for_prompt(ask_tot)} | 买卖力差 {bid_ask_skew_pct:+.2f}%（(买-卖)/(买+卖)）",
+        f"盘口价差 spread: {ob_spread:+.4f}%（买一/卖一价差，衡量流动性紧致度，非买卖力对比）",
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
         "说明: 本节仅含聚合深度总额。具体的大额挂单/墙体请参见 §8d「大单追踪」。",
     ])
