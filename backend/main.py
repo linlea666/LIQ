@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router, set_engine as set_routes_engine
+from api.nofx_router import router as nofx_router, set_engine as set_nofx_engine
 from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
@@ -174,6 +175,7 @@ async def _te_eval_scheduler():
 async def lifespan(app: FastAPI):
     set_routes_engine(engine)
     set_ws_engine(engine)
+    set_nofx_engine(engine)
 
     # P0-A Shadow Logger：启动后台 writer
     try:
@@ -219,6 +221,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(nofx_router)
 
 _socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)

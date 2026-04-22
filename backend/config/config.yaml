@@ -196,3 +196,23 @@ server:
     - "http://localhost:3001"
     - "http://8.217.240.76:8801"
     - "http://8.217.240.76"
+
+# ── NOFX 外部 AI 决策接口（/api/nofx/*） ──
+# 目的：为 NOFX 项目（3 分钟一次决策）提供"完整原始行情快照"，仅返回原始/统计
+#       类数据，已剔除本项目所有加工层（trend_exhaustion / market_structure /
+#       direction_vote / temperature / execution_plan / ai_trader_report …）
+# 关键约束：
+#   1. JSON 返回，字段命名稳定，向后兼容（仅允许加字段）
+#   2. 纯读内存，不触发外部请求，对现有系统零侵入
+#   3. 30s 响应缓存 + IP 令牌桶限频，防呆并保护 CPU
+nofx:
+  enabled: true
+  cache_ttl_sec: 30           # 响应字节级缓存（远小于 NOFX 3min 节奏，业务透明）
+  rate_limit_per_min: 60      # 单 IP 上限；NOFX 3min/次 = 20/h，远低于此
+  allow_coins: ["BTC", "ETH", "SOL"]
+  candle_limit:               # 每个时间框返回最近 N 根（按 state 实际可用容量）
+    "15m": 96                 # 最近 24h
+    "1h":  168                # 最近 7d
+    "4h":  120                # 最近 20d
+    "1d":  90                 # 最近 3 个月
+    "1w":  60                 # 最近 ~1.2 年

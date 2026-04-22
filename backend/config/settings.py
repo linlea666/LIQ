@@ -168,6 +168,29 @@ class NotificationsConfig:
 
 
 @dataclass(frozen=True)
+class NOFXConfig:
+    """NOFX 外部 AI 交易决策系统的数据接口配置（/api/nofx/*）。
+
+    关键设计原则：
+      - 纯读内存 CoinState，不触发外部请求，不消耗 Coinglass 配额
+      - 30 秒字节级响应缓存，避免 NOFX / 其它消费方并发重复序列化
+      - IP 级令牌桶限频（默认 60/min，远高于 NOFX 自身 20/h 需求）
+      - Schema 版本化，仅允许"加字段"，不允许"改名/删字段"
+    """
+    enabled: bool = True
+    cache_ttl_sec: int = 30
+    rate_limit_per_min: int = 60
+    allow_coins: list[str] = field(default_factory=lambda: ["BTC", "ETH", "SOL"])
+    candle_limit: dict[str, int] = field(default_factory=lambda: {
+        "15m": 96,
+        "1h": 168,
+        "4h": 120,
+        "1d": 90,
+        "1w": 60,
+    })
+
+
+@dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
@@ -179,6 +202,7 @@ class Settings:
     server: ServerConfig
     engine: EngineConfig = field(default_factory=EngineConfig)
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
+    nofx: NOFXConfig = field(default_factory=NOFXConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -329,6 +353,30 @@ def _build_settings(raw: dict) -> Settings:
     )
     notifications_cfg = NotificationsConfig(email=email_cfg)
 
+    # NOFX 外部 AI 决策接口配置：缺省段落时用 dataclass 默认值（接口默认启用）
+    nofx_raw = raw.get("nofx", {}) or {}
+    candle_limit_raw = nofx_raw.get("candle_limit") or {}
+    default_candle_limit = {"15m": 96, "1h": 168, "4h": 120, "1d": 90, "1w": 60}
+    # 以 default 为底板 merge：避免 yaml 写了 3 个就丢了另外 2 个导致 builder KeyError
+    candle_limit: dict[str, int] = {**default_candle_limit}
+    for tf, n in candle_limit_raw.items():
+        try:
+            candle_limit[str(tf)] = max(1, int(n))
+        except (TypeError, ValueError):
+            continue
+    allow_coins_raw = nofx_raw.get("allow_coins")
+    if isinstance(allow_coins_raw, list) and allow_coins_raw:
+        allow_coins = [str(c).upper() for c in allow_coins_raw]
+    else:
+        allow_coins = list(coins.keys())
+    nofx_cfg = NOFXConfig(
+        enabled=bool(nofx_raw.get("enabled", True)),
+        cache_ttl_sec=max(0, int(nofx_raw.get("cache_ttl_sec", 30) or 0)),
+        rate_limit_per_min=max(1, int(nofx_raw.get("rate_limit_per_min", 60) or 60)),
+        allow_coins=allow_coins,
+        candle_limit=candle_limit,
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -340,6 +388,7 @@ def _build_settings(raw: dict) -> Settings:
         server=server,
         engine=engine_cfg,
         notifications=notifications_cfg,
+        nofx=nofx_cfg,
         default_coin=default_coin,
     )
 
