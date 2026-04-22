@@ -370,6 +370,40 @@ def _calc_entry_zones(
     return zones
 
 
+def _validate_sniper_entry(e: SniperEntry, min_rr: float) -> tuple[bool, str]:
+    """P0.5 · SniperEntry 结构与 R:R 质量统一校验。
+    校验项：
+      1. 方向合法
+      2. stop / tp1 / tp2 相对 entry 的几何顺序（long: sl<entry<=tp1<=tp2；short 反之）
+      3. rr_ratio_1 ≥ 1.5，rr_ratio_2 ≥ min_rr
+      4. risk > 0（防除 0）
+    任何一项失败 → (False, reason)；用于主函数与 KL 信号桥接两个入口的共用质量门。
+    """
+    if e.direction not in ("long", "short"):
+        return False, f"direction 非法: {e.direction}"
+    if e.risk_usd_per_unit <= 0:
+        return False, "risk <= 0"
+    if e.direction == "long":
+        # long: sl < entry <= tp1 <= tp2
+        if not (e.stop_loss < e.entry_price <= e.take_profit_1 <= e.take_profit_2):
+            return False, (
+                f"long 几何不合法 sl={e.stop_loss} entry={e.entry_price} "
+                f"tp1={e.take_profit_1} tp2={e.take_profit_2}"
+            )
+    else:
+        # short: tp2 <= tp1 <= entry < sl
+        if not (e.take_profit_2 <= e.take_profit_1 <= e.entry_price < e.stop_loss):
+            return False, (
+                f"short 几何不合法 sl={e.stop_loss} entry={e.entry_price} "
+                f"tp1={e.take_profit_1} tp2={e.take_profit_2}"
+            )
+    if e.rr_ratio_1 < 1.5:
+        return False, f"rr1={e.rr_ratio_1} < 1.5"
+    if e.rr_ratio_2 < min_rr:
+        return False, f"rr2={e.rr_ratio_2} < min_rr({min_rr})"
+    return True, ""
+
+
 def _calc_sniper_entries(
     current_price: float,
     liq_map: Optional[LiquidationMap],
@@ -532,6 +566,12 @@ def _merge_kl_signals_into_sniper(
 ) -> list[SniperEntry]:
     """将 V2 关键位信号 (SWEPT/BOUNCED/FLIPPED) 桥接为 SniperEntry 合入候选池。
 
+    P0.5 · 旧版桥接绕开了主函数 `_calc_sniper_entries` 的质量门，
+    会把 rr1<1.5 / tp1-tp2 顺序反 / 止损方向反 的 KL 信号直接塞入候选池，
+    与主函数生成的 entries 混排时让 AI 读到不合法的交易计划。
+    新版复用 `_validate_sniper_entry` 做与主函数同口径的几何+R:R 校验，
+    不合格的信号丢弃并 debug log（便于观察 KL 侧是否频繁产出废票）。
+
     去重规则：与已有 sniper entry 挂单价在 0.5% 以内且方向相同时，保留 R:R 更高的。
     """
     _ACTION_DIR = {
@@ -539,6 +579,7 @@ def _merge_kl_signals_into_sniper(
         "flip_long": "long", "flip_short": "short",
     }
     merged = list(existing)
+    min_rr = float(get_settings().processors.levels.get("min_sniper_rr", 2.5))
 
     for sig in kl_signals:
         direction = _ACTION_DIR.get(sig.action)
@@ -574,6 +615,15 @@ def _merge_kl_signals_into_sniper(
                 sig.reason,
             ],
         )
+
+        # 与主函数同口径的几何 + R:R 质量门
+        ok, why = _validate_sniper_entry(new_entry, min_rr)
+        if not ok:
+            logger.debug(
+                "skip KL->sniper bridging (action=%s state=%s price=%.2f): %s",
+                sig.action, sig.state, sig.level_price, why,
+            )
+            continue
 
         dup_idx = None
         for i, ex in enumerate(merged):
