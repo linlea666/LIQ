@@ -656,8 +656,10 @@ def build_user_prompt(snapshot: dict) -> str:
         f"多空失衡比: {snapshot.get('liq_imbalance_ratio', 0):.2f} (>1=空头清算多/看多磁吸, <1=多头清算多/看空磁吸)",
     ]
 
+    # P2.3 · 24h 清算簇展示截断（[:10]，保留近距离高密度簇）
+    # 数据采集不改；AI 实际决策常用前 6-8 条，10 是保守截断
     lines.append("\n上方清算密集区(空头清算):")
-    for c in snapshot.get("liq_clusters_above", []):
+    for c in snapshot.get("liq_clusters_above", [])[:10]:
         lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
                      f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                      f"距当前{c.get('distance_pct', 0):.1f}%")
@@ -665,7 +667,7 @@ def build_user_prompt(snapshot: dict) -> str:
             lines.append(f"    ⚠ 当前价${price:,.1f}已在此簇范围内 — 清算正在发生，基于此簇的策略前提需重新评估")
 
     lines.append("\n下方清算密集区(多头清算):")
-    for c in snapshot.get("liq_clusters_below", []):
+    for c in snapshot.get("liq_clusters_below", [])[:10]:
         lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
                      f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                      f"距当前{c.get('distance_pct', 0):.1f}%")
@@ -715,15 +717,16 @@ def build_user_prompt(snapshot: dict) -> str:
     if clusters_above_7d or clusters_below_7d:
         lines.extend(["", "### 1b. 清算地图数据 [7天]"])
         lines.append(f"7天多空失衡比: {imb_7d:.2f}")
+        # P2.3 · 7d 清算簇展示截断：同 30d 保持 [:8]，省 token（数据采集侧不改）
         if clusters_above_7d:
             lines.append("\n7天上方清算密集区(空头清算):")
-            for c in clusters_above_7d:
+            for c in clusters_above_7d[:8]:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
                              f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
         if clusters_below_7d:
             lines.append("\n7天下方清算密集区(多头清算):")
-            for c in clusters_below_7d:
+            for c in clusters_below_7d[:8]:
                 lines.append(f"  - ${c.get('price_from', 0):,.0f}-${c.get('price_to', 0):,.0f}: "
                              f"{_fmt_usd_for_prompt(c.get('total_usd', 0))} ({c.get('dominant_leverage', '')}x) "
                              f"距当前{c.get('distance_pct', 0):.1f}%")
@@ -1487,7 +1490,10 @@ def build_user_prompt(snapshot: dict) -> str:
             2: "stage2(回踩中·观察)",
             3: "stage3(已确认·可追)",
         }
-        for lv in kl.get("levels", [])[:15]:
+        # P2.3 · 展示层去冗余：15 → 10 条（优先 S/A 级 + 距离近的；已按 confluence 排序）
+        # 根因：用户反馈 prompt 过长 + §9g 活跃位占版面；实盘常用前 8-10 条即够判断
+        # 数据采集侧完全不动，仅截展示
+        for lv in kl.get("levels", [])[:10]:
             side_cn = "支撑" if lv.get("side") == "support" else "阻力"
             state_cn = {
                 "idle": "待观察", "approaching": "正接近",
