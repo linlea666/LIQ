@@ -22,6 +22,8 @@ backend/data/divergence_store.json
 backend/data/ai_quality_ledger.json
 backend/data/plan_backtest.json
 backend/data/replay/
+# 滚仓模块用户状态（运行时生成：持仓/事件/模板/设置）
+backend/data/roll/
 # 本地 Cursor MCP 配置（机器相关绝对路径）
 .cursor/mcp.json
 # P0 · TrendExhaustion 影子日志 / 日报（运行时生成，不进仓）

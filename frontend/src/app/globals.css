@@ -14,8 +14,33 @@ body {
 body:has(.ai-detail-page),
 body:has(.levels-detail-page),
 body:has(.range-detail-page),
-body:has(.news-brief-page) {
+body:has(.news-brief-page),
+body:has(.roll-page) {
   overflow: auto;
+}
+
+/* 滚仓模块表单输入统一样式 */
+.roll-input {
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.375rem;
+  color: #e2e8f0;
+  font-size: 0.8125rem;
+  transition: border-color 120ms ease;
+}
+.roll-input:focus {
+  outline: none;
+  border-color: #10b981;
+}
+.roll-input[type="number"]::-webkit-inner-spin-button,
+.roll-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.roll-input:disabled {
+  opacity: 0.5;
 }
 
 /* Custom scrollbar */

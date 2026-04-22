@@ -72,6 +72,13 @@ export default function Dashboard() {
             >
               📼 回放
             </Link>
+            <Link
+              href="/roll"
+              className="rounded-md border border-emerald-700/60 bg-emerald-950/40 px-2 py-1 text-[11px] text-emerald-300 hover:border-emerald-500 hover:text-emerald-200 transition"
+              title="滚仓计划管家 · 提醒模式"
+            >
+              📊 滚仓
+            </Link>
             <AIButton />
           </div>
         </div>

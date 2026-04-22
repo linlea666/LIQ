@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from ai.analyzer import AIAnalyzer, create_analyzer
 from ai.snapshot import build_ai_snapshot
-from api.ws import push_to_coin
+from api.ws import push_roll_signal, push_to_coin
 from config.settings import CoinConfig, get_settings
 from models.flow import (
     BasisData, CVDData, CVDPoint, CyclePositionData, ETFFlowData, ETFFlowDay,
@@ -225,6 +225,16 @@ class Engine:
         )
         self._notif_cfg = self._settings.notifications.email
         self._alert_config_warned = False
+
+        # ── 滚仓模块 · RollService ──
+        # 把 on_signal 回调接到 WS 推送：评估产生信号 → roll_signal event
+        from processors.roll_service import RollService
+        self._roll_loop_ref: Optional[asyncio.AbstractEventLoop] = None
+        self.roll_service = RollService(
+            data_dir=self._data_dir,
+            on_signal=self._on_roll_signal,
+        )
+        self._roll_eval_interval_sec: int = 10
 
     @property
     def ai_available(self) -> bool:
@@ -436,10 +446,23 @@ class Engine:
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
         self._running = True
+        self._roll_loop_ref = asyncio.get_running_loop()
         logger.info(
             "Engine starting (Coinglass) | coins=%s default=%s",
             self._settings.supported_coins, self._default_coin,
         )
+
+        # ── 滚仓模块启动：从磁盘加载 positions + plans + events + settings ──
+        try:
+            self.roll_service.bootstrap()
+            logger.info(
+                "[Roll] service ready | positions=%d plans=%d templates=%d",
+                len(self.roll_service.store.positions),
+                len(self.roll_service.store.plans),
+                len(self.roll_service.templates),
+            )
+        except Exception:
+            logger.warning("[Roll] service bootstrap failed", exc_info=True)
 
         # ── D1-D17 架构决策追踪：启动时打印清单与状态 ──
         try:
@@ -526,6 +549,9 @@ class Engine:
             tasks.append(asyncio.create_task(self._news_agent_loop()))
         except Exception:
             logger.debug("[D13] news_agent_loop schedule failed", exc_info=True)
+
+        # ── 滚仓评估循环（每 _roll_eval_interval_sec 秒一轮） ──
+        tasks.append(asyncio.create_task(self._roll_eval_loop()))
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -720,6 +746,13 @@ class Engine:
             logger.info("KL history saved to disk before shutdown")
         except Exception:
             logger.error("Failed to save KL history on shutdown", exc_info=True)
+        # 滚仓模块：最后一次落盘（确保关闭前事件全部可恢复）
+        try:
+            if self.roll_service._initialized:  # type: ignore[attr-defined]
+                self.roll_service.persist_store()
+                logger.info("[Roll] store persisted before shutdown")
+        except Exception:
+            logger.error("[Roll] persist on shutdown failed", exc_info=True)
         await self._cg.close()
         await self._bn.close()
         await self._bbx.close()
@@ -2113,6 +2146,72 @@ class Engine:
     def _calc_stablecoin_change(sc):
         from polls.macro import calc_stablecoin_change
         return calc_stablecoin_change(sc)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 滚仓模块 · 评估调度 + WS 推送
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async def _roll_eval_loop(self) -> None:
+        """定时对所有 active 滚仓持仓做一轮评估。
+
+        触发间隔：`_roll_eval_interval_sec`（默认 10s，可以根据算力微调）。
+        跳过条件：
+          - 持仓的 coin 不在支持列表
+          - 对应 CoinState.ticker 尚未就绪（价格为 0 即无法评估）
+          - build_market_context 返回 None
+        on_signal 回调已在 __init__ 中注入 → signal 生成即异步推送。
+        """
+        from processors.roll_market_adapter import build_market_context_from_state
+
+        # 给数据管线一点热身时间
+        await asyncio.sleep(15)
+        logger.info(
+            "[Roll] eval loop started | interval=%ds",
+            self._roll_eval_interval_sec,
+        )
+
+        while self._running:
+            try:
+                if self.roll_service._initialized:  # type: ignore[attr-defined]
+                    def _provider(coin: str):
+                        state = self._states.get(coin)
+                        if state is None:
+                            return None
+                        return build_market_context_from_state(state)
+
+                    signals = self.roll_service.evaluate_all(_provider)
+                    if signals:
+                        actionable = sum(1 for s in signals if s.action != "hold")
+                        logger.debug(
+                            "[Roll] evaluated | total=%d actionable=%d",
+                            len(signals), actionable,
+                        )
+            except Exception:
+                logger.error("[Roll] eval loop error", exc_info=True)
+            await asyncio.sleep(self._roll_eval_interval_sec)
+
+    def _on_roll_signal(self, signal) -> None:
+        """RollService on_signal 回调：把信号异步推送给订阅的前端。
+
+        本方法在 evaluate_all 的同步调用栈里被触发，需要通过
+        asyncio.create_task（或 loop.call_soon_threadsafe）把推送挂回事件循环。
+        """
+        loop = self._roll_loop_ref
+        if loop is None or not loop.is_running():
+            return
+        try:
+            payload = signal.model_dump()
+            # 同 loop 内直接 schedule；跨线程调用时用 call_soon_threadsafe 也安全
+            if asyncio.get_event_loop_policy().get_event_loop() is loop:
+                asyncio.create_task(push_roll_signal(signal.position_id, payload))
+            else:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(
+                        push_roll_signal(signal.position_id, payload)
+                    )
+                )
+        except Exception:
+            logger.debug("[Roll] on_signal push failed", exc_info=True)
 
     def get_source_health(self) -> list[dict]:
         daily = self._cg.daily_request_count

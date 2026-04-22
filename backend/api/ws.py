@@ -22,6 +22,9 @@ _engine = None
 _sid_coin: dict[str, str] = {}
 _coin_viewer_count: dict[str, int] = {}
 
+# 滚仓模块订阅：sid → {position_id}，单个 sid 可订阅多个持仓
+_sid_roll_positions: dict[str, set[str]] = {}
+
 
 def set_engine(engine):
     """由 main.py 在启动时注入 Engine 实例"""
@@ -41,6 +44,10 @@ async def disconnect(sid):
         _coin_viewer_count[old_coin] = max(0, _coin_viewer_count.get(old_coin, 0) - 1)
         if _coin_viewer_count.get(old_coin, 0) == 0 and _engine:
             _engine.mark_coin_viewer_left(old_coin)
+
+    # 滚仓订阅清理
+    _sid_roll_positions.pop(sid, None)
+
     logger.info("Client disconnected | sid=%s coin=%s", sid, old_coin)
 
 
@@ -121,3 +128,58 @@ async def push_to_coin(coin: str, event: str, data: dict):
 async def push_to_all(event: str, data: dict):
     """向所有客户端广播"""
     await sio.emit(event, data)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 滚仓模块订阅（独立频道，不影响行情订阅）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _roll_room(position_id: str) -> str:
+    return f"roll:{position_id}"
+
+
+@sio.event
+async def subscribe_roll(sid, data):
+    """客户端订阅一个持仓的滚仓信号流。
+
+    data = {"position_id": "pos-xxx"}
+    同一 sid 可多次调用以订阅多个持仓；已订阅则幂等。
+    """
+    position_id = str((data or {}).get("position_id") or "").strip()
+    if not position_id:
+        await sio.emit("error", {"msg": "position_id required"}, to=sid)
+        return
+
+    subs = _sid_roll_positions.setdefault(sid, set())
+    if position_id in subs:
+        await sio.emit("roll_subscribed", {"position_id": position_id}, to=sid)
+        return
+
+    await sio.enter_room(sid, _roll_room(position_id))
+    subs.add(position_id)
+    logger.info("Roll subscribe | sid=%s position=%s subs=%d", sid, position_id, len(subs))
+    await sio.emit("roll_subscribed", {"position_id": position_id}, to=sid)
+
+
+@sio.event
+async def unsubscribe_roll(sid, data):
+    position_id = str((data or {}).get("position_id") or "").strip()
+    if not position_id:
+        return
+    subs = _sid_roll_positions.get(sid)
+    if not subs or position_id not in subs:
+        return
+    await sio.leave_room(sid, _roll_room(position_id))
+    subs.discard(position_id)
+    logger.info("Roll unsubscribe | sid=%s position=%s", sid, position_id)
+    await sio.emit("roll_unsubscribed", {"position_id": position_id}, to=sid)
+
+
+async def push_roll_signal(position_id: str, data: dict):
+    """向订阅了该持仓的客户端推送滚仓引擎评估结果。"""
+    await sio.emit("roll_signal", data, room=_roll_room(position_id))
+
+
+async def push_roll_event(position_id: str, data: dict):
+    """向订阅了该持仓的客户端推送执行/关闭/覆盖等事件（供前端刷新列表）。"""
+    await sio.emit("roll_event", data, room=_roll_room(position_id))
