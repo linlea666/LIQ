@@ -81,6 +81,15 @@ def _vote_structure(state) -> DirectionVote:
 
 
 def _vote_mtf_align(state) -> DirectionVote:
+    """P0.4 · MTF 一致性归一化
+    旧版 bug：当 1w/1d 缺失、只剩 1h 一个 TF 时，仍走 `bulls == total` 分支
+    返回 strength 0.9（和 3/3 同向权重相同），把"MTF"退化成单 TF 重复计数。
+    新版：按可用 TF 数量分档打强度，单 TF 硬顶 0.3 并在 note 标注数据不全。
+    - total==3：2/3 同向 → 0.55，3/3 → 0.9（保留）
+    - total==2：1/2 同向 → 0.25，2/2 → 0.6
+    - total==1：无论哪个方向 → ≤0.3（MTF 本应多周期共振，单 TF 不算"共振"）
+    - total==0：missing
+    """
     tfs = []
     for attr, tag in (("market_structure_1w", "1w"),
                       ("market_structure_1d", "1d"),
@@ -96,15 +105,33 @@ def _vote_mtf_align(state) -> DirectionVote:
     bulls = sum(1 for _, d in tfs if d == "bullish")
     bears = sum(1 for _, d in tfs if d == "bearish")
     total = len(tfs)
-    if bulls == total:
-        return _mk("mtf_align", "bullish", 0.9, f"{total}/{total} 周期同向做多（{'+'.join(t for t,_ in tfs)}）")
-    if bears == total:
-        return _mk("mtf_align", "bearish", 0.9, f"{total}/{total} 周期同向做空（{'+'.join(t for t,_ in tfs)}）")
+    joined = "+".join(t for t, _ in tfs)
+
+    if total == 1:
+        tag, d = tfs[0]
+        # 单 TF 不算 MTF 共振，硬顶 0.3 并标注数据不全
+        return _mk(
+            "mtf_align", d, 0.3,
+            f"仅 {tag} 一个周期 {'多' if d == 'bullish' else '空'}（1w/1d 数据不全，MTF 共振无法判定，权重折半）"
+        )
+
+    if total == 2:
+        if bulls == 2:
+            return _mk("mtf_align", "bullish", 0.6, f"2/2 周期同向做多（{joined}，1 周期数据不全）")
+        if bears == 2:
+            return _mk("mtf_align", "bearish", 0.6, f"2/2 周期同向做空（{joined}，1 周期数据不全）")
+        # 1 多 1 空
+        return _mk("mtf_align", "neutral", 0.1, f"MTF 分歧（多{bulls}/空{bears}，{joined}）")
+
+    # total == 3
+    if bulls == 3:
+        return _mk("mtf_align", "bullish", 0.9, f"3/3 周期同向做多（{joined}）")
+    if bears == 3:
+        return _mk("mtf_align", "bearish", 0.9, f"3/3 周期同向做空（{joined}）")
     if bulls >= 2 and bears == 0:
-        return _mk("mtf_align", "bullish", 0.55, f"{bulls}/{total} 周期偏多 · 其余中性")
+        return _mk("mtf_align", "bullish", 0.55, f"{bulls}/3 周期偏多 · 其余中性")
     if bears >= 2 and bulls == 0:
-        return _mk("mtf_align", "bearish", 0.55, f"{bears}/{total} 周期偏空 · 其余中性")
-    # 多空对冲
+        return _mk("mtf_align", "bearish", 0.55, f"{bears}/3 周期偏空 · 其余中性")
     return _mk("mtf_align", "neutral", 0.1, f"MTF 分歧（多{bulls}/空{bears}）")
 
 
