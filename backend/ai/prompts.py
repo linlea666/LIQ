@@ -474,15 +474,26 @@ def _append_news_context(lines: list[str], snapshot: dict) -> None:
         for t in active_narr[:5]:
             ff = int(t.get("flip_flop_count_24h", 0) or 0)
             ff_flag = f" ⚠反复{ff}次" if ff >= 2 else ""
+            # P0.7 · 字段语义澄清
+            # bias = 该叙事对 **BTC 价格方向** 的判断（bullish/bearish/neutral），
+            # 不是叙事本身的"情感色彩"，也不是叙事强度；
+            # intensity = 该叙事的影响强度（0-5 级），与价格方向解耦。
+            # 旧版仅写 "bias=xxx intensity=n/5" 易让 AI 把强度当作方向权重或反之。
             lines.append(
                 f"  - {t.get('theme_id', '?')} ({t.get('theme_name_cn', '')}): "
-                f"bias={t.get('current_direction_bias', 'neutral')} "
-                f"intensity={t.get('current_intensity', 0)}/5{ff_flag}"
+                f"btc_price_bias={t.get('current_direction_bias', 'neutral')} "
+                f"(该叙事对 BTC 价格方向的判断) · "
+                f"intensity={t.get('current_intensity', 0)}/5 (叙事影响强度，与方向解耦)"
+                f"{ff_flag}"
             )
 
     lines.append(
         "- 【使用规则】§一须纳入新闻叙事大方向；§四若与新闻强烈冲突须给出理由；"
         "flip-flop 主题权重减半；geo level≥4 时禁止新开仓。"
+    )
+    lines.append(
+        "- 【字段术语】btc_price_bias = 该叙事对 BTC 价格方向的判断；"
+        "intensity = 叙事影响强度（0-5）；两者**解耦**：高强度利空 ≠ 高强度看多。"
     )
 
 
