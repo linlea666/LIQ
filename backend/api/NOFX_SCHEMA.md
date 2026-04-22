@@ -1,4 +1,10 @@
-# NOFX 外部 AI 决策接口契约 (Schema v1.0.0)
+# NOFX 外部 AI 决策接口契约 (Schema v1.0.1)
+
+> **v1.0.1 变更说明（向后兼容）**
+> - `candles / cvd.last_point.ts / whale.hl_alerts_recent[].ts / whale.top_transfers[].ts / oi.history_30pts[].ts` 统一归一化为 **unix 秒**（此前个别源头会混入毫秒）
+> - `options.expiries[].put_call_ratio` 与 `options.put_call_oi_ratio` 在源头为 0 时，按 `put_oi / call_oi` 自动补算
+> - `whale.top_transfers` 会过滤掉上游返回的"空壳" transfer（`ts=0 && amount_usd=0`）；同时新增 `whale.transfers_count_raw` 字段用于观测过滤前数量
+> - 纯增量、无字段删除/改名/改类型
 
 > 给 NOFX 项目（3 分钟决策周期）提供**完整原始行情快照**的专用接口。
 > 所有"已下结论"的加工字段（动能衰竭 / 市场结构 / 决策 / 评分等）**已剔除**，

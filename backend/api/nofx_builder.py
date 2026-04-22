@@ -23,10 +23,28 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.0.1"
 
 
 # ── 工具函数 ────────────────────────────────────────────────
+
+def _normalize_ts(ts: Any) -> int:
+    """统一归一化时间戳到 unix 秒。
+
+    源头不一致：Binance K 线 / Coinglass whale / Hyperliquid 返回毫秒，
+    其它 processor 返回秒。我们对外契约承诺秒，因此在 builder 层做"智能换算"：
+    任何 ts > 1e12 视为毫秒（约合 2001 年后的毫秒都会大于这个阈值），÷1000。
+    """
+    try:
+        v = int(ts or 0)
+    except (TypeError, ValueError):
+        return 0
+    if v <= 0:
+        return 0
+    if v > 10_000_000_000:  # ≈ 2286 年的秒数；任何超过此阈值的都是毫秒
+        return v // 1000
+    return v
+
 
 def _safe_dump(obj: Any) -> Any:
     """pydantic / dict / 其它 -> dict；失败返回 None。"""
@@ -45,10 +63,12 @@ def _safe_dump(obj: Any) -> Any:
 
 
 def _compact_candle(c: Any) -> Optional[list]:
-    """CandleData -> [ts, o, h, l, c, v]。用数组节省 JSON 体积。"""
+    """CandleData -> [ts, o, h, l, c, v]。用数组节省 JSON 体积。
+    ts 统一输出秒（源头可能是毫秒）。
+    """
     try:
         return [
-            int(getattr(c, "ts", 0) or 0),
+            _normalize_ts(getattr(c, "ts", 0)),
             float(getattr(c, "open", 0) or 0),
             float(getattr(c, "high", 0) or 0),
             float(getattr(c, "low", 0) or 0),
@@ -78,17 +98,17 @@ def _last_ts(candles: Any) -> int:
     if not candles:
         return 0
     try:
-        return int(getattr(candles[-1], "ts", 0) or 0)
+        return _normalize_ts(getattr(candles[-1], "ts", 0))
     except Exception:
         return 0
 
 
 def _age_sec(ts: Optional[int], now: int) -> Optional[int]:
-    """data_age_sec 计算；ts 缺失或非法 -> None。"""
+    """data_age_sec 计算；ts 缺失或非法 -> None。自动识别毫秒并归一化。"""
     if not ts:
         return None
     try:
-        age = now - int(ts)
+        age = now - _normalize_ts(ts)
         return age if age >= 0 else 0
     except Exception:
         return None
@@ -125,7 +145,7 @@ def _build_cvd(state: Any) -> dict:
             "has_divergence": bool(getattr(cvd, "has_divergence", False)),
             "cumulative": float(getattr(last, "cvd", 0) or 0) if last else 0.0,
             "last_point": {
-                "ts": int(getattr(last, "ts", 0) or 0),
+                "ts": _normalize_ts(getattr(last, "ts", 0)),
                 "buy_vol": float(getattr(last, "buy_vol", 0) or 0),
                 "sell_vol": float(getattr(last, "sell_vol", 0) or 0),
                 "delta": float(getattr(last, "delta", 0) or 0),
@@ -148,7 +168,7 @@ def _build_oi(state: Any) -> Optional[dict]:
     try:
         for pt in list(history)[-30:]:
             recent.append({
-                "ts": int(getattr(pt, "ts", 0) or 0),
+                "ts": _normalize_ts(getattr(pt, "ts", 0)),
                 "oi": float(getattr(pt, "oi", 0) or 0),
                 "oi_usd": float(getattr(pt, "oi_usd", 0) or 0),
             })
@@ -329,7 +349,7 @@ def _build_large_orders(state: Any) -> Optional[dict]:
     recent = []
     for o in sorted(orders, key=lambda x: float(getattr(x, "size_usd", 0) or 0), reverse=True)[:15]:
         recent.append({
-            "ts": int(getattr(o, "ts", 0) or 0),
+            "ts": _normalize_ts(getattr(o, "ts", 0)),
             "exchange": getattr(o, "exchange", "") or "",
             "symbol": getattr(o, "symbol", "") or "",
             "side": getattr(o, "side", "") or "",
@@ -356,21 +376,32 @@ def _build_whale(state: Any) -> Optional[dict]:
     transfers = list(getattr(whale, "transfers", None) or [])
 
     # 转账资金流向：exchange 标签进/出
+    # 注：上游有时会产生"空壳 transfer"（ts=0 amount_usd=0 仅有 from/to 标签），
+    #     这里用 amount_usd > 0 过滤，避免 count 虚高而 net_usd=0 的割裂数据。
     inflow_usd = 0.0   # 转入交易所
     outflow_usd = 0.0  # 转出交易所
+    EXCHANGE_LABELS = {"binance", "okx", "coinbase", "bybit", "kraken", "huobi", "kucoin", "bitfinex"}
     for t in transfers:
+        amt = float(getattr(t, "amount_usd", 0) or 0)
+        if amt <= 0:
+            continue
         to_label = (getattr(t, "to_label", "") or "").lower()
         from_label = (getattr(t, "from_label", "") or "").lower()
-        amt = float(getattr(t, "amount_usd", 0) or 0)
-        if "exchange" in to_label or to_label in {"binance", "okx", "coinbase", "bybit", "kraken"}:
+        if "exchange" in to_label or any(k in to_label for k in EXCHANGE_LABELS):
             inflow_usd += amt
-        if "exchange" in from_label or from_label in {"binance", "okx", "coinbase", "bybit", "kraken"}:
+        if "exchange" in from_label or any(k in from_label for k in EXCHANGE_LABELS):
             outflow_usd += amt
 
+    # 过滤掉 ts=0 且 amount_usd=0 的空壳转账（Coinglass 字段映射问题，见已知问题）
+    valid_transfers = [
+        t for t in transfers
+        if _normalize_ts(getattr(t, "ts", 0)) > 0
+        and float(getattr(t, "amount_usd", 0) or 0) > 0
+    ]
     top_transfers = []
-    for t in sorted(transfers, key=lambda x: float(getattr(x, "amount_usd", 0) or 0), reverse=True)[:15]:
+    for t in sorted(valid_transfers, key=lambda x: float(getattr(x, "amount_usd", 0) or 0), reverse=True)[:15]:
         top_transfers.append({
-            "ts": int(getattr(t, "ts", 0) or 0),
+            "ts": _normalize_ts(getattr(t, "ts", 0)),
             "symbol": getattr(t, "symbol", "") or "",
             "amount": float(getattr(t, "amount", 0) or 0),
             "amount_usd": float(getattr(t, "amount_usd", 0) or 0),
@@ -380,9 +411,9 @@ def _build_whale(state: Any) -> Optional[dict]:
         })
 
     top_alerts = []
-    for a in sorted(alerts, key=lambda x: int(getattr(x, "ts", 0) or 0), reverse=True)[:20]:
+    for a in sorted(alerts, key=lambda x: _normalize_ts(getattr(x, "ts", 0)), reverse=True)[:20]:
         top_alerts.append({
-            "ts": int(getattr(a, "ts", 0) or 0),
+            "ts": _normalize_ts(getattr(a, "ts", 0)),
             "symbol": getattr(a, "symbol", "") or "",
             "side": getattr(a, "side", "") or "",
             "action": getattr(a, "action", "") or "",
@@ -405,7 +436,8 @@ def _build_whale(state: Any) -> Optional[dict]:
     return {
         "hl_alerts_count": len(alerts),
         "hl_positions_count": len(positions),
-        "transfers_count": len(transfers),
+        "transfers_count": len(valid_transfers),
+        "transfers_count_raw": len(transfers),
         "transfer_inflow_usd": round(inflow_usd, 2),
         "transfer_outflow_usd": round(outflow_usd, 2),
         "transfer_net_usd": round(inflow_usd - outflow_usd, 2),
@@ -458,22 +490,31 @@ def _build_options(state: Any) -> Optional[dict]:
     info = getattr(state, "option_info", None)
     if opt is None and info is None:
         return None
-    expiries = []
+    expiries: list[dict] = []
     nearest_mp = None
     nearest_expiry = ""
     nearest_call_oi = None
     nearest_put_oi = None
     nearest_pcr = None
+    total_call_oi_sum = 0.0
+    total_put_oi_sum = 0.0
     if opt is not None:
         try:
             for e in getattr(opt, "expiries", None) or []:
+                call_oi = float(getattr(e, "call_oi", 0) or 0)
+                put_oi = float(getattr(e, "put_oi", 0) or 0)
+                raw_pcr = float(getattr(e, "put_call_ratio", 0) or 0)
+                # 源头 put_call_ratio 常为 0（Coinglass 未返回），用 call/put OI 自算
+                pcr = raw_pcr if raw_pcr > 0 else (round(put_oi / call_oi, 4) if call_oi > 0 else 0.0)
                 expiries.append({
                     "expiry_date": getattr(e, "expiry_date", "") or "",
                     "max_pain_price": float(getattr(e, "max_pain_price", 0) or 0),
-                    "call_oi": float(getattr(e, "call_oi", 0) or 0),
-                    "put_oi": float(getattr(e, "put_oi", 0) or 0),
-                    "put_call_ratio": float(getattr(e, "put_call_ratio", 0) or 0),
+                    "call_oi": call_oi,
+                    "put_oi": put_oi,
+                    "put_call_ratio": pcr,
                 })
+                total_call_oi_sum += call_oi
+                total_put_oi_sum += put_oi
             nearest_mp = getattr(opt, "nearest_max_pain", None)
             nearest_expiry = getattr(opt, "nearest_expiry", "") or ""
             if expiries:
@@ -482,6 +523,13 @@ def _build_options(state: Any) -> Optional[dict]:
                 nearest_pcr = expiries[0]["put_call_ratio"]
         except Exception:
             pass
+
+    # 顶层 OI 比率：优先用 OptionInfoData；为 0 时退回用 max_pain 表汇总估算
+    pcr_oi_info = float(getattr(info, "put_call_oi_ratio", 0) or 0) if info else 0.0
+    pcr_vol_info = float(getattr(info, "put_call_vol_ratio", 0) or 0) if info else 0.0
+    if pcr_oi_info <= 0 and total_call_oi_sum > 0:
+        pcr_oi_info = round(total_put_oi_sum / total_call_oi_sum, 4)
+
     return {
         "nearest_max_pain": nearest_mp,
         "nearest_expiry": nearest_expiry,
@@ -491,8 +539,8 @@ def _build_options(state: Any) -> Optional[dict]:
         "expiries": expiries[:10],
         "total_oi_usd": float(getattr(info, "total_oi_usd", 0) or 0) if info else 0,
         "total_vol_24h_usd": float(getattr(info, "total_vol_24h_usd", 0) or 0) if info else 0,
-        "put_call_oi_ratio": float(getattr(info, "put_call_oi_ratio", 0) or 0) if info else 0,
-        "put_call_vol_ratio": float(getattr(info, "put_call_vol_ratio", 0) or 0) if info else 0,
+        "put_call_oi_ratio": pcr_oi_info,
+        "put_call_vol_ratio": pcr_vol_info,
         "iv_atm": getattr(info, "iv_atm", None) if info else None,
     }
 
@@ -611,10 +659,11 @@ def _build_sweeps(state: Any, now: int) -> list[dict]:
         for e in list(events):
             if not isinstance(e, dict):
                 continue
-            if int(e.get("ts", 0) or 0) <= cutoff:
+            ts_sec = _normalize_ts(e.get("ts", 0))
+            if ts_sec <= cutoff:
                 continue
             out.append({
-                "ts": int(e.get("ts", 0) or 0),
+                "ts": ts_sec,
                 "side": e.get("side", ""),
                 "usd": float(e.get("usd", 0) or 0),
                 "price": float(e.get("price", 0) or 0),

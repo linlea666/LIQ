@@ -486,3 +486,99 @@ def test_news_only_brief_conclusion():
         }
         leak = set(news["brief"].keys()) - allowed
         assert not leak, f"news.brief 出现非法字段: {leak}"
+
+
+# ── v1.0.1: 时间戳归一化 & 源头字段兜底 ────────────────────────
+
+def test_ts_always_in_seconds_not_milliseconds():
+    """所有对外 ts 都必须是 unix 秒（10 位），禁止毫秒（13 位）。
+
+    上游 Binance K 线 / Coinglass whale / Hyperliquid 会返回毫秒，
+    builder 必须统一归一化。阈值：秒 < 1e10 < 毫秒。
+    """
+    state = _make_state()
+
+    # 模拟上游把毫秒直接丢进 state（常见真实情况）
+    now_ms = int(time.time() * 1000)
+    state.candles_1h = [
+        CandleData(coin="BTC", ts=now_ms - i * 3_600_000, o=1, h=1, l=1, c=1, vol=1.0, vol_ccy=0.0)
+        for i in range(10, 0, -1)
+    ]
+    state.cvd_contract = CVDData(
+        coin="BTC", inst_type="CONTRACTS",
+        series=[CVDPoint(ts=now_ms, buy_vol=1, sell_vol=1, delta=0, cvd=0.0)],
+        delta_1h=0, has_divergence=False,
+    )
+    state.whale_data = WhaleData(
+        ts=int(time.time()),
+        hl_alerts=[HyperliquidWhaleAlert(
+            ts=now_ms, symbol="BTC", side="long", action="open",
+            size_usd=1_000_000, entry_price=70000,
+        )],
+        transfers=[],
+        hl_positions=[],
+    )
+
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    snap = out["snapshot"]
+
+    THRESHOLD = 10_000_000_000  # 秒最大 ≈ 2286 年；毫秒都超过此阈值
+
+    for row in snap["candles"].get("1h", []):
+        assert row[0] < THRESHOLD, f"K 线 ts 必须是秒，实际={row[0]}"
+
+    last_pt = snap["cvd"]["contract"]["last_point"]
+    if last_pt is not None:
+        assert last_pt["ts"] < THRESHOLD, f"cvd last_point.ts 必须是秒，实际={last_pt['ts']}"
+
+    for a in snap["whale"]["hl_alerts_recent"]:
+        assert a["ts"] < THRESHOLD, f"whale alert ts 必须是秒，实际={a['ts']}"
+
+
+def test_whale_empty_transfers_filtered():
+    """Coinglass 有时返回 ts=0 amount_usd=0 的空壳转账，必须从 top_transfers 过滤。"""
+    state = _make_state()
+    state.whale_data = WhaleData(
+        ts=int(time.time()),
+        hl_alerts=[],
+        hl_positions=[],
+        transfers=[
+            WhaleTransfer(ts=0, symbol="", amount=0, amount_usd=0,
+                          from_label="unknown", to_label="unknown", blockchain=""),
+            WhaleTransfer(ts=0, symbol="", amount=0, amount_usd=0,
+                          from_label="Binance", to_label="Coinbase", blockchain=""),
+            WhaleTransfer(ts=int(time.time()), symbol="BTC", amount=100, amount_usd=7_600_000,
+                          from_label="unknown", to_label="binance", blockchain="bitcoin"),
+        ],
+    )
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    top = out["snapshot"]["whale"]["top_transfers"]
+    assert len(top) == 1, "空壳 transfers 必须被过滤"
+    assert top[0]["amount_usd"] == 7_600_000
+
+
+def test_options_put_call_ratio_autofilled():
+    """源头 put_call_ratio 常为 0，builder 应按 put_oi/call_oi 自算补齐。"""
+    state = _make_state()
+    state.option_max_pain = OptionMaxPainData(
+        coin="BTC", symbol="BTC", ts=int(time.time()),
+        nearest_max_pain=76500.0, nearest_expiry="260430",
+        expiries=[
+            OptionMaxPainExpiry(expiry_date="260430", max_pain_price=76500.0,
+                                call_oi=10_000.0, put_oi=6_000.0, put_call_ratio=0.0),
+            OptionMaxPainExpiry(expiry_date="260529", max_pain_price=74000.0,
+                                call_oi=20_000.0, put_oi=15_000.0, put_call_ratio=0.0),
+        ],
+    )
+    state.option_info = OptionInfoData(
+        coin="BTC", symbol="BTC", ts=int(time.time()),
+        total_oi_usd=1e9, total_vol_24h_usd=5e8,
+        put_call_oi_ratio=0.0, put_call_vol_ratio=0.0, iv_atm=None,
+    )
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    opt = out["snapshot"]["options"]
+    # 每个 expiry 补算
+    assert opt["expiries"][0]["put_call_ratio"] == pytest.approx(0.6, rel=1e-3)
+    assert opt["expiries"][1]["put_call_ratio"] == pytest.approx(0.75, rel=1e-3)
+    # 顶层汇总：(6000+15000)/(10000+20000) = 0.7
+    assert opt["put_call_oi_ratio"] == pytest.approx(0.7, rel=1e-3)
