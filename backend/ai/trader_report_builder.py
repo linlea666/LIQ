@@ -1490,6 +1490,9 @@ def _mark_d14(
         )
 
         # D17 · 7 板块 AIFactorMatrix 独立上报
+        # 注意：规则侧 build_factor_matrix 永远生成完整 A-G 7 板块（独立于 AI）
+        # AI 的 sections[] 现为 optional，仅用于可选覆写（P1.3 降级策略 β）
+        # 因此这里的完整性校验对象是"规则侧 matrix + AI overlay 后"的最终产物
         expected = {"A", "B", "C", "D", "E", "F", "G"}
         present = {s.section_id for s in sections if getattr(s, "section_id", None)}
         missing = sorted(expected - present)
@@ -1536,16 +1539,22 @@ def _record_quality(
         )
 
         # json_valid 判定
+        # P1.3 · sections[] 降级策略 β：AI 可选填，缺失/空数组不再算 invalid
+        # - 有核心字段（bias / trading_plans / matrix_summary_cn 任一）即认为 JSON 有效
+        # - sections 若存在但非 list → malformed（真正的 schema 错误）
+        # - 完全缺失或空数组 → 合法降级（规则侧规则引擎 build_factor_matrix 已兜底生成 7 板块）
         json_valid = False
         invalid_reason = "missing"
         if ai_json:
             if not isinstance(ai_json, dict):
                 invalid_reason = "malformed"
-            elif not isinstance(ai_json.get("sections"), list):
-                invalid_reason = "wrong_sections"
             else:
-                json_valid = True
-                invalid_reason = ""
+                secs = ai_json.get("sections", None)
+                if secs is not None and not isinstance(secs, list):
+                    invalid_reason = "wrong_sections"
+                else:
+                    json_valid = True
+                    invalid_reason = ""
 
         # bias_vs_text：AI JSON bias vs markdown signal_summary direction
         bias_vs_text = "unknown"

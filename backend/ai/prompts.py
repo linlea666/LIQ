@@ -391,13 +391,17 @@ CPS 由 MVRV Z、Ahr999、200周均线比、STH成本、Pi周期综合评分，�
 ```
 
 **填写约束**：
-- `sections` 必须恰好 7 个，`section_id` 依次 `A/B/C/D/E/F/G`
-- `rows` 每个板块 **≥1 条**；单行 `signal_cn` ≤ 60 字；`direction` 必须是三选一枚举值之一
+- `sections` 现为**可选**（optional，降级策略 β）：
+  - AI 认为 markdown 叙事链已经充分表达 A-G 板块共振时可返回 `"sections": []`
+  - 也可以只填核心板块（比如方向冲突最剧烈的 ≤3 个），不要求补齐全部 7 个
+  - 若填则仍遵循 `section_id ∈ {{A,B,C,D,E,F,G}}` 与下面的 rows/resonance 规范
+  - 系统前端已适配：sections 为空时不渲染 JSON 附录板块，完全依赖 §一叙事链
+- `rows` 若该 section 有填，则 ≥1 条；单行 `signal_cn` ≤ 60 字；`direction` 必须是三选一枚举值之一
 - `resonance` 反映"这个单维信号在当前全局上的确信强度"：
   - `high` = 与 ≥2 维共振、数据源可信度 L1/L2
   - `medium` = 中性偏向、L3 级别或有冲突
   - `low` = 单维单薄、疑似异常值、L5 或未提供
-- `section_bias`/`bias` 与 §一叙事链、§四交易计划保持**严格一致**（出现反向即系统判为内部矛盾）
+- `section_bias`/`bias` 与 §一叙事链、§四交易计划保持**一致**（仅当 sections 非空时约束；反向将被系统判为内部矛盾）
 - `conviction` 与 §一 `置信度：高/中/低` 对齐：高=75-90、中=55-75、低=30-55；观望=40 以下
 - G · 双引擎共识：rows 至少 2 条（"数学引擎" + "AI Trader"），direction 反映对齐状态
 - `trading_plans`（**必填数组，≤3 条**）：

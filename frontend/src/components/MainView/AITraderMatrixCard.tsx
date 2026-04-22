@@ -156,8 +156,16 @@ export default function AITraderMatrixCard({
         <ExpandableMarketView text={report.market_view_cn} />
       )}
 
-      {/* 多维度看盘表（7 板块） */}
-      {report.factor_matrix && <FactorMatrixBlock matrix={report.factor_matrix} />}
+      {/* 多维度看盘表（7 板块）
+          P1.3 · 降级策略 β：sections[] 从 AI 侧变为 optional。
+          规则侧 build_factor_matrix 永远生成 A-G 完整 7 板块；
+          若上游返回的 matrix 结构异常导致 sections 为空，则直接不渲染该板块，
+          避免前端出现"7 板块占位但内容全空"的尴尬状态。 */}
+      {report.factor_matrix &&
+        report.factor_matrix.sections &&
+        report.factor_matrix.sections.length > 0 && (
+          <FactorMatrixBlock matrix={report.factor_matrix} />
+        )}
 
       {/* 交易计划 */}
       {report.trading_plans.length > 0 && (
