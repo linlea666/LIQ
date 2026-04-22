@@ -731,6 +731,45 @@ function RichMarkdown({ text }: { text: string }) {
   let tableRows: string[][] = [];
   let inTable = false;
 
+  // P1.2 · 代码块折叠缓冲（处理 AITRADER_MATRIX_JSON 之类的大段 JSON 裸露问题）
+  // 旧版 RichMarkdown 不识别 ``` 围栏，AI 输出末尾的结构化 JSON 会被逐行渲染
+  // 成几十行单行文本，视觉噪音极大。现在按围栏聚合并折叠为 <details> 块，默认收起。
+  let codeBuf: string[] = [];
+  let codeLang = "";
+  let inCode = false;
+
+  const flushCode = () => {
+    if (codeBuf.length === 0) {
+      inCode = false;
+      codeLang = "";
+      return;
+    }
+    const content = codeBuf.join("\n");
+    const isMatrix = content.includes("AITRADER_MATRIX_JSON") ||
+                     (codeLang === "json" && content.length > 400);
+    const title = isMatrix
+      ? "📋 结构化 JSON 附录（AITRADER_MATRIX_JSON，调试用，默认折叠）"
+      : codeLang
+        ? `\u2308 代码块 · ${codeLang} \u230b`
+        : "\u2308 代码块 \u230b";
+    elements.push(
+      <details
+        key={`code-${elements.length}`}
+        className="my-3 rounded-lg border border-slate-700/50 bg-slate-900/40"
+      >
+        <summary className="cursor-pointer px-3 py-2 text-xs text-slate-400 hover:text-slate-200 select-none">
+          {title} · 共 {codeBuf.length} 行 / {content.length} 字符（点击展开）
+        </summary>
+        <pre className="px-3 py-2 text-xs text-slate-300 whitespace-pre-wrap break-all overflow-x-auto max-h-96 overflow-y-auto">
+          {content}
+        </pre>
+      </details>
+    );
+    codeBuf = [];
+    codeLang = "";
+    inCode = false;
+  };
+
   const flushTable = () => {
     if (tableRows.length === 0) return;
     const header = tableRows[0];
@@ -767,6 +806,26 @@ function RichMarkdown({ text }: { text: string }) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+
+    // P1.2 · 代码块围栏 ``` 开关（优先级最高，在 table / list / p 之前）
+    if (trimmed.startsWith("```")) {
+      if (inCode) {
+        flushCode();
+      } else {
+        // 先 flush 掉未完结的 table（防串块）
+        if (inTable) {
+          flushTable();
+          inTable = false;
+        }
+        inCode = true;
+        codeLang = trimmed.slice(3).trim();
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      continue;
+    }
 
     if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       if (trimmed.replace(/[\s|:-]/g, "").length === 0) {
@@ -819,6 +878,7 @@ function RichMarkdown({ text }: { text: string }) {
   }
 
   if (inTable) flushTable();
+  if (inCode) flushCode();
 
   return <>{elements}</>;
 }
