@@ -311,7 +311,14 @@ def build_ai_snapshot(
         exchange_btc_total=mi_exchange_btc_total,
         exchange_btc_change_24h=mi.exchange_btc_change_24h if mi else None,
         exchange_btc_change_pct=mi_exchange_btc_change_pct,
-        ahr999=(mi.ahr999 if mi and mi.ahr999 and mi.ahr999 > 0 else (cycle_position.ahr999_value if cycle_position and cycle_position.ahr999_value and cycle_position.ahr999_value > 0 else None)),
+        # P0.1 · Ahr999 单一事实源：Coinglass（与 §9e CPS 贡献分同源，保证 §9c / §9e 展示一致）优先；BBX 仅作失败兜底
+        # 背景：BBX i2api 聚合值与 Coinglass 官方值在特定窗口可差 40%（如 0.6247 vs 0.4407），
+        # 若 §9c 取 BBX、§9e 取 Coinglass 会让 AI 在同一报告内读到两个 Ahr999 方向相反的解读（"适合定投" vs "适合抄底"）。
+        ahr999=(
+            cycle_position.ahr999_value
+            if cycle_position and cycle_position.ahr999_value and cycle_position.ahr999_value > 0
+            else (mi.ahr999 if mi and mi.ahr999 and mi.ahr999 > 0 else None)
+        ),
         stablecoin_dominance=mi.stablecoin_dominance if mi else None,
         coinbase_btc_premium=mi.coinbase_btc_premium if mi else None,
         usdt_otc_premium=mi.usdt_otc_premium if mi else None,
