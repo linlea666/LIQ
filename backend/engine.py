@@ -2035,21 +2035,29 @@ class Engine:
                 logger.warning("MAA arbiter unavailable | coin=%s", ccy)
                 return
 
+            # 捕获上一份报告（在覆盖 state.market_action_report 之前），供 AI 做时序对照
+            previous_report = state.market_action_report
+
             t0 = time.time()
-            report = await arbiter.analyze(facts)
+            report = await arbiter.analyze(facts, previous_report=previous_report)
             elapsed = time.time() - t0
 
             state.market_action_report = report
             state.market_action_last_ts = time.time()
             state.market_action_history.append(report)
 
+            cont_stance = (
+                report.continuity.stance
+                if report.continuity is not None else "n/a"
+            )
             logger.info(
                 "MAA ok | coin=%s | %.1fs | scenario=%s phase=%s conf=%d "
-                "bias=%s dq=%s evidence=%d parse_ok=%s",
+                "bias=%s dq=%s evidence=%d continuity=%s parse_ok=%s",
                 ccy, elapsed, report.scenario, report.market_phase,
                 report.confidence,
                 report.trading_implications.bias,
                 report.data_quality, len(report.evidence_breakdown),
+                cont_stance,
                 bool(report.prompt_debug and report.prompt_debug.parse_ok),
             )
 

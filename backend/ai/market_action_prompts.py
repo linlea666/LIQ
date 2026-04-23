@@ -33,7 +33,9 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 3. **场景必须落在下面 9 种之一**，不要自创。
 4. **你必须写出"思考过程"**，不能只给结论。
 5. **矛盾的证据必须诚实标注**：要么标 `supports="contrarian"` 并在 analyst_reasoning 里解释你为什么仍然保留主结论；要么放入 invalidation_conditions 作为推翻条件。**禁止把反向指标以 main 立场 + medium/high 权重假装支持主逻辑**。
-6. **confidence 必须可解释**：在 `confidence_rationale` 里明说"为什么是 65 不是 75 也不是 55"。
+6. **反事实失败点必须标 contrarian**：在 Step 4 反事实测试中发现的任何不符点，对应指标的 evidence 条目 supports 必须是 `contrarian`，不能是 neutral（反事实不符本身就是方向性反证，不是中性信息）。
+7. **confidence 必须可解释**：在 `confidence_rationale` 里明说"为什么是 65 不是 75 也不是 55"。
+8. **时序连续性**：若提供了 §0 前情提要，你必须在 `continuity` 字段里显式判断本次相对上一份的立场（continuation / refinement / reversal），不要无视历史。
 
 ━━━━━━━━━━ 你必须按此路径思考（6 步） ━━━━━━━━━━
 
@@ -85,6 +87,8 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 ━━━━━━━━━━ Evidence 写法要求（关键） ━━━━━━━━━━
 
 每条证据必须包含 4 项：
+- `dimension`：**必须**严格落在以下白名单中的一个（大小写完全一致，不要自创，不要翻译）：
+  `PriceContext` | `OI` | `Funding` | `Basis` | `CVD` | `Liquidation` | `LiqMap` | `LiqSweep` | `Footprint` | `Taker` | `Orderbook` | `Options`
 - `observation`：**纯事实陈述**，必须带具体数值。示例："OI 1h -1.22%，同期价格仅 -0.09%"
 - `inference`：**从观察推出的判断**，可跨维度、可对比历史形态。示例："价格几乎不动但 OI 显著下降 = 多头平仓为主，而非空头新进场；结合 range_position 86.99% 高位语境，是派发特征而非抛售"
 - `supports`：`"main"`（支持主结论） / `"contrarian"`（与主结论矛盾） / `"neutral"`（中性信息）
@@ -121,6 +125,12 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
     "scenario": "<9 选 1，与主 scenario 不同>",
     "probability_pct": 10-40 之间的整数,
     "trigger": "什么观察/价格条件会让你切换到这个对立场景"
+  },
+  "continuity": {
+    "stance": "continuation|refinement|reversal|first_run",
+    "previous_scenario": "若 §0 前情提要有给则原样回填，否则 null",
+    "previous_ts": "若 §0 前情提要有给则原样回填为整数秒，否则 null",
+    "note": "一句话说明：本次结论与上一份相比是延续/细节修正/方向反转；如果是首次分析则写 first_run 并说明无历史可比"
   },
   "evidence_breakdown": [
     {
@@ -197,8 +207,17 @@ def _zone_line(z: dict) -> str:
     )
 
 
-def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection]]:
-    """渲染 facts → markdown，并返回章节锚点列表。"""
+def build_user_prompt(
+    facts: MarketActionFacts,
+    previous_report: Any | None = None,
+) -> tuple[str, list[PromptSection]]:
+    """渲染 facts → markdown，并返回章节锚点列表。
+
+    Args:
+        facts: 本轮 MarketActionFacts（必填）
+        previous_report: 上一份 MarketActionReport（可选 · Pydantic 模型 或 dict 均可）。
+                         若提供则在最前渲染 §0 前情提要，供 AI 做"延续 / 修正 / 反转"判断
+    """
     d = facts.model_dump()
     coin = d.get("coin", "?")
     lines: list[str] = []
@@ -207,6 +226,54 @@ def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection
     def _header(anchor: str, title: str) -> None:
         sections.append(PromptSection(anchor=anchor, title=title, level=2))
         lines.append(f"\n## {anchor} {title}\n")
+
+    # ── §0 前情提要（有历史才渲染） ──
+    prev_snapshot: dict[str, Any] | None = None
+    if previous_report is not None:
+        try:
+            if hasattr(previous_report, "model_dump"):
+                prev_snapshot = previous_report.model_dump()
+            elif isinstance(previous_report, dict):
+                prev_snapshot = previous_report
+        except Exception:
+            prev_snapshot = None
+
+    if prev_snapshot:
+        _header("§0", "前情提要（上一份报告，用于判断延续 / 修正 / 反转）")
+        prev_ts = prev_snapshot.get("timestamp")
+        cur_ts = d.get("timestamp")
+        try:
+            delta_min = (
+                (int(cur_ts) - int(prev_ts)) / 60
+                if cur_ts is not None and prev_ts is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            delta_min = None
+        lines.append(f"- 上一份 ts：`{prev_ts}`（距本次约 {_fmt(delta_min, nd=1)} 分钟前）")
+        lines.append(f"- 上一份 scenario：**`{prev_snapshot.get('scenario', '—')}`**")
+        lines.append(f"- 上一份 market_phase：`{prev_snapshot.get('market_phase', '—')}`")
+        ti = prev_snapshot.get("trading_implications") or {}
+        lines.append(
+            f"- 上一份 bias：`{ti.get('bias', '—')}` "
+            f"| confidence：{prev_snapshot.get('confidence', '—')} "
+            f"| data_quality：`{prev_snapshot.get('data_quality', '—')}`"
+        )
+        prev_conclusion = (prev_snapshot.get("market_conclusion") or "").strip()
+        if prev_conclusion:
+            snippet = prev_conclusion[:200] + ("…" if len(prev_conclusion) > 200 else "")
+            lines.append(f"- 上一份结论首段：> {snippet}")
+        alt = prev_snapshot.get("alternative_scenario") or {}
+        if alt.get("scenario"):
+            lines.append(
+                f"- 上一份对立场景：`{alt.get('scenario')}`（"
+                f"{alt.get('probability_pct', '—')}% · trigger：{alt.get('trigger', '—')}）"
+            )
+        lines.append(
+            "\n**你需要**：在本次结论的 `continuity` 字段里诚实回答——"
+            "本次是**延续**上版（主方向相同且证据更强/同级）、**细节修正**（主方向相同但强度/阶段/置信度调整）、还是**方向反转**（scenario 大类切换，例如 exhaustion_top → trend_continuation_up）。"
+            "若反事实测试表明上版主假设已被新数据证伪，请**诚实给出 reversal**，不要因为一致性而硬延续。"
+        )
 
     # ── §1 当前行情速览 ──
     _header("§1", "当前行情速览")
@@ -437,20 +504,29 @@ def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection
 
     # ── §6 任务 ──
     _header("§6", "你的任务（严格按思维流程 Step 1→6 执行）")
+    has_prev = prev_snapshot is not None
     lines.append(
         "请按 system prompt 里的 6 步思维流程**先想清楚、再回答**：\n"
         "  1. Step 1-2：扫描 §2-§4 全部指标，分别打偏多/偏空/中性标签，找证据群 + 矛盾\n"
         "  2. Step 3-4：形成主假设（scenario + phase）并做反事实测试\n"
-        "  3. Step 5-6：给对立视角 + 交易员直觉\n\n"
-        "完成后以**单一 JSON 代码块**输出，字段严格匹配 schema，包含："
+        "  3. Step 5-6：给对立视角 + 交易员直觉\n"
+        + (
+            "  4. **时序对照**：对比 §0 前情提要，判断本次相对上一份是"
+            "**延续 / 细节修正 / 方向反转**，填入 `continuity` 字段\n"
+            if has_prev else
+            "  4. 本次无 §0 前情提要（首次分析），`continuity.stance` 填 `first_run`\n"
+        )
+        + "\n完成后以**单一 JSON 代码块**输出，字段严格匹配 schema，包含："
         "`analyst_reasoning`（你的思考链）、`confidence_rationale`（打分理由）、"
-        "`alternative_scenario`（第二可能性）、"
-        "每条 evidence 的 `inference` + `supports`。\n\n"
+        "`alternative_scenario`（第二可能性）、`continuity`（时序立场）、"
+        "每条 evidence 的 `dimension`（白名单）+ `inference` + `supports`。\n\n"
         "**红线**：\n"
         "- 禁止 evidence 只有 observation 没有 inference\n"
+        "- 禁止 dimension 使用白名单外的字符串（必须 12 选 1）\n"
         "- 禁止把矛盾证据（如 bid 更厚 vs 顶部衰竭）标成 `supports=main`\n"
-        "- 禁止 analyst_reasoning / confidence_rationale / alternative_scenario 为空\n"
-        f"- data_quality=insufficient 时 bias 必须 wait/neutral 且 confidence ≤ 50"
+        "- 反事实测试中发现的不符点，对应 evidence 的 `supports` 必须是 `contrarian`\n"
+        "- 禁止 analyst_reasoning / confidence_rationale / alternative_scenario / continuity 为空\n"
+        "- data_quality=insufficient 时 bias 必须 wait/neutral 且 confidence ≤ 50"
     )
 
     prompt_text = "\n".join(lines).strip()

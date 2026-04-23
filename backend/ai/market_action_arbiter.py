@@ -25,6 +25,7 @@ from ai.market_action_prompts import (
 from config.settings import get_settings
 from models.market_action import (
     AlternativeScenario,
+    ContinuityVerdict,
     EvidenceItem,
     MarketActionFacts,
     MarketActionReport,
@@ -44,7 +45,15 @@ def _fallback_report(
     *,
     reason: str,
     prompt_debug: Optional[PromptDebug] = None,
+    previous_snapshot: Optional[dict] = None,
 ) -> MarketActionReport:
+    # fallback 也保留 continuity（first_run 或保留上版参考，但 stance=first_run 表示"本次不可信"）
+    continuity = ContinuityVerdict(
+        stance="first_run",
+        previous_scenario=(previous_snapshot or {}).get("scenario") if previous_snapshot else None,
+        previous_ts=(previous_snapshot or {}).get("timestamp") if previous_snapshot else None,
+        note=f"本次为降级报告（{reason}），未进行时序对照；如需连续性判断请待 AI 恢复后重新分析。",
+    )
     return MarketActionReport(
         coin=facts.coin,
         timestamp=int(time.time()),
@@ -59,6 +68,7 @@ def _fallback_report(
         stale_minutes=0,
         facts_snapshot=facts,
         prompt_debug=prompt_debug,
+        continuity=continuity,
     )
 
 
@@ -94,10 +104,32 @@ class MarketActionArbiter:
     def available(self) -> bool:
         return self._client is not None
 
-    async def analyze(self, facts: MarketActionFacts) -> MarketActionReport:
-        """执行一次 AI 分析，返回完整的 MarketActionReport（含 PromptDebug）。"""
+    async def analyze(
+        self,
+        facts: MarketActionFacts,
+        previous_report: Optional[MarketActionReport] = None,
+    ) -> MarketActionReport:
+        """执行一次 AI 分析，返回完整的 MarketActionReport（含 PromptDebug）。
+
+        Args:
+            facts: 本轮市场事实数据
+            previous_report: 可选 · 同币种上一份 MarketActionReport，若提供则渲染 §0 前情提要，
+                             供 AI 做"延续 / 细节修正 / 方向反转"判断
+        """
         system_prompt = build_system_prompt()
-        user_prompt, sections = build_user_prompt(facts)
+        user_prompt, sections = build_user_prompt(facts, previous_report=previous_report)
+
+        # 提取 prev 快照，供 fallback 与 continuity 回填使用
+        prev_snapshot: Optional[dict] = None
+        if previous_report is not None:
+            try:
+                prev_snapshot = (
+                    previous_report.model_dump()
+                    if hasattr(previous_report, "model_dump")
+                    else dict(previous_report)
+                )
+            except Exception:
+                prev_snapshot = None
 
         if self._client is None:
             return _fallback_report(
@@ -113,6 +145,7 @@ class MarketActionArbiter:
                     parse_ok=False,
                     parse_error="ai_client_unavailable",
                 ),
+                previous_snapshot=prev_snapshot,
             )
 
         is_reasoner = "reasoner" in self._model.lower()
@@ -187,6 +220,7 @@ class MarketActionArbiter:
                     return _fallback_report(
                         facts, reason="AI API exhausted retries",
                         prompt_debug=prompt_debug,
+                        previous_snapshot=prev_snapshot,
                     )
 
         latency_ms = int((time.time() - t0) * 1000)
@@ -218,10 +252,11 @@ class MarketActionArbiter:
             return _fallback_report(
                 facts, reason="AI output parse failed",
                 prompt_debug=prompt_debug,
+                previous_snapshot=prev_snapshot,
             )
 
         try:
-            report = _payload_to_report(payload, facts, prompt_debug)
+            report = _payload_to_report(payload, facts, prompt_debug, prev_snapshot)
             return report
         except Exception as e:
             logger.warning(
@@ -233,6 +268,7 @@ class MarketActionArbiter:
             return _fallback_report(
                 facts, reason="AI output schema invalid",
                 prompt_debug=prompt_debug,
+                previous_snapshot=prev_snapshot,
             )
 
 
@@ -251,6 +287,68 @@ _VALID_PHASES = {"accumulation", "markup", "distribution", "markdown", "transiti
 _VALID_BIAS = {"long", "short", "neutral", "wait"}
 _VALID_WEIGHT = {"high", "medium", "low"}
 _VALID_SUPPORTS = {"main", "contrarian", "neutral"}
+_VALID_CONTINUITY = {"continuation", "refinement", "reversal", "first_run"}
+
+# dimension 白名单（与 prompts 里 §Evidence 写法要求保持一致）
+_VALID_DIMENSIONS = {
+    "PriceContext", "OI", "Funding", "Basis", "CVD",
+    "Liquidation", "LiqMap", "LiqSweep", "Footprint",
+    "Taker", "Orderbook", "Options",
+}
+# 常见变体 → 白名单的归一映射（AI 偶尔会写成中文或连字符形式）
+_DIMENSION_ALIASES = {
+    "price": "PriceContext",
+    "pricecontext": "PriceContext",
+    "position": "PriceContext",
+    "oi": "OI",
+    "open_interest": "OI",
+    "openinterest": "OI",
+    "funding": "Funding",
+    "fundingrate": "Funding",
+    "basis": "Basis",
+    "cvd": "CVD",
+    "cvd_contract": "CVD",
+    "cvd_spot": "CVD",
+    "liquidation": "Liquidation",
+    "liq": "Liquidation",
+    "liqmap": "LiqMap",
+    "liq_map": "LiqMap",
+    "liquidationmap": "LiqMap",
+    "liqsweep": "LiqSweep",
+    "liq_sweep": "LiqSweep",
+    "sweep": "LiqSweep",
+    "footprint": "Footprint",
+    "taker": "Taker",
+    "taker_flow": "Taker",
+    "orderbook": "Orderbook",
+    "depth": "Orderbook",
+    "options": "Options",
+    "option": "Options",
+}
+
+
+def _coerce_dimension(v) -> str:
+    """把 AI 输出的 dimension 归一到白名单；无法识别时保底 PriceContext。"""
+    if not isinstance(v, str):
+        return "PriceContext"
+    s = v.strip()
+    if s in _VALID_DIMENSIONS:
+        return s
+    key = s.lower().replace("-", "_").replace(" ", "_")
+    if key in _DIMENSION_ALIASES:
+        return _DIMENSION_ALIASES[key]
+    # 宽松匹配大小写
+    for d in _VALID_DIMENSIONS:
+        if d.lower() == key:
+            return d
+    logger.debug("MAA dimension fallback | received=%r → PriceContext", v)
+    return "PriceContext"
+
+
+def _coerce_continuity_stance(v) -> str:
+    if isinstance(v, str) and v in _VALID_CONTINUITY:
+        return v
+    return "first_run"
 
 
 def _coerce_scenario(v) -> str:
@@ -315,6 +413,7 @@ def _payload_to_report(
     payload: dict,
     facts: MarketActionFacts,
     prompt_debug: PromptDebug,
+    previous_snapshot: Optional[dict] = None,
 ) -> MarketActionReport:
     evidence_raw = payload.get("evidence_breakdown") or []
     evidence: list[EvidenceItem] = []
@@ -322,7 +421,7 @@ def _payload_to_report(
         for e in evidence_raw[:12]:  # 防过量
             if not isinstance(e, dict):
                 continue
-            dim = str(e.get("dimension") or "")[:60] or "Unknown"
+            dim = _coerce_dimension(e.get("dimension"))
             obs = str(e.get("observation") or "")[:400]
             if not obs:
                 continue
@@ -393,6 +492,44 @@ def _payload_to_report(
     if not conclusion:
         conclusion = "（AI 未给出总结）"
 
+    # ── continuity · 时序连续性 ──
+    # 若无上一份报告：无论 AI 输出什么，都强制 first_run
+    # 若有上一份：尊重 AI 的 stance 判断，但 previous_scenario / previous_ts 由后端强制回填
+    continuity: Optional[ContinuityVerdict] = None
+    cont_raw = payload.get("continuity")
+    if previous_snapshot is None:
+        continuity = ContinuityVerdict(
+            stance="first_run",
+            previous_scenario=None,
+            previous_ts=None,
+            note=(
+                str((cont_raw or {}).get("note") or "")[:300]
+                or "首次分析，无历史参考。"
+            ),
+        )
+    else:
+        prev_scenario = previous_snapshot.get("scenario")
+        prev_ts = previous_snapshot.get("timestamp")
+        if isinstance(cont_raw, dict):
+            stance = _coerce_continuity_stance(cont_raw.get("stance"))
+            # 若 AI 给出 first_run 但实际有历史，视为 continuation（保守）
+            if stance == "first_run":
+                stance = "continuation"
+            note = str(cont_raw.get("note") or "")[:300]
+        else:
+            # AI 忘了填 continuity 字段：按 scenario 对比兜底
+            current_scenario = _coerce_scenario(payload.get("scenario"))
+            if current_scenario == prev_scenario:
+                stance, note = "continuation", "AI 未给出 continuity，后端按 scenario 相同判为 continuation。"
+            else:
+                stance, note = "refinement", "AI 未给出 continuity，后端按 scenario 变化判为 refinement。"
+        continuity = ContinuityVerdict(
+            stance=stance,
+            previous_scenario=prev_scenario if isinstance(prev_scenario, str) else None,
+            previous_ts=int(prev_ts) if isinstance(prev_ts, (int, float)) else None,
+            note=note or f"本次相对上一份判为 {stance}。",
+        )
+
     return MarketActionReport(
         coin=facts.coin,
         timestamp=int(time.time()),
@@ -402,6 +539,7 @@ def _payload_to_report(
         analyst_reasoning=analyst_reasoning,
         confidence_rationale=confidence_rationale,
         alternative_scenario=alternative_scenario,
+        continuity=continuity,
         evidence_breakdown=evidence,
         trading_implications=trading_impl,
         invalidation_conditions=invalidations,

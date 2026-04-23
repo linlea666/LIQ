@@ -287,6 +287,20 @@ class AlternativeScenario(BaseModel):
     trigger: str                        # 触发这个替代场景所需的观察条件
 
 
+class ContinuityVerdict(BaseModel):
+    """时序连续性判断 · 本次分析相对"上一份报告"的立场
+
+    - continuation：主假设延续，证据方向无变化
+    - refinement  ：方向不变但细节修正（如强度/阶段/置信度调整）
+    - reversal    ：方向反转或关键证据反转（如从 exhaustion_top → trend_continuation_up）
+    - first_run   ：首次分析，无前序参考
+    """
+    stance: Literal["continuation", "refinement", "reversal", "first_run"] = "first_run"
+    previous_scenario: Optional[str] = None     # 上一份的 scenario（便于前端对比展示）
+    previous_ts: Optional[int] = None           # 上一份的 timestamp
+    note: str = ""                              # 中文自然语言描述：为什么是延续/修正/反转
+
+
 class TradingImplications(BaseModel):
     """AI 给出的操作建议（仅提示，不自动下单）"""
     bias: Literal["long", "short", "neutral", "wait"] = "wait"
@@ -343,13 +357,15 @@ class MarketActionReport(BaseModel):
     scenario: MarketScenario
     market_phase: MarketPhase
 
-    # 推理层（新增 · 核心升级）
+    # 推理层（核心升级）
     analyst_reasoning: Optional[str] = None
     # 200-500 字"交易员思维链"：扫描 → 印证/矛盾 → 假设 → 反事实 → 结论
     confidence_rationale: Optional[str] = None
     # 为什么是这个 confidence，扣分/加分的具体原因
     alternative_scenario: Optional[AlternativeScenario] = None
     # 对立假设（第二可能性） + 概率 + 触发条件
+    continuity: Optional[ContinuityVerdict] = None
+    # 时序连续性：本次相对上一份报告是延续/修正/反转/首次
 
     # 证据层
     evidence_breakdown: list[EvidenceItem] = Field(default_factory=list)
