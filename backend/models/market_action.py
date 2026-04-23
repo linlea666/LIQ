@@ -80,7 +80,11 @@ class FundingSnapshot(BaseModel):
 class CVDSnapshot(BaseModel):
     """S4/S5 · CVD 合约或现货（可贴附短窗 netflow）"""
     delta_1h: float
-    trend_1h: Optional[str] = None  # rising / declining / flat
+    trend_1h: Optional[str] = None  # rising / declining / flat（基于整个 1h 聚合）
+    trend_recent_30m: Optional[str] = None  # rising / declining / flat
+    # 基于 recent_delta_5m **后 6 根**（近 30min）派生，用来识别"1h 仍 rising 但
+    # 最近 30min 已经反转"这种拐点场景。阈值自适应序列幅度：|sum_30m| 若超过
+    # (max|x| in 12×5m) × 15% 判定方向，否则 flat，避免噪声误判。
     has_divergence: bool = False
     divergence_note: Optional[str] = None
     recent_delta_5m: list[float] = Field(default_factory=list)
@@ -130,14 +134,18 @@ class OrderbookSnapshot(BaseModel):
 
 
 class LiqClusterSnapshot(BaseModel):
-    """A3 · 清算图上下簇对比"""
+    """A3 · 清算图上下簇对比（只出纯数值，不做立场预判）
+
+    刻意去掉"bias"立场字段（short_squeeze_fuel / long_squeeze_fuel / balanced）——
+    由 AI 基于 above/below 簇大小 + 距离 + 与其他维度（PriceContext / OI /
+    Taker 主动性）交叉后自己推断"燃料偏哪边"，而不是在 facts 层预打标签。
+    """
     above_cluster_usd: float = 0
     below_cluster_usd: float = 0
     above_nearest_price: Optional[float] = None
     below_nearest_price: Optional[float] = None
     above_distance_pct: Optional[float] = None
     below_distance_pct: Optional[float] = None
-    bias: Literal["short_squeeze_fuel", "long_squeeze_fuel", "balanced", "unknown"] = "unknown"
 
 
 class LiqSweepSnapshot(BaseModel):

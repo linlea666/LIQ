@@ -2541,12 +2541,20 @@ class Engine:
 
                     # 1) urgent 一律 WARNING（无论是否变化）
                     for s in urgent_signals:
+                        # Phase 1 的 urgent 走"刚性规则"（爆仓临近 / SafetyGate / 数据不足），
+                        # 并不经过加权评分流水线，confidence_score 保持默认 0.0。直接打 "0"
+                        # 会让运维误读为"没信心"，因此 urgent + 非 reduce 的情况统一标记
+                        # `confidence=RULE`（确定性规则触发），和 Phase 2/3 的数值分走开。
+                        _is_rule_trigger = (
+                            s.action in ("close", "hold") and (s.confidence_score or 0) == 0
+                        )
+                        _conf_text = "RULE" if _is_rule_trigger else f"{s.confidence_score:.0f}"
                         logger.warning(
                             "[Roll][URGENT] pos=%s coin=%s action=%s headline=%s | "
-                            "confidence=%.0f price=%.4f liq_dist=%s%%",
+                            "confidence=%s price=%.4f liq_dist=%s%%",
                             s.position_id, s.coin, s.action,
                             (s.headline_cn or "—")[:80],
-                            s.confidence_score or 0.0,
+                            _conf_text,
                             s.current_price,
                             f"{s.distance_to_liq_pct:.2f}" if s.distance_to_liq_pct is not None else "—",
                         )

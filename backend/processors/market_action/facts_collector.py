@@ -319,19 +319,40 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
     return None
 
 
+def _trend_label_from_window(window: list[float], noise_ratio: float = 0.15) -> Optional[str]:
+    """从一段 delta 序列派生 rising / declining / flat 标签。
+
+    自适应噪声阈值：|sum| 超过 (max|x| × noise_ratio) 才判方向，避免抖动误判。
+    低币值、样本少时自动倾向 flat。
+    """
+    if not window:
+        return None
+    s = sum(window)
+    peak = max((abs(x) for x in window), default=0.0)
+    noise = peak * noise_ratio
+    if s > noise:
+        return "rising"
+    if s < -noise:
+        return "declining"
+    return "flat"
+
+
 def build_cvd_snapshot(cvd, recent_delta_5m: Optional[list[float]] = None) -> Optional[CVDSnapshot]:
     if not cvd or not cvd.series:
         return None
-    delta_arr = []
+    delta_arr: list[float] = []
     if recent_delta_5m is None:
         # 取 12 点（近 1h）与 delta_1h 的窗口对齐，逐点求和 ≈ delta_1h
         # 防 off-by-one：Coinglass 返回的是 5m K 线，恰好 12 根 = 60min
         delta_arr = [float(p.delta) for p in cvd.series[-12:]]
     else:
-        delta_arr = recent_delta_5m
+        delta_arr = list(recent_delta_5m)
+    # 拐点识别辅助字段：后 6 根 5m = 近 30min
+    trend_recent_30m = _trend_label_from_window(delta_arr[-6:]) if len(delta_arr) >= 3 else None
     return CVDSnapshot(
         delta_1h=float(cvd.delta_1h or 0),
         trend_1h=cvd.trend_1h or None,
+        trend_recent_30m=trend_recent_30m,
         has_divergence=bool(cvd.has_divergence),
         divergence_note=cvd.divergence_note or None,
         recent_delta_5m=delta_arr,

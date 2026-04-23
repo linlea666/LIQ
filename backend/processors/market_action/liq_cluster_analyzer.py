@@ -64,17 +64,6 @@ def _build_from_preaggregated(
         snap.below_distance_pct = round(
             (current_price - nearest_b.price_center) / current_price * 100, 3
         )
-    if above_sum > 0 and below_sum > 0:
-        ratio = above_sum / below_sum
-        snap.bias = (
-            "short_squeeze_fuel" if ratio > 1.5
-            else "long_squeeze_fuel" if ratio < 0.67
-            else "balanced"
-        )
-    elif above_sum > 0:
-        snap.bias = "short_squeeze_fuel"
-    elif below_sum > 0:
-        snap.bias = "long_squeeze_fuel"
     return snap
 
 
@@ -133,19 +122,6 @@ def build_cluster_snapshot(
         snap.above_distance_pct = round((above_near - current_price) / current_price * 100, 3)
     if below_near:
         snap.below_distance_pct = round((current_price - below_near) / current_price * 100, 3)
-
-    if above_sum > 0 and below_sum > 0:
-        ratio = above_sum / below_sum
-        if ratio > 1.5:
-            snap.bias = "short_squeeze_fuel"
-        elif ratio < 0.67:
-            snap.bias = "long_squeeze_fuel"
-        else:
-            snap.bias = "balanced"
-    elif above_sum > 0:
-        snap.bias = "short_squeeze_fuel"
-    elif below_sum > 0:
-        snap.bias = "long_squeeze_fuel"
 
     return snap
 

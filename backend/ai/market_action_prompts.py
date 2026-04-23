@@ -35,7 +35,11 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 5. **矛盾的证据必须诚实标注**：要么标 `supports="contrarian"` 并在 analyst_reasoning 里解释你为什么仍然保留主结论；要么放入 invalidation_conditions 作为推翻条件。**禁止把反向指标以 main 立场 + medium/high 权重假装支持主逻辑**。
 6. **反事实失败点必须标 contrarian**：在 Step 4 反事实测试中发现的任何不符点，对应指标的 evidence 条目 supports 必须是 `contrarian`，不能是 neutral（反事实不符本身就是方向性反证，不是中性信息）。
 7. **confidence 必须可解释**：在 `confidence_rationale` 里明说"为什么是 65 不是 75 也不是 55"。
-8. **时序连续性**：若提供了 §0 前情提要，你必须在 `continuity` 字段里显式判断本次相对上一份的立场（continuation / refinement / reversal），不要无视历史。
+8. **时序连续性**：若提供了 §0 前情提要，你必须在 `continuity` 字段里显式判断本次相对上一份的立场（continuation / refinement / reversal），不要无视历史。**硬规则**：
+   - `continuation`：本次 `scenario` **与上一份完全相同** 且主逻辑与强度都没有实质变化
+   - `refinement`：本次 `scenario` **与上一份完全相同**，但细节（market_phase / confidence / bias / 关键位）有调整
+   - `reversal`：**仅当 `scenario` 大类切换到不同项**时使用（例：`exhaustion_top → trend_continuation_up`，`range_bound → fake_breakout_up`）。**scenario 与上一份相同时禁止填 reversal**，即使你认为"证据变强/变弱"也属于 refinement
+   - `first_run`：§0 未提供前情提要时使用
 
 ━━━━━━━━━━ 你必须按此路径思考（6 步） ━━━━━━━━━━
 
@@ -49,8 +53,9 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 **字段定义速查（P0 派生字段 + Absorption · 均基于真实采样，无推算）**：
  - `funding.hourly_cost_usd`：按当前费率 × 当前 OI / 8 估算的**每小时**资金费成本（美元，负数=空头在支付多头）
  - `funding.cost_24h_usd`：近 24h（3 个 8h 结算点）累计资金费成本估算（美元，**基于当前 OI 近似**，误差约 ±1-2%）
- - `funding.days_negative_streak`：从最新往前数，连续负费率的天数（0 = 最新费率为正）
- - `funding.sign_flip_7d`：近 7d 均费率与前 7d（若样本不足则与近 24h）符号是否翻转（bool）
+ - `funding.days_negative_streak`：基于 **OI 加权的 8h 结算点历史**，从最新 1 点往前数连续 rate<0 的天数（3 个 8h 点 = 1 天；0 = 最新 OI 加权结算点 ≥ 0）。
+   · ⚠ **口径提醒**：`avg_current` 是跨家（OKX+Binance…）**算术均值**，`oi_weighted` / `streak` 基于 **OI 加权历史**，两者符号偶尔可能不一致（当 OKX 和 Binance 方向相反时）；发现不一致请以 `oi_weighted` + `streak` 为主参考，并在 reasoning 里说明
+ - `funding.sign_flip_7d`：近 7d 均费率（同样基于 OI 加权历史）与前 7d 符号是否翻转（bool；样本不足时 null）
  - `oi.percentile_30d_hourly`：当前 OI 在过去 30d（按 1h 采样）中的百分位（0-100）
  - `oi.is_near_local_high_7d`：当前 OI ≥ 近 7d 最高值的 98%（bool）
  - `history_sample_size`：对应历史样本点数，若为 0 / 过小，该组派生字段可能为 null 或不可信
@@ -61,6 +66,7 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
    · `bar_count`：在 1h × N 根 bar 中重复出现的次数（越大越可靠）
    · `age_hours`：最近一次出现距今小时数（0=当前 bar）
  - `absorption.fallback_used=True`：保守阈值下无命中，detector 放宽到次级阈值的兜底结果，可信度略低
+ - `cvd_*.trend_1h` vs `cvd_*.trend_recent_30m`：前者是**整个 1h 聚合方向**；后者是**近 30min（后 6 根 5m）派生方向**。两者若不同（如 trend_1h=rising 但 trend_recent_30m=declining），通常意味着**1h 窗口内发生了方向切换**——后半段已经反转，1h 聚合还未跟上。这是拐点识别的重要线索，不是数据 bug
  **以上字段只是对"真实市场动作"的结构化补充，不预设任何策略含义；具体如何结合场景判断（是否作为支撑/阻力、是否配合 OI/Taker 做意图识别，吸收背后是机构吸筹还是做市商对冲库存），由你自己在 Step 3-4 决定**。
 
 **Step 2 · 找"证据群"与"矛盾"**
@@ -371,7 +377,8 @@ def build_user_prompt(
     lines.append(f"\n### CVD 期 · 合约")
     lines.append(
         f"- 1h delta：${_fmt(cvd_c.get('delta_1h'))} "
-        f"| 趋势：`{cvd_c.get('trend_1h', '—')}` "
+        f"| `trend_1h`：`{cvd_c.get('trend_1h', '—')}` "
+        f"| `trend_recent_30m`：`{cvd_c.get('trend_recent_30m', '—')}` "
         f"| 背离：{cvd_c.get('has_divergence')}"
     )
     lines.append(
@@ -381,7 +388,8 @@ def build_user_prompt(
     lines.append(f"\n### CVD 现 · 现货")
     lines.append(
         f"- 1h delta：${_fmt(cvd_s.get('delta_1h'))} "
-        f"| 趋势：`{cvd_s.get('trend_1h', '—')}` "
+        f"| `trend_1h`：`{cvd_s.get('trend_1h', '—')}` "
+        f"| `trend_recent_30m`：`{cvd_s.get('trend_recent_30m', '—')}` "
         f"| 背离：{cvd_s.get('has_divergence')}"
     )
     lines.append(
@@ -432,7 +440,19 @@ def build_user_prompt(
         f"${_fmt(lc.get('below_nearest_price'))} "
         f"（距离 {_fmt_pct(lc.get('below_distance_pct'))}）"
     )
-    lines.append(f"- 偏向：`{lc.get('bias')}`")
+    # 纯数值对比（不再预设 short_squeeze_fuel / long_squeeze_fuel 立场标签）：
+    _above = lc.get("above_cluster_usd") or 0
+    _below = lc.get("below_cluster_usd") or 0
+    if _above > 0 and _below > 0:
+        _ratio = _above / _below
+        lines.append(
+            f"- 上/下簇比值：{_ratio:.2f}x（>1=上方燃料多，<1=下方燃料多；"
+            f"是否构成挤压 fuel 需结合 PriceContext 位置 + OI 动向 + Taker 主动性 自行判断）"
+        )
+    elif _above > 0 and _below == 0:
+        lines.append("- 上/下簇比值：仅上方有簇（下方无清算簇可作燃料）")
+    elif _below > 0 and _above == 0:
+        lines.append("- 上/下簇比值：仅下方有簇（上方无清算簇可作燃料）")
 
     sw = d.get("liq_sweep_recent") or {}
     lines.append(f"\n### LiqSweep · 清算扫单")
