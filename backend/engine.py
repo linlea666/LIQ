@@ -183,6 +183,8 @@ class CoinState:
         # 最新一次 MAA 分析结果缓存
         self.market_action_report: Optional[Any] = None
         self.market_action_last_ts: float = 0.0
+        # MAA 历史（最多 max_history，实际由 settings.market_action.max_history 决定）
+        self.market_action_history: deque = deque(maxlen=max_history)
         # 历史对比字段
         self.ls_ratio_change_24h: Optional[float] = None
         self.ls_ratio_long_pct: Optional[float] = None
@@ -207,10 +209,13 @@ class Engine:
             timeout_sec=self._settings.bbx.timeout_sec,
         )
         self._analyzer = create_analyzer()
+        # MAA arbiter（懒创建：只在需要时导入，不影响旧链路）
+        self._maa_arbiter = None  # type: ignore[assignment]
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
         self._running = False
         self._ai_running: set[str] = set()
+        self._maa_running: set[str] = set()
 
         self._default_coin = self._settings.default_coin
         self._active_coins: set[str] = {self._default_coin}
@@ -227,13 +232,22 @@ class Engine:
         self._data_dir = os.path.join(os.path.dirname(__file__), "data")
         self._ai_history_file = os.path.join(self._data_dir, "ai_history.json")
         self._kl_history_file = os.path.join(self._data_dir, "kl_history.json")
+        self._maa_history_file = os.path.join(self._data_dir, "market_action_history.json")
 
         max_hist = self._settings.ai.max_history
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy, max_history=max_hist)
 
+        # MAA 的历史 deque 容量独立配置（不与 ai max_history 共用）
+        maa_max = self._settings.market_action.max_history
+        for state in self._states.values():
+            state.market_action_history = deque(
+                state.market_action_history, maxlen=maa_max,
+            )
+
         self._load_ai_history()
         self._load_kl_history()
+        self._load_market_action_history()
 
         # S 级信号邮件通知
         from notifications.signal_monitor import AlertDedup
@@ -292,6 +306,51 @@ class Engine:
             logger.debug("AI history saved to disk | coins=%d", len(data))
         except (OSError, TypeError) as e:
             logger.warning("Failed to save AI history: %s", e)
+
+    # ── MAA 历史持久化 ────────────────────────────────────────────────────
+    def _load_market_action_history(self) -> None:
+        if not os.path.exists(self._maa_history_file):
+            logger.info("No MAA history file found, starting fresh")
+            return
+        try:
+            from models.market_action import MarketActionReport
+            with open(self._maa_history_file, "r", encoding="utf-8") as f:
+                raw: dict = json.load(f)
+            total = 0
+            for ccy, items in raw.items():
+                if ccy not in self._states:
+                    continue
+                for item in items:
+                    try:
+                        rpt = MarketActionReport(**item)
+                        self._states[ccy].market_action_history.append(rpt)
+                        self._states[ccy].market_action_report = rpt
+                        self._states[ccy].market_action_last_ts = float(
+                            rpt.timestamp or 0
+                        )
+                        total += 1
+                    except Exception:
+                        continue
+            logger.info("MAA history loaded from disk | entries=%d", total)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load MAA history: %s", e)
+
+    def _save_market_action_history(self) -> None:
+        try:
+            os.makedirs(self._data_dir, exist_ok=True)
+            data: dict[str, list] = {}
+            for ccy, state in self._states.items():
+                hist = getattr(state, "market_action_history", None)
+                if not hist:
+                    continue
+                data[ccy] = [r.model_dump() for r in hist]
+            tmp_path = self._maa_history_file + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, self._maa_history_file)
+            logger.debug("MAA history saved | coins=%d", len(data))
+        except (OSError, TypeError) as e:
+            logger.warning("Failed to save MAA history: %s", e)
 
     def _load_kl_history(self):
         if not os.path.exists(self._kl_history_file):
@@ -553,6 +612,13 @@ class Engine:
         if auto_ai_sec > 0 and self.ai_available:
             tasks.append(asyncio.create_task(self._auto_ai_loop(auto_ai_sec)))
 
+        # ── Market Action Analyzer (MAA) 周期循环 ──
+        maa_cfg = self._settings.market_action
+        if maa_cfg.enabled:
+            tasks.append(asyncio.create_task(
+                self._auto_market_action_loop(maa_cfg.auto_interval_sec)
+            ))
+
         kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
         if kl_snap_sec > 0:
             tasks.append(asyncio.create_task(self._auto_kl_snapshot_loop(kl_snap_sec)))
@@ -769,6 +835,11 @@ class Engine:
             logger.info("KL history saved to disk before shutdown")
         except Exception:
             logger.error("Failed to save KL history on shutdown", exc_info=True)
+        try:
+            self._save_market_action_history()
+            logger.info("MAA history saved to disk before shutdown")
+        except Exception:
+            logger.error("Failed to save MAA history on shutdown", exc_info=True)
         # 滚仓模块：最后一次落盘（确保关闭前事件全部可恢复）
         try:
             if self.roll_service._initialized:  # type: ignore[attr-defined]
@@ -1921,6 +1992,118 @@ class Engine:
             await push_to_coin(ccy, "ai_error", {"coin": ccy, "message": str(e)})
         finally:
             self._ai_running.discard(ccy)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Market Action Analyzer · 周期循环 + 触发器
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def _get_maa_arbiter(self):
+        """懒加载 MAA arbiter（避免启动时 openai 客户端重复初始化）。"""
+        if self._maa_arbiter is None:
+            try:
+                from ai.market_action_arbiter import create_market_action_arbiter
+                self._maa_arbiter = create_market_action_arbiter()
+            except Exception:
+                logger.error("MAA arbiter init failed", exc_info=True)
+                self._maa_arbiter = None
+        return self._maa_arbiter
+
+    @property
+    def market_action_available(self) -> bool:
+        arb = self._get_maa_arbiter()
+        return bool(arb and getattr(arb, "available", False))
+
+    async def fire_market_action_analysis(self, ccy: str) -> None:
+        """对外暴露：手动触发一次 MAA 分析（API / CLI 调用）。"""
+        if ccy in self._maa_running:
+            raise RuntimeError(f"MAA already running for {ccy}")
+        state = self._states.get(ccy)
+        if state is None:
+            raise RuntimeError(f"coin not supported: {ccy}")
+        state.market_action_last_ts = time.time()
+        self._maa_running.add(ccy)
+        asyncio.create_task(self._market_action_task(ccy))
+
+    async def _market_action_task(self, ccy: str) -> None:
+        try:
+            from processors.market_action.facts_collector import collect as collect_facts
+            state = self._states[ccy]
+            facts = collect_facts(state)
+
+            arbiter = self._get_maa_arbiter()
+            if arbiter is None:
+                logger.warning("MAA arbiter unavailable | coin=%s", ccy)
+                return
+
+            t0 = time.time()
+            report = await arbiter.analyze(facts)
+            elapsed = time.time() - t0
+
+            state.market_action_report = report
+            state.market_action_last_ts = time.time()
+            state.market_action_history.append(report)
+
+            logger.info(
+                "MAA ok | coin=%s | %.1fs | scenario=%s phase=%s conf=%d "
+                "bias=%s dq=%s evidence=%d parse_ok=%s",
+                ccy, elapsed, report.scenario, report.market_phase,
+                report.confidence,
+                report.trading_implications.bias,
+                report.data_quality, len(report.evidence_breakdown),
+                bool(report.prompt_debug and report.prompt_debug.parse_ok),
+            )
+
+            try:
+                await push_to_coin(ccy, "market_action_report", report.model_dump())
+            except Exception:
+                logger.debug("MAA ws push failed | coin=%s", ccy, exc_info=True)
+
+            try:
+                self._save_market_action_history()
+            except Exception:
+                logger.debug("MAA persist failed | coin=%s", ccy, exc_info=True)
+        except Exception as e:
+            logger.error(
+                "MAA background task failed | coin=%s | %s: %s",
+                ccy, type(e).__name__, e, exc_info=True,
+            )
+        finally:
+            self._maa_running.discard(ccy)
+
+    async def _auto_market_action_loop(self, interval_sec: int) -> None:
+        """按 interval_sec 节律自动触发每个币种的 MAA 分析（交错启动）。
+
+        - 冷启动等待 180s 让 facts 数据就绪
+        - 每个币种间隔 10s 发起，避免 3 币同时抢 DeepSeek 配额
+        """
+        # 冷启等待 facts 就绪
+        await asyncio.sleep(180)
+        logger.info(
+            "MAA auto loop started | interval=%ds arbiter=%s",
+            interval_sec, self.market_action_available,
+        )
+        while self._running:
+            if not self.market_action_available:
+                await asyncio.sleep(120)
+                continue
+            for ccy in self._settings.supported_coins:
+                if ccy in self._maa_running:
+                    continue
+                state = self._states.get(ccy)
+                if state is None:
+                    continue
+                last = state.market_action_last_ts or 0
+                elapsed = time.time() - last if last else float("inf")
+                if elapsed < interval_sec:
+                    continue
+                try:
+                    await self.fire_market_action_analysis(ccy)
+                    logger.info("MAA auto triggered | coin=%s", ccy)
+                except Exception:
+                    logger.error("MAA auto trigger failed | coin=%s",
+                                 ccy, exc_info=True)
+                await asyncio.sleep(10)  # 三币之间交错
+            await asyncio.sleep(60)
 
     async def _build_and_fuse_trader_report(
         self, ccy: str, analysis: AIAnalysisResult, *, latency_ms: int = 0,

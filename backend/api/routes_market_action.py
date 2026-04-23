@@ -1,17 +1,26 @@
 """Market Action Analyzer · REST API
 
-当前阶段（P1+P2 Debug）：
-- GET /api/market-action/facts?coin=BTC         返回 MarketActionFacts（14 字段）
-- GET /api/market-action/facts/raw?coin=BTC     返回部分原始 state 调试快照
-- GET /api/market-action/footprint?coin=BTC     返回原始 footprint buckets（调试）
+端点总览：
+  Debug / 数据侧
+    GET  /api/market-action/facts               返回 MarketActionFacts（14 字段）
+    GET  /api/market-action/facts/summary       返回覆盖度 + 派生标签
+    GET  /api/market-action/footprint           返回原始 footprint buckets
 
-AI Arbiter / 报告接口留作 P3 阶段。
+  AI 报告
+    GET  /api/market-action/report              最新一份 MarketActionReport
+    GET  /api/market-action/report/history      最近 N 份报告（时间倒序）
+    GET  /api/market-action/report/all          三币最新报告聚合
+    POST /api/market-action/run                 手动触发一次 AI 分析
+
+默认会携带 prompt_debug（含 system/user/raw_response），前端用于展示"本轮喂给 AI
+的原始数据"。如需精简可加参数 ?slim=1 剥离 prompt_debug 与 facts_snapshot。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+import time
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -27,18 +36,47 @@ def set_engine(engine) -> None:
     _engine = engine
 
 
-def _get_state(coin: str):
+def _require_engine():
     if _engine is None:
         raise HTTPException(status_code=503, detail="engine not ready")
-    state = _engine._states.get(coin.upper())
+    return _engine
+
+
+def _get_state(coin: str):
+    engine = _require_engine()
+    state = engine._states.get(coin.upper())
     if state is None:
         raise HTTPException(status_code=404, detail=f"coin not supported: {coin}")
     return state
 
 
+def _dump_report(report, *, slim: bool = False, include_prompt: bool = True) -> Optional[dict]:
+    if report is None:
+        return None
+    d = report.model_dump()
+    if slim or not include_prompt:
+        d.pop("prompt_debug", None)
+    if slim:
+        d.pop("facts_snapshot", None)
+    return d
+
+
+def _staleness_minutes(ts: int | float | None) -> int:
+    if not ts:
+        return -1
+    try:
+        return max(0, int((time.time() - float(ts)) / 60))
+    except (TypeError, ValueError):
+        return -1
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Debug · Facts / Footprint
+# ────────────────────────────────────────────────────────────────────────────
+
 @router.get("/facts")
 async def get_facts(coin: str = Query("BTC")) -> dict[str, Any]:
-    """返回 MarketActionFacts（AI 输入契约，14 字段）"""
+    """返回 MarketActionFacts（AI 输入契约，14 字段）。"""
     state = _get_state(coin)
     from processors.market_action.facts_collector import collect
     facts = collect(state)
@@ -47,7 +85,7 @@ async def get_facts(coin: str = Query("BTC")) -> dict[str, Any]:
 
 @router.get("/facts/summary")
 async def get_facts_summary(coin: str = Query("BTC")) -> dict[str, Any]:
-    """facts 精简版：只返回顶层字段名 + data_quality + missing，快速检查覆盖度"""
+    """facts 精简版：只返回顶层字段名 + data_quality + missing。"""
     state = _get_state(coin)
     from processors.market_action.facts_collector import collect
     facts = collect(state)
@@ -77,11 +115,129 @@ async def get_facts_summary(coin: str = Query("BTC")) -> dict[str, Any]:
 
 @router.get("/footprint")
 async def get_footprint(coin: str = Query("BTC")) -> dict[str, Any]:
-    """返回 state 上的原始 footprint 数据（调试用）"""
+    """返回 state 上的原始 footprint 数据（调试用）。"""
     state = _get_state(coin)
     return {
         "coin": coin.upper(),
         "last_ts": getattr(state, "footprint_last_ts", None),
         "contract": list(getattr(state, "footprint_contract", []) or []),
         "spot": list(getattr(state, "footprint_spot", []) or []),
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# AI 报告
+# ────────────────────────────────────────────────────────────────────────────
+
+def _default_include_prompt() -> bool:
+    if _engine is None:
+        return True
+    try:
+        return bool(_engine._settings.market_action.include_prompt_in_api)
+    except Exception:
+        return True
+
+
+@router.get("/report")
+async def get_report(
+    coin: str = Query("BTC"),
+    slim: int = Query(0, ge=0, le=1, description="1=去除 prompt_debug + facts_snapshot"),
+    include_prompt: Optional[int] = Query(
+        None, ge=0, le=1, description="显式控制 prompt_debug（覆盖全局默认）",
+    ),
+) -> dict[str, Any]:
+    """返回该币种最新一份 MarketActionReport。
+
+    - 返回 404 情况：引擎还没跑过 MAA 分析
+    - `stale_minutes` 字段由服务端实时计算覆盖（方便前端渲染）
+    """
+    state = _get_state(coin)
+    report = getattr(state, "market_action_report", None)
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no market action report for {coin} yet",
+        )
+    inc = bool(include_prompt) if include_prompt is not None else _default_include_prompt()
+    dumped = _dump_report(report, slim=bool(slim), include_prompt=inc)
+    assert dumped is not None  # type narrowing
+    dumped["stale_minutes"] = _staleness_minutes(
+        getattr(state, "market_action_last_ts", None) or report.timestamp,
+    )
+    return dumped
+
+
+@router.get("/report/history")
+async def get_report_history(
+    coin: str = Query("BTC"),
+    limit: int = Query(20, ge=1, le=200),
+    slim: int = Query(1, ge=0, le=1, description="默认 1：history 不返回 prompt_debug，节省带宽"),
+) -> dict[str, Any]:
+    """最近 N 份报告（时间倒序）。history 默认 slim=1 避免响应过大。"""
+    state = _get_state(coin)
+    hist = list(getattr(state, "market_action_history", []) or [])
+    hist.reverse()
+    hist = hist[:limit]
+    items: list[dict] = []
+    include_prompt = not bool(slim)
+    for r in hist:
+        d = _dump_report(r, slim=bool(slim), include_prompt=include_prompt)
+        if d is not None:
+            items.append(d)
+    return {
+        "coin": coin.upper(),
+        "count": len(items),
+        "items": items,
+    }
+
+
+@router.get("/report/all")
+async def get_report_all(
+    slim: int = Query(1, ge=0, le=1, description="默认 1：聚合接口 slim 返回"),
+) -> dict[str, Any]:
+    """三币最新报告聚合（SOL 可能未配置期权等字段）。"""
+    engine = _require_engine()
+    out: dict[str, Any] = {}
+    for ccy in engine._settings.supported_coins:
+        state = engine._states.get(ccy)
+        if state is None:
+            out[ccy] = None
+            continue
+        report = getattr(state, "market_action_report", None)
+        if report is None:
+            out[ccy] = None
+            continue
+        d = _dump_report(report, slim=bool(slim), include_prompt=not bool(slim))
+        if d is not None:
+            d["stale_minutes"] = _staleness_minutes(
+                getattr(state, "market_action_last_ts", None) or report.timestamp,
+            )
+        out[ccy] = d
+    return {
+        "coins": out,
+        "generated_at": int(time.time()),
+    }
+
+
+@router.post("/run")
+async def run_once(coin: str = Query("BTC")) -> dict[str, Any]:
+    """手动触发一次 AI 分析（异步，返回后任务仍在后台执行）。
+
+    - 如果该币种已有任务运行中，返回 409
+    - 不等待结果；通过 `/report` 轮询或 WS `market_action_report` 事件拿结果
+    """
+    engine = _require_engine()
+    ccy = coin.upper()
+    if ccy not in engine._settings.supported_coins:
+        raise HTTPException(status_code=404, detail=f"coin not supported: {coin}")
+    if not engine.market_action_available:
+        raise HTTPException(status_code=503, detail="MAA arbiter not available")
+    try:
+        await engine.fire_market_action_analysis(ccy)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "coin": ccy,
+        "status": "dispatched",
+        "started_at": int(time.time()),
     }

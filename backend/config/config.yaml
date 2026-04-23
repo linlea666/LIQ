@@ -206,6 +206,16 @@ server:
 #   1. JSON 返回，字段命名稳定，向后兼容（仅允许加字段）
 #   2. 纯读内存，不触发外部请求，对现有系统零侵入
 #   3. 30s 响应缓存 + IP 令牌桶限频，防呆并保护 CPU
+# ── Market Action Analyzer (MAA) · AI Arbiter 节 ──
+# 独立于主 AI（后者输出长文 markdown 交易计划），MAA 只做"基于真实市场动作的
+# 场景结构识别"，复用 ai 段的 DeepSeek 配置（model / api_key / timeout / retries）。
+# 输出固定 6 块 JSON + PromptDebug（供前端展示"本轮喂给 AI 的完整数据"）。
+market_action:
+  enabled: true
+  auto_interval_sec: 600      # 10 分钟一次；注意 reasoner 单次 ~4-8 min，3 币交错即可
+  max_history: 200            # per-coin 历史保留条数（~33h @ 10min）
+  include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
+
 nofx:
   enabled: true
   cache_ttl_sec: 30           # 响应字节级缓存（远小于 NOFX 3min 节奏，业务透明）

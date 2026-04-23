@@ -168,6 +168,21 @@ class NotificationsConfig:
 
 
 @dataclass(frozen=True)
+class MarketActionConfig:
+    """Market Action Analyzer (MAA) 配置
+
+    - enabled：是否启用 MAA 周期 AI 分析
+    - auto_interval_sec：两次调用之间的最小间隔（秒）
+    - max_history：历史报告保留条数（per coin）
+    - include_prompt_in_api：默认接口是否返回完整 prompt_debug（节省带宽可关闭）
+    """
+    enabled: bool = True
+    auto_interval_sec: int = 600
+    max_history: int = 200
+    include_prompt_in_api: bool = True
+
+
+@dataclass(frozen=True)
 class NOFXConfig:
     """NOFX 外部 AI 交易决策系统的数据接口配置（/api/nofx/*）。
 
@@ -203,6 +218,7 @@ class Settings:
     engine: EngineConfig = field(default_factory=EngineConfig)
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     nofx: NOFXConfig = field(default_factory=NOFXConfig)
+    market_action: MarketActionConfig = field(default_factory=MarketActionConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -377,6 +393,14 @@ def _build_settings(raw: dict) -> Settings:
         candle_limit=candle_limit,
     )
 
+    maa_raw = raw.get("market_action", {}) or {}
+    maa_cfg = MarketActionConfig(
+        enabled=bool(maa_raw.get("enabled", True)),
+        auto_interval_sec=max(60, int(maa_raw.get("auto_interval_sec", 600) or 600)),
+        max_history=max(10, int(maa_raw.get("max_history", 200) or 200)),
+        include_prompt_in_api=bool(maa_raw.get("include_prompt_in_api", True)),
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -389,6 +413,7 @@ def _build_settings(raw: dict) -> Settings:
         engine=engine_cfg,
         notifications=notifications_cfg,
         nofx=nofx_cfg,
+        market_action=maa_cfg,
         default_coin=default_coin,
     )
 

@@ -278,6 +278,30 @@ class TradingImplications(BaseModel):
     notes: Optional[str] = None
 
 
+class PromptSection(BaseModel):
+    """Prompt 中的章节锚点，供前端生成 TOC"""
+    anchor: str                       # "§1" / "§2" 等
+    title: str                        # "当前行情速览"
+    level: int = 2                    # markdown 标题级别（2=##, 3=###）
+
+
+class PromptDebug(BaseModel):
+    """AI 调用透明度 · 供前端"本轮喂给 AI 的完整数据"卡片展示"""
+    system: str                       # system prompt 原文
+    user: str                         # user prompt 原文（含 facts + 规则）
+    chars: int                        # user prompt 字符数
+    sections: list[PromptSection] = Field(default_factory=list)
+    model: str                        # e.g. "deepseek-reasoner"
+    tokens_prompt: Optional[int] = None
+    tokens_completion: Optional[int] = None
+    tokens_reasoning: Optional[int] = None
+    latency_ms: int = 0
+    generated_at: int = 0             # 秒级 unix
+    ai_raw_response: Optional[str] = None  # AI 返回的原始文本（调试/复盘用）
+    parse_ok: bool = True
+    parse_error: Optional[str] = None
+
+
 class MarketActionReport(BaseModel):
     """AI Arbiter 输出契约"""
     coin: str
@@ -296,3 +320,4 @@ class MarketActionReport(BaseModel):
     data_quality: DataQuality = "ok"
     stale_minutes: int = 0  # 距上次成功 AI 调用的分钟数（若为降级结果）
     facts_snapshot: Optional[MarketActionFacts] = None  # 快照留档用
+    prompt_debug: Optional[PromptDebug] = None  # 透明度：本轮发给 AI 的原文
