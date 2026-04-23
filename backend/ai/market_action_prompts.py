@@ -337,7 +337,8 @@ def build_user_prompt(
         f"| 交易所数：{fd.get('exchange_count', 0)} "
         f"| 分散度(std)：{_fmt(fd.get('dispersion_abs'), nd=6)}"
     )
-    lines.append(f"- 解读：{fd.get('interpretation') or '—'}")
+    # 注：funding.interpretation（后端规则给的文字定性）已从 prompt 剔除，
+    # 避免 AI 抄结论；funding 方向由 AI 自行基于 avg_current/avg_7d/cost 等数值判断。
     # P0 派生字段（基于 7d × 8h 结算点真实采样）
     fd_n = fd.get("history_sample_size")
     if fd_n:
@@ -393,9 +394,10 @@ def build_user_prompt(
     lines.append(f"### Basis · 期现溢价")
     lines.append(
         f"- 当前：{_fmt_pct(bs.get('basis_pct'), nd=3)} "
-        f"| 趋势：`{bs.get('basis_trend')}` "
-        f"| 解读：{bs.get('interpretation', '—')}"
+        f"| 趋势：`{bs.get('basis_trend')}`"
     )
+    # 注：basis.interpretation（后端文字定性）已剔除，basis 方向由 AI 自行基于
+    # basis_pct 数值 + 趋势 + 近 1h 序列形态判断
     if bs.get("recent_values"):
         lines.append(f"- 近 1h basis 序列（%）：{bs['recent_values']}")
 
@@ -464,9 +466,10 @@ def build_user_prompt(
 
     fp = d.get("footprint") or {}
     lines.append(f"\n### Footprint · 足迹图摘要")
+    # 注：footprint.interpretation（后端文字定性如"期现轻度分化"）已剔除，
+    # AI 自行基于下方 spot_contract_delta_diff_pct 数值 + 合约/现货各自 delta_pct 判断一致性
     lines.append(
-        f"- 期现一致性解读：{fp.get('interpretation', '—')} "
-        f"| 现-期 delta_pct 差：{_fmt_pct(fp.get('spot_contract_delta_diff_pct'))}"
+        f"- 现-期 delta_pct 差：{_fmt_pct(fp.get('spot_contract_delta_diff_pct'))}"
     )
     for key, label in (
         ("contract_latest", "合约 · 最新 1h"),
