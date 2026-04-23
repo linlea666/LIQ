@@ -111,13 +111,22 @@ class BasisSnapshot(BaseModel):
 
 
 class OrderbookSnapshot(BaseModel):
-    """A2 · 盘口深度 + spread 趋势"""
+    """A2 · 盘口挂单失衡度 + 趋势
+
+    ⚠ 命名澄清：这里的字段**不是** bid-ask spread（点差），而是**挂单失衡度**
+    （(ask - bid) / avg × 100）。历史上曾用 `spread_pct` 命名，容易被误解为点差，
+    P0-3 起改用语义准确的 `book_imbalance_pct`。
+
+    - `book_imbalance_pct`：负数 = bid 侧挂单更厚（潜在支撑强）；正数 = ask 更厚
+    - `imbalance_trend`：挂单失衡度的**绝对值**趋势（widening=失衡加剧，
+      narrowing=趋向均衡，stable=基本不变）
+    - `recent_imbalances`：最近 12 点（5m 间隔）的 book_imbalance_pct 序列
+    """
     bid_total_usd: float
     ask_total_usd: float
-    spread_pct: float
-    spread_trend: Literal["widening", "narrowing", "stable"] = "stable"
-    recent_spreads: list[float] = Field(default_factory=list)
-    # 最近 12 点 5m spread
+    book_imbalance_pct: float
+    imbalance_trend: Literal["widening", "narrowing", "stable"] = "stable"
+    recent_imbalances: list[float] = Field(default_factory=list)
 
 
 class LiqClusterSnapshot(BaseModel):

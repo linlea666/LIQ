@@ -41,7 +41,7 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 
 **Step 1 · 扫描 & 标记方向性**
 读 §2-§4 全部指标，在脑中给每一项打标签：偏多 / 偏空 / 中性。关注容易误读字段：
- - `orderbook.spread_pct` 负 = bid 更厚（偏多）；正 = ask 更厚（偏空）
+ - `orderbook.book_imbalance_pct` =(ask-bid)/avg×100：**这不是点差**，是挂单失衡度。负 = bid 更厚（潜在支撑强）；正 = ask 更厚（潜在阻力强）
  - `funding.avg_7d=0` 多数是数据不足默认值，**不是"7d=0 则中性"**，以 `avg_current` 和 `funding_trend` 为准（若提供了 `history_sample_size` 且 > 0，可以信任 avg_7d）
  - footprint `ratio=999.9` 含义是 one-sided，不是 999 倍
  - `price_context.vah_price/val_price=null` 只用 POC，不要臆造 VAH/VAL
@@ -356,13 +356,19 @@ def build_user_prompt(
 
     cvd_c = d.get("cvd_contract") or {}
     cvd_s = d.get("cvd_spot") or {}
+    # 说明：recent_delta_5m 现已固定为 12 点（近 1h），逐点求和 ≈ delta_1h
+    # AI 可以自检：若和与 delta_1h 明显不符，该时窗内可能有数据源跳点
+    _cvd_c_n = len(cvd_c.get("recent_delta_5m") or [])
+    _cvd_s_n = len(cvd_s.get("recent_delta_5m") or [])
     lines.append(f"\n### CVD 期 · 合约")
     lines.append(
         f"- 1h delta：${_fmt(cvd_c.get('delta_1h'))} "
         f"| 趋势：`{cvd_c.get('trend_1h', '—')}` "
         f"| 背离：{cvd_c.get('has_divergence')}"
     )
-    lines.append(f"- 近 6×5m delta：{cvd_c.get('recent_delta_5m')}")
+    lines.append(
+        f"- 近 1h（{_cvd_c_n}×5m）逐点 delta：{cvd_c.get('recent_delta_5m')}"
+    )
 
     lines.append(f"\n### CVD 现 · 现货")
     lines.append(
@@ -370,7 +376,9 @@ def build_user_prompt(
         f"| 趋势：`{cvd_s.get('trend_1h', '—')}` "
         f"| 背离：{cvd_s.get('has_divergence')}"
     )
-    lines.append(f"- 近 6×5m delta：{cvd_s.get('recent_delta_5m')}")
+    lines.append(
+        f"- 近 1h（{_cvd_s_n}×5m）逐点 delta：{cvd_s.get('recent_delta_5m')}"
+    )
 
     lq = d.get("liquidation_flow") or {}
     lines.append(f"\n### Liquidation · 清算流")
@@ -402,18 +410,19 @@ def build_user_prompt(
         lines.append(f"- 近 1h basis 序列（%）：{bs['recent_values']}")
 
     ob = d.get("orderbook") or {}
-    lines.append(f"\n### Orderbook · 盘口深度")
+    lines.append(f"\n### Orderbook · 盘口挂单失衡度")
     lines.append(
         f"- bid 总额：${_fmt(ob.get('bid_total_usd'))} "
         f"| ask 总额：${_fmt(ob.get('ask_total_usd'))}"
     )
     lines.append(
-        f"- `spread_pct`（**注意**：这是挂单失衡度，=(ask-bid)/avg×100；**负数=bid 更厚**）："
-        f"{_fmt_pct(ob.get('spread_pct'), nd=2)}"
+        f"- `book_imbalance_pct` =(ask-bid)/avg×100（**负数=bid 更厚=支撑更强**；"
+        f"正数=ask 更厚=阻力更强。**这不是点差/spread**，是挂单不平衡度）："
+        f"{_fmt_pct(ob.get('book_imbalance_pct'), nd=2)}"
     )
-    lines.append(f"- 趋势：`{ob.get('spread_trend')}`")
-    if ob.get("recent_spreads"):
-        lines.append(f"- 近 12 点 5m 序列：{ob['recent_spreads']}")
+    lines.append(f"- 失衡度绝对值趋势：`{ob.get('imbalance_trend')}`")
+    if ob.get("recent_imbalances"):
+        lines.append(f"- 近 12 点（5m）失衡度序列（%）：{ob['recent_imbalances']}")
 
     lc = d.get("liq_map_clusters") or {}
     lines.append(f"\n### LiqMap · 清算图上下簇")
@@ -518,13 +527,23 @@ def build_user_prompt(
     opt = d.get("options") or {}
     lines.append(f"\n### Options · 期权（仅 BTC/ETH；SOL 全 null）")
     if opt and any(v is not None for v in opt.values()):
+        # 口径标注（避免 AI 把 magnet 价当短线回归目标误用）
+        lines.append(
+            "- **口径说明**：`total_oi` / `oi_change_24h` / `vol_change_24h` / `iv_current` = "
+            "**全期限合成**（Coinglass & OKX BTC 持仓加权）；"
+            "`pcr_oi` / `magnet_price` = **近 3 个到期日 OI 加权**（偏近月主导，短中线参考）；"
+            "`iv_skew_1m` = **1 个月期限 OKX 索引**。"
+        )
         lines.append(f"- 总 OI：${_fmt(opt.get('total_oi_usd'))}")
         lines.append(
             f"- OI/Vol 24h 变化：{_fmt_pct(opt.get('oi_change_24h_pct'))} / "
             f"{_fmt_pct(opt.get('vol_change_24h_pct'))}"
         )
         lines.append(f"- PCR(OI)：{_fmt(opt.get('pcr_oi'), nd=3)}")
-        lines.append(f"- Magnet 价（max-pain OI 加权）：${_fmt(opt.get('magnet_price'))}")
+        lines.append(
+            f"- Magnet 价（近 3 期 max-pain × OI 加权）：${_fmt(opt.get('magnet_price'))}"
+            f"  ← **注意**：若离现价较远，对短线无参考价值"
+        )
         lines.append(
             f"- IV：当前 {_fmt(opt.get('iv_current'), nd=4)} "
             f"| 24h 变化 {_fmt_pct(opt.get('iv_change_24h_pct'))} "

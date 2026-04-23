@@ -321,7 +321,9 @@ def build_cvd_snapshot(cvd, recent_delta_5m: Optional[list[float]] = None) -> Op
         return None
     delta_arr = []
     if recent_delta_5m is None:
-        delta_arr = [float(p.delta) for p in cvd.series[-6:]]
+        # 取 12 点（近 1h）与 delta_1h 的窗口对齐，逐点求和 ≈ delta_1h
+        # 防 off-by-one：Coinglass 返回的是 5m K 线，恰好 12 根 = 60min
+        delta_arr = [float(p.delta) for p in cvd.series[-12:]]
     else:
         delta_arr = recent_delta_5m
     return CVDSnapshot(
@@ -369,17 +371,23 @@ def build_basis_snapshot(state: "CoinState") -> Optional[BasisSnapshot]:
 
 
 def build_orderbook_snapshot(state: "CoinState") -> Optional[OrderbookSnapshot]:
+    """构建盘口挂单失衡度快照。
+
+    注意：上游 state.orderbook.spread_pct 和 orderbook_series 里的 `spread_pct`
+    仍沿用老字段名（老接口共用，不便改动）。本函数**只在 MAA 出口把数据映射到
+    语义准确的 book_imbalance_pct**，老系统的字段保持不变避免连锁改动。
+    """
     if not state.orderbook:
         return None
     series = getattr(state, "orderbook_series", []) or []
-    spreads = [s.get("spread_pct", 0) for s in series if "spread_pct" in s][-12:]
+    imbalances = [s.get("spread_pct", 0) for s in series if "spread_pct" in s][-12:]
     trend = _trend_label(series, "spread_pct")
     return OrderbookSnapshot(
         bid_total_usd=float(state.orderbook.bid_total_usd),
         ask_total_usd=float(state.orderbook.ask_total_usd),
-        spread_pct=float(state.orderbook.spread_pct),
-        spread_trend=trend,
-        recent_spreads=spreads,
+        book_imbalance_pct=float(state.orderbook.spread_pct),
+        imbalance_trend=trend,
+        recent_imbalances=imbalances,
     )
 
 
