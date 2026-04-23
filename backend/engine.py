@@ -2373,21 +2373,13 @@ class Engine:
         recent_sweeps = [e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff]
 
         opt = state.option_max_pain
-        lo = state.large_orders
 
         whale_flows = self._calc_whale_transfer_flows(state.whale_data) if state.whale_data else {}
 
+        # 订单墙（bid_walls/ask_walls）与 large_orders 聚合数据已不再喂给老 AI；
+        # 原始 state.large_orders 仅由 `_build_payload` 填充到给前端的 orderbook
+        # 对象，供人工观察使用。
         ob_for_ai = state.orderbook
-        if ob_for_ai and lo and lo.orders and not ob_for_ai.bid_walls and not ob_for_ai.ask_walls:
-            from models.market import WallInfo
-            bid_walls, ask_walls = [], []
-            for o in sorted(lo.orders, key=lambda x: x.size_usd, reverse=True)[:10]:
-                wall = WallInfo(price=o.price, size=0, size_usd=o.size_usd)
-                if o.side == "bid":
-                    bid_walls.append(wall)
-                else:
-                    ask_walls.append(wall)
-            ob_for_ai = ob_for_ai.model_copy(update={"bid_walls": bid_walls[:5], "ask_walls": ask_walls[:5]})
 
         snapshot = build_ai_snapshot(
             coin=ccy, price=state.ticker.last,
@@ -2419,11 +2411,6 @@ class Engine:
             option_nearest_expiry=opt.nearest_expiry if opt else "",
             option_call_oi=opt.expiries[0].call_oi if opt and opt.expiries else None,
             option_put_oi=opt.expiries[0].put_oi if opt and opt.expiries else None,
-            large_orders_buy_count=len([o for o in lo.orders if o.side == "bid"]) if lo else 0,
-            large_orders_sell_count=len([o for o in lo.orders if o.side == "ask"]) if lo else 0,
-            large_orders_net_usd=sum(
-                o.size_usd * (1 if o.side == "bid" else -1) for o in lo.orders
-            ) if lo else 0,
             ls_ratio_top_account=state.ls_ratio_top_account.avg_ratio if state.ls_ratio_top_account else None,
             ls_ratio_top_position=state.ls_ratio_top_position.avg_ratio if state.ls_ratio_top_position else None,
             ls_ratio_long_pct=state.ls_ratio_long_pct,

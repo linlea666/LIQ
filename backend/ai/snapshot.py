@@ -81,9 +81,6 @@ def build_ai_snapshot(
     option_nearest_expiry: str = "",
     option_call_oi: Optional[float] = None,
     option_put_oi: Optional[float] = None,
-    large_orders_buy_count: int = 0,
-    large_orders_sell_count: int = 0,
-    large_orders_net_usd: float = 0,
     ls_ratio_top_account: Optional[float] = None,
     ls_ratio_top_position: Optional[float] = None,
     ls_ratio_long_pct: Optional[float] = None,
@@ -154,11 +151,9 @@ def build_ai_snapshot(
         clusters_below_30d = [c.model_dump() for c in liq_map_30d.clusters_below[:10]]
         imbalance_30d = liq_map_30d.imbalance_ratio
 
-    bid_walls = []
-    ask_walls = []
-    if orderbook:
-        bid_walls = [w.model_dump() for w in orderbook.bid_walls[:5]]
-        ask_walls = [w.model_dump() for w in orderbook.ask_walls[:5]]
+    # 订单墙（bid_walls/ask_walls）已不再喂给 AI：挂单是"意图"软信号，
+    # 可撤可假；其支撑/阻力角色由 MAA 的 absorption 维度（已成交硬证据）承担。
+    # orderbook 的聚合深度总额仍保留给 AI 作参考（bid_total / ask_total / spread）。
 
     funding_exchanges = []
     funding_avg_7d = None
@@ -265,8 +260,6 @@ def build_ai_snapshot(
         funding_avg_7d=funding_avg_7d,
         funding_exchanges=funding_exchanges,
         basis_pct=basis.basis_pct if basis else 0,
-        orderbook_bid_walls=bid_walls,
-        orderbook_ask_walls=ask_walls,
         orderbook_bid_total_usd=ob_bid_total,
         orderbook_ask_total_usd=ob_ask_total,
         orderbook_spread_pct=ob_spread,
@@ -360,9 +353,6 @@ def build_ai_snapshot(
         option_nearest_expiry=option_nearest_expiry,
         option_call_oi=option_call_oi,
         option_put_oi=option_put_oi,
-        large_orders_buy_count=large_orders_buy_count,
-        large_orders_sell_count=large_orders_sell_count,
-        large_orders_net_usd=large_orders_net_usd,
         ls_ratio_top_account=ls_ratio_top_account,
         ls_ratio_top_position=ls_ratio_top_position,
         ls_ratio_long_pct=ls_ratio_long_pct,

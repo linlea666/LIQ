@@ -105,8 +105,11 @@ class AISnapshot(BaseModel):
 
     basis_pct: float
 
-    orderbook_bid_walls: list[dict]
-    orderbook_ask_walls: list[dict]
+    # 订单墙（orderbook_bid_walls/ask_walls）和大单追踪聚合
+    # （large_orders_buy_count/sell_count/net_usd）已从 AI 输入中移除：
+    # 挂单是"意图"软信号（可撤可假），不适合作为 AI 决策链证据；实际
+    # 成交的"被动吸收"由 MAA 的 absorption 维度提供硬证据。原始 large_orders
+    # 仍保留在 state + 前端 payload 供人工观察，仅不再喂给 AI。
     orderbook_bid_total_usd: float = 0
     orderbook_ask_total_usd: float = 0
     orderbook_spread_pct: float = 0
@@ -239,11 +242,6 @@ class AISnapshot(BaseModel):
     option_nearest_expiry: str = ""
     option_call_oi: Optional[float] = None
     option_put_oi: Optional[float] = None
-
-    # 大单追踪
-    large_orders_buy_count: int = 0
-    large_orders_sell_count: int = 0
-    large_orders_net_usd: float = 0
 
     # 3 维多空比
     ls_ratio_top_account: Optional[float] = None

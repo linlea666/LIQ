@@ -41,12 +41,12 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 
 **Step 1 · 扫描 & 标记方向性**
 读 §2-§4 全部指标，在脑中给每一项打标签：偏多 / 偏空 / 中性。关注容易误读字段：
- - `orderbook.book_imbalance_pct` =(ask-bid)/avg×100：**这不是点差**，是挂单失衡度。负 = bid 更厚（潜在支撑强）；正 = ask 更厚（潜在阻力强）
  - `funding.avg_7d=0` 多数是数据不足默认值，**不是"7d=0 则中性"**，以 `avg_current` 和 `funding_trend` 为准（若提供了 `history_sample_size` 且 > 0，可以信任 avg_7d）
  - footprint `ratio=999.9` 含义是 one-sided，不是 999 倍
  - `price_context.vah_price/val_price=null` 只用 POC，不要臆造 VAH/VAL
+ - **本次 facts 已移除 orderbook 挂单/订单墙数据**（软信号、可被 spoof）；支撑/阻力的被动吸收信号改用 `absorption` 区（硬证据）
 
-**字段定义速查（P0 派生字段，均基于真实采样，无推算）**：
+**字段定义速查（P0 派生字段 + Absorption · 均基于真实采样，无推算）**：
  - `funding.hourly_cost_usd`：按当前费率 × 当前 OI / 8 估算的**每小时**资金费成本（美元，负数=空头在支付多头）
  - `funding.cost_24h_usd`：近 24h（3 个 8h 结算点）累计资金费成本估算（美元，**基于当前 OI 近似**，误差约 ±1-2%）
  - `funding.days_negative_streak`：从最新往前数，连续负费率的天数（0 = 最新费率为正）
@@ -54,7 +54,14 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
  - `oi.percentile_30d_hourly`：当前 OI 在过去 30d（按 1h 采样）中的百分位（0-100）
  - `oi.is_near_local_high_7d`：当前 OI ≥ 近 7d 最高值的 98%（bool）
  - `history_sample_size`：对应历史样本点数，若为 0 / 过小，该组派生字段可能为 null 或不可信
- **这些字段只是对"真实市场动作"的结构化补充，不预设任何策略含义；具体如何结合场景判断，由你自己在 Step 3-4 决定**。
+ - `absorption.zones_support` / `zones_resistance`：**价位级被动吸收带**（从 Footprint buckets 派生 · 已成交事实，不可撤单，比任何挂单/订单墙信号可靠）。每个 zone 字段：
+   · `price`：价位；`side`：support（现价下方·买方被动接卖盘）/ resistance（现价上方·卖方被动接买盘）
+   · `taker_volume_usd`：该价位累计成交额（跨 bar 合并越大越可靠）
+   · `delta_pct_abs_avg`：该价位的 |买-卖|/总量 加权均值（越接近 0 越纯粹的吸收）
+   · `bar_count`：在 1h × N 根 bar 中重复出现的次数（越大越可靠）
+   · `age_hours`：最近一次出现距今小时数（0=当前 bar）
+ - `absorption.fallback_used=True`：保守阈值下无命中，detector 放宽到次级阈值的兜底结果，可信度略低
+ **以上字段只是对"真实市场动作"的结构化补充，不预设任何策略含义；具体如何结合场景判断（是否作为支撑/阻力、是否配合 OI/Taker 做意图识别，吸收背后是机构吸筹还是做市商对冲库存），由你自己在 Step 3-4 决定**。
 
 **Step 2 · 找"证据群"与"矛盾"**
 把同方向的指标聚合成证据群（例如："OI 下行 + 24h 高点回落 + 顶部 Taker 净卖 = 派发群"）；标出与主流方向冲突的指标（例如："但 bid 侧挂单更厚 vs 顶部衰竭假设"）。
@@ -98,7 +105,8 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 
 每条证据必须包含 4 项：
 - `dimension`：**必须**严格落在以下白名单中的一个（大小写完全一致，不要自创，不要翻译）：
-  `PriceContext` | `OI` | `Funding` | `Basis` | `CVD` | `Liquidation` | `LiqMap` | `LiqSweep` | `Footprint` | `Taker` | `Orderbook` | `Options`
+  `PriceContext` | `OI` | `Funding` | `Basis` | `CVD` | `Liquidation` | `LiqMap` | `LiqSweep` | `Footprint` | `Taker` | `Absorption` | `Options`
+  注：`Orderbook` 已从本系统**移除**（挂单可被 spoof / 撤单，软信号，不用于 AI 决策），它的支撑/阻力角色由 `Absorption`（价位级被动吸收，已成交事实）替代。
 - `observation`：**纯事实陈述**，必须带具体数值。示例："OI 1h -1.22%，同期价格仅 -0.09%"
 - `inference`：**从观察推出的判断**，可跨维度、可对比历史形态。示例："价格几乎不动但 OI 显著下降 = 多头平仓为主，而非空头新进场；结合 range_position 86.99% 高位语境，是派发特征而非抛售"
 - `supports`：`"main"`（支持主结论） / `"contrarian"`（与主结论矛盾） / `"neutral"`（中性信息）
@@ -144,7 +152,7 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
   },
   "evidence_breakdown": [
     {
-      "dimension": "PriceContext|OI|Funding|Basis|CVD|Liquidation|LiqMap|LiqSweep|Footprint|Taker|Orderbook|Options",
+      "dimension": "PriceContext|OI|Funding|Basis|CVD|Liquidation|LiqMap|LiqSweep|Footprint|Taker|Absorption|Options",
       "observation": "纯事实 + 具体数值",
       "inference": "跨维度判断 / 交易员解读，≥20 字",
       "supports": "main|contrarian|neutral",
@@ -395,8 +403,11 @@ def build_user_prompt(
         f"| 主导方：`{lq.get('dominant_side_1h')}`"
     )
 
-    # ── §3 A 级 9 维 ──
-    _header("§3", "A 级关键区分（Basis / Orderbook / 清算图 / 清算扫单 / 三大一致性 / PriceContext / Footprint）")
+    # ── §3 A 级维度 ──
+    # 注：Orderbook（挂单失衡 / 订单墙）已从本系统移除（软信号、可被 spoof / 撤单，
+    # 不适合作为 AI 决策链证据）；其支撑/阻力角色由下方 Absorption 区（价位级被动
+    # 吸收，已成交硬证据，来自 Footprint 派生）替代。
+    _header("§3", "A 级关键区分（Basis / 清算图 / 清算扫单 / 三大一致性 / PriceContext / Footprint / Absorption）")
 
     bs = d.get("basis") or {}
     lines.append(f"### Basis · 期现溢价")
@@ -408,21 +419,6 @@ def build_user_prompt(
     # basis_pct 数值 + 趋势 + 近 1h 序列形态判断
     if bs.get("recent_values"):
         lines.append(f"- 近 1h basis 序列（%）：{bs['recent_values']}")
-
-    ob = d.get("orderbook") or {}
-    lines.append(f"\n### Orderbook · 盘口挂单失衡度")
-    lines.append(
-        f"- bid 总额：${_fmt(ob.get('bid_total_usd'))} "
-        f"| ask 总额：${_fmt(ob.get('ask_total_usd'))}"
-    )
-    lines.append(
-        f"- `book_imbalance_pct` =(ask-bid)/avg×100（**负数=bid 更厚=支撑更强**；"
-        f"正数=ask 更厚=阻力更强。**这不是点差/spread**，是挂单不平衡度）："
-        f"{_fmt_pct(ob.get('book_imbalance_pct'), nd=2)}"
-    )
-    lines.append(f"- 失衡度绝对值趋势：`{ob.get('imbalance_trend')}`")
-    if ob.get("recent_imbalances"):
-        lines.append(f"- 近 12 点（5m）失衡度序列（%）：{ob['recent_imbalances']}")
 
     lc = d.get("liq_map_clusters") or {}
     lines.append(f"\n### LiqMap · 清算图上下簇")
@@ -504,6 +500,55 @@ def build_user_prompt(
             lines.append(f"  top 失衡价位（**注意** ratio=999.9 表示 one-sided）：")
             for z in zones[:6]:
                 lines.append(_zone_line(z))
+
+    # ── Absorption · 价位级被动吸收带（Footprint 派生 · 已成交硬证据） ──
+    absorp = d.get("absorption") or {}
+    lines.append(f"\n### Absorption · 价位级被动吸收带（Footprint 派生，硬证据）")
+    if absorp and (absorp.get("total_zone_count") or 0) > 0:
+        window_h = absorp.get("window_hours") or 0
+        n_bars = absorp.get("lookback_bars") or 0
+        fb = "是（保守阈值无命中，放宽到次级）" if absorp.get("fallback_used") else "否"
+        lines.append(
+            f"- 覆盖窗口：近 {window_h}h（{n_bars} 根 1h bar） "
+            f"| 命中 zones：{absorp.get('total_zone_count')} "
+            f"| 放宽兜底：{fb}"
+        )
+        lines.append(
+            "- **字段含义**：每个 zone 是一个「该价位出现大量真实成交 + 买卖接近均衡」的 "
+            "被动吸收带；`taker_volume_usd` 累计成交额，`delta_pct_abs_avg` 越接近 0 "
+            "吸收越纯粹，`bar_count` 是跨 bar 重复出现次数，`age_hours` 是最近一次距今小时数"
+        )
+
+        def _fmt_zone(z: dict) -> str:
+            return (
+                f"  - 价位 ${_fmt(z.get('price'))} "
+                f"| vol=${_fmt(z.get('taker_volume_usd'))} "
+                f"| |delta|={_fmt(z.get('delta_pct_abs_avg'), nd=3)} "
+                f"| bar_count={z.get('bar_count')} "
+                f"| age={_fmt(z.get('age_hours'), nd=1)}h "
+                f"| src=`{z.get('source')}`"
+            )
+
+        sups = absorp.get("zones_support") or []
+        if sups:
+            lines.append(f"- **Support 带**（价位 < 现价 · 买方被动吸收卖盘，潜在支撑）：")
+            for z in sups:
+                lines.append(_fmt_zone(z))
+        else:
+            lines.append("- **Support 带**：近窗口无显著支撑吸收带")
+        ress = absorp.get("zones_resistance") or []
+        if ress:
+            lines.append(f"- **Resistance 带**（价位 > 现价 · 卖方被动吸收买盘，潜在阻力）：")
+            for z in ress:
+                lines.append(_fmt_zone(z))
+        else:
+            lines.append("- **Resistance 带**：近窗口无显著阻力吸收带")
+    else:
+        lines.append(
+            f"- 近窗口（{absorp.get('window_hours') or 0}h / "
+            f"{absorp.get('lookback_bars') or 0} 根 bar）**无显著吸收带**，"
+            "无法从 absorption 维度获取支撑/阻力证据；应以 LiqMap / PriceContext / Footprint 为主"
+        )
 
     # ── §4 B 级 2 维 ──
     _header("§4", "B 级加分（Taker 5m / Options）")

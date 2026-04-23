@@ -13,6 +13,7 @@ from statistics import pstdev
 from typing import Optional, TYPE_CHECKING
 
 from models.market_action import (
+    AbsorptionSnapshot,
     BasisSnapshot,
     CVDSnapshot,
     DataQuality,
@@ -25,6 +26,8 @@ from models.market_action import (
     PriceSnapshot,
     TakerFlowSnapshot,
 )
+
+from processors.absorption_detector import detect_absorption_zones
 
 from .derived_labels import (
     derive_funding_trend,
@@ -391,6 +394,27 @@ def build_orderbook_snapshot(state: "CoinState") -> Optional[OrderbookSnapshot]:
     )
 
 
+def build_absorption_snapshot(state: "CoinState") -> AbsorptionSnapshot:
+    """构建价位级被动吸收带快照。
+
+    输入：
+      - state.footprint_contract / state.footprint_spot（polls.footprint 写入）
+      - state.ticker.last（当前价用于判 support/resistance）
+    输出：
+      AbsorptionSnapshot（永不 None；无数据时为空 snapshot）
+
+    详细阈值和合并策略见 processors.absorption_detector。
+    """
+    current_price = float(state.ticker.last) if state.ticker and state.ticker.last else 0.0
+    fp_contract = list(getattr(state, "footprint_contract", []) or [])
+    fp_spot = list(getattr(state, "footprint_spot", []) or [])
+    return detect_absorption_zones(
+        footprint_contract=fp_contract,
+        footprint_spot=fp_spot,
+        current_price=current_price,
+    )
+
+
 def build_taker_snapshot(state: "CoinState") -> Optional[TakerFlowSnapshot]:
     c_series = getattr(state, "taker_contract_series", []) or []
     s_series = getattr(state, "taker_spot_series", []) or []
@@ -540,6 +564,11 @@ def collect(state: "CoinState") -> MarketActionFacts:
     facts.footprint = build_footprint_snapshot(fp_contract, fp_spot)
     if facts.footprint is None:
         missing.append("footprint")
+
+    # A10 · Absorption（复用 footprint 数据，不新增 poll；AbsorptionSnapshot 永不 None）
+    facts.absorption = build_absorption_snapshot(state)
+    if facts.absorption.total_zone_count == 0:
+        missing.append("absorption")
 
     # B 级 2
     facts.taker_flow_5m = build_taker_snapshot(state)

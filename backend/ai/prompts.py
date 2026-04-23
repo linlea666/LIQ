@@ -900,9 +900,10 @@ def build_user_prompt(snapshot: dict) -> str:
     bid_ask_skew_pct = 0.0
     if (bid_tot + ask_tot) > 0:
         bid_ask_skew_pct = (bid_tot - ask_tot) / (bid_tot + ask_tot) * 100.0
-    # §6 只展示"聚合深度"——这是 Coinglass 订单簿快照的真实产出
-    # 大单/墙体详情统一移到 §8d「大单追踪」，避免同一份 large_orders 数据
-    # 在两个板块重复展示造成 AI 困惑
+    # §6 只展示"聚合深度总额"——这是 Coinglass 订单簿快照的真实产出
+    # 注：原 §8d「大单追踪」(large_orders_* / orderbook_*_walls) 已整体从 AI 输入中移除
+    # 挂单是"意图"软信号，可被 spoof / 撤单，不适合作为 AI 决策证据；
+    # 原始 large_orders 仍保留在 state + 前端 payload 供人工观察，只是不喂 AI。
     lines.extend([
         "",
         "### 6. 订单簿聚合深度 [数据源: Coinglass · 聚合 Binance/OKX/Bybit 订单簿快照]",
@@ -914,7 +915,6 @@ def build_user_prompt(snapshot: dict) -> str:
                if spread_is_extreme else "")
         ),
         f"买卖力对比: {'买盘强于卖盘(支撑偏强)' if bid_tot > ask_tot * 1.1 else '卖盘强于买盘(抛压偏重)' if ask_tot > bid_tot * 1.1 else '买卖均衡'}",
-        "说明: 本节仅含聚合深度总额。具体的大额挂单/墙体请参见 §8d「大单追踪」。",
     ])
 
     lines.extend([
@@ -992,58 +992,12 @@ def build_user_prompt(snapshot: dict) -> str:
                 dist = (opt_mp - price) / price * 100
                 lines.append(f"当前价距Max Pain: {dist:+.1f}% (价格倾向向Max Pain靠拢)")
 
-    lo_buy = snapshot.get("large_orders_buy_count", 0)
-    lo_sell = snapshot.get("large_orders_sell_count", 0)
-    lo_net = snapshot.get("large_orders_net_usd", 0)
-    # 注：§6 的 orderbook_*_walls 本质上就是这份 large_orders 按方向聚合后的 Top 10
-    # 展开展示——让 AI 直接看到大单价格/规模，便于和关键位、清算簇做共振分析
-    bid_walls = snapshot.get("orderbook_bid_walls", [])
-    ask_walls = snapshot.get("orderbook_ask_walls", [])
-    # 空节友好降级：即使全为空也渲染章节 + 解释，避免 AI 把"无活跃大单"误报为"数据缺失"
-    lines.extend(["", "### 8d. 大单追踪 [数据源: Coinglass 大单监控·实时]"])
-    if lo_buy > 0 or lo_sell > 0 or bid_walls or ask_walls:
-        if lo_buy > 0 or lo_sell > 0:
-            lines.append(f"大单买入: {lo_buy}笔 / 卖出: {lo_sell}笔 | 净方向: {_fmt_usd_for_prompt(lo_net)}")
-            if lo_net > 0:
-                lines.append(f"  大资金偏向: 买入为主(净流入)")
-            elif lo_net < 0:
-                lines.append(f"  大资金偏向: 卖出为主(净流出)")
-
-        if bid_walls:
-            lines.append("Top 买方大单（按金额排序）:")
-            for w in bid_walls:
-                price_val = w.get("price", 0)
-                usd_val = w.get("size_usd", 0)
-                rel_pct = ((price_val - price) / price * 100) if price > 0 else 0
-                lines.append(
-                    f"  - ${price_val:,.1f} (距现价 {rel_pct:+.2f}%): "
-                    f"{_fmt_usd_for_prompt(usd_val)}"
-                )
-        else:
-            lines.append("Top 买方大单: 近期下方无活跃大额买单挂单 → 机构承接意愿分散，下跌时缓冲有限")
-
-        if ask_walls:
-            lines.append("Top 卖方大单（按金额排序）:")
-            for w in ask_walls:
-                price_val = w.get("price", 0)
-                usd_val = w.get("size_usd", 0)
-                rel_pct = ((price_val - price) / price * 100) if price > 0 else 0
-                lines.append(
-                    f"  - ${price_val:,.1f} (距现价 {rel_pct:+.2f}%): "
-                    f"{_fmt_usd_for_prompt(usd_val)}"
-                )
-        else:
-            lines.append("Top 卖方大单: 近期上方无活跃大额卖单挂单 → 机构压盘不显著，上行阻力主要来自清算簇/技术位")
-    else:
-        lines.append(
-            "当前无超阈值大单活跃（Coinglass 阈值: 现货≥$100K / 合约≥$1M）。"
-        )
-        lines.append(
-            "→ 非数据缺失，解读为常态信号：大资金观望 / 订单簿静默期 / 本周期无异常挂单"
-        )
-        lines.append(
-            "→ 此时 §6 聚合深度（买卖力差）与 §1 清算簇/ §9g 关键位仍是有效的阻力/支撑依据"
-        )
+    # 注：原 §8d「大单追踪」(Coinglass large_orders 聚合 + 订单墙 Top10) 已整体移除
+    # 原因：挂单属"意图"软信号（可被 spoof / 中途撤单），长期实盘中误导 AI 的比例显著
+    # 替代方案：
+    # 1) MAA 新增 absorption 维度 —— 从 Footprint 派生"价位级被动吸收带"（已成交事实，硬证据）
+    # 2) 关键位系统（§9g）用 absorption zones 替代原 orderbook walls 作为 capital_flow 候选
+    # 3) state.large_orders 原始数据仍保留，由前端 payload 展示供人工观察
 
     w_alerts = snapshot.get("whale_hl_alerts_count", 0)
     w_transfers = snapshot.get("whale_transfers_count", 0)
