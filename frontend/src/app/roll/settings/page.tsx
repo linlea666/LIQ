@@ -64,6 +64,7 @@ interface Draft {
   override_cooldown_hours: number;
 
   liq_emergency_pct: number;
+  liq_warning_pct: number;
 }
 
 function fromSettings(s: RollGlobalSettings): Draft {
@@ -83,6 +84,7 @@ function fromSettings(s: RollGlobalSettings): Draft {
     override_warn_window: s.override_warn_window,
     override_cooldown_hours: s.override_cooldown_hours,
     liq_emergency_pct: s.liq_emergency_pct,
+    liq_warning_pct: s.liq_warning_pct,
   };
 }
 
@@ -109,6 +111,10 @@ function validateDraft(d: Draft): string | null {
 
   if (d.liq_emergency_pct < 1 || d.liq_emergency_pct > 15)
     return "紧急离场距爆仓阈值应 ∈ [1, 15]%";
+  if (d.liq_warning_pct < 2 || d.liq_warning_pct > 25)
+    return "预警减仓距爆仓阈值应 ∈ [2, 25]%";
+  if (d.liq_warning_pct <= d.liq_emergency_pct)
+    return "预警减仓阈值必须严格大于紧急离场阈值";
   return null;
 }
 
@@ -209,6 +215,22 @@ function SettingsForm({ initial }: { initial: RollGlobalSettings }) {
               value={draft.liq_emergency_pct}
               onChange={(e) =>
                 patch("liq_emergency_pct", Number(e.target.value) || 5)
+              }
+            />
+          </Field>
+          <Field
+            label="预警减仓阈值 (%)"
+            hint="距爆仓在 [紧急阈值, 此值) 区间时触发半量减仓 + attention；必须 > 紧急阈值；范围 [2, 25]"
+          >
+            <input
+              type="number"
+              min={2}
+              max={25}
+              step={0.5}
+              className="roll-input"
+              value={draft.liq_warning_pct}
+              onChange={(e) =>
+                patch("liq_warning_pct", Number(e.target.value) || 10)
               }
             />
           </Field>

@@ -26,6 +26,7 @@ import {
   getSettings as apiGetSettings,
   listPositionEvents as apiListPositionEvents,
   listPositions as apiListPositions,
+  listRecentSignals as apiListRecentSignals,
   listTemplates as apiListTemplates,
   overrideAdd as apiOverrideAdd,
   updateSettings as apiUpdateSettings,
@@ -58,6 +59,9 @@ interface RollState {
 
   // 实时数据
   signalsByPosition: Record<string, RollSignal>;
+  // 最近 N 次评估的本地 ring buffer（WS 增量追加 + REST 首屏补齐）
+  // 按 position_id 存；容量与后端对齐（60 条）。
+  signalHistoryByPosition: Record<string, RollSignal[]>;
   eventsByPosition: Record<string, RollEvent[]>;
 
   // 复盘缓存（按 position_id）
@@ -84,6 +88,7 @@ interface RollState {
   refreshPosition: (id: string) => Promise<void>;
   refreshPositionEvents: (id: string, limit?: number) => Promise<void>;
   refreshPositionSignal: (id: string) => Promise<void>;
+  refreshPositionSignalHistory: (id: string, limit?: number) => Promise<void>;
   refreshAll: () => Promise<void>;
 
   // 复盘
@@ -141,6 +146,7 @@ export const useRollStore = create<RollState>((set, get) => ({
   enums: null,
 
   signalsByPosition: {},
+  signalHistoryByPosition: {},
   eventsByPosition: {},
   replaysByPosition: {},
   closedPositions: [],
@@ -291,6 +297,17 @@ export const useRollStore = create<RollState>((set, get) => ({
     }
   },
 
+  async refreshPositionSignalHistory(id, limit = 60) {
+    try {
+      const { items } = await apiListRecentSignals(id, limit);
+      set((prev) => ({
+        signalHistoryByPosition: { ...prev.signalHistoryByPosition, [id]: items },
+      }));
+    } catch {
+      // 404 / 未评估时静默
+    }
+  },
+
   async refreshAll() {
     await Promise.all([
       get().loadEnums(),
@@ -359,12 +376,15 @@ export const useRollStore = create<RollState>((set, get) => ({
       set((prev) => {
         const { [id]: _sig, ...restSignals } = prev.signalsByPosition;
         const { [id]: _evs, ...restEvents } = prev.eventsByPosition;
+        const { [id]: _hist, ...restHistory } = prev.signalHistoryByPosition;
         void _sig;
         void _evs;
+        void _hist;
         return {
           positions: prev.positions.filter((p) => p.id !== id),
           signalsByPosition: restSignals,
           eventsByPosition: restEvents,
+          signalHistoryByPosition: restHistory,
         };
       });
     } catch (e) {
@@ -423,12 +443,28 @@ export const useRollStore = create<RollState>((set, get) => ({
   // ── WS 推送接收 ────────────────────────────────────
 
   applySignal(signal) {
-    set((prev) => ({
-      signalsByPosition: {
-        ...prev.signalsByPosition,
-        [signal.position_id]: signal,
-      },
-    }));
+    set((prev) => {
+      const pid = signal.position_id;
+      // 增量追加到本地 ring buffer（与后端同为 60 条上限）
+      const HISTORY_CAP = 60;
+      const prevHistory = prev.signalHistoryByPosition[pid] || [];
+      // 忽略完全重复的信号（WS 可能重播；以 ts 去重）
+      const last = prevHistory[prevHistory.length - 1];
+      const nextHistory =
+        last && last.ts === signal.ts
+          ? prevHistory
+          : [...prevHistory, signal].slice(-HISTORY_CAP);
+      return {
+        signalsByPosition: {
+          ...prev.signalsByPosition,
+          [pid]: signal,
+        },
+        signalHistoryByPosition: {
+          ...prev.signalHistoryByPosition,
+          [pid]: nextHistory,
+        },
+      };
+    });
   },
 
   applyEvent(positionId, event) {

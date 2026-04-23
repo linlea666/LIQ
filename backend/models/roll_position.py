@@ -377,6 +377,12 @@ class RollGlobalSettings(BaseModel):
     # 默认 5.0%（保守）；激进交易者可下调到 3.0；建议下限 2.0 防止数据延迟误触发
     liq_emergency_pct: float = Field(5.0, ge=1.0, le=15.0)
 
+    # 预警减仓阈值（%）：当 liq_emergency_pct ≤ 距爆仓 < liq_warning_pct 时，
+    # 引擎在 Phase 1.5 给出"半量减仓 + attention"软预警，不直接全平。
+    # 与 liq_emergency_pct 一起构成阶梯防线：在"快爆仓但还没到 5% 硬红线"时给用户缓冲。
+    # 约束：必须 > liq_emergency_pct；范围 [2, 25]，默认 10.0。设为 ≤ liq_emergency_pct 时该阶段禁用。
+    liq_warning_pct: float = Field(10.0, ge=2.0, le=25.0)
+
     # 更新时间（便于 UI 显示）
     updated_at: int = 0
 

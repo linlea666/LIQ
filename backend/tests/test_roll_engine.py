@@ -118,6 +118,8 @@ class TestPhase0:
         assert sig.urgency == "info"
         assert "数据不足" in sig.headline_cn
         assert sig.data_quality == "insufficient"
+        # C1：Phase 0 中止时必须声明所有下游 phase 被跳过
+        assert set(sig.skipped_phases) == {"exit", "reduce", "trail_sl", "add"}
 
     def test_safety_gate_block_urgent_hold(self):
         pos = _pos()
@@ -127,6 +129,7 @@ class TestPhase0:
         assert sig.action == "hold"
         assert sig.urgency == "urgent"
         assert "黑天鹅事件" in sig.detail_cn
+        assert set(sig.skipped_phases) == {"exit", "reduce", "trail_sl", "add"}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -159,6 +162,8 @@ class TestPhase1Exit:
         sig = evaluate(pos, plan, ctx)
         assert sig.action == "close"
         assert "爆仓" in sig.headline_cn
+        # C1：Phase 1 命中 → reduce/trail_sl/add 被跳过（exit 本身不算跳过）
+        assert set(sig.skipped_phases) == {"reduce", "trail_sl", "add"}
 
     def test_structure_choch_plus_exhaustion_confirmed(self):
         pos = _pos()
@@ -171,6 +176,67 @@ class TestPhase1Exit:
         sig = evaluate(pos, plan, ctx)
         assert sig.action == "close"
         assert "结构反转" in sig.headline_cn
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Phase 1.5 · 爆仓预警软减仓（C3）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestPhase15LiqWarning:
+    """short @79000 isolated 10x → liq ≈ 86468
+    距爆仓：
+      - 83000 → ≈ 4.18% < 5% → Phase 1 close
+      - 81800 → ≈ 5.71% ∈ [5, 10) → Phase 1.5 半量减仓
+      - 78500 → ≈ 10.15% > 10% → 1.5 不触发
+    """
+
+    def test_warning_triggers_half_reduce(self):
+        pos = _pos(side="short", entry=79000.0, leverage=10)
+        plan = _plan()
+        ctx = _ctx(price=81800.0)
+        sig = evaluate(pos, plan, ctx,
+                       liq_emergency_pct=5.0, liq_warning_pct=10.0)
+        assert sig.action == "reduce"
+        assert sig.urgency == "attention"
+        # 半量（step_size × 0.5）
+        assert sig.reduce_pct == pytest.approx(plan.reduce_step_size_pct * 0.5)
+        # supporting 必含 liq_warning
+        assert any(s.source == "liq_warning" for s in sig.supporting)
+        # 跳过下游
+        assert set(sig.skipped_phases) == {"reduce", "trail_sl", "add"}
+
+    def test_outside_warning_zone_does_not_trigger(self):
+        pos = _pos(side="short", entry=79000.0, leverage=10)
+        plan = _plan()
+        # 距爆仓 ≈ 10.15% > warning 阈值 10 → 1.5 不触发，继续走下游
+        ctx = _ctx(price=78500.0)
+        sig = evaluate(pos, plan, ctx,
+                       liq_emergency_pct=5.0, liq_warning_pct=10.0)
+        assert sig.action != "reduce" or not any(
+            s.source == "liq_warning" for s in sig.supporting
+        )
+
+    def test_emergency_still_wins_over_warning(self):
+        pos = _pos(side="short", entry=79000.0, leverage=10)
+        plan = _plan()
+        # 距爆仓 < 5% 仍走 Phase 1 close，不降级为 1.5 reduce
+        ctx = _ctx(price=83000.0)
+        sig = evaluate(pos, plan, ctx,
+                       liq_emergency_pct=5.0, liq_warning_pct=10.0)
+        assert sig.action == "close"
+
+    def test_warning_disabled_when_threshold_not_strictly_greater(self):
+        # liq_warning_pct <= liq_emergency_pct → 1.5 禁用
+        pos = _pos(side="short", entry=79000.0, leverage=10)
+        plan = _plan()
+        ctx = _ctx(price=81800.0)   # 在原本的预警区
+        sig = evaluate(pos, plan, ctx,
+                       liq_emergency_pct=5.0, liq_warning_pct=5.0)
+        # 禁用后该仓不应被 1.5 推到 reduce
+        assert not (
+            sig.action == "reduce"
+            and any(s.source == "liq_warning" for s in sig.supporting)
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -195,6 +261,8 @@ class TestPhase2Reduce:
         assert sig.action == "reduce"
         assert sig.reduce_pct == pytest.approx(plan.reduce_step_size_pct)
         assert sig.reduce_confidence >= 60
+        # C1：Phase 2 full 命中 → trail_sl/add 被跳过
+        assert set(sig.skipped_phases) == {"trail_sl", "add"}
 
     def test_half_reduce_triggered(self):
         # 单一中等信号 → 40 ≤ score < 60

@@ -48,6 +48,9 @@ export type AddIntensity = "full" | "half" | "small" | "reject";
 export type RollAction = "add" | "reduce" | "close" | "hold" | "move_sl";
 export type Urgency = "info" | "attention" | "urgent";
 
+// 评估流水线阶段名（与后端 models/roll_signal.EvalPhase 对齐）
+export type EvalPhase = "exit" | "reduce" | "trail_sl" | "add";
+
 export type EventKind =
   | "init"
   | "add"
@@ -221,6 +224,13 @@ export interface RollGlobalSettings {
   /** 距爆仓百分比小于此值（%）时强制 close + urgent。范围 [1, 15]，默认 5.0 */
   liq_emergency_pct: number;
 
+  /**
+   * 预警减仓阈值（%）。当 liq_emergency_pct ≤ 距爆仓 < liq_warning_pct 时，
+   * 引擎在 Phase 1.5 给出"半量减仓 + attention"软预警，不直接平仓。
+   * 必须 > liq_emergency_pct，范围 [2, 25]，默认 10.0；设为 0 或 ≤ liq_emergency_pct 时该阶段禁用。
+   */
+  liq_warning_pct: number;
+
   updated_at: number;
 }
 
@@ -320,6 +330,13 @@ export interface RollSignal {
   detail_cn: string;
   data_quality: "ok" | "partial" | "insufficient";
   missing_inputs: string[];
+
+  /**
+   * 被高优先级 Phase 短路跳过的下游阶段列表。
+   * 例：Phase 1 离场触发 → ["reduce", "trail_sl", "add"]
+   * 空数组表示完整跑完评估流水线。
+   */
+  skipped_phases: EvalPhase[];
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -717,6 +717,10 @@ def compute_reduce_confidence(
 # （见 RollService.evaluate_position → evaluate(..., liq_emergency_pct=...)）
 LIQ_EMERGENCY_PCT_DEFAULT = 5.0
 
+# 默认值：距爆仓 < 10% 触发"预警减仓（半量）"。运行时由 RollGlobalSettings.liq_warning_pct 覆盖。
+# 设为 0 或 ≤ liq_emergency_pct 时 Phase 1.5 不生效（向后兼容旧配置）。
+LIQ_WARNING_PCT_DEFAULT = 10.0
+
 
 def _evaluate_exit(
     position: UserPosition,
@@ -821,6 +825,7 @@ def evaluate(
     first_add_ratio: float = 0.5,
     reinvest_ratio: float = 1.0,
     liq_emergency_pct: float = LIQ_EMERGENCY_PCT_DEFAULT,
+    liq_warning_pct: float = LIQ_WARNING_PCT_DEFAULT,
 ) -> RollSignal:
     """单个活跃滚仓计划的评估入口。
 
@@ -885,6 +890,7 @@ def evaluate(
         signal.forward_windows = forward_scanner.scan(position.id, market)
 
     # ── Phase 0 · 数据健康 & 系统护栏 ─────────────────
+    # Phase 0 触发时，后续 Exit/Reduce/TrailSL/Add 均被跳过（中止评估）
     if market.data_quality == "insufficient":
         signal.action = "hold"
         signal.urgency = "info"
@@ -894,6 +900,7 @@ def evaluate(
             source="data_quality", read="insufficient",
             weight=-100, detail="数据不足",
         ))
+        signal.skipped_phases = ["exit", "reduce", "trail_sl", "add"]
         return signal
 
     if market.safety_gate == "block":
@@ -905,6 +912,7 @@ def evaluate(
             source="safety_gate", read="block",
             weight=-100, detail=signal.detail_cn,
         ))
+        signal.skipped_phases = ["exit", "reduce", "trail_sl", "add"]
         return signal
 
     # ── Phase 1 · 离场扫描 ───────────────────────────
@@ -916,6 +924,40 @@ def evaluate(
         signal.headline_cn = f"建议立即平仓：{reason}"
         signal.detail_cn = "； ".join(s.detail for s in sigs)
         signal.supporting = sigs
+        signal.skipped_phases = ["reduce", "trail_sl", "add"]
+        return signal
+
+    # ── Phase 1.5 · 爆仓预警软减仓（5% < 距爆仓 < liq_warning_pct）─
+    # 与 Phase 1 的爆仓阈值形成阶梯：距爆仓进入"次危险区"时给半量减仓建议，
+    # 让用户在"啥事没有"和"立即全平"之间多一道缓冲。
+    # 此处直接读全局 settings 级阈值（不走 plan.reduce_signals 白名单），
+    # 与 liq_emergency_pct 保持同级——都属于系统安全兜底。
+    if (
+        liq_warning_pct > liq_emergency_pct
+        and liq_dist_pct is not None
+        and liq_emergency_pct <= liq_dist_pct < liq_warning_pct
+    ):
+        half_pct = plan.reduce_step_size_pct * 0.5
+        warn_sig = SignalRef(
+            source="liq_warning", read=f"{liq_dist_pct:.2f}%", weight=0,
+            detail=(
+                f"距爆仓 {liq_dist_pct:.2f}% 已进入预警区"
+                f"（[{liq_emergency_pct:.1f}%, {liq_warning_pct:.1f}%)），"
+                f"建议提前半量减仓降杠杆"
+            ),
+        )
+        signal.action = "reduce"
+        signal.urgency = "attention"
+        signal.reduce_pct = half_pct
+        # 用一个与 reduce confidence 同序的"软分"占位：阈值满分（half_reduce）
+        signal.reduce_confidence = float(plan.thresholds.half_reduce)
+        signal.supporting = [warn_sig]
+        signal.confidence_breakdown = {"liq_warning": float(plan.thresholds.half_reduce)}
+        signal.headline_cn = (
+            f"预警减仓：距爆仓 {liq_dist_pct:.2f}% < 阈值 {liq_warning_pct:.1f}%"
+        )
+        signal.detail_cn = warn_sig.detail
+        signal.skipped_phases = ["reduce", "trail_sl", "add"]
         return signal
 
     # ── Phase 2 · 减仓扫描 ───────────────────────────
@@ -929,6 +971,7 @@ def evaluate(
         signal.confidence_breakdown = dict(reduce_conf.breakdown)
         signal.headline_cn = f"建议减仓 {plan.reduce_step_size_pct*100:.0f}%（信号分 {reduce_conf.score:.0f}）"
         signal.detail_cn = "； ".join(s.detail for s in reduce_conf.supporting)
+        signal.skipped_phases = ["trail_sl", "add"]
         return signal
     if reduce_conf.score >= plan.thresholds.half_reduce:
         signal.action = "reduce"
@@ -939,6 +982,7 @@ def evaluate(
         signal.confidence_breakdown = dict(reduce_conf.breakdown)
         signal.headline_cn = f"建议半量减仓（信号分 {reduce_conf.score:.0f}）"
         signal.detail_cn = "； ".join(s.detail for s in reduce_conf.supporting)
+        signal.skipped_phases = ["trail_sl", "add"]
         return signal
 
     # ── Phase 3 · 止损上移 ───────────────────────────
@@ -959,6 +1003,7 @@ def evaluate(
             source="roll_risk.trail_sl", read=signal.sl_move_reason,
             weight=0, detail=signal.detail_cn,
         ))
+        signal.skipped_phases = ["add"]
         return signal
 
     # ── Phase 4 · 加仓评估 ────────────────────────────

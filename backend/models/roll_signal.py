@@ -35,6 +35,12 @@ RollAction = Literal["add", "reduce", "close", "hold", "move_sl"]
 # 提醒紧迫程度（驱动前端颜色 + Notification 声音）
 Urgency = Literal["info", "attention", "urgent"]
 
+# 评估流水线阶段名 —— 用于 skipped_phases 透出
+# 注：Phase 0（data_health / safety_gate）一旦触发会导致 hold，
+#     但语义上数据健康/护栏是"评估中止"，不同于"下游被高优先级短路"，因此
+#     data_health / safety_gate 触发时 skipped_phases 会包含所有后续 phase。
+EvalPhase = Literal["exit", "reduce", "trail_sl", "add"]
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 信号引用（可解释性单位）
@@ -213,3 +219,10 @@ class RollSignal(BaseModel):
     # 评估用到的市场数据是否完整；partial/insufficient 时降级显示
     data_quality: Literal["ok", "partial", "insufficient"] = "ok"
     missing_inputs: list[str] = Field(default_factory=list)
+
+    # ── 流水线透明度 ─────────────────────────────────────
+    # 高优先级 Phase 触发后被跳过的下游 Phase 列表。
+    # 典型场景：Phase 1 Exit 命中 → skipped_phases=["reduce","trail_sl","add"]
+    # 前端据此把 pipeline 可视化条的对应段置灰，避免用户误解为"加/减仓引擎没跑"。
+    # 空列表表示 evaluate() 正常完整走完，或 Phase 4 自然停在 hold。
+    skipped_phases: list[EvalPhase] = Field(default_factory=list)

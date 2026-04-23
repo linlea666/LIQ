@@ -22,6 +22,7 @@ import AddPreviewCard from "@/components/Roll/AddPreviewCard";
 import PositionCard from "@/components/Roll/PositionCard";
 import RollingLadder from "@/components/Roll/RollingLadder";
 import SignalExplain from "@/components/Roll/SignalExplain";
+import SignalHistory from "@/components/Roll/SignalHistory";
 import { useRollStore } from "@/stores/rollStore";
 
 export default function RollDetailPage() {
@@ -140,6 +141,8 @@ export default function RollDetailPage() {
           onExecuted={handleRefreshAfterEvent}
         />
       )}
+
+      <SignalHistory positionId={position.id} />
 
       <RollingLadder position={position} events={events} />
     </div>

@@ -147,6 +147,39 @@ class TestCreatePosition:
         with pytest.raises(RollServiceError, match="占比超上限"):
             _create_default_position(service, margin=2000.0)   # 累计 60% > 50%
 
+    def test_li_fashi_requires_stop_loss(self, service: RollService):
+        """C2：李法师派模板在建仓时必须设置 stop_loss（模板硬约定）。"""
+        with pytest.raises(RollServiceError, match="李法师派"):
+            service.create_position(
+                coin="BTC", side="short", margin_mode="isolated", leverage=10,
+                entry_price=60000.0, margin_usd=500.0,
+                total_account_usd=service.settings.total_account_usd,
+                template_id="li_fashi",
+                stop_loss=None,
+            )
+
+    def test_li_fashi_with_stop_loss_succeeds(self, service: RollService):
+        pos, plan = service.create_position(
+            coin="BTC", side="short", margin_mode="isolated", leverage=10,
+            entry_price=60000.0, margin_usd=500.0,
+            total_account_usd=service.settings.total_account_usd,
+            template_id="li_fashi",
+            stop_loss=61200.0,
+        )
+        assert pos.stop_loss == 61200.0
+        assert plan.template_id == "li_fashi"
+
+    def test_other_templates_allow_no_stop_loss(self, service: RollService):
+        """非 li_fashi 模板不应被此硬约束拦住。"""
+        pos, _ = service.create_position(
+            coin="BTC", side="long", margin_mode="isolated", leverage=10,
+            entry_price=60000.0, margin_usd=500.0,
+            total_account_usd=service.settings.total_account_usd,
+            template_id="fatzhai",
+            stop_loss=None,
+        )
+        assert pos.stop_loss is None
+
     def test_account_cap_respected(self, service: RollService):
         # account_margin_pct_cap 默认 0.8
         # per_coin_cap 默认 0.5，必须先放宽才能测 account cap
@@ -329,6 +362,36 @@ class TestEvaluate:
         signal = service.evaluate_position(pos.id, _make_market())
         assert signal is not None
         assert service.last_signals[pos.id] is signal
+
+    def test_signal_history_ring_buffer(self, service: RollService):
+        """C4：每次评估都应追加到 ring buffer，且遵守容量上限。"""
+        pos, _ = _create_default_position(service)
+        # 缩小容量方便测试
+        service.signal_history_capacity = 3
+        for i in range(5):
+            sig = service.evaluate_position(
+                pos.id, _make_market(ts=1_000_000 + i * 10),
+            )
+            assert sig is not None
+        buf = service.signal_history[pos.id]
+        assert len(buf) == 3
+        # 最后一次 ts 必须是最新的（ring 语义：旧的被挤出）
+        assert buf[-1].ts == 1_000_000 + 40
+        assert buf[0].ts == 1_000_000 + 20
+
+    def test_signal_history_cleared_on_close(self, service: RollService):
+        pos, _ = _create_default_position(service)
+        service.evaluate_position(pos.id, _make_market())
+        assert pos.id in service.signal_history
+        service.execute_close(position_id=pos.id, price=60000.0)
+        assert pos.id not in service.signal_history
+
+    def test_signal_history_cleared_on_delete(self, service: RollService):
+        pos, _ = _create_default_position(service)
+        service.evaluate_position(pos.id, _make_market())
+        assert pos.id in service.signal_history
+        service.delete_position(pos.id)
+        assert pos.id not in service.signal_history
 
     def test_on_signal_callback_fires(self, tmp_path: Path):
         captured: list[RollSignal] = []

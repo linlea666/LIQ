@@ -100,6 +100,21 @@ export function getLatestSignal(id: string): Promise<RollSignal> {
   );
 }
 
+export interface ListRecentSignalsResp {
+  position_id: string;
+  count: number;
+  items: RollSignal[];
+}
+
+export function listRecentSignals(
+  id: string,
+  limit = 60,
+): Promise<ListRecentSignalsResp> {
+  return httpRequest<ListRecentSignalsResp>(
+    `/api/roll/positions/${encodeURIComponent(id)}/signals?limit=${limit}`,
+  );
+}
+
 export function executeEvent(
   id: string,
   req: ExecuteEventReq,

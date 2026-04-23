@@ -238,6 +238,29 @@ def get_latest_signal(position_id: str):
     return signal.model_dump()
 
 
+@router.get("/positions/{position_id}/signals")
+def list_recent_signals(position_id: str, limit: int = 60):
+    """返回该持仓最近 N 次评估的 RollSignal 列表（按时间升序）。
+
+    仅内存中的 ring buffer，重启后清空；默认保留最近 60 条（约 10 分钟）。
+    用于前端"信号时间线"面板，消除"引擎是否真在跑"的疑虑。
+    """
+    svc = _require_service()
+    if position_id not in svc.store.positions:
+        raise HTTPException(404, f"持仓不存在: {position_id}")
+    buf = svc.signal_history.get(position_id)
+    if buf is None or len(buf) == 0:
+        return {"position_id": position_id, "count": 0, "items": []}
+
+    capped = max(1, min(limit, svc.signal_history_capacity))
+    items = list(buf)[-capped:]
+    return {
+        "position_id": position_id,
+        "count": len(items),
+        "items": [s.model_dump() for s in items],
+    }
+
+
 @router.post("/positions/{position_id}/execute")
 def execute_event(position_id: str, req: ExecuteEventReq):
     """用户确认执行一次事件：add / reduce / close / move_sl。
@@ -418,6 +441,14 @@ def update_global_settings(patch: dict[str, Any]):
         raise HTTPException(400, "quiet_start_utc 必须 ∈ [0, 23]")
     if merged.quiet_end_utc < 0 or merged.quiet_end_utc > 23:
         raise HTTPException(400, "quiet_end_utc 必须 ∈ [0, 23]")
+
+    # 跨字段：预警阈值必须严格大于紧急阈值（否则 Phase 1.5 永远不会触发，语义不一致）
+    if merged.liq_warning_pct <= merged.liq_emergency_pct:
+        raise HTTPException(
+            400,
+            f"liq_warning_pct ({merged.liq_warning_pct}) 必须严格大于 "
+            f"liq_emergency_pct ({merged.liq_emergency_pct})",
+        )
 
     import time as _t
     merged.updated_at = int(_t.time())

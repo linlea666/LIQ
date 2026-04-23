@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 
 import { useRollStore } from "@/stores/rollStore";
 import type {
+  EvalPhase,
   RollPlan,
   RollSignal,
   UserPosition,
@@ -130,6 +131,9 @@ export default function SignalExplain({ position, signal, plan, onExecuted }: Pr
       <header className="border-b border-slate-800 px-4 py-2 text-[12px] font-semibold text-slate-300">
         信号解释板
       </header>
+
+      {/* ── 评估流水线 ── */}
+      <PipelineStrip signal={signal} />
 
       {/* ── 置信度 ── */}
       <div className="grid grid-cols-1 gap-4 border-b border-slate-800 px-4 py-3 sm:grid-cols-2">
@@ -342,6 +346,138 @@ export default function SignalExplain({ position, signal, plan, onExecuted }: Pr
           ❌ {err}
         </div>
       )}
+
+      {/* ── Debug：原始 RollSignal JSON（默认折叠） ── */}
+      <RawSignalPanel signal={signal} />
     </section>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pipeline 可视化：展示 Phase exit/reduce/trail_sl/add 的激活/跳过状态
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface PhaseBadgeMeta {
+  phase: EvalPhase;
+  label: string;
+  hint: string;
+}
+
+const PIPELINE_PHASES: PhaseBadgeMeta[] = [
+  { phase: "exit", label: "Phase 1 · Exit", hint: "止损/爆仓/结构+衰竭双确认" },
+  { phase: "reduce", label: "Phase 2 · Reduce", hint: "依据 plan.reduce_signals 累加评分" },
+  { phase: "trail_sl", label: "Phase 3 · TrailSL", hint: "加仓后上移止损（trail_sl_after_add_n）" },
+  { phase: "add", label: "Phase 4 · Add", hint: "置信度打分 + 烈度映射 + 三闸门" },
+];
+
+// 主动作映射到当前命中的 Phase（用于高亮颜色）
+function hitPhaseFor(action: RollSignal["action"]): EvalPhase | null {
+  if (action === "close") return "exit";
+  if (action === "reduce") return "reduce";
+  if (action === "move_sl") return "trail_sl";
+  if (action === "add") return "add";
+  return null;
+}
+
+function PipelineStrip({ signal }: { signal: RollSignal }) {
+  const skipped = new Set<EvalPhase>(signal.skipped_phases || []);
+  const hit = hitPhaseFor(signal.action);
+  const aborted =
+    signal.action === "hold" &&
+    (signal.data_quality === "insufficient" ||
+      signal.blocking.some((b) => b.source === "safety_gate"));
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 px-4 py-2 text-[10.5px]">
+      <span className="mr-1 text-slate-500">评估流水线</span>
+      {PIPELINE_PHASES.map(({ phase, label, hint }) => {
+        const isHit = hit === phase;
+        const isSkipped = skipped.has(phase);
+        let cls: string;
+        let suffix = "";
+        if (isHit) {
+          cls =
+            phase === "exit"
+              ? "border-rose-600/60 bg-rose-950/60 text-rose-200"
+              : phase === "reduce"
+              ? "border-amber-600/60 bg-amber-950/60 text-amber-200"
+              : phase === "trail_sl"
+              ? "border-sky-600/60 bg-sky-950/60 text-sky-200"
+              : "border-emerald-600/60 bg-emerald-950/60 text-emerald-200";
+          suffix = " · 命中";
+        } else if (isSkipped) {
+          cls = "border-slate-800 bg-slate-900/40 text-slate-600 line-through";
+          suffix = " · 跳过";
+        } else {
+          cls = "border-slate-700/60 bg-slate-900/60 text-slate-400";
+        }
+        return (
+          <span
+            key={phase}
+            title={hint + suffix}
+            className={["rounded-md border px-2 py-0.5 font-mono", cls].join(" ")}
+          >
+            {label}
+          </span>
+        );
+      })}
+      {aborted && (
+        <span
+          className="rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 font-mono text-amber-200"
+          title="Phase 0 数据/护栏触发，评估流水线整体中止"
+        >
+          Phase 0 · 中止评估
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Raw RollSignal JSON 折叠面板（排障/可观测性）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function RawSignalPanel({ signal }: { signal: RollSignal }) {
+  const [copied, setCopied] = useState(false);
+  const json = useMemo(() => JSON.stringify(signal, null, 2), [signal]);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <details className="group border-t border-slate-800 bg-slate-950/50 text-[11px]">
+      <summary className="cursor-pointer select-none px-4 py-2 text-slate-400 transition hover:text-slate-200">
+        <span className="mr-2 inline-block text-[10px] text-slate-500 group-open:hidden">▶</span>
+        <span className="mr-2 hidden text-[10px] text-slate-500 group-open:inline-block">▼</span>
+        原始 RollSignal JSON（排障用）
+        <span className="ml-2 text-[10px] text-slate-600">
+          · ts={signal.ts} · action={signal.action} · urgency={signal.urgency}
+        </span>
+      </summary>
+      <div className="border-t border-slate-800 px-4 py-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[10px] text-slate-500">
+            与 GET /api/roll/positions/{signal.position_id}/signal 的响应完全一致
+          </span>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="rounded border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 transition hover:bg-slate-800"
+          >
+            {copied ? "已复制" : "复制 JSON"}
+          </button>
+        </div>
+        <pre className="max-h-80 overflow-auto rounded bg-slate-900/80 p-2 font-mono text-[10.5px] leading-snug text-slate-200">
+          {json}
+        </pre>
+      </div>
+    </details>
   );
 }

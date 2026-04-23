@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Callable, Optional
+from collections import deque
+from typing import Callable, Deque, Optional
 
 from models.roll_position import (
     RollEvent,
@@ -89,6 +90,12 @@ class RollService:
         # 每 position 最近一次评估结果的缓存（API 层直接读取）
         self.last_signals: dict[str, RollSignal] = {}
 
+        # 每 position 最近 N 次评估结果的 ring buffer（用于前端"信号时间线"面板）
+        # 容量按 "60 条 ≈ 10 分钟"（默认评估间隔 10s）设置；历史只在内存，不落盘。
+        # 用单独结构而非扩展 last_signals，便于向后兼容并保持各自语义清晰。
+        self.signal_history_capacity = 60
+        self.signal_history: dict[str, Deque[RollSignal]] = {}
+
         # 懒初始化（避免测试场景下未准备 data_dir 就调用）
         self._initialized = False
 
@@ -154,6 +161,15 @@ class RollService:
             raise RollServiceError(f"leverage 越界: {leverage}")
         if entry_price <= 0 or margin_usd <= 0 or total_account_usd <= 0:
             raise RollServiceError("entry_price/margin/account 必须 > 0")
+
+        # 模板硬约定校验：李法师派模板的交易哲学是"每仓独立 2% 止损"，
+        # 若用户不填 stop_loss 就建仓，引擎只剩 liq_emergency_pct 兜底，
+        # 这与模板自身承诺的风控语义直接冲突 —— 必须在建仓期拒绝。
+        # 其它模板保持自由（如 conservative 等可接受"先不设止损，由引擎 trail"）。
+        if template_id == "li_fashi" and stop_loss is None:
+            raise RollServiceError(
+                "李法师派模板要求每仓独立止损（默认 2%），请在建仓时设置 stop_loss"
+            )
 
         position_id = f"pos-{uuid.uuid4().hex[:12]}"
         plan_id = f"plan-{uuid.uuid4().hex[:12]}"
@@ -240,6 +256,11 @@ class RollService:
             raise RollServiceError(f"持仓不存在: {position_id}")
         self.store.delete_position(position_id)
         self.persist_store()
+        # 同步清理 per-position 的内存状态，避免残留历史误导下次重建同 ID 的计划
+        self.stabilizer.reset(position_id)
+        self.forward_scanner.reset(position_id)
+        self.last_signals.pop(position_id, None)
+        self.signal_history.pop(position_id, None)
         logger.info("[Roll] delete_position | id=%s", position_id)
 
     # ─── 事件执行（用户确认后调用） ──────────────────────
@@ -402,10 +423,11 @@ class RollService:
         append_event(self.data_dir, position_id, event)
         self.persist_store()
 
-        # 清理稳定器 & 前瞻频控 & signal 缓存
+        # 清理稳定器 & 前瞻频控 & signal 缓存（含 ring buffer 历史）
         self.stabilizer.reset(position_id)
         self.forward_scanner.reset(position_id)
         self.last_signals.pop(position_id, None)
+        self.signal_history.pop(position_id, None)
         logger.info(
             "[Roll] execute_close | id=%s kind=%s price=%.4f reason=%s",
             position_id, kind, price, reason or "—",
@@ -476,10 +498,18 @@ class RollService:
             stabilizer=self.stabilizer,
             forward_scanner=self.forward_scanner,
             liq_emergency_pct=self.settings.liq_emergency_pct,
+            liq_warning_pct=self.settings.liq_warning_pct,
         )
 
         # 缓存供 API 读取
         self.last_signals[position_id] = signal
+
+        # 追加到 ring buffer（便于前端展示"最近 N 次评估"时间线）
+        buf = self.signal_history.get(position_id)
+        if buf is None:
+            buf = deque(maxlen=self.signal_history_capacity)
+            self.signal_history[position_id] = buf
+        buf.append(signal)
 
         # 重要事件落盘（仅 alert_* / gate_blocked）
         self._archive_alert_event(pos, signal)
