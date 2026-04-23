@@ -7,6 +7,12 @@ services:
       - "8800:8000"
     env_file:
       - ./backend/.env
+    volumes:
+      # 持久化所有运行时写入的数据，防止 docker-compose up --build 后丢失
+      # /app/data        → 滚仓持仓、api 缓存、ai/kl 历史、新闻账本、信号 PnL 等
+      # /app/logs        → te_shadow / te_eval / 诊断日志
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
