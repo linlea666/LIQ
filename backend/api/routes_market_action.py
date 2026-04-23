@@ -52,6 +52,7 @@ async def get_facts_summary(coin: str = Query("BTC")) -> dict[str, Any]:
     from processors.market_action.facts_collector import collect
     facts = collect(state)
     dump = facts.model_dump()
+    missing_set = set(dump.get("missing", []))
     coverage: dict[str, bool] = {}
     for key in (
         "price", "oi", "funding", "cvd_contract", "cvd_spot", "liquidation_flow",
@@ -59,7 +60,7 @@ async def get_facts_summary(coin: str = Query("BTC")) -> dict[str, Any]:
         "price_context", "footprint", "taker_flow_5m", "options",
     ):
         v = dump.get(key)
-        coverage[key] = v is not None and (not isinstance(v, dict) or bool(v))
+        coverage[key] = (v is not None) and (key not in missing_set)
     return {
         "coin": dump.get("coin"),
         "timestamp": dump.get("timestamp"),

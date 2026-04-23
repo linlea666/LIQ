@@ -321,12 +321,24 @@ def collect(state: "CoinState") -> MarketActionFacts:
     if facts.orderbook is None:
         missing.append("orderbook")
 
-    # liq_map heatmap（取 1h 或最近）
+    # liq_map_clusters（优先 LiquidationMap 预聚合簇，回退 HeatmapData.data）
     heatmap = None
     if state.liq_heatmaps:
-        heatmap = next(iter(state.liq_heatmaps.values()))
+        # 优先 24h，其次 3d，再其次任一
+        heatmap = (
+            state.liq_heatmaps.get("m1_24h")
+            or state.liq_heatmaps.get("24h")
+            or state.liq_heatmaps.get("m1_3d")
+            or state.liq_heatmaps.get("3d")
+            or next(iter(state.liq_heatmaps.values()))
+        )
+    liq_map = None
+    if getattr(state, "liq_maps", None):
+        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("3d") or next(iter(state.liq_maps.values()))
     facts.liq_map_clusters = build_cluster_snapshot(
-        heatmap, state.ticker.last if state.ticker else None
+        heatmap,
+        state.ticker.last if state.ticker else None,
+        liq_map=liq_map,
     )
     if facts.liq_map_clusters.above_cluster_usd == 0 and facts.liq_map_clusters.below_cluster_usd == 0:
         missing.append("liq_map_clusters")

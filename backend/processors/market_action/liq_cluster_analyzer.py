@@ -1,4 +1,9 @@
-"""清算图上下簇分析 · 从 heatmap → LiqClusterSnapshot"""
+"""清算图上下簇分析 · 从 heatmap / liquidation_map → LiqClusterSnapshot
+
+数据源优先级：
+  1. LiquidationMap.clusters_above / clusters_below（processors/liquidation.py 已预聚合）
+  2. HeatmapData.data（list[HeatmapDataPoint(price, value, ts)]）
+"""
 
 from __future__ import annotations
 
@@ -7,20 +12,91 @@ from typing import Optional
 from models.market_action import LiqClusterSnapshot
 
 
+def _point_price_value(lvl) -> Optional[tuple[float, float]]:
+    """兼容 HeatmapDataPoint(BaseModel) / dict / list-tuple 三种结构。"""
+    try:
+        # BaseModel（有 .price / .value 属性）
+        if hasattr(lvl, "price") and (hasattr(lvl, "value") or hasattr(lvl, "usd")):
+            price = float(getattr(lvl, "price"))
+            value = float(getattr(lvl, "value", None) or getattr(lvl, "usd", 0) or 0)
+            return price, value
+        if isinstance(lvl, dict):
+            price = float(lvl.get("price", lvl.get("level", 0)))
+            value = float(
+                lvl.get("value",
+                        lvl.get("usd",
+                                lvl.get("volume",
+                                        lvl.get("liq", 0))))
+            )
+            return price, value
+        if isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
+            return float(lvl[0]), float(lvl[1])
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _build_from_preaggregated(
+    liq_map,
+    current_price: float,
+) -> Optional[LiqClusterSnapshot]:
+    """优先走 LiquidationMap.clusters_above / clusters_below（字段结构更清晰）。"""
+    if liq_map is None:
+        return None
+    clusters_above = getattr(liq_map, "clusters_above", None) or []
+    clusters_below = getattr(liq_map, "clusters_below", None) or []
+    if not clusters_above and not clusters_below:
+        return None
+    snap = LiqClusterSnapshot()
+    above_sum = sum(float(c.total_usd) for c in clusters_above if getattr(c, "total_usd", 0))
+    below_sum = sum(float(c.total_usd) for c in clusters_below if getattr(c, "total_usd", 0))
+    snap.above_cluster_usd = round(above_sum, 2)
+    snap.below_cluster_usd = round(below_sum, 2)
+    if clusters_above:
+        nearest_a = min(clusters_above, key=lambda c: abs(c.price_center - current_price))
+        snap.above_nearest_price = float(nearest_a.price_center)
+        snap.above_distance_pct = round(
+            (nearest_a.price_center - current_price) / current_price * 100, 3
+        )
+    if clusters_below:
+        nearest_b = min(clusters_below, key=lambda c: abs(c.price_center - current_price))
+        snap.below_nearest_price = float(nearest_b.price_center)
+        snap.below_distance_pct = round(
+            (current_price - nearest_b.price_center) / current_price * 100, 3
+        )
+    if above_sum > 0 and below_sum > 0:
+        ratio = above_sum / below_sum
+        snap.bias = (
+            "short_squeeze_fuel" if ratio > 1.5
+            else "long_squeeze_fuel" if ratio < 0.67
+            else "balanced"
+        )
+    elif above_sum > 0:
+        snap.bias = "short_squeeze_fuel"
+    elif below_sum > 0:
+        snap.bias = "long_squeeze_fuel"
+    return snap
+
+
 def build_cluster_snapshot(
     heatmap: Optional[object],
     current_price: Optional[float],
+    liq_map: Optional[object] = None,
 ) -> LiqClusterSnapshot:
-    """heatmap: HeatmapData 对象（含 price_levels: list[(price, long_liq, short_liq)] 或类似）
-    本函数做最兼容的解析——不同版本 HeatmapData 字段名略有差异。
-    """
+    """优先 LiquidationMap.clusters_{above,below}，回退 HeatmapData.data。"""
     snap = LiqClusterSnapshot()
-    if heatmap is None or current_price is None or current_price <= 0:
+    if current_price is None or current_price <= 0:
         return snap
 
-    # 兼容多种结构：HeatmapData 可能有 levels / price_levels / y_data
+    pre = _build_from_preaggregated(liq_map, current_price)
+    if pre is not None and (pre.above_cluster_usd > 0 or pre.below_cluster_usd > 0):
+        return pre
+
+    if heatmap is None:
+        return snap
+
     levels = None
-    for attr in ("levels", "price_levels", "data", "rows"):
+    for attr in ("data", "levels", "price_levels", "rows"):
         v = getattr(heatmap, attr, None)
         if isinstance(v, list) and v:
             levels = v
@@ -34,17 +110,10 @@ def build_cluster_snapshot(
     below_near: Optional[float] = None
 
     for lvl in levels:
-        try:
-            if isinstance(lvl, dict):
-                price = float(lvl.get("price", lvl.get("level", 0)))
-                liq_usd = float(lvl.get("usd", lvl.get("volume", lvl.get("liq", 0))))
-            elif isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
-                price = float(lvl[0])
-                liq_usd = float(lvl[1])
-            else:
-                continue
-        except (TypeError, ValueError):
+        pv = _point_price_value(lvl)
+        if pv is None:
             continue
+        price, liq_usd = pv
         if price <= 0 or liq_usd <= 0:
             continue
         if price > current_price:
