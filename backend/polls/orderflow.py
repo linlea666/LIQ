@@ -118,6 +118,13 @@ async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
         coin.symbol_cg, interval="5m", limit=24,
     )
 
+    def _ts_sec(raw) -> int:
+        try:
+            v = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return v // 1000 if v > 10_000_000_000 else v
+
     c_buy = c_sell = s_buy = s_sell = 0.0
     contract_series: list[dict] = []
     spot_series: list[dict] = []
@@ -129,7 +136,7 @@ async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
                 c_buy += buy
                 c_sell += sell
                 contract_series.append({
-                    "ts": int(item.get("time", item.get("t", 0))),
+                    "ts": _ts_sec(item.get("time", item.get("t", 0))),
                     "buy_usd": buy, "sell_usd": sell,
                     "delta_usd": buy - sell,
                 })
@@ -144,7 +151,7 @@ async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
                 s_buy += buy
                 s_sell += sell
                 spot_series.append({
-                    "ts": int(item.get("time", item.get("t", 0))),
+                    "ts": _ts_sec(item.get("time", item.get("t", 0))),
                     "buy_usd": buy, "sell_usd": sell,
                     "delta_usd": buy - sell,
                 })
@@ -183,7 +190,14 @@ async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: Coi
             bid_total_usd=bid_usd, ask_total_usd=ask_usd,
             spread_pct=round(spread, 2),
         )
-        # ── MAA: 保留 12 点 5m 序列 ──
+        # ── MAA: 保留 12 点 5m 序列 · ts 归一为秒 ──
+        def _ts_sec(raw) -> int:
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return 0
+            return v // 1000 if v > 10_000_000_000 else v
+
         series: list[dict] = []
         for item in data:
             try:
@@ -191,7 +205,7 @@ async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: Coi
                 au = float(item.get("aggregated_asks_usd", 0))
                 sp = (au - bu) / ((au + bu) / 2) * 100 if (au + bu) > 0 else 0
                 series.append({
-                    "ts": int(item.get("time", item.get("t", 0))),
+                    "ts": _ts_sec(item.get("time", item.get("t", 0))),
                     "bid_usd": bu,
                     "ask_usd": au,
                     "spread_pct": round(sp, 4),

@@ -87,19 +87,23 @@ def build_price_snapshot(state: "CoinState") -> Optional[PriceSnapshot]:
         except Exception:
             pass
 
-    # 近 6 根 1h bars（OHLCV）
+    # 近 6 根 1h bars（OHLCV）· ts 统一输出为秒
+    def _ts_to_sec(ts_raw: int) -> int:
+        return int(ts_raw // 1000) if ts_raw > 10_000_000_000 else int(ts_raw)
+
     recent_bars: list[list[float]] = []
     if state.candles_1h:
         for c in state.candles_1h[-6:]:
             try:
                 if hasattr(c, "ts"):
                     recent_bars.append([
-                        int(c.ts), float(c.open), float(c.high),
+                        _ts_to_sec(int(c.ts)),
+                        float(c.open), float(c.high),
                         float(c.low), float(c.close), float(getattr(c, "vol", 0) or 0),
                     ])
                 elif isinstance(c, dict):
                     recent_bars.append([
-                        int(c.get("ts", c.get("t", 0))),
+                        _ts_to_sec(int(c.get("ts", c.get("t", 0)))),
                         float(c.get("open", c.get("o", 0))),
                         float(c.get("high", c.get("h", 0))),
                         float(c.get("low", c.get("l", 0))),
