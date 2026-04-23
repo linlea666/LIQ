@@ -200,6 +200,63 @@ class FootprintSnapshot(BaseModel):
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# A10 · Absorption Zone · 价位级被动吸收（Footprint 派生硬证据）
+# ────────────────────────────────────────────────────────────────────────────
+
+class AbsorptionZone(BaseModel):
+    """单个吸收价位带 · 从 Footprint buckets 派生
+
+    「吸收」= 某价位出现**大量真实成交**但**买卖接近均衡**。
+    技术特征：该价位 `buy_quote + sell_quote` 显著高于同 bar 其他 buckets
+    （top 20%），且 `|delta_pct|` 偏低（< 0.20），说明被动端在持续接单。
+    这是**已成交事实**，不可撤单，因此比挂单（订单墙）更可靠。
+
+    - `side=support`：价位位于当时价下方，买方被动吸收卖盘（潜在支撑）
+    - `side=resistance`：价位位于当时价上方，卖方被动吸收买盘（潜在阻力）
+    - `age_hours`：从对应 Footprint bar 到现在的小时数（0 = 最新 bar）
+    - `bar_count`：跨多少根 bar 在该价位重复出现吸收（1-3，越大越可靠）
+    """
+    price: float
+    side: Literal["support", "resistance"]
+    taker_volume_usd: float
+    # 该价位累计（跨 bar 合并）总成交额
+    delta_pct_abs_avg: float
+    # 加权平均的 |delta_pct|（0~1，越接近 0 吸收越纯粹）
+    bar_count: int
+    # 在近 N 根 bar 中出现吸收特征的次数
+    age_hours: float
+    # 最近一次出现的 bar 距今小时数
+    source: Literal["contract", "spot", "both"] = "contract"
+
+
+class AbsorptionSnapshot(BaseModel):
+    """A10 · 价位级吸收带汇总（被动吸收 = 硬证据）
+
+    Footprint 数据源的派生产物，每根 bar 的 buckets 中筛选出
+    「高成交量 + 低方向性 delta」的价位，跨 bars 合并为 zone 列表。
+
+    供 MAA AI 和关键位系统共同消费：
+    - MAA：作为"近期真实成交留痕"证据（dimension="Absorption"）
+    - 关键位：作为 capital_flow 维度候选位（source_tag="absorption_zone"）
+
+    阈值采保守基线（top 20% vol + |delta_pct| < 0.20）；若该基线
+    下完全无 zone 命中，detector 会兜底放宽一次（top 30% + 0.30），
+    并设置 `fallback_used=True` 透明告知。
+    """
+    zones_support: list[AbsorptionZone] = Field(default_factory=list)
+    zones_resistance: list[AbsorptionZone] = Field(default_factory=list)
+    total_zone_count: int = 0
+    strongest_support: Optional[AbsorptionZone] = None
+    strongest_resistance: Optional[AbsorptionZone] = None
+    window_hours: float = 3.0
+    # 数据覆盖时间窗（= footprint deque maxlen × bar 时长，默认 3h）
+    lookback_bars: int = 0
+    # 实际使用的 footprint bar 数
+    fallback_used: bool = False
+    # 是否启用了放宽阈值兜底
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # B 级 · 加分 2 项
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -259,6 +316,8 @@ class MarketActionFacts(BaseModel):
     funding_trend: FundingTrend = "stable"
     price_context: Optional[PriceContextSnapshot] = None
     footprint: Optional[FootprintSnapshot] = None
+    absorption: Optional[AbsorptionSnapshot] = None
+    # A10 · 价位级被动吸收带（Footprint 派生，硬证据，替代 orderbook 软信号）
 
     # B 级 2
     taker_flow_5m: Optional[TakerFlowSnapshot] = None
