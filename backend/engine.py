@@ -1631,6 +1631,15 @@ class Engine:
         if state.oi and state.oi.history:
             oi_hist = [{"ts": s.ts, "oi": s.oi_usd} for s in state.oi.history]
 
+        # 吸收带候选（基于 Footprint 派生；替代原"订单墙"软信号，
+        # 价位级已成交硬证据，不受 spoof/撤单干扰）
+        from processors.absorption_detector import detect_absorption_zones
+        absorption = detect_absorption_zones(
+            footprint_contract=list(getattr(state, "footprint_contract", []) or []),
+            footprint_spot=list(getattr(state, "footprint_spot", []) or []),
+            current_price=price,
+        )
+
         discovery = discover_levels(
             current_price=price,
             atr=state.atr,
@@ -1640,7 +1649,7 @@ class Engine:
             liq_map=liq_map,
             liq_map_7d=liq_map_7d,
             vp=state.vp,
-            orderbook=state.orderbook,
+            absorption=absorption,
             ema_daily=state.ema_daily if state.ema_daily else None,
             sma200_daily=state.sma200_daily_cg,
             boll_data=state.boll_data,

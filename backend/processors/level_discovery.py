@@ -3,9 +3,15 @@
 三大维度：
   A. 价格结构 (Swing H/L, 前高前低, 未回补影线, 成交密集区)
   B. 数学指标 (EMA 簇, SMA200, BMSA, Fibonacci, Pivot, Ichimoku, BOLL)
-  C. 资金仓位 (清算簇, VP POC/VA, VWAP, 订单墙, 链上周期价)
+  C. 资金仓位 (清算簇, VP POC/VA, VWAP, 吸收带, 链上周期价)
 
 每个候选位输出 RawCandidate，后续由 confluence_scoring 做聚类打分。
+
+资金仓位维度说明：
+  · 原"订单墙"(orderbook_bid/ask_walls) 候选已移除 —— 挂单属"意图"软信号，
+    可被 spoof / 撤单，长期实盘会系统性污染支撑/阻力判断
+  · 替代为"吸收带"(absorption_zone_*) —— 从 Footprint 派生的已成交硬证据：
+    价位级「高成交量 + 买卖接近均衡」的 zone 视为被动承接/压制价位
 """
 
 from __future__ import annotations
@@ -35,7 +41,8 @@ def fmt_usd_cn(usd: float) -> str:
         return f"{sign}{a:,.0f}"
     return "0"
 from models.liquidation import LiquidationMap
-from models.market import CandleData, OrderBookAnalysis, VolumeProfileData
+from models.market import CandleData, VolumeProfileData
+from models.market_action import AbsorptionSnapshot
 from processors.ta_core import (
     BMSAResult,
     FibLevel,
@@ -207,7 +214,7 @@ def discover_levels(
     liq_map: LiquidationMap | None = None,
     liq_map_7d: LiquidationMap | None = None,
     vp: VolumeProfileData | None = None,
-    orderbook: OrderBookAnalysis | None = None,
+    absorption: AbsorptionSnapshot | None = None,
     ema_daily: dict[int, float] | None = None,
     sma200_daily: float | None = None,
     boll_data: dict | None = None,
@@ -244,7 +251,7 @@ def discover_levels(
     _discover_capital_flow(
         cands, current_price, atr,
         liq_map, liq_map_7d,
-        vp, orderbook, vwap,
+        vp, absorption, vwap,
         cycle_position,
         oi_history, candles_1h,
     )
@@ -532,7 +539,7 @@ def _discover_capital_flow(
     liq_map: LiquidationMap | None,
     liq_map_7d: LiquidationMap | None,
     vp: VolumeProfileData | None,
-    orderbook: OrderBookAnalysis | None,
+    absorption: AbsorptionSnapshot | None,
     vwap: float,
     cycle_position: CyclePositionData | None,
     oi_history: list[dict] | None = None,
@@ -637,29 +644,65 @@ def _discover_capital_flow(
             source_tag="vwap", base_score=15, timeframe="1D",
         ))
 
-    # 订单簿大单
-    if orderbook:
-        for wall in orderbook.bid_walls[:3]:
-            usd_m = wall.size_usd / 1e6
-            if usd_m < 0.5:
+    # 吸收带（替代原订单墙 · 已成交硬证据）
+    #   评分逻辑（加分项可叠乘）：
+    #   · base = min(taker_volume_usd / 1e6, 30)   —— 每 $1M 贡献 1 分，封顶 30
+    #   · bar_count 加成：1→1.0x / 2→1.2x / 3→1.5x （跨 bar 重复越多越可靠）
+    #   · delta 纯度：1 - (delta_pct_abs_avg / 0.30)  —— 越接近 0 越纯粹
+    #   · age 衰减：max(0.3, 1 - age_hours/3)       —— 3h 前衰减到基准的 30%
+    #   · fallback 折扣：detector 用放宽阈值兜底时 × 0.7
+    #   每侧最多 5 个（detector 返回时已按 vol 降序），防止污染 cluster 打分
+    if absorption:
+        def _absorption_score(zone_dict: dict, used_fallback: bool) -> float:
+            vol_m = (zone_dict.get("taker_volume_usd") or 0) / 1e6
+            base = min(vol_m, 30.0)
+            bc = zone_dict.get("bar_count") or 1
+            bar_mult = 1.0 if bc <= 1 else (1.2 if bc == 2 else 1.5)
+            d_abs = min(zone_dict.get("delta_pct_abs_avg") or 0.30, 0.30)
+            purity = max(0.0, 1.0 - d_abs / 0.30)
+            age = zone_dict.get("age_hours") or 0.0
+            age_factor = max(0.3, 1.0 - age / 3.0)
+            fb_factor = 0.7 if used_fallback else 1.0
+            return base * bar_mult * purity * age_factor * fb_factor
+
+        absorp_dict = absorption.model_dump() if hasattr(absorption, "model_dump") else absorption
+        fb_used = bool(absorp_dict.get("fallback_used"))
+        for z in (absorp_dict.get("zones_support") or [])[:5]:
+            score = _absorption_score(z, fb_used)
+            if score <= 0:
+                continue
+            # 距离过远的不加入（和其他 capital_flow 候选统一的 15% 范围）
+            z_price = z.get("price") or 0
+            if z_price <= 0 or abs(z_price - price) / price > 0.15:
                 continue
             cands.append(RawCandidate(
-                price=round(wall.price, 2), side="support",
-                dimension="capital_flow", source=f"买墙{fmt_usd_cn(wall.size_usd)}",
-                source_tag="orderbook_bid_wall",
-                base_score=min(usd_m * 10, 25), timeframe="1H",
-                data_age_hours=0,
+                price=round(z_price, 2), side="support",
+                dimension="capital_flow",
+                source=(
+                    f"吸收带{fmt_usd_cn(z.get('taker_volume_usd') or 0)}"
+                    f"(bar×{z.get('bar_count')}|Δ{z.get('delta_pct_abs_avg') or 0:.2f})"
+                ),
+                source_tag="absorption_zone_support",
+                base_score=score, timeframe="1H",
+                data_age_hours=z.get("age_hours") or 0,
             ))
-        for wall in orderbook.ask_walls[:3]:
-            usd_m = wall.size_usd / 1e6
-            if usd_m < 0.5:
+        for z in (absorp_dict.get("zones_resistance") or [])[:5]:
+            score = _absorption_score(z, fb_used)
+            if score <= 0:
+                continue
+            z_price = z.get("price") or 0
+            if z_price <= 0 or abs(z_price - price) / price > 0.15:
                 continue
             cands.append(RawCandidate(
-                price=round(wall.price, 2), side="resistance",
-                dimension="capital_flow", source=f"卖墙{fmt_usd_cn(wall.size_usd)}",
-                source_tag="orderbook_ask_wall",
-                base_score=min(usd_m * 10, 25), timeframe="1H",
-                data_age_hours=0,
+                price=round(z_price, 2), side="resistance",
+                dimension="capital_flow",
+                source=(
+                    f"吸收带{fmt_usd_cn(z.get('taker_volume_usd') or 0)}"
+                    f"(bar×{z.get('bar_count')}|Δ{z.get('delta_pct_abs_avg') or 0:.2f})"
+                ),
+                source_tag="absorption_zone_resistance",
+                base_score=score, timeframe="1H",
+                data_age_hours=z.get("age_hours") or 0,
             ))
 
     # 链上周期价位（BTC 特有）
