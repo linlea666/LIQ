@@ -318,7 +318,7 @@ async def poll_options(
     states: dict[str, Any],
     supported_coins: list[str],
 ) -> None:
-    """获取期权数据"""
+    """获取期权数据（同时派生 MAA 所需的 PCR / magnet_price / 24h OI&Vol 变化率）。"""
     from models.options import OptionMaxPainExpiry
     for symbol in ("BTC", "ETH"):
         try:
@@ -347,6 +347,21 @@ async def poll_options(
                         nearest_max_pain=nearest.max_pain_price if nearest else None,
                         nearest_expiry=nearest.expiry_date if nearest else "",
                     )
+                    # ── MAA 派生：PCR + magnet_price（近 3 期 OI 加权）──
+                    state = states[symbol]
+                    top3 = expiries[:3]
+                    sum_call_oi = sum(e.call_oi for e in top3)
+                    sum_put_oi = sum(e.put_oi for e in top3)
+                    pcr_oi = (sum_put_oi / sum_call_oi) if sum_call_oi > 0 else None
+                    total_oi = sum_call_oi + sum_put_oi
+                    if total_oi > 0:
+                        magnet = sum(
+                            e.max_pain_price * (e.call_oi + e.put_oi) for e in top3
+                        ) / total_oi
+                    else:
+                        magnet = nearest.max_pain_price if nearest else None
+                    state.option_pcr_oi = pcr_oi
+                    state.option_magnet_price = magnet
         except Exception:
             logger.warning("options: max_pain %s failed", symbol, exc_info=True)
 
@@ -365,6 +380,19 @@ async def poll_options(
                         put_call_oi_ratio=float(agg.get("putCallOIRatio", 0)),
                         put_call_vol_ratio=float(agg.get("putCallVolRatio", 0)),
                     )
+                    # ── MAA 派生：24h OI / Vol 变化率 ──
+                    try:
+                        state.option_oi_change_24h_pct = float(
+                            agg.get("open_interest_change_24h", 0)
+                        )
+                    except (TypeError, ValueError):
+                        state.option_oi_change_24h_pct = None
+                    try:
+                        state.option_vol_change_24h_pct = float(
+                            agg.get("volume_change_percent_24h", 0)
+                        )
+                    except (TypeError, ValueError):
+                        state.option_vol_change_24h_pct = None
         except Exception:
             logger.debug("options: info %s failed", symbol, exc_info=True)
 

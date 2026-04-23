@@ -39,6 +39,7 @@ sources:
       long_short: 120
       taker_volume: 120
       cvd: 60
+      footprint: 180            # MAA · 合约+现货足迹图（1h 粒度，180s 轮询）
       options: 600
       etf: 1800
       onchain: 3600

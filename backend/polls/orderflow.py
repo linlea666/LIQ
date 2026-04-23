@@ -110,7 +110,7 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
 
 
 async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
-    """获取 Taker 买卖量"""
+    """获取 Taker 买卖量（保留 5m 序列供 Market Action Analyzer 使用）。"""
     contract_data = await cg.fetch_aggregated_taker_bs_history(
         coin.symbol_cg, interval="5m", limit=24,
     )
@@ -119,19 +119,35 @@ async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
     )
 
     c_buy = c_sell = s_buy = s_sell = 0.0
+    contract_series: list[dict] = []
+    spot_series: list[dict] = []
     if contract_data and isinstance(contract_data, list):
         for item in contract_data:
             try:
-                c_buy += float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
-                c_sell += float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
+                buy = float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
+                sell = float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
+                c_buy += buy
+                c_sell += sell
+                contract_series.append({
+                    "ts": int(item.get("time", item.get("t", 0))),
+                    "buy_usd": buy, "sell_usd": sell,
+                    "delta_usd": buy - sell,
+                })
             except (ValueError, KeyError):
                 continue
 
     if spot_data and isinstance(spot_data, list):
         for item in spot_data:
             try:
-                s_buy += float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
-                s_sell += float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
+                buy = float(item.get("aggregated_buy_volume_usd", item.get("buyVolUsd", 0)))
+                sell = float(item.get("aggregated_sell_volume_usd", item.get("sellVolUsd", 0)))
+                s_buy += buy
+                s_sell += sell
+                spot_series.append({
+                    "ts": int(item.get("time", item.get("t", 0))),
+                    "buy_usd": buy, "sell_usd": sell,
+                    "delta_usd": buy - sell,
+                })
             except (ValueError, KeyError):
                 continue
 
@@ -145,10 +161,13 @@ async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
         contract_buy_vol=c_buy, contract_sell_vol=c_sell,
         spot_buy_vol=s_buy, spot_sell_vol=s_sell,
     )
+    # ── MAA: 保留 5m 序列 ──
+    state.taker_contract_series = contract_series[-12:]
+    state.taker_spot_series = spot_series[-12:]
 
 
 async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
-    """获取订单簿深度聚合数据"""
+    """获取订单簿深度聚合数据（同时保留近 12 点 5m 序列供 Market Action Analyzer 使用）。"""
     data = await cg.fetch_orderbook_aggregated_ask_bids(
         coin.symbol_cg, interval="5m", limit=12,
     )
@@ -164,6 +183,22 @@ async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: Coi
             bid_total_usd=bid_usd, ask_total_usd=ask_usd,
             spread_pct=round(spread, 2),
         )
+        # ── MAA: 保留 12 点 5m 序列 ──
+        series: list[dict] = []
+        for item in data:
+            try:
+                bu = float(item.get("aggregated_bids_usd", 0))
+                au = float(item.get("aggregated_asks_usd", 0))
+                sp = (au - bu) / ((au + bu) / 2) * 100 if (au + bu) > 0 else 0
+                series.append({
+                    "ts": int(item.get("time", item.get("t", 0))),
+                    "bid_usd": bu,
+                    "ask_usd": au,
+                    "spread_pct": round(sp, 4),
+                })
+            except (TypeError, ValueError, KeyError):
+                continue
+        state.orderbook_series = series
     except (ValueError, KeyError, IndexError):
         pass
 

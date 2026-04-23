@@ -612,6 +612,24 @@ class CoinglassSource(DataSource):
             "exchange_list": exchange_list,
         }, cache_ttl=60)
 
+    async def fetch_spot_footprint_history(self, exchange: str, symbol: str,
+                                           interval: str = "1h",
+                                           limit: int = 3) -> Optional[list]:
+        """现货足迹图 · 返回 [[ts, [[price_lo, price_hi, buy_base, sell_base, buy_q, sell_q, _, _, buy_n, sell_n], ...]], ...]"""
+        return await self._request("/api/spot/volume/footprint-history", {
+            "exchange": exchange, "symbol": symbol,
+            "interval": interval, "limit": str(limit),
+        }, cache_ttl=120)
+
+    async def fetch_futures_footprint_history(self, exchange: str, symbol: str,
+                                              interval: str = "1h",
+                                              limit: int = 3) -> Optional[list]:
+        """合约足迹图 · 返回结构同现货"""
+        return await self._request("/api/futures/volume/footprint-history", {
+            "exchange": exchange, "symbol": symbol,
+            "interval": interval, "limit": str(limit),
+        }, cache_ttl=120)
+
     async def fetch_spot_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
         return await self._request("/api/spot/orderbook/large-limit-order", {
             "exchange": exchange, "symbol": symbol,

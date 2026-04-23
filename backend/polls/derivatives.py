@@ -427,14 +427,22 @@ async def poll_basis(
             return
         basis_pct = (mark_price - index_price) / index_price * 100
         interp = "合约偏贵" if basis_pct > 0.1 else "合约折价" if basis_pct < -0.1 else "中性"
+        now_ts = int(time.time())
         state.basis = BasisData(
             coin=coin.ccy,
-            ts=int(time.time()),
+            ts=now_ts,
             mark_price=mark_price,
             index_price=index_price,
             basis_pct=round(basis_pct, 4),
             interpretation=interp,
         )
+        # ── Market Action Analyzer: basis 序列（maxlen=60 ≈ 近 1h，60s 粒度）──
+        from collections import deque as _deque
+        bh = getattr(state, "basis_history", None)
+        if not isinstance(bh, _deque):
+            bh = _deque(maxlen=60)
+            state.basis_history = bh
+        bh.append({"ts": now_ts, "basis_pct": round(basis_pct, 4)})
         if "binance_basis_ready" not in state._log_once_keys:
             state._log_once_keys.add("binance_basis_ready")
             logger.info(

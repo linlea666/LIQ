@@ -166,6 +166,23 @@ class CoinState:
         self.td_sequential_direction: str = ""
         self.poll_failures: dict[str, str] = {}
         self._log_once_keys: set[str] = set()
+        # ── Market Action Analyzer (MAA) 新增字段 · v4 ──
+        # poll 层写入的原始/序列数据（不破坏现有字段）
+        self.basis_history: deque = deque(maxlen=60)        # {ts, basis_pct}，60s 粒度近 1h
+        self.orderbook_series: list = []                    # 近 12 点 5m [{ts,bid_usd,ask_usd,spread_pct}]
+        self.taker_contract_series: list = []               # 近 12 点 5m [{ts,buy_usd,sell_usd,delta_usd}]
+        self.taker_spot_series: list = []
+        self.footprint_contract: deque = deque(maxlen=3)    # 原始 footprint bars（dict 结构，含 buckets）
+        self.footprint_spot: deque = deque(maxlen=3)
+        self.footprint_last_ts: Optional[int] = None
+        # 期权派生字段（仅 BTC/ETH 生效，SOL 保持 None）
+        self.option_pcr_oi: Optional[float] = None
+        self.option_magnet_price: Optional[float] = None
+        self.option_oi_change_24h_pct: Optional[float] = None
+        self.option_vol_change_24h_pct: Optional[float] = None
+        # 最新一次 MAA 分析结果缓存
+        self.market_action_report: Optional[Any] = None
+        self.market_action_last_ts: float = 0.0
         # 历史对比字段
         self.ls_ratio_change_24h: Optional[float] = None
         self.ls_ratio_long_pct: Optional[float] = None
@@ -639,6 +656,7 @@ class Engine:
         net_pos_interval = 900
         netflow_interval = 900
         td_seq_interval = 3600
+        footprint_interval = self._poll_cfg.get("footprint", 180)
         return [
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, s,
@@ -722,6 +740,11 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_td_seq_{ccy}", self._poll_td_sequential, coin,
                 td_seq_interval, s + 30.0,
+            )),
+            # ── MAA · Footprint（合约+现货足迹图）──
+            asyncio.create_task(self._poll_loop(
+                f"cg_footprint_{ccy}", self._poll_footprint, coin,
+                footprint_interval, s + 33.0,
             )),
         ]
 
@@ -1079,6 +1102,11 @@ class Engine:
     async def _poll_td_sequential(self, coin: CoinConfig):
         from polls.derivatives import poll_td_sequential
         await poll_td_sequential(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_footprint(self, coin: CoinConfig):
+        """MAA · 合约+现货足迹图"""
+        from polls.footprint import poll_footprint
+        await poll_footprint(self._cg, coin, self._states[coin.ccy])
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Phase 4: 新维度
