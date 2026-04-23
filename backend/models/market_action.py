@@ -263,10 +263,28 @@ MarketPhase = Literal[
 
 
 class EvidenceItem(BaseModel):
-    """单条证据（AI 从 facts 中引用的关键点）"""
-    dimension: str          # e.g. "CVD 期现", "Footprint", "Basis"
-    observation: str        # 中文自然语言描述
+    """单条证据（AI 从 facts 中引用的关键点 + 推断 + 立场）
+
+    - observation：纯事实陈述（必须引用 facts 的具体数值）
+    - inference：**从观察推出的判断**（交易员语气：跨维度因果、对比历史形态等）
+    - supports：这条证据是支持主结论（main）、与主结论矛盾（contrarian），还是中性信息（neutral）
+      禁止把 contrarian 证据以 high/medium 假装支持 main
+    """
+    dimension: str
+    observation: str
+    inference: Optional[str] = None
+    supports: Literal["main", "contrarian", "neutral"] = "main"
     weight: Literal["high", "medium", "low"] = "medium"
+
+
+class AlternativeScenario(BaseModel):
+    """对立视角 · AI 必须给出的"第二可能性"
+
+    强制产出对立假设 + 发生概率 + 触发条件，逼 AI 自己辩论而非单向填表。
+    """
+    scenario: str                       # 9 场景之一
+    probability_pct: int = Field(ge=0, le=100)
+    trigger: str                        # 触发这个替代场景所需的观察条件
 
 
 class TradingImplications(BaseModel):
@@ -276,6 +294,8 @@ class TradingImplications(BaseModel):
     stop_loss_beyond: Optional[float] = None
     take_profit_targets: list[float] = Field(default_factory=list)
     notes: Optional[str] = None
+    trader_intuition: Optional[str] = None
+    # 50-100 字交易员直觉："如果我是机构交易员，此刻我会……"
 
 
 class PromptSection(BaseModel):
@@ -298,22 +318,47 @@ class PromptDebug(BaseModel):
     latency_ms: int = 0
     generated_at: int = 0             # 秒级 unix
     ai_raw_response: Optional[str] = None  # AI 返回的原始文本（调试/复盘用）
+    ai_reasoning_content: Optional[str] = None
+    # deepseek-reasoner 的 Chain-of-Thought 原文；让前端可展开看"AI 是怎么想的"
     parse_ok: bool = True
     parse_error: Optional[str] = None
 
 
 class MarketActionReport(BaseModel):
-    """AI Arbiter 输出契约"""
+    """AI Arbiter 输出契约
+
+    字段分层：
+      1. 结论层：market_conclusion / scenario / market_phase
+      2. 推理层：**analyst_reasoning / confidence_rationale / alternative_scenario**
+         —— 让 AI 显式给出"交易员思维链"，而不是只填格子
+      3. 证据层：evidence_breakdown（每条含 inference + supports）
+      4. 建议层：trading_implications / invalidation_conditions
+      5. 置信层：confidence + data_quality
+    """
     coin: str
     timestamp: int
 
-    # 6 块结构
+    # 结论层
     market_conclusion: str                    # 2-3 句中文总结
     scenario: MarketScenario
     market_phase: MarketPhase
+
+    # 推理层（新增 · 核心升级）
+    analyst_reasoning: Optional[str] = None
+    # 200-500 字"交易员思维链"：扫描 → 印证/矛盾 → 假设 → 反事实 → 结论
+    confidence_rationale: Optional[str] = None
+    # 为什么是这个 confidence，扣分/加分的具体原因
+    alternative_scenario: Optional[AlternativeScenario] = None
+    # 对立假设（第二可能性） + 概率 + 触发条件
+
+    # 证据层
     evidence_breakdown: list[EvidenceItem] = Field(default_factory=list)
+
+    # 建议层
     trading_implications: TradingImplications = Field(default_factory=TradingImplications)
     invalidation_conditions: list[str] = Field(default_factory=list)
+
+    # 置信层
     confidence: int = Field(ge=0, le=100)
 
     # 元数据

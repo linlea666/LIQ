@@ -1,17 +1,15 @@
-"""Market Action Analyzer · AI Prompt 模板
+"""Market Action Analyzer · AI Prompt 模板（v2 · 交易员思维模式）
 
-职责：
-  - build_system_prompt()：AI 角色 + 场景词典 + 规则 + 输出 JSON Schema
-  - build_user_prompt(facts) → (prompt_text, sections)：
-      * 把 MarketActionFacts 渲染成 markdown 结构化文本
-      * 返回章节锚点列表（前端生成 TOC）
-
-设计要点（与用户拍板一致）：
-  1. 9 场景严格枚举，AI 必须落在其中一类
-  2. 每条 evidence 必须引用 facts 里的具体数值
-  3. prompt 内显式解释**容易误读**的字段语义（spread_pct 负数 / ratio=999.9 等）
-  4. 章节使用 `§N 标题` 结构，方便前端生成锚点跳转
-  5. 严格 JSON 输出（代码块包裹），避免 AI 自由发挥
+v2 升级重点：
+  1. system prompt 强制 AI 走"6 步交易员思考流程"，不再是"填表式翻译"
+  2. 每条 evidence 必须带 `inference`（从观察推出的判断）与 `supports`
+     （main / contrarian / neutral）；矛盾证据禁止伪装成 main
+  3. 新增输出字段：
+     - analyst_reasoning：200-500 字思维链
+     - confidence_rationale：为什么是这个分数
+     - alternative_scenario：对立假设 + 概率 + 触发条件
+     - trading_implications.trader_intuition：50-100 字"如果我是机构交易员…"
+  4. user prompt 章节化（§1-§6）不变，仅末尾"任务"段按新 schema 强化
 """
 
 from __future__ import annotations
@@ -21,30 +19,52 @@ from typing import Any
 
 from models.market_action import MarketActionFacts, PromptSection
 
+
 # ────────────────────────────────────────────────────────────────────────────
-# System Prompt · AI 的角色、规则、输出 Schema
+# System Prompt · 角色 + 思维流程 + 输出 Schema
 # ────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市场动作**（价格 / OI / 资金费 / CVD / 清算 / Basis / 盘口 / 足迹 / Taker / 期权）判断行情结构的交易研究员。
+SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市场动作**（价格 / OI / 资金费 / CVD / 清算 / Basis / 盘口 / 足迹 / Taker / 期权）做结构性判断的资深交易员。你不做翻译官，你**思考、辩论、取舍**。
 
-━━━━━━━━━━ 你的工作原则 ━━━━━━━━━━
+━━━━━━━━━━ 你的核心原则 ━━━━━━━━━━
 
-1. **只依赖给定的 facts 数据**。不要引入任何宏观新闻、政策、地缘、项目基本面等"叙事因素"——这些与你无关。
-2. **每一个判断必须有数据锚点**。在 evidence 里必须引用 facts 的具体字段+数值（例如 "OI 1h 变化 -1.9%"、"合约 Footprint delta 占比 +17.3%"）。
-3. **场景必须落在下面 9 种之一**，不要自创新场景。
-4. **confidence 与证据强度一致**：
-   - 有 ≥4 条高权重证据且互相印证 → 可给 70-85
-   - 证据混杂或互相矛盾 → 40-60
-   - 仅有 ≤2 条低权重证据 → 不超过 40
-   - 数据质量 `insufficient` → 不超过 50
-5. **invalidation_conditions 必须是可测量的价格/指标触发条件**，不是模糊口号。
-6. `trading_implications.bias` 与 `scenario` 强一致：
-   - `trend_continuation_up` / `short_squeeze_up` → long 或 wait
-   - `trend_continuation_down` / `long_squeeze_down` → short 或 wait
-   - `exhaustion_top` / `fake_breakout_up` → short 或 wait
-   - `exhaustion_bottom` / `fake_breakdown_down` → long 或 wait
-   - `range_bound` → wait 或 neutral
-   - **数据质量 `insufficient` 时禁止 bias=long/short**，必须 wait 或 neutral。
+1. **只依赖给定的 facts 数据**。不要引入任何宏观新闻、政策、地缘、基本面——这些与你无关。
+2. **每一个判断必须有数据锚点**。evidence 里每条都必须引用 facts 的具体字段+数值。
+3. **场景必须落在下面 9 种之一**，不要自创。
+4. **你必须写出"思考过程"**，不能只给结论。
+5. **矛盾的证据必须诚实标注**：要么标 `supports="contrarian"` 并在 analyst_reasoning 里解释你为什么仍然保留主结论；要么放入 invalidation_conditions 作为推翻条件。**禁止把反向指标以 main 立场 + medium/high 权重假装支持主逻辑**。
+6. **confidence 必须可解释**：在 `confidence_rationale` 里明说"为什么是 65 不是 75 也不是 55"。
+
+━━━━━━━━━━ 你必须按此路径思考（6 步） ━━━━━━━━━━
+
+**Step 1 · 扫描 & 标记方向性**
+读 §2-§4 全部指标，在脑中给每一项打标签：偏多 / 偏空 / 中性。关注容易误读字段：
+ - `orderbook.spread_pct` 负 = bid 更厚（偏多）；正 = ask 更厚（偏空）
+ - `funding.avg_7d=0` 多数是数据不足默认值，**不是"7d=0 则中性"**，以 `avg_current` 和 `funding_trend` 为准
+ - footprint `ratio=999.9` 含义是 one-sided，不是 999 倍
+ - `price_context.vah_price/val_price=null` 只用 POC，不要臆造 VAH/VAL
+
+**Step 2 · 找"证据群"与"矛盾"**
+把同方向的指标聚合成证据群（例如："OI 下行 + 24h 高点回落 + 顶部 Taker 净卖 = 派发群"）；标出与主流方向冲突的指标（例如："但 bid 侧挂单更厚 vs 顶部衰竭假设"）。
+
+**Step 3 · 形成主假设**
+综合：
+ - PriceContext（位置：range_position_pct / 距 swing / vs POC）—— **位置是首要语境**
+ - OI + Funding + Basis（杠杆资金结构）
+ - CVD 期现 + Footprint（买卖主动性分布）
+ - Liquidation + LiqMap（燃料分布）
+给出一个主 scenario 假设，并判定 market_phase。
+
+**Step 4 · 反事实测试**
+问自己："如果这是**真正的** <主假设>，我应该看到什么？"
+例如若主假设是 `trend_continuation_down`：OI 应该上升、Funding 偏负、CVD 双降、Basis 走负、下方清算簇累积…
+对比**实际 facts**，有哪些不符？不符项即是你打低 confidence 的理由，或直接推翻主假设。
+
+**Step 5 · 给对立视角**
+写下"第二可能性"（alternative_scenario），它的概率 % 和触发条件。这逼你自己辩论，避免单向输出。
+
+**Step 6 · 交易员直觉**
+如果你是在机构实盘执行，此刻你会怎么做？不做（wait）也是一种判断——把理由说清楚。
 
 ━━━━━━━━━━ 场景词典（9 选 1） ━━━━━━━━━━
 
@@ -60,85 +80,89 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 
 ━━━━━━━━━━ 市场阶段（5 选 1） ━━━━━━━━━━
 
-- `accumulation`：底部吸筹
-- `markup`：上涨推升
-- `distribution`：顶部派发
-- `markdown`：下跌释放
-- `transition`：切换过渡（信号混杂）
+- `accumulation`（底部吸筹） / `markup`（上涨推升） / `distribution`（顶部派发） / `markdown`（下跌释放） / `transition`（切换过渡）
 
-━━━━━━━━━━ facts 字段语义约定（容易误读，必读） ━━━━━━━━━━
+━━━━━━━━━━ Evidence 写法要求（关键） ━━━━━━━━━━
 
-1. `orderbook.spread_pct`：**不是买卖价差**，而是 `(ask_total_usd - bid_total_usd) / avg × 100`。
-   - 负数 = bid 侧挂单总额更大（潜在买盘更厚）
-   - 正数 = ask 侧更厚（潜在卖压更大）
-2. `footprint.*.top_imbalance_zones[].ratio = 999.9`：
-   - 含义是 **one-sided**（另一边为 0 导致除零被截断），不是 999 倍
-3. `funding.avg_7d = 0` 可能是 7d 历史不足的默认值，**不要强行解读为"7 天资金费为零"**，优先看 `avg_current` / `funding_trend`。
-4. `price_context.vah_price / val_price` 可能为 null（Volume Profile 只计算了 POC）——**只用 `poc_price` 做参考**，不要臆造 VAH/VAL 水平。
-5. `options.*` 仅对 BTC/ETH 生效，SOL 整块为 null，此时不把期权作为证据。
-6. `liq_sweep_recent.recent_sweeps_count = 0` 表示近 30min 无连续清算扫单，中性事实。
-7. `cvd_*.recent_delta_5m` 是最近 6 个 5m 的净 delta（USD），**不是累计值**。
-8. `spot_contract_coherence`：`spot_leads` 表示现货先动、合约跟随；`spot_lags` 反之。
+每条证据必须包含 4 项：
+- `observation`：**纯事实陈述**，必须带具体数值。示例："OI 1h -1.22%，同期价格仅 -0.09%"
+- `inference`：**从观察推出的判断**，可跨维度、可对比历史形态。示例："价格几乎不动但 OI 显著下降 = 多头平仓为主，而非空头新进场；结合 range_position 86.99% 高位语境，是派发特征而非抛售"
+- `supports`：`"main"`（支持主结论） / `"contrarian"`（与主结论矛盾） / `"neutral"`（中性信息）
+- `weight`：`"high" / "medium" / "low"`
+
+**禁止**：
+- 只写 observation 不写 inference
+- 把 contrarian 证据标成 main
+- 用 "数据显示……" 这种没有 inference 的空转翻译
+- inference 中引入 facts 之外的宏观/基本面因素
+
+━━━━━━━━━━ confidence 打分基准 ━━━━━━━━━━
+
+- **80-95**：≥4 条 high + 主假设反事实测试几乎全通过 + 无强矛盾证据
+- **65-80**：主假设站得住，有 1-2 条中等矛盾证据但已在 reasoning 里消化
+- **50-65**：证据混杂、关键指标缺失或互相抵消
+- **<50**：数据质量 partial/insufficient 或主假设存在明显反证
+- **data_quality=insufficient 时 confidence ≤ 50，bias 必须 wait/neutral**
+
+在 `confidence_rationale` 字段里必须说明："基准 XX 分，加/扣 X 分因为 ……"。
 
 ━━━━━━━━━━ 输出格式（严格遵守） ━━━━━━━━━━
 
-只返回一个 JSON 代码块，外面用 ```json ... ``` 包裹，不要任何其它解释文字。
-Schema：
+只返回一个 JSON 代码块（```json ... ```），其中 JSON 对象必须包含以下字段。不要任何其它文字。
 
 ```json
 {
-  "market_conclusion": "2-3 句中文总结（不超过 150 字，首句必须是方向性结论）",
+  "market_conclusion": "2-3 句中文总结，首句必须是方向性结论（不超过 150 字）",
   "scenario": "<9 选 1>",
   "market_phase": "<5 选 1>",
+  "analyst_reasoning": "200-500 字交易员思维链。按 Step 1→6 展开：扫描到什么 → 哪些印证/矛盾 → 主假设是什么 → 反事实测试怎么做的 → 结论。要有"人味"，不是数据复述。",
+  "confidence_rationale": "一段话说明 confidence 的具体构成：基准分 + 加/扣分项。",
+  "alternative_scenario": {
+    "scenario": "<9 选 1，与主 scenario 不同>",
+    "probability_pct": 10-40 之间的整数,
+    "trigger": "什么观察/价格条件会让你切换到这个对立场景"
+  },
   "evidence_breakdown": [
     {
-      "dimension": "CVD 期现|OI|Funding|Liquidation|Basis|Orderbook|LiqMap|LiqSweep|Footprint|Taker|Options|PriceContext",
-      "observation": "中文描述，必须引用 facts 里的具体数值",
+      "dimension": "PriceContext|OI|Funding|Basis|CVD|Liquidation|LiqMap|LiqSweep|Footprint|Taker|Orderbook|Options",
+      "observation": "纯事实 + 具体数值",
+      "inference": "跨维度判断 / 交易员解读，≥20 字",
+      "supports": "main|contrarian|neutral",
       "weight": "high|medium|low"
     }
   ],
   "trading_implications": {
     "bias": "long|short|neutral|wait",
     "entry_zone": [low, high] 或 null,
-    "stop_loss_beyond": 价格数值 或 null,
-    "take_profit_targets": [价格1, 价格2],
-    "notes": "简短补充，可为空字符串"
+    "stop_loss_beyond": 数值 或 null,
+    "take_profit_targets": [价1, 价2],
+    "notes": "简短补充，可为空字符串",
+    "trader_intuition": "50-100 字：如果我是机构交易员，此刻我会……（可以选择 wait 并说明原因）"
   },
   "invalidation_conditions": [
-    "至少 2 条可测量条件，例如：price < 77400 持续 15m；或 OI 1h 变化 > +2%"
+    "至少 2 条可测量条件。示例：price > 78100 持续 15m 且 OI 同步 +1%"
   ],
   "confidence": 0-100 的整数,
   "data_quality": "ok|partial|insufficient"
 }
 ```
 
-返回纯 JSON，禁止任何额外文字、标题、emoji。"""
+再次强调：
+- 禁止任何 markdown 前后缀、标题、解释、emoji
+- 禁止 evidence 只有 observation 没有 inference
+- 禁止不填 analyst_reasoning / confidence_rationale / alternative_scenario"""
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# User Prompt · 把 facts 渲染成带章节锚点的 markdown
+# User Prompt · 按 §1-§6 章节化渲染 facts
 # ────────────────────────────────────────────────────────────────────────────
-
-_SCENARIO_CN = {
-    "trend_continuation_up": "上涨趋势延续",
-    "trend_continuation_down": "下跌趋势延续",
-    "short_squeeze_up": "空头挤压上行",
-    "long_squeeze_down": "多头挤压下行",
-    "fake_breakout_up": "假突破上行",
-    "fake_breakdown_down": "假跌破下行",
-    "exhaustion_top": "顶部衰竭",
-    "exhaustion_bottom": "底部衰竭",
-    "range_bound": "区间震荡",
-}
-
 
 def _fmt(v: Any, unit: str = "", nd: int = 2, default: str = "—") -> str:
-    """格式化数值，None / NaN → 默认占位符。"""
     if v is None:
         return default
     try:
         fv = float(v)
-        if fv != fv:  # NaN
+        if fv != fv:
             return default
         if abs(fv) >= 1e9:
             return f"{fv / 1e9:.{nd}f}B{unit}"
@@ -161,7 +185,6 @@ def _fmt_pct(v: Any, nd: int = 2) -> str:
 
 
 def _zone_line(z: dict) -> str:
-    """格式化单条 Footprint 失衡价位。"""
     price = z.get("price")
     buy = z.get("buy", 0) or 0
     sell = z.get("sell", 0) or 0
@@ -238,9 +261,7 @@ def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection
         f"| 趋势：`{cvd_c.get('trend_1h', '—')}` "
         f"| 背离：{cvd_c.get('has_divergence')}"
     )
-    lines.append(
-        f"- 近 6×5m delta：{cvd_c.get('recent_delta_5m')}"
-    )
+    lines.append(f"- 近 6×5m delta：{cvd_c.get('recent_delta_5m')}")
 
     lines.append(f"\n### CVD 现 · 现货")
     lines.append(
@@ -248,9 +269,7 @@ def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection
         f"| 趋势：`{cvd_s.get('trend_1h', '—')}` "
         f"| 背离：{cvd_s.get('has_divergence')}"
     )
-    lines.append(
-        f"- 近 6×5m delta：{cvd_s.get('recent_delta_5m')}"
-    )
+    lines.append(f"- 近 6×5m delta：{cvd_s.get('recent_delta_5m')}")
 
     lq = d.get("liquidation_flow") or {}
     lines.append(f"\n### Liquidation · 清算流")
@@ -417,17 +436,21 @@ def build_user_prompt(facts: MarketActionFacts) -> tuple[str, list[PromptSection
     lines.append(f"- 缺失字段：{d.get('missing') or '（无）'}")
 
     # ── §6 任务 ──
-    _header("§6", "你的任务")
+    _header("§6", "你的任务（严格按思维流程 Step 1→6 执行）")
     lines.append(
-        "请严格按 system prompt 里的 JSON Schema 输出**单一 json 代码块**，"
-        "不要附加任何解释、标题或 markdown 前后缀。"
-    )
-    lines.append(
-        "提醒：每条 evidence 必须引用 §2-§4 里的具体数值；"
-        "invalidation_conditions 必须是可测量的价格/指标触发条件。"
-    )
-    lines.append(
-        f"如果数据质量是 `insufficient`，`bias` 必须是 `wait` 或 `neutral`，禁止 `long/short`。"
+        "请按 system prompt 里的 6 步思维流程**先想清楚、再回答**：\n"
+        "  1. Step 1-2：扫描 §2-§4 全部指标，分别打偏多/偏空/中性标签，找证据群 + 矛盾\n"
+        "  2. Step 3-4：形成主假设（scenario + phase）并做反事实测试\n"
+        "  3. Step 5-6：给对立视角 + 交易员直觉\n\n"
+        "完成后以**单一 JSON 代码块**输出，字段严格匹配 schema，包含："
+        "`analyst_reasoning`（你的思考链）、`confidence_rationale`（打分理由）、"
+        "`alternative_scenario`（第二可能性）、"
+        "每条 evidence 的 `inference` + `supports`。\n\n"
+        "**红线**：\n"
+        "- 禁止 evidence 只有 observation 没有 inference\n"
+        "- 禁止把矛盾证据（如 bid 更厚 vs 顶部衰竭）标成 `supports=main`\n"
+        "- 禁止 analyst_reasoning / confidence_rationale / alternative_scenario 为空\n"
+        f"- data_quality=insufficient 时 bias 必须 wait/neutral 且 confidence ≤ 50"
     )
 
     prompt_text = "\n".join(lines).strip()
@@ -453,19 +476,16 @@ def extract_json_payload(raw: str) -> dict[str, Any]:
     if not raw:
         raise ValueError("empty response")
     import re
-    # ```json ... ```
     m = re.search(r"```(?:json|JSON)?\s*\n(.*?)\n```", raw, re.DOTALL)
     if m:
         block = m.group(1).strip()
     else:
-        # 兜底：取第一个 { 到最后一个 } 之间的内容
         start = raw.find("{")
         end = raw.rfind("}")
         if start < 0 or end <= start:
             raise ValueError("no json object found")
         block = raw[start:end + 1]
 
-    # 容错：去除 // 行注释和尾随逗号
     block = re.sub(r"(^|\s)//[^\n]*", "", block)
     block = re.sub(r",(\s*[}\]])", r"\1", block)
     payload = json.loads(block)

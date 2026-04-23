@@ -24,6 +24,7 @@ from ai.market_action_prompts import (
 )
 from config.settings import get_settings
 from models.market_action import (
+    AlternativeScenario,
     EvidenceItem,
     MarketActionFacts,
     MarketActionReport,
@@ -124,6 +125,7 @@ class MarketActionArbiter:
         )
 
         raw_text = ""
+        reasoning_text = ""
         tokens_in = tokens_out = tokens_reasoning = 0
         t0 = time.time()
 
@@ -143,6 +145,8 @@ class MarketActionArbiter:
                 resp = await self._client.chat.completions.create(**api_kwargs)
                 msg = resp.choices[0].message
                 raw_text = msg.content or ""
+                # deepseek-reasoner 把 Chain-of-Thought 放在 msg.reasoning_content
+                reasoning_text = getattr(msg, "reasoning_content", None) or ""
 
                 if resp.usage:
                     tokens_in = resp.usage.prompt_tokens or 0
@@ -152,9 +156,10 @@ class MarketActionArbiter:
 
                 logger.info(
                     "MAA analyze ok | coin=%s | attempt=%d | %.1fs | "
-                    "tok_in=%d out=%d reasoning=%d | resp=%d chars",
+                    "tok_in=%d out=%d reasoning=%d | resp=%d chars | cot=%d chars",
                     facts.coin, attempt, time.time() - t0,
-                    tokens_in, tokens_out, tokens_reasoning, len(raw_text),
+                    tokens_in, tokens_out, tokens_reasoning,
+                    len(raw_text), len(reasoning_text),
                 )
                 break
             except Exception as e:
@@ -197,6 +202,7 @@ class MarketActionArbiter:
             latency_ms=latency_ms,
             generated_at=int(time.time()),
             ai_raw_response=raw_text,
+            ai_reasoning_content=reasoning_text or None,
         )
 
         # ── 解析 JSON ──
@@ -244,6 +250,7 @@ _VALID_SCENARIOS = {
 _VALID_PHASES = {"accumulation", "markup", "distribution", "markdown", "transition"}
 _VALID_BIAS = {"long", "short", "neutral", "wait"}
 _VALID_WEIGHT = {"high", "medium", "low"}
+_VALID_SUPPORTS = {"main", "contrarian", "neutral"}
 
 
 def _coerce_scenario(v) -> str:
@@ -268,6 +275,12 @@ def _coerce_weight(v) -> str:
     if isinstance(v, str) and v in _VALID_WEIGHT:
         return v
     return "medium"
+
+
+def _coerce_supports(v) -> str:
+    if isinstance(v, str) and v in _VALID_SUPPORTS:
+        return v
+    return "main"
 
 
 def _coerce_int_confidence(v) -> int:
@@ -313,9 +326,13 @@ def _payload_to_report(
             obs = str(e.get("observation") or "")[:400]
             if not obs:
                 continue
+            inf_raw = e.get("inference")
+            inference = str(inf_raw)[:500] if inf_raw else None
             evidence.append(EvidenceItem(
                 dimension=dim,
                 observation=obs,
+                inference=inference,
+                supports=_coerce_supports(e.get("supports")),
                 weight=_coerce_weight(e.get("weight")),
             ))
 
@@ -340,7 +357,31 @@ def _payload_to_report(
         stop_loss_beyond=_coerce_float(ti_raw.get("stop_loss_beyond")),
         take_profit_targets=_coerce_float_list(ti_raw.get("take_profit_targets"))[:4],
         notes=(str(ti_raw.get("notes") or "")[:300]) or None,
+        trader_intuition=(str(ti_raw.get("trader_intuition") or "")[:400]) or None,
     )
+
+    # 推理层新字段（向后兼容：缺失时为 None）
+    analyst_reasoning_raw = payload.get("analyst_reasoning")
+    analyst_reasoning = str(analyst_reasoning_raw)[:2500] if analyst_reasoning_raw else None
+
+    conf_rationale_raw = payload.get("confidence_rationale")
+    confidence_rationale = str(conf_rationale_raw)[:600] if conf_rationale_raw else None
+
+    alt_raw = payload.get("alternative_scenario")
+    alternative_scenario = None
+    if isinstance(alt_raw, dict):
+        alt_sc = alt_raw.get("scenario")
+        if isinstance(alt_sc, str) and alt_sc in _VALID_SCENARIOS:
+            try:
+                prob = int(float(alt_raw.get("probability_pct") or 0))
+                prob = max(0, min(100, prob))
+                alternative_scenario = AlternativeScenario(
+                    scenario=alt_sc,
+                    probability_pct=prob,
+                    trigger=str(alt_raw.get("trigger") or "")[:300],
+                )
+            except (TypeError, ValueError):
+                alternative_scenario = None
 
     inv_raw = payload.get("invalidation_conditions") or []
     if isinstance(inv_raw, list):
@@ -358,6 +399,9 @@ def _payload_to_report(
         market_conclusion=conclusion,
         scenario=_coerce_scenario(payload.get("scenario")),
         market_phase=_coerce_phase(payload.get("market_phase")),
+        analyst_reasoning=analyst_reasoning,
+        confidence_rationale=confidence_rationale,
+        alternative_scenario=alternative_scenario,
         evidence_breakdown=evidence,
         trading_implications=trading_impl,
         invalidation_conditions=invalidations,

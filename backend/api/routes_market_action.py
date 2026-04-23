@@ -51,6 +51,12 @@ def _get_state(coin: str):
 
 
 def _dump_report(report, *, slim: bool = False, include_prompt: bool = True) -> Optional[dict]:
+    """序列化 Report → dict，按需剥离大字段。
+
+    - slim=True：同时去掉 prompt_debug 和 facts_snapshot（列表 API 默认）
+    - include_prompt=False：保留 facts_snapshot 但剥离 prompt_debug
+    - 默认完整：保留全部，含 CoT（ai_reasoning_content 可能几千字）
+    """
     if report is None:
         return None
     d = report.model_dump()
