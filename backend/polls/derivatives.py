@@ -644,9 +644,23 @@ async def poll_funding_history_8h(
 ) -> None:
     """拉 7d × 8h 结算点资金费率历史，缓存到 state.funding_history_8h。
 
-    同时回填 state.multi_funding 的 avg_7d 和 oi_weighted 字段（历史 bug 修复）：
-      - avg_7d = 近 21 个 8h 点的均值
-      - oi_weighted = 接口返回的最近点（该接口本身就是 OI 加权口径）
+    ⚠ 单位陷阱：
+      Coinglass `/api/futures/funding-rate/oi-weight-history` 的 close 字段是
+      **百分比单位**（-0.0071 表示 -0.0071% = -0.000071 小数），
+      而 Binance/OKX 官方接口返回的是**小数单位**（-0.000071）。
+      两个口径差 100 倍！本函数统一归一化为**小数单位**后再写入 deque，
+      所有下游（facts_collector / prompt）都按小数处理，与 avg_current 一致。
+
+    归一化策略（三层，优先级从高到低）：
+      1. **交叉比对法**（最可靠）：若 state.multi_funding.avg_current 已有值
+         （来自 Binance/OKX 官方小数口径），用它和 history 最新点的量级比
+         ratio = median(|history|) / |avg_current|，若 ratio > 50 → 百分比
+      2. **绝对量级法**（fallback）：单纯基于历史极值
+         max_abs > 0.003 → 百分比（历史峰值 BTC 2021 也才 ~0.003 小数单位 = 0.3%/8h）
+      3. **不触发归一化**：认为已经是小数单位
+
+      0.0071 百分比在"绝对量级法"下 0.0071 > 0.003 会被识别为百分比
+      0.001 小数在"绝对量级法"下 0.001 < 0.003，不会被误判
     """
     try:
         # limit=60 = 20 天 × 3 个 8h 点，足够计算 sign_flip_7d（需要 42+ 点）
@@ -661,45 +675,84 @@ async def poll_funding_history_8h(
     if not data or not isinstance(data, list):
         return
 
-    # 接口返回单位明确：close 字段是 0.0001 = 0.01%（与 Binance/OKX 同口径小数）
-    points: list[dict] = []
+    raw_rates: list[float] = []
+    raw_points: list[tuple[int, float]] = []
     for item in data:
         try:
             ts_raw = int(item.get("time", item.get("t", 0)))
             ts_sec = ts_raw // 1000 if ts_raw > 10_000_000_000 else ts_raw
             rate = float(item.get("close", item.get("c", 0)))
             if ts_sec > 0:
-                points.append({"ts_sec": ts_sec, "rate": rate})
+                raw_points.append((ts_sec, rate))
+                raw_rates.append(rate)
         except (TypeError, ValueError):
             continue
 
-    if not points:
+    if not raw_points:
         return
 
-    points.sort(key=lambda p: p["ts_sec"])
-    # 重建 deque（接口每次都返回完整窗口，替代式写入避免累积历史漂移）
-    state.funding_history_8h.clear()
-    for p in points[-60:]:
-        state.funding_history_8h.append(p)
+    # ── 单位自动归一化（三层策略） ──
+    scale = 1.0
+    unit_note = "decimal (no scale)"
+    abs_rates = [abs(r) for r in raw_rates if r != 0]
+    max_abs = max(abs_rates) if abs_rates else 0.0
 
-    # ── Bug 修复：回填 multi_funding.avg_7d / oi_weighted ──
+    # 策略 1：交叉比对官方小数口径（最可靠）
+    ref_decimal = None
+    if state.multi_funding and abs(state.multi_funding.avg_current) > 1e-9:
+        ref_decimal = abs(state.multi_funding.avg_current)
+    elif state.funding and abs(state.funding.avg_rate) > 1e-9:
+        ref_decimal = abs(state.funding.avg_rate)
+
+    if ref_decimal is not None and abs_rates:
+        # 用中位数（对异常极值鲁棒）
+        sorted_abs = sorted(abs_rates)
+        median_abs = sorted_abs[len(sorted_abs) // 2]
+        if median_abs > 0:
+            ratio = median_abs / ref_decimal
+            if ratio > 50:  # 相差 50 倍以上必然是百分比
+                scale = 0.01
+                unit_note = f"cross-check: median(|hist|)/|avg_current|={ratio:.1f}x → percent"
+            elif 0.1 <= ratio <= 10:  # 同量级
+                unit_note = f"cross-check: ratio={ratio:.2f}x → decimal"
+            # 其他情况（ratio < 0.1 或 10-50）走 fallback
+            else:
+                ref_decimal = None  # 触发 fallback
+
+    # 策略 2：绝对量级法（fallback）
+    if scale == 1.0 and ref_decimal is None:
+        # BTC 历史峰值 funding ~0.3%/8h = 0.003 小数；超过就几乎肯定是百分比
+        if max_abs > 0.003:
+            scale = 0.01
+            unit_note = f"abs-magnitude: max_abs={max_abs:.4f} > 0.003 → percent"
+        else:
+            unit_note = f"abs-magnitude: max_abs={max_abs:.4f} ≤ 0.003 → decimal"
+
+    raw_points.sort(key=lambda p: p[0])
+    state.funding_history_8h.clear()
+    for ts_sec, rate in raw_points[-60:]:
+        state.funding_history_8h.append({"ts_sec": ts_sec, "rate": rate * scale})
+
+    # ── 回填 multi_funding.avg_7d / oi_weighted（若对象已存在） ──
+    # 注意：poll_funding_all 每次会新建 MultiFundingRateData 覆盖这两个字段，
+    # 所以 facts_collector 不依赖这里的回填，而是直接从 funding_history_8h 重算。
+    # 保留这段回填是为了让仪表盘侧的 MultiFundingRateData 也有值（兼容老代码路径）。
     if state.multi_funding:
         recent_21 = list(state.funding_history_8h)[-21:]
         if recent_21:
             state.multi_funding.avg_7d = round(
                 sum(p["rate"] for p in recent_21) / len(recent_21), 8,
             )
-            # 接口本身是 OI 加权口径，最新点就是实时 OI 加权费率
             state.multi_funding.oi_weighted = round(recent_21[-1]["rate"], 8)
 
     state.poll_failures.pop("funding_history_8h", None)
     if "funding_hist_8h_ready" not in state._log_once_keys:
         state._log_once_keys.add("funding_hist_8h_ready")
+        latest_decimal = raw_points[-1][1] * scale
         logger.info(
-            "[funding-hist-8h] %s ready | points=%d avg_7d=%.6f latest=%.6f",
+            "[funding-hist-8h] %s ready | points=%d latest=%.6f (%s, max_abs=%.4f)",
             coin.ccy, len(state.funding_history_8h),
-            state.multi_funding.avg_7d if state.multi_funding else 0.0,
-            points[-1]["rate"],
+            latest_decimal, unit_note, max_abs,
         )
 
 

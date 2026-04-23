@@ -237,6 +237,31 @@ def _derive_funding_history_fields(
     return out
 
 
+def _compute_avg_7d_from_history(history_8h: list) -> Optional[float]:
+    """从 funding_history_8h（已归一化为小数单位）直接计算 7d 均值。
+
+    单点真相原则：不依赖 state.multi_funding.avg_7d（会被 poll_funding_all 覆盖），
+    facts_collector 每次组装 snapshot 时都从 deque 现算。
+    """
+    recent_21 = list(history_8h)[-21:]
+    if not recent_21:
+        return None
+    try:
+        return round(sum(float(p["rate"]) for p in recent_21) / len(recent_21), 8)
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
+def _latest_rate_from_history(history_8h: list) -> Optional[float]:
+    """从 funding_history_8h 取最新点作为 oi_weighted（接口本身就是 OI 加权口径）。"""
+    if not history_8h:
+        return None
+    try:
+        return round(float(list(history_8h)[-1]["rate"]), 8)
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
 def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
     # 先确定 current_oi（派生成本需要用）
     current_oi_usd: Optional[float] = None
@@ -247,6 +272,9 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
             current_oi_usd = None
 
     history_8h = list(getattr(state, "funding_history_8h", []) or [])
+    # 直接从 deque 现算，避免依赖 multi_funding.avg_7d（会被 poll_funding_all 覆盖）
+    avg_7d_computed = _compute_avg_7d_from_history(history_8h)
+    oi_weighted_computed = _latest_rate_from_history(history_8h)
 
     mf = state.multi_funding
     if mf and mf.exchanges:
@@ -256,8 +284,9 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
         derived = _derive_funding_history_fields(avg_current, current_oi_usd, history_8h)
         return FundingSnapshot(
             avg_current=avg_current,
-            avg_7d=_safe_float(mf.avg_7d),
-            oi_weighted=_safe_float(mf.oi_weighted),
+            # avg_7d / oi_weighted 从 history 现算，不读 mf（mf 字段会被覆盖成 0）
+            avg_7d=avg_7d_computed,
+            oi_weighted=oi_weighted_computed,
             interpretation=mf.interpretation or None,
             exchange_count=len(mf.exchanges),
             dispersion_abs=disp,
@@ -273,7 +302,9 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
         derived = _derive_funding_history_fields(avg_current, current_oi_usd, history_8h)
         return FundingSnapshot(
             avg_current=avg_current,
-            oi_weighted=_safe_float(f.oi_weighted_rate),
+            avg_7d=avg_7d_computed,
+            oi_weighted=oi_weighted_computed if oi_weighted_computed is not None
+            else _safe_float(f.oi_weighted_rate),
             interpretation=f.interpretation or None,
             exchange_count=(1 if f.okx_rate is not None else 0) + (1 if f.binance_rate is not None else 0),
             hourly_cost_usd=derived["hourly_cost_usd"],
