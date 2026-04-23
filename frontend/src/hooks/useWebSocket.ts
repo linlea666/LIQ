@@ -6,6 +6,7 @@ import { WS_URL } from "@/lib/constants";
 import { useMarketStore } from "@/stores/marketStore";
 import type {
   AIAnalysisResult,
+  MarketActionReport,
   MarketUpdate,
   TEAIInterpretation,
 } from "@/lib/types";
@@ -19,6 +20,8 @@ export function useWebSocket() {
   const setAIError = useMarketStore((s) => s.setAIError);
   const setTEAIResult = useMarketStore((s) => s.setTEAIResult);
   const setTEAIError = useMarketStore((s) => s.setTEAIError);
+  const setMAAReport = useMarketStore((s) => s.setMAAReport);
+  const loadMAAReport = useMarketStore((s) => s.loadMAAReport);
 
   coinRef.current = coin;
 
@@ -35,6 +38,8 @@ export function useWebSocket() {
     socket.on("connect", () => {
       console.log("[WS] connected");
       socket.emit("subscribe", { coin: coinRef.current });
+      // MAA 无后端 replay，首屏通过 REST 补一份最新报告
+      loadMAAReport(coinRef.current);
     });
 
     socket.on("market_update", (data: MarketUpdate) => {
@@ -68,6 +73,14 @@ export function useWebSocket() {
       },
     );
 
+    socket.on("market_action_report", (data: MarketActionReport) => {
+      console.log(
+        "[WS] market_action_report | coin=%s scenario=%s conf=%s bias=%s",
+        data.coin, data.scenario, data.confidence, data.trading_implications?.bias,
+      );
+      setMAAReport(data);
+    });
+
     socket.on("disconnect", () => {
       console.log("[WS] disconnected");
     });
@@ -80,6 +93,8 @@ export function useWebSocket() {
   useEffect(() => {
     if (socketRef.current?.connected) {
       socketRef.current.emit("subscribe", { coin });
+      // 切币后 REST 补拉该币种最新 MAA 报告
+      loadMAAReport(coin);
     }
-  }, [coin]);
+  }, [coin, loadMAAReport]);
 }

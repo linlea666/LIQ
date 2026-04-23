@@ -1425,3 +1425,192 @@ export interface ReplayFrameResponse {
   frame: ReplayFrame;
   error?: string;
 }
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Market Action Analyzer (MAA)
+//   对齐 backend/models/market_action.py
+//   WebSocket 事件：`market_action_report`
+//   REST：GET /api/market-action/report, /report/history, /report/all
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type MAAScenario =
+  | "trend_continuation_up"
+  | "trend_continuation_down"
+  | "short_squeeze_up"
+  | "long_squeeze_down"
+  | "fake_breakout_up"
+  | "fake_breakdown_down"
+  | "exhaustion_top"
+  | "exhaustion_bottom"
+  | "range_bound";
+
+export type MAAPhase =
+  | "accumulation"
+  | "markup"
+  | "distribution"
+  | "markdown"
+  | "transition";
+
+export type MAABias = "long" | "short" | "neutral" | "wait";
+export type MAADataQuality = "ok" | "partial" | "insufficient";
+export type MAAEvidenceSupports = "main" | "contrarian" | "neutral";
+export type MAAEvidenceWeight = "high" | "medium" | "low";
+export type MAAContinuityStance =
+  | "continuation"
+  | "refinement"
+  | "reversal"
+  | "first_run";
+
+export type MAADimension =
+  | "PriceContext"
+  | "OI"
+  | "Funding"
+  | "Basis"
+  | "CVD"
+  | "Liquidation"
+  | "LiqMap"
+  | "LiqSweep"
+  | "Footprint"
+  | "Taker"
+  | "Orderbook"
+  | "Options"
+  | string;
+
+export interface MAAEvidenceItem {
+  dimension: MAADimension;
+  observation: string;
+  inference?: string | null;
+  supports: MAAEvidenceSupports;
+  weight: MAAEvidenceWeight;
+}
+
+export interface MAAAlternativeScenario {
+  scenario: MAAScenario;
+  probability_pct: number;
+  trigger: string;
+}
+
+export interface MAAContinuityVerdict {
+  stance: MAAContinuityStance;
+  previous_scenario?: MAAScenario | null;
+  previous_ts?: number | null;
+  note: string;
+}
+
+export interface MAATradingImplications {
+  bias: MAABias;
+  entry_zone?: [number, number] | null;
+  stop_loss_beyond?: number | null;
+  take_profit_targets: number[];
+  notes?: string | null;
+  trader_intuition?: string | null;
+}
+
+export interface MAAPromptSection {
+  anchor: string;
+  title: string;
+  level: number;
+}
+
+export interface MAAPromptDebug {
+  system: string;
+  user: string;
+  chars: number;
+  sections: MAAPromptSection[];
+  model: string;
+  tokens_prompt?: number | null;
+  tokens_completion?: number | null;
+  tokens_reasoning?: number | null;
+  latency_ms?: number | null;
+  generated_at: number;
+  ai_raw_response?: string | null;
+  ai_reasoning_content?: string | null;
+  parse_ok: boolean;
+  parse_error?: string | null;
+}
+
+export interface MarketActionReport {
+  coin: string;
+  timestamp: number;
+  market_conclusion: string;
+  scenario: MAAScenario;
+  market_phase: MAAPhase;
+  analyst_reasoning?: string | null;
+  confidence_rationale?: string | null;
+  alternative_scenario?: MAAAlternativeScenario | null;
+  continuity?: MAAContinuityVerdict | null;
+  evidence_breakdown: MAAEvidenceItem[];
+  trading_implications: MAATradingImplications;
+  invalidation_conditions: string[];
+  confidence: number;
+  data_quality: MAADataQuality;
+  stale_minutes: number;
+  /** slim=true 时不返回 */
+  facts_snapshot?: Record<string, unknown> | null;
+  /** slim=true 或 include_prompt=false 时不返回 */
+  prompt_debug?: MAAPromptDebug | null;
+}
+
+export interface MAAReportHistoryResponse {
+  coin: string;
+  count: number;
+  items: MarketActionReport[];
+}
+
+// ── MAA 事后校准（Phase 5） ───────────────────────────
+export type MAAHorizon = "4h" | "8h" | "24h";
+export type MAAOutcomeLabel = "correct" | "wrong" | "neutral" | "pending";
+
+export interface MAAEvalSample {
+  ts: number;
+  coin: string;
+  scenario: MAAScenario;
+  bias: MAABias;
+  confidence: number;
+  price_at_analysis: number;
+  outcomes: Partial<Record<MAAHorizon, {
+    price: number | null;
+    delta_pct: number | null;
+    label: MAAOutcomeLabel;
+  }>>;
+}
+
+export interface MAACalibrationBucket {
+  /** 如 "0-49", "50-59", "60-69", "70-79", "80-100" */
+  range: string;
+  sample_size: number;
+  accuracy_pct: number | null;
+}
+
+export interface MAAHorizonStats {
+  horizon: MAAHorizon;
+  sample_size: number;
+  correct: number;
+  wrong: number;
+  neutral: number;
+  accuracy_pct: number | null;
+}
+
+export interface MAAEvalSummary {
+  coin: string;
+  window_days: number;
+  sample_size: number;
+  last_updated_ts: number;
+  horizons: MAAHorizonStats[];
+  calibration: MAACalibrationBucket[];
+  per_scenario: Array<{
+    scenario: MAAScenario;
+    sample_size: number;
+    accuracy_pct: number | null;
+    horizon: MAAHorizon;
+  }>;
+  recent: MAAEvalSample[];
+}
+
+export interface MAAEvalResponse {
+  ready: boolean;
+  coin: string;
+  summary?: MAAEvalSummary;
+  error?: string;
+}

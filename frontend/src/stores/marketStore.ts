@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type {
   AIAnalysisResult,
+  MAAEvalSummary,
+  MarketActionReport,
   MarketUpdate,
   SourceHealth,
   TEAIInterpretation,
@@ -45,6 +47,23 @@ interface MarketStore {
   setTEAIResult: (result: TEAIInterpretation) => void;
   setTEAILoading: (coin: string, loading: boolean) => void;
   setTEAIError: (coin: string, err: string | null) => void;
+
+  // Market Action Analyzer（按 coin 分存；WS market_action_report 驱动 + REST 首屏补拉）
+  maaByCoin: Record<string, MarketActionReport>;
+  maaHistoryByCoin: Record<string, MarketActionReport[]>;
+  maaLoadingByCoin: Record<string, boolean>;
+  maaErrorByCoin: Record<string, string | null>;
+  setMAAReport: (report: MarketActionReport) => void;
+  setMAALoading: (coin: string, loading: boolean) => void;
+  setMAAError: (coin: string, err: string | null) => void;
+  loadMAAReport: (coin: string) => Promise<void>;
+  loadMAAHistory: (coin: string, limit?: number) => Promise<void>;
+  triggerMAARun: (coin: string) => Promise<void>;
+
+  // MAA 事后评估（Phase 5）· REST 按需拉取，缓存在 store 中
+  maaEvalByCoin: Record<string, MAAEvalSummary>;
+  maaEvalLoadingByCoin: Record<string, boolean>;
+  loadMAAEval: (coin: string, opts?: { refresh?: boolean; window_days?: number }) => Promise<void>;
 }
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
@@ -145,4 +164,126 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
         teAiLoadingByCoin: { ...state.teAiLoadingByCoin, [c]: false },
       };
     }),
+
+  maaByCoin: {},
+  maaHistoryByCoin: {},
+  maaLoadingByCoin: {},
+  maaErrorByCoin: {},
+  setMAAReport: (report) =>
+    set((state) => {
+      const c = (report.coin || "").toUpperCase();
+      if (!c) return {};
+      const existing = state.maaHistoryByCoin[c] ?? [];
+      const merged = existing.some((r) => r.timestamp === report.timestamp)
+        ? existing
+        : [report, ...existing].slice(0, 20);
+      return {
+        maaByCoin: { ...state.maaByCoin, [c]: report },
+        maaHistoryByCoin: { ...state.maaHistoryByCoin, [c]: merged },
+        maaLoadingByCoin: { ...state.maaLoadingByCoin, [c]: false },
+        maaErrorByCoin: { ...state.maaErrorByCoin, [c]: null },
+      };
+    }),
+  setMAALoading: (coin, loading) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        maaLoadingByCoin: { ...state.maaLoadingByCoin, [c]: loading },
+        maaErrorByCoin: loading
+          ? { ...state.maaErrorByCoin, [c]: null }
+          : state.maaErrorByCoin,
+      };
+    }),
+  setMAAError: (coin, err) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        maaErrorByCoin: { ...state.maaErrorByCoin, [c]: err },
+        maaLoadingByCoin: { ...state.maaLoadingByCoin, [c]: false },
+      };
+    }),
+  loadMAAReport: async (coin) => {
+    const c = coin.toUpperCase();
+    try {
+      const resp = await fetch(
+        `${API_BASE}/api/market-action/report?coin=${encodeURIComponent(c)}&slim=0`,
+      );
+      if (!resp.ok) {
+        const msg = resp.status === 404
+          ? "尚未生成首份 MAA 报告"
+          : `HTTP ${resp.status}`;
+        get().setMAAError(c, msg);
+        return;
+      }
+      const data = (await resp.json()) as MarketActionReport;
+      if (data && data.coin) {
+        get().setMAAReport(data);
+      }
+    } catch (e) {
+      get().setMAAError(c, e instanceof Error ? e.message : String(e));
+    }
+  },
+  loadMAAHistory: async (coin, limit = 20) => {
+    const c = coin.toUpperCase();
+    try {
+      const resp = await fetch(
+        `${API_BASE}/api/market-action/report/history?coin=${encodeURIComponent(
+          c,
+        )}&limit=${limit}&slim=1`,
+      );
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const items: MarketActionReport[] = Array.isArray(data.items) ? data.items : [];
+      if (items.length > 0) {
+        set((state) => ({
+          maaHistoryByCoin: { ...state.maaHistoryByCoin, [c]: items },
+        }));
+      }
+    } catch {
+      // silently ignore
+    }
+  },
+  triggerMAARun: async (coin) => {
+    const c = coin.toUpperCase();
+    get().setMAALoading(c, true);
+    try {
+      const resp = await fetch(
+        `${API_BASE}/api/market-action/run?coin=${encodeURIComponent(c)}`,
+        { method: "POST" },
+      );
+      if (!resp.ok && resp.status !== 409) {
+        get().setMAAError(c, `HTTP ${resp.status}`);
+      }
+    } catch (e) {
+      get().setMAAError(c, e instanceof Error ? e.message : String(e));
+    }
+  },
+
+  maaEvalByCoin: {},
+  maaEvalLoadingByCoin: {},
+  loadMAAEval: async (coin, opts) => {
+    const c = coin.toUpperCase();
+    set((state) => ({
+      maaEvalLoadingByCoin: { ...state.maaEvalLoadingByCoin, [c]: true },
+    }));
+    try {
+      const params = new URLSearchParams({ coin: c });
+      if (opts?.refresh) params.set("refresh", "1");
+      if (opts?.window_days) params.set("window_days", String(opts.window_days));
+      const resp = await fetch(`${API_BASE}/api/market-action/eval?${params}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data?.ready && data.summary) {
+        set((state) => ({
+          maaEvalByCoin: { ...state.maaEvalByCoin, [c]: data.summary },
+        }));
+      }
+    } catch {
+      // silently ignore
+    } finally {
+      set((state) => ({
+        maaEvalLoadingByCoin: { ...state.maaEvalLoadingByCoin, [c]: false },
+      }));
+    }
+  },
 }));

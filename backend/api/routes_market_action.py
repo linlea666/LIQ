@@ -225,6 +225,58 @@ async def get_report_all(
     }
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Phase 5 · 事后评估（T+4h/8h/24h 兑现率 + Confidence 校准）
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get("/eval")
+async def get_eval_summary(
+    coin: str = Query("BTC"),
+    refresh: int = Query(0, ge=0, le=1, description="1=强制重算（忽略缓存，会阻塞请求数秒）"),
+    window_days: int = Query(7, ge=1, le=30),
+) -> dict[str, Any]:
+    """返回 MAA 事后评估 summary：
+      - 各 horizon (4h/8h/24h) 的命中率
+      - Confidence 分桶校准
+      - Per-scenario 准确率
+      - 最近 20 条样本
+
+    默认读 engine 缓存（每 30 分钟刷新一次）；refresh=1 强制重算。
+    """
+    engine = _require_engine()
+    ccy = coin.upper()
+    if ccy not in engine._settings.supported_coins:
+        raise HTTPException(status_code=404, detail=f"coin not supported: {coin}")
+
+    cache = getattr(engine, "_maa_eval_summary", {}) or {}
+    cached = cache.get(ccy)
+
+    need_compute = bool(refresh) or cached is None or cached.get("window_days") != window_days
+    if need_compute:
+        try:
+            from monitoring import maa_eval
+            summary = maa_eval.evaluate_coin(ccy, window_days=window_days)
+            payload = summary.to_dict()
+            if not refresh:  # 只有默认 window 时才更新全局缓存
+                cache[ccy] = payload
+        except Exception as e:
+            logger.error("[MAA-Eval] on-demand failed | coin=%s", ccy, exc_info=True)
+            return {
+                "ready": False,
+                "coin": ccy,
+                "error": f"{type(e).__name__}: {e}",
+            }
+    else:
+        payload = cached
+
+    return {
+        "ready": True,
+        "coin": ccy,
+        "summary": payload,
+        "last_eval_ts": int(getattr(engine, "_maa_eval_last_ts", 0) or 0),
+    }
+
+
 @router.post("/run")
 async def run_once(coin: str = Query("BTC")) -> dict[str, Any]:
     """手动触发一次 AI 分析（异步，返回后任务仍在后台执行）。

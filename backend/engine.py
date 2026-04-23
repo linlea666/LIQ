@@ -234,6 +234,10 @@ class Engine:
         self._kl_history_file = os.path.join(self._data_dir, "kl_history.json")
         self._maa_history_file = os.path.join(self._data_dir, "market_action_history.json")
 
+        # MAA 事后评估（Phase 5）· coin → EvalSummary.to_dict()，由 _auto_maa_eval_loop 周期刷新
+        self._maa_eval_summary: dict[str, dict] = {}
+        self._maa_eval_last_ts: float = 0.0
+
         max_hist = self._settings.ai.max_history
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy, max_history=max_hist)
@@ -618,6 +622,20 @@ class Engine:
             tasks.append(asyncio.create_task(
                 self._auto_market_action_loop(maa_cfg.auto_interval_sec)
             ))
+            # Phase 5-A：启动 shadow logger（懒启动也可，但显式启动便于落盘验证）
+            try:
+                from monitoring.maa_shadow import get_maa_shadow_logger
+                get_maa_shadow_logger().start()
+            except Exception:
+                logger.warning("[MAA-Shadow] start failed", exc_info=True)
+            # Phase 5-A：价格 heartbeat 循环（5 分钟一轮，每币去重）
+            tasks.append(asyncio.create_task(
+                self._auto_maa_heartbeat_loop(interval_sec=300)
+            ))
+            # Phase 5-B：事后评估循环（30 分钟一轮，按 coin 滚动计算）
+            tasks.append(asyncio.create_task(
+                self._auto_maa_eval_loop(interval_sec=1800)
+            ))
 
         kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
         if kl_snap_sec > 0:
@@ -840,6 +858,13 @@ class Engine:
             logger.info("MAA history saved to disk before shutdown")
         except Exception:
             logger.error("Failed to save MAA history on shutdown", exc_info=True)
+        # Phase 5-A · 关停 MAA shadow writer（flush 队列后写盘）
+        try:
+            from monitoring.maa_shadow import get_maa_shadow_logger
+            await get_maa_shadow_logger().stop()
+            logger.info("[MAA-Shadow] writer stopped")
+        except Exception:
+            logger.debug("[MAA-Shadow] stop failed", exc_info=True)
         # 滚仓模块：最后一次落盘（确保关闭前事件全部可恢复）
         try:
             if self.roll_service._initialized:  # type: ignore[attr-defined]
@@ -2070,6 +2095,15 @@ class Engine:
                 self._save_market_action_history()
             except Exception:
                 logger.debug("MAA persist failed | coin=%s", ccy, exc_info=True)
+
+            # ── MAA Shadow Logger（Phase 5-A）：落 report 记录以便事后评估 ──
+            try:
+                from monitoring.maa_shadow import get_maa_shadow_logger
+                price_now = float(state.ticker.last) if state.ticker and state.ticker.last else 0.0
+                if price_now > 0:
+                    get_maa_shadow_logger().record_report(ccy, report, price_now)
+            except Exception:
+                logger.debug("[MAA-Shadow] record_report failed | coin=%s", ccy, exc_info=True)
         except Exception as e:
             logger.error(
                 "MAA background task failed | coin=%s | %s: %s",
@@ -2112,6 +2146,58 @@ class Engine:
                                  ccy, exc_info=True)
                 await asyncio.sleep(10)  # 三币之间交错
             await asyncio.sleep(60)
+
+    async def _auto_maa_heartbeat_loop(self, interval_sec: int = 300) -> None:
+        """Phase 5-A · 每 interval_sec 给每个币种落一条价格 heartbeat。
+
+        用途：为 maa_eval 在 T+4h/T+8h/T+24h 寻价提供足够密集的价格锚点。
+        shadow logger 内部有 15 分钟去重，interval_sec 设置过小也不会膨胀磁盘。
+        """
+        await asyncio.sleep(60)  # 冷启稍等一会儿
+        try:
+            from monitoring.maa_shadow import get_maa_shadow_logger
+            shadow = get_maa_shadow_logger()
+        except Exception:
+            logger.warning("[MAA-Shadow] import failed, heartbeat disabled", exc_info=True)
+            return
+        logger.info("MAA heartbeat loop started | interval=%ds", interval_sec)
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                state = self._states.get(ccy)
+                if state is None or state.ticker is None or not state.ticker.last:
+                    continue
+                try:
+                    shadow.record_heartbeat(ccy, float(state.ticker.last))
+                except Exception:
+                    logger.debug("[MAA-Shadow] heartbeat failed | coin=%s", ccy, exc_info=True)
+            await asyncio.sleep(interval_sec)
+
+    async def _auto_maa_eval_loop(self, interval_sec: int = 1800) -> None:
+        """Phase 5-B · 每 interval_sec 跑一次 MAA 事后评估，缓存结果到
+        `self._maa_eval_summary[coin]`，供 `/api/market-action/eval` 读取。
+        """
+        # 冷启等 10 分钟，先让 heartbeat/report 积累一些样本
+        await asyncio.sleep(600)
+        try:
+            from monitoring import maa_eval
+        except Exception:
+            logger.warning("[MAA-Eval] import failed, eval loop disabled", exc_info=True)
+            return
+        logger.info("MAA eval loop started | interval=%ds", interval_sec)
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                try:
+                    summary = maa_eval.evaluate_coin(ccy, window_days=7)
+                    self._maa_eval_summary[ccy] = summary.to_dict()
+                    self._maa_eval_last_ts = time.time()
+                    logger.info(
+                        "[MAA-Eval] %s | %s",
+                        ccy, maa_eval.summary_headline(summary),
+                    )
+                except Exception:
+                    logger.error("[MAA-Eval] failed | coin=%s", ccy, exc_info=True)
+                await asyncio.sleep(2)
+            await asyncio.sleep(interval_sec)
 
     async def _build_and_fuse_trader_report(
         self, ccy: str, analysis: AIAnalysisResult, *, latency_ms: int = 0,
