@@ -475,6 +475,7 @@ class RollService:
             pos, plan, market,
             stabilizer=self.stabilizer,
             forward_scanner=self.forward_scanner,
+            liq_emergency_pct=self.settings.liq_emergency_pct,
         )
 
         # 缓存供 API 读取

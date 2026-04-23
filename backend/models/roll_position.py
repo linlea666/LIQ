@@ -373,6 +373,10 @@ class RollGlobalSettings(BaseModel):
     override_warn_window: int = 10         # 近 N 次
     override_cooldown_hours: int = 24      # 连续 2 次警告仍覆盖 → 冷却时长
 
+    # 硬离场阈值：距爆仓百分比（%）小于此值时强制 action=close + urgency=urgent
+    # 默认 5.0%（保守）；激进交易者可下调到 3.0；建议下限 2.0 防止数据延迟误触发
+    liq_emergency_pct: float = Field(5.0, ge=1.0, le=15.0)
+
     # 更新时间（便于 UI 显示）
     updated_at: int = 0
 

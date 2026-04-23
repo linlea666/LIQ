@@ -713,15 +713,22 @@ def compute_reduce_confidence(
 # Phase 1 · 离场（close）判定
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-LIQ_EMERGENCY_PCT = 5.0    # 爆仓距离 < 5% → 紧急离场
+# 默认值：距爆仓 < 5% 触发硬离场。运行时由 RollGlobalSettings.liq_emergency_pct 覆盖
+# （见 RollService.evaluate_position → evaluate(..., liq_emergency_pct=...)）
+LIQ_EMERGENCY_PCT_DEFAULT = 5.0
 
 
 def _evaluate_exit(
     position: UserPosition,
     plan: RollPlan,
     market: MarketContext,
+    liq_emergency_pct: float = LIQ_EMERGENCY_PCT_DEFAULT,
 ) -> Optional[tuple[str, list[SignalRef]]]:
-    """若需立即离场，返回 (reason_cn, supporting_signals)；否则 None。"""
+    """若需立即离场，返回 (reason_cn, supporting_signals)；否则 None。
+
+    liq_emergency_pct: 距爆仓百分比阈值（%）。来自 RollGlobalSettings.liq_emergency_pct，
+                       由 RollService 注入；此处兼容旧调用使用默认 5.0。
+    """
     supporting: list[SignalRef] = []
 
     # 止损被击穿
@@ -754,12 +761,12 @@ def _evaluate_exit(
             liq_dist = (market.current_price - liq) / market.current_price * 100.0
         else:
             liq_dist = (liq - market.current_price) / market.current_price * 100.0
-        if liq_dist < LIQ_EMERGENCY_PCT:
+        if liq_dist < liq_emergency_pct:
             supporting.append(SignalRef(
                 source="liq_price", read=f"{liq_dist:.2f}%", weight=0,
-                detail=f"距爆仓仅 {liq_dist:.2f}%",
+                detail=f"距爆仓仅 {liq_dist:.2f}%（阈值 {liq_emergency_pct:.1f}%）",
             ))
-            return ("爆仓临近", supporting)
+            return (f"爆仓临近（距爆仓 {liq_dist:.2f}% < 阈值 {liq_emergency_pct:.1f}%）", supporting)
 
     # 结构 + 衰竭双确认
     if (
@@ -813,6 +820,7 @@ def evaluate(
     forward_scanner: Optional["object"] = None,  # ForwardScanner | None（避免循环引用）
     first_add_ratio: float = 0.5,
     reinvest_ratio: float = 1.0,
+    liq_emergency_pct: float = LIQ_EMERGENCY_PCT_DEFAULT,
 ) -> RollSignal:
     """单个活跃滚仓计划的评估入口。
 
@@ -900,7 +908,7 @@ def evaluate(
         return signal
 
     # ── Phase 1 · 离场扫描 ───────────────────────────
-    exit_result = _evaluate_exit(position, plan, market)
+    exit_result = _evaluate_exit(position, plan, market, liq_emergency_pct=liq_emergency_pct)
     if exit_result is not None:
         reason, sigs = exit_result
         signal.action = "close"

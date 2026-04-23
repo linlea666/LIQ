@@ -2170,6 +2170,11 @@ class Engine:
             self._roll_eval_interval_sec,
         )
 
+        # 心跳节流：每 60s 至少 1 条 INFO，便于运维确认 loop 还活着
+        heartbeat_interval_sec = 60
+        last_heartbeat_ts = 0.0
+        last_actions: dict[str, str] = {}     # position_id → 上次 action（用于"action 变化时打日志"）
+
         while self._running:
             try:
                 if self.roll_service._initialized:  # type: ignore[attr-defined]
@@ -2180,12 +2185,47 @@ class Engine:
                         return build_market_context_from_state(state)
 
                     signals = self.roll_service.evaluate_all(_provider)
-                    if signals:
-                        actionable = sum(1 for s in signals if s.action != "hold")
-                        logger.debug(
-                            "[Roll] evaluated | total=%d actionable=%d",
-                            len(signals), actionable,
+                    now_ts = time.time()
+                    actionable_signals = [s for s in (signals or []) if s.action != "hold"]
+                    urgent_signals = [s for s in (signals or []) if getattr(s, "urgency", "normal") == "urgent"]
+
+                    # 1) urgent 一律 WARNING（无论是否变化）
+                    for s in urgent_signals:
+                        logger.warning(
+                            "[Roll][URGENT] pos=%s coin=%s action=%s headline=%s | "
+                            "confidence=%.0f price=%.4f liq_dist=%s%%",
+                            s.position_id, s.coin, s.action,
+                            (s.headline_cn or "—")[:80],
+                            s.confidence_score or 0.0,
+                            s.current_price,
+                            f"{s.distance_to_liq_pct:.2f}" if s.distance_to_liq_pct is not None else "—",
                         )
+
+                    # 2) 非 urgent 但 action 由 hold→其他 / 或 action 改变：INFO
+                    for s in actionable_signals:
+                        if s.urgency == "urgent":
+                            continue   # 已在上一段打过 WARNING
+                        prev = last_actions.get(s.position_id)
+                        if prev != s.action:
+                            logger.info(
+                                "[Roll][ACTION] pos=%s coin=%s %s→%s headline=%s | "
+                                "confidence=%.0f intensity=%s",
+                                s.position_id, s.coin, prev or "—", s.action,
+                                (s.headline_cn or "—")[:60],
+                                s.confidence_score or 0.0, s.add_intensity,
+                            )
+                    # 更新 action 缓存（含 hold，便于检测"恢复 hold"）
+                    if signals:
+                        for s in signals:
+                            last_actions[s.position_id] = s.action
+
+                    # 3) 心跳：每 60s 一条 INFO（即便全 hold 也证明 loop 在转）
+                    if signals and (now_ts - last_heartbeat_ts >= heartbeat_interval_sec):
+                        logger.info(
+                            "[Roll][heartbeat] positions=%d actionable=%d urgent=%d",
+                            len(signals), len(actionable_signals), len(urgent_signals),
+                        )
+                        last_heartbeat_ts = now_ts
             except Exception:
                 logger.error("[Roll] eval loop error", exc_info=True)
             await asyncio.sleep(self._roll_eval_interval_sec)

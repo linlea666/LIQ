@@ -218,6 +218,9 @@ export interface RollGlobalSettings {
   override_warn_window: number;
   override_cooldown_hours: number;
 
+  /** 距爆仓百分比小于此值（%）时强制 close + urgent。范围 [1, 15]，默认 5.0 */
+  liq_emergency_pct: number;
+
   updated_at: number;
 }
 

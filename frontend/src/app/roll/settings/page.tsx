@@ -62,6 +62,8 @@ interface Draft {
   override_warn_threshold: number;
   override_warn_window: number;
   override_cooldown_hours: number;
+
+  liq_emergency_pct: number;
 }
 
 function fromSettings(s: RollGlobalSettings): Draft {
@@ -80,6 +82,7 @@ function fromSettings(s: RollGlobalSettings): Draft {
     override_warn_threshold: s.override_warn_threshold,
     override_warn_window: s.override_warn_window,
     override_cooldown_hours: s.override_cooldown_hours,
+    liq_emergency_pct: s.liq_emergency_pct,
   };
 }
 
@@ -103,6 +106,9 @@ function validateDraft(d: Draft): string | null {
     return "覆盖警告阈值应 ∈ [0, 统计窗口]";
   if (d.override_cooldown_hours < 1 || d.override_cooldown_hours > 168)
     return "覆盖冷却时长应 ∈ [1, 168] 小时";
+
+  if (d.liq_emergency_pct < 1 || d.liq_emergency_pct > 15)
+    return "紧急离场距爆仓阈值应 ∈ [1, 15]%";
   return null;
 }
 
@@ -185,6 +191,24 @@ function SettingsForm({ initial }: { initial: RollGlobalSettings }) {
               value={(draft.account_margin_pct_cap * 100).toFixed(1)}
               onChange={(e) =>
                 patch("account_margin_pct_cap", Number(e.target.value) / 100)
+              }
+            />
+          </Field>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field
+            label="紧急离场阈值 (%)"
+            hint="距爆仓百分比小于此值时强制 close + urgent；范围 [1, 15]，激进可设 3，保守 5+"
+          >
+            <input
+              type="number"
+              min={1}
+              max={15}
+              step={0.5}
+              className="roll-input"
+              value={draft.liq_emergency_pct}
+              onChange={(e) =>
+                patch("liq_emergency_pct", Number(e.target.value) || 5)
               }
             />
           </Field>
@@ -483,15 +507,30 @@ function Toggle({
 }
 
 function PermissionPill() {
-  // 浏览器权限状态（仅显示，用户可点击重新申请）
-  const permission =
-    typeof window !== "undefined" && "Notification" in window
-      ? Notification.permission
-      : "unsupported";
+  // 浏览器权限状态。注意：denied 后 requestPermission 会立即返回 denied 且不弹原生对话框，
+  // 这是浏览器防骚扰策略，JS 无法绕过。此时只能引导用户去地址栏锁图标手动开启。
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
+    () =>
+      typeof window !== "undefined" && "Notification" in window
+        ? Notification.permission
+        : "unsupported",
+  );
+  const [showHelp, setShowHelp] = useState(false);
 
-  const requestPerm = () => {
+  const requestPerm = async () => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
-    Notification.requestPermission().catch(() => undefined);
+    // 已 denied：直接展示引导，不浪费一次无效调用
+    if (Notification.permission === "denied") {
+      setShowHelp(true);
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result === "denied") setShowHelp(true);
+    } catch {
+      setPermission(Notification.permission);
+    }
   };
 
   const tone =
@@ -505,27 +544,52 @@ function PermissionPill() {
     permission === "granted"
       ? "✓ 浏览器通知权限已授予"
       : permission === "denied"
-      ? "✗ 已拒绝 · 请在浏览器地址栏重开通知权限"
+      ? "✗ 已拒绝 · 浏览器已记住此选择，需手动开启"
       : permission === "default"
       ? "⚠ 尚未授予通知权限"
       : "⚠ 当前浏览器不支持通知 API";
 
+  const btnLabel = permission === "denied" ? "查看开启方法" : "申请权限";
+
   return (
-    <div
-      className={[
-        "flex items-center justify-between gap-3 rounded border px-3 py-2 text-[12px]",
-        tone,
-      ].join(" ")}
-    >
-      <span>{label}</span>
-      {permission !== "granted" && permission !== "unsupported" && (
-        <button
-          type="button"
-          onClick={requestPerm}
-          className="rounded border border-current px-2 py-0.5 text-[11px] transition hover:bg-slate-900/30"
-        >
-          申请权限
-        </button>
+    <div className="space-y-2">
+      <div
+        className={[
+          "flex items-center justify-between gap-3 rounded border px-3 py-2 text-[12px]",
+          tone,
+        ].join(" ")}
+      >
+        <span>{label}</span>
+        {permission !== "granted" && permission !== "unsupported" && (
+          <button
+            type="button"
+            onClick={requestPerm}
+            className="rounded border border-current px-2 py-0.5 text-[11px] transition hover:bg-slate-900/30"
+          >
+            {btnLabel}
+          </button>
+        )}
+      </div>
+      {showHelp && permission === "denied" && (
+        <div className="rounded border border-slate-700/60 bg-slate-900/40 p-2.5 text-[11px] leading-relaxed text-slate-300">
+          <div className="mb-1 font-medium text-slate-200">手动开启浏览器通知</div>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>点击地址栏左侧的 🔒 / 🛡 / ⓘ 图标</li>
+            <li>找到「通知 / Notifications」一项，将其改为「允许 / Allow」</li>
+            <li>刷新本页面，再回到此处确认状态变绿</li>
+          </ol>
+          <div className="mt-2 text-[10px] text-slate-500">
+            说明：被拒绝后浏览器会永久记住此决定，JavaScript 无法再次唤起原生授权弹窗（这是
+            Chrome/Edge/Safari 统一的反骚扰策略，不是本应用的 bug）。
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowHelp(false)}
+            className="mt-2 text-[10px] text-slate-400 underline hover:text-slate-200"
+          >
+            收起
+          </button>
+        </div>
       )}
     </div>
   );

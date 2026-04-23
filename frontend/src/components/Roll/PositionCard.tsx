@@ -148,12 +148,28 @@ export default function PositionCard({ position, signal, plan }: Props) {
       {/* ── 白话 ── */}
       {signal?.headline_cn && (
         <div className="px-4 py-3">
-          <div className="text-[13px] text-slate-100">
+          <div
+            className={[
+              "text-[13px]",
+              signal.urgency === "urgent" ? "text-rose-200 font-medium" : "text-slate-100",
+            ].join(" ")}
+          >
             {signal.headline_cn}
           </div>
           {signal.detail_cn && (
             <div className="mt-1 whitespace-pre-wrap text-[12px] text-slate-400">
               {signal.detail_cn}
+            </div>
+          )}
+          {/* 规则透明化：urgent 离场时明确告知触发依据 */}
+          {signal.action === "close" && signal.urgency === "urgent" && (
+            <div className="mt-2 rounded border border-rose-900/40 bg-rose-950/20 px-2 py-1.5 text-[11px] text-rose-300/90">
+              <div className="font-medium text-rose-200">触发依据（硬规则）</div>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                <li>止损被现价击穿，或</li>
+                <li>距爆仓百分比 &lt; 阈值（默认 5%，可在「设置」中调整），或</li>
+                <li>4H CHoCH 反向 + 动能衰竭确认</li>
+              </ul>
             </div>
           )}
         </div>
