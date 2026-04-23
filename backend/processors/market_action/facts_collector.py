@@ -124,39 +124,163 @@ def build_price_snapshot(state: "CoinState") -> Optional[PriceSnapshot]:
     )
 
 
+def _derive_oi_history_fields(
+    current_oi_usd: float,
+    hourly_history: list,
+) -> dict:
+    """基于 30d hourly OI 历史派生 percentile / is_near_local_high_7d。
+
+    全部基于真实采样（bisect 排序 + 切片 max），无任何推算。
+    样本不足时对应字段返回 None，透明标注。
+    """
+    out: dict = {
+        "percentile_30d_hourly": None,
+        "is_near_local_high_7d": None,
+        "history_sample_size": None,
+    }
+    if not hourly_history or current_oi_usd <= 0:
+        return out
+    pts = [p.get("oi_usd") for p in hourly_history if p.get("oi_usd")]
+    pts = [float(x) for x in pts if x is not None and float(x) > 0]
+    n = len(pts)
+    out["history_sample_size"] = n
+    if n >= 24:  # 至少 1 天样本才算分位
+        sorted_pts = sorted(pts)
+        # bisect 写法等价于：(count of values <= current_oi) / n × 100
+        import bisect
+        rank = bisect.bisect_right(sorted_pts, current_oi_usd)
+        out["percentile_30d_hourly"] = round(rank / n * 100, 1)
+    # 近 7d 最高（168 点 1h）
+    if n >= 24:
+        last_7d = pts[-168:] if n >= 168 else pts
+        local_max = max(last_7d)
+        if local_max > 0:
+            out["is_near_local_high_7d"] = bool(current_oi_usd >= local_max * 0.98)
+    return out
+
+
 def build_oi_snapshot(state: "CoinState") -> Optional[MAOISnapshot]:
     oi = state.oi
     if not oi:
         return None
+    # P0 派生：30d hourly 分位 + 近 7d 是否接近局部高
+    hist = list(getattr(state, "oi_hourly_history", []) or [])
+    derived = _derive_oi_history_fields(float(oi.current_usd), hist)
     return MAOISnapshot(
         current_usd=float(oi.current_usd),
         change_5m_pct=_safe_float(oi.change_5m_pct),
         change_1h_pct=_safe_float(oi.change_1h_pct),
         change_24h_pct=_safe_float(state.oi_change_24h_pct),
         trend=oi.trend or None,
+        percentile_30d_hourly=derived["percentile_30d_hourly"],
+        is_near_local_high_7d=derived["is_near_local_high_7d"],
+        history_sample_size=derived["history_sample_size"],
     )
 
 
+def _derive_funding_history_fields(
+    avg_current: float,
+    current_oi_usd: Optional[float],
+    history_8h: list,
+) -> dict:
+    """基于 7d × 8h 结算点历史派生 4 个 P0 字段。
+
+    采样 + 算术：
+      - hourly_cost_usd  = avg_current × current_oi / 8（8h 一结算，折算每小时）
+      - cost_24h_usd     = Σ(最近 3 个 8h 点) × current_oi（**基于当前 OI 近似**）
+      - days_negative_streak = 从最新往前数连续 rate < 0 的点数 / 3
+      - sign_flip_7d     = 近 7d 均值与"前 7 天滚动参考"符号相反
+    """
+    out: dict = {
+        "hourly_cost_usd": None,
+        "cost_24h_usd": None,
+        "days_negative_streak": None,
+        "sign_flip_7d": None,
+        "history_sample_size": None,
+    }
+    pts = [p for p in (history_8h or []) if p.get("rate") is not None]
+    n = len(pts)
+    out["history_sample_size"] = n
+
+    # 1) hourly_cost_usd：即时值即可算（不依赖历史），有 OI 即可
+    if current_oi_usd and current_oi_usd > 0:
+        out["hourly_cost_usd"] = round(avg_current * current_oi_usd / 8.0, 2)
+
+    if n == 0:
+        return out
+
+    # 2) cost_24h_usd：需要最近 3 个 8h 点 + 当前 OI（近似口径）
+    if n >= 3 and current_oi_usd and current_oi_usd > 0:
+        last3_sum = sum(float(p["rate"]) for p in pts[-3:])
+        out["cost_24h_usd"] = round(last3_sum * current_oi_usd, 2)
+
+    # 3) days_negative_streak：从最新往前数连续 < 0
+    streak_points = 0
+    for p in reversed(pts):
+        if float(p["rate"]) < 0:
+            streak_points += 1
+        else:
+            break
+    # 8h 一个点，3 个点 = 1 天
+    out["days_negative_streak"] = round(streak_points / 3.0, 2)
+
+    # 4) sign_flip_7d：近 7d（最近 21 点）均值 vs 前 7d（再往前 21 点）均值
+    #   需要两个独立的 21 点窗口（共 42 点 ≈ 14 天），否则诚实返回 None
+    #   任何"样本不足时用 24h 近似 7d"的退化方案数学上都有 overlap bug，不做
+    if n >= 42:
+        recent_7d = sum(float(p["rate"]) for p in pts[-21:]) / 21.0
+        prior_7d = sum(float(p["rate"]) for p in pts[-42:-21]) / 21.0
+        if abs(recent_7d) > 1e-9 and abs(prior_7d) > 1e-9:
+            out["sign_flip_7d"] = bool((recent_7d > 0) != (prior_7d > 0))
+    # n < 42 时 sign_flip_7d 保持 None，AI 看到 history_sample_size 会知道为何
+
+    return out
+
+
 def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
+    # 先确定 current_oi（派生成本需要用）
+    current_oi_usd: Optional[float] = None
+    if state.oi and state.oi.current_usd:
+        try:
+            current_oi_usd = float(state.oi.current_usd)
+        except (TypeError, ValueError):
+            current_oi_usd = None
+
+    history_8h = list(getattr(state, "funding_history_8h", []) or [])
+
     mf = state.multi_funding
     if mf and mf.exchanges:
         vals = [_safe_float(e.current) for e in mf.exchanges if _safe_float(e.current) is not None]
         disp = round(pstdev(vals), 8) if len(vals) >= 2 else 0.0
+        avg_current = float(mf.avg_current)
+        derived = _derive_funding_history_fields(avg_current, current_oi_usd, history_8h)
         return FundingSnapshot(
-            avg_current=float(mf.avg_current),
+            avg_current=avg_current,
             avg_7d=_safe_float(mf.avg_7d),
             oi_weighted=_safe_float(mf.oi_weighted),
             interpretation=mf.interpretation or None,
             exchange_count=len(mf.exchanges),
             dispersion_abs=disp,
+            hourly_cost_usd=derived["hourly_cost_usd"],
+            cost_24h_usd=derived["cost_24h_usd"],
+            days_negative_streak=derived["days_negative_streak"],
+            sign_flip_7d=derived["sign_flip_7d"],
+            history_sample_size=derived["history_sample_size"],
         )
     f = state.funding
     if f:
+        avg_current = float(f.avg_rate)
+        derived = _derive_funding_history_fields(avg_current, current_oi_usd, history_8h)
         return FundingSnapshot(
-            avg_current=float(f.avg_rate),
+            avg_current=avg_current,
             oi_weighted=_safe_float(f.oi_weighted_rate),
             interpretation=f.interpretation or None,
             exchange_count=(1 if f.okx_rate is not None else 0) + (1 if f.binance_rate is not None else 0),
+            hourly_cost_usd=derived["hourly_cost_usd"],
+            cost_24h_usd=derived["cost_24h_usd"],
+            days_negative_streak=derived["days_negative_streak"],
+            sign_flip_7d=derived["sign_flip_7d"],
+            history_sample_size=derived["history_sample_size"],
         )
     return None
 

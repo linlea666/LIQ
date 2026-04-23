@@ -42,9 +42,19 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 **Step 1 · 扫描 & 标记方向性**
 读 §2-§4 全部指标，在脑中给每一项打标签：偏多 / 偏空 / 中性。关注容易误读字段：
  - `orderbook.spread_pct` 负 = bid 更厚（偏多）；正 = ask 更厚（偏空）
- - `funding.avg_7d=0` 多数是数据不足默认值，**不是"7d=0 则中性"**，以 `avg_current` 和 `funding_trend` 为准
+ - `funding.avg_7d=0` 多数是数据不足默认值，**不是"7d=0 则中性"**，以 `avg_current` 和 `funding_trend` 为准（若提供了 `history_sample_size` 且 > 0，可以信任 avg_7d）
  - footprint `ratio=999.9` 含义是 one-sided，不是 999 倍
  - `price_context.vah_price/val_price=null` 只用 POC，不要臆造 VAH/VAL
+
+**字段定义速查（P0 派生字段，均基于真实采样，无推算）**：
+ - `funding.hourly_cost_usd`：按当前费率 × 当前 OI / 8 估算的**每小时**资金费成本（美元，负数=空头在支付多头）
+ - `funding.cost_24h_usd`：近 24h（3 个 8h 结算点）累计资金费成本估算（美元，**基于当前 OI 近似**，误差约 ±1-2%）
+ - `funding.days_negative_streak`：从最新往前数，连续负费率的天数（0 = 最新费率为正）
+ - `funding.sign_flip_7d`：近 7d 均费率与前 7d（若样本不足则与近 24h）符号是否翻转（bool）
+ - `oi.percentile_30d_hourly`：当前 OI 在过去 30d（按 1h 采样）中的百分位（0-100）
+ - `oi.is_near_local_high_7d`：当前 OI ≥ 近 7d 最高值的 98%（bool）
+ - `history_sample_size`：对应历史样本点数，若为 0 / 过小，该组派生字段可能为 null 或不可信
+ **这些字段只是对"真实市场动作"的结构化补充，不预设任何策略含义；具体如何结合场景判断，由你自己在 Step 3-4 决定**。
 
 **Step 2 · 找"证据群"与"矛盾"**
 把同方向的指标聚合成证据群（例如："OI 下行 + 24h 高点回落 + 顶部 Taker 净卖 = 派发群"）；标出与主流方向冲突的指标（例如："但 bid 侧挂单更厚 vs 顶部衰竭假设"）。
@@ -305,13 +315,22 @@ def build_user_prompt(
         f"{_fmt_pct(oi.get('change_1h_pct'))} / {_fmt_pct(oi.get('change_24h_pct'))}"
     )
     lines.append(f"- 趋势：`{oi.get('trend', '—')}`")
+    # P0 派生字段（基于 30d hourly 真实采样，无推算）
+    oi_pct = oi.get("percentile_30d_hourly")
+    oi_near_high = oi.get("is_near_local_high_7d")
+    oi_n = oi.get("history_sample_size")
+    if oi_pct is not None or oi_near_high is not None:
+        lines.append(
+            f"- 历史分位（30d hourly，n={oi_n}）：`percentile_30d_hourly`={_fmt(oi_pct, nd=1)}% "
+            f"| `is_near_local_high_7d`（≥近 7d 最高的 98%）：**{oi_near_high}**"
+        )
 
     fd = d.get("funding") or {}
     lines.append(f"\n### Funding · 资金费")
     lines.append(
         f"- 当前均值：{_fmt(fd.get('avg_current'), nd=6)} "
         f"| 7d 均值：{_fmt(fd.get('avg_7d'), nd=6)}  "
-        f"（**注意**：7d=0 可能是数据不足默认值）"
+        f"（**注意**：7d=0 仍有可能是数据不足默认值，若 `history_sample_size=0` 请以 avg_current 和 funding_trend 为准）"
     )
     lines.append(
         f"- OI 加权：{_fmt(fd.get('oi_weighted'), nd=6)} "
@@ -319,6 +338,20 @@ def build_user_prompt(
         f"| 分散度(std)：{_fmt(fd.get('dispersion_abs'), nd=6)}"
     )
     lines.append(f"- 解读：{fd.get('interpretation') or '—'}")
+    # P0 派生字段（基于 7d × 8h 结算点真实采样）
+    fd_n = fd.get("history_sample_size")
+    if fd_n:
+        lines.append(
+            f"- 资金费成本（采样 n={fd_n}；cost_24h 基于**当前 OI 近似**，误差约 ±1-2%）："
+        )
+        lines.append(
+            f"  - `hourly_cost_usd`：${_fmt(fd.get('hourly_cost_usd'))} "
+            f"| `cost_24h_usd`：${_fmt(fd.get('cost_24h_usd'))}"
+        )
+        lines.append(
+            f"  - `days_negative_streak`：{_fmt(fd.get('days_negative_streak'), nd=2)} 天 "
+            f"| `sign_flip_7d`（近 7d 均值 vs 前 7d 是否符号翻转）：**{fd.get('sign_flip_7d')}**"
+        )
 
     cvd_c = d.get("cvd_contract") or {}
     cvd_s = d.get("cvd_spot") or {}

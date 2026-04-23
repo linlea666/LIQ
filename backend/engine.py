@@ -175,6 +175,17 @@ class CoinState:
         self.footprint_contract: deque = deque(maxlen=3)    # 原始 footprint bars（dict 结构，含 buckets）
         self.footprint_spot: deque = deque(maxlen=3)
         self.footprint_last_ts: Optional[int] = None
+        # ── MAA P0 增强：funding 8h 结算点历史 + OI 30d hourly 历史 ──
+        # funding_history_8h：[{ts_sec, rate}]，由 poll_funding_history_8h 写入（5min 调用一次）
+        #   - 21 点 = 7 天 × 3 次 8h 结算
+        #   - 用于派生 avg_7d / cost_24h_usd / days_negative_streak / sign_flip_7d
+        # oi_hourly_history：[{ts_sec, oi_usd}]，由 poll_oi_hourly_30d 写入
+        #   - 720 点 = 30 天 × 1h；用于派生 percentile_30d_hourly / is_near_local_high_7d
+        from collections import deque as _deque
+        # maxlen=60 = 20 天 × 3 个 8h 结算点，足够诚实地计算 sign_flip_7d
+        # （需要近 7d 与前 7d 两个独立 21 点窗口，共 42 点，留余量）
+        self.funding_history_8h: _deque = _deque(maxlen=60)
+        self.oi_hourly_history: _deque = _deque(maxlen=720)
         # 期权派生字段（仅 BTC/ETH 生效，SOL 保持 None）
         self.option_pcr_oi: Optional[float] = None
         self.option_magnet_price: Optional[float] = None
@@ -635,6 +646,10 @@ class Engine:
             # Phase 5-B：事后评估循环（30 分钟一轮，按 coin 滚动计算）
             tasks.append(asyncio.create_task(
                 self._auto_maa_eval_loop(interval_sec=1800)
+            ))
+            # P0 增强：funding 8h 历史 + OI 30d hourly 历史（5min / 币一次）
+            tasks.append(asyncio.create_task(
+                self._auto_maa_history_loop(interval_sec=300)
             ))
 
         kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
@@ -2170,6 +2185,40 @@ class Engine:
                     shadow.record_heartbeat(ccy, float(state.ticker.last))
                 except Exception:
                     logger.debug("[MAA-Shadow] heartbeat failed | coin=%s", ccy, exc_info=True)
+            await asyncio.sleep(interval_sec)
+
+    async def _auto_maa_history_loop(self, interval_sec: int = 300) -> None:
+        """MAA P0 增强 · 每 interval_sec 拉一次 funding 8h + OI 30d hourly 历史。
+
+        设计：
+          - 两个接口（`fetch_fr_oi_weight_history` + `fetch_oi_aggregated_history`）
+            均已封装，Coinglass 侧有 30s 级缓存，5min 一轮不会爆 quota
+          - 每币 2 次 API ≈ 6 次/5min ≈ 72 次/h，占 3 万日配额不到 0.25%
+          - 顺便修复 multi_funding.avg_7d / oi_weighted 这两个历史永远是 0 的 bug
+        """
+        from polls.derivatives import (
+            poll_funding_history_8h,
+            poll_oi_hourly_30d,
+        )
+        await asyncio.sleep(30)  # 冷启稍等，让基础 poll 先跑一轮，避免同时抢 rate limit
+        logger.info("MAA history loop started | interval=%ds", interval_sec)
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                coin = self._settings.get_coin(ccy)
+                state = self._states.get(ccy)
+                if state is None:
+                    continue
+                try:
+                    await poll_funding_history_8h(self._cg, coin, state)
+                except Exception:
+                    logger.debug("[MAA-hist] funding_history_8h failed | coin=%s",
+                                 ccy, exc_info=True)
+                try:
+                    await poll_oi_hourly_30d(self._cg, coin, state)
+                except Exception:
+                    logger.debug("[MAA-hist] oi_hourly_30d failed | coin=%s",
+                                 ccy, exc_info=True)
+                await asyncio.sleep(3)  # 币之间交错避免抢 quota
             await asyncio.sleep(interval_sec)
 
     async def _auto_maa_eval_loop(self, interval_sec: int = 1800) -> None:

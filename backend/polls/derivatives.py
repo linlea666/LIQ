@@ -624,3 +624,130 @@ async def poll_td_sequential(
     except Exception:
         logger.warning("poll_td_sequential failed", exc_info=True)
         state.poll_failures["td_sequential"] = "API调用失败"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# MAA P0 增强 · 资金费 8h 历史 + OI 30d hourly 历史
+#
+# 设计原则：
+#   1. 只写 state.funding_history_8h / state.oi_hourly_history 两个 deque
+#   2. 顺便回填 state.multi_funding.avg_7d / oi_weighted 两个之前永远是 0 的字段
+#      （根因：代码从未写入，不是 API 问题）
+#   3. 调用频率：5min / 次（两个接口都有 30s 级 Coinglass 缓存，不会爆 quota）
+#   4. 所有派生字段由 facts_collector 在消费端计算，poll 层只负责"采样 + 缓存"
+# ════════════════════════════════════════════════════════════════════════════
+
+async def poll_funding_history_8h(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+) -> None:
+    """拉 7d × 8h 结算点资金费率历史，缓存到 state.funding_history_8h。
+
+    同时回填 state.multi_funding 的 avg_7d 和 oi_weighted 字段（历史 bug 修复）：
+      - avg_7d = 近 21 个 8h 点的均值
+      - oi_weighted = 接口返回的最近点（该接口本身就是 OI 加权口径）
+    """
+    try:
+        # limit=60 = 20 天 × 3 个 8h 点，足够计算 sign_flip_7d（需要 42+ 点）
+        data = await cg.fetch_fr_oi_weight_history(
+            coin.symbol_cg, interval="8h", limit=60,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[funding-hist-8h] %s fetch fail: %s", coin.ccy, e)
+        state.poll_failures["funding_history_8h"] = "API调用失败"
+        return
+
+    if not data or not isinstance(data, list):
+        return
+
+    # 接口返回单位明确：close 字段是 0.0001 = 0.01%（与 Binance/OKX 同口径小数）
+    points: list[dict] = []
+    for item in data:
+        try:
+            ts_raw = int(item.get("time", item.get("t", 0)))
+            ts_sec = ts_raw // 1000 if ts_raw > 10_000_000_000 else ts_raw
+            rate = float(item.get("close", item.get("c", 0)))
+            if ts_sec > 0:
+                points.append({"ts_sec": ts_sec, "rate": rate})
+        except (TypeError, ValueError):
+            continue
+
+    if not points:
+        return
+
+    points.sort(key=lambda p: p["ts_sec"])
+    # 重建 deque（接口每次都返回完整窗口，替代式写入避免累积历史漂移）
+    state.funding_history_8h.clear()
+    for p in points[-60:]:
+        state.funding_history_8h.append(p)
+
+    # ── Bug 修复：回填 multi_funding.avg_7d / oi_weighted ──
+    if state.multi_funding:
+        recent_21 = list(state.funding_history_8h)[-21:]
+        if recent_21:
+            state.multi_funding.avg_7d = round(
+                sum(p["rate"] for p in recent_21) / len(recent_21), 8,
+            )
+            # 接口本身是 OI 加权口径，最新点就是实时 OI 加权费率
+            state.multi_funding.oi_weighted = round(recent_21[-1]["rate"], 8)
+
+    state.poll_failures.pop("funding_history_8h", None)
+    if "funding_hist_8h_ready" not in state._log_once_keys:
+        state._log_once_keys.add("funding_hist_8h_ready")
+        logger.info(
+            "[funding-hist-8h] %s ready | points=%d avg_7d=%.6f latest=%.6f",
+            coin.ccy, len(state.funding_history_8h),
+            state.multi_funding.avg_7d if state.multi_funding else 0.0,
+            points[-1]["rate"],
+        )
+
+
+async def poll_oi_hourly_30d(
+    cg: CoinglassSource,
+    coin: CoinConfig,
+    state: CoinState,
+) -> None:
+    """拉 30d × 1h OI 历史，缓存到 state.oi_hourly_history。
+
+    用途：facts_collector 派生 oi.percentile_30d_hourly / is_near_local_high_7d。
+    """
+    try:
+        data = await cg.fetch_oi_aggregated_history(
+            coin.symbol_cg, interval="1h", limit=720,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[oi-hist-30d] %s fetch fail: %s", coin.ccy, e)
+        state.poll_failures["oi_hourly_30d"] = "API调用失败"
+        return
+
+    if not data or not isinstance(data, list):
+        return
+
+    points: list[dict] = []
+    for item in data:
+        try:
+            ts_raw = int(item.get("time", item.get("t", 0)))
+            ts_sec = ts_raw // 1000 if ts_raw > 10_000_000_000 else ts_raw
+            oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
+            if ts_sec > 0 and oi_usd > 0:
+                points.append({"ts_sec": ts_sec, "oi_usd": oi_usd})
+        except (TypeError, ValueError):
+            continue
+
+    if not points:
+        return
+
+    points.sort(key=lambda p: p["ts_sec"])
+    state.oi_hourly_history.clear()
+    for p in points[-720:]:
+        state.oi_hourly_history.append(p)
+
+    state.poll_failures.pop("oi_hourly_30d", None)
+    if "oi_hist_30d_ready" not in state._log_once_keys:
+        state._log_once_keys.add("oi_hist_30d_ready")
+        logger.info(
+            "[oi-hist-30d] %s ready | points=%d latest=$%s",
+            coin.ccy, len(state.oi_hourly_history),
+            f"{points[-1]['oi_usd']/1e9:.2f}B",
+        )

@@ -34,16 +34,34 @@ class PriceSnapshot(BaseModel):
 
 
 class OISnapshot(BaseModel):
-    """S2 · OI 规模 + 变化率"""
+    """S2 · OI 规模 + 变化率 + 历史分位
+
+    派生字段（基于 30d hourly 历史）：
+      - percentile_30d_hourly：当前 OI 在 30d（按 1h 采样）中的百分位（0-100）
+      - is_near_local_high_7d：当前 OI ≥ 近 7d 最高值的 98%
+    两项均为真实历史采样计算，无推算成分；若历史样本不足会返回 None。
+    """
     current_usd: float
     change_5m_pct: Optional[float] = None
     change_1h_pct: Optional[float] = None
     change_24h_pct: Optional[float] = None
     trend: Optional[str] = None  # "rising" / "declining" / "flat"
+    # ── P0 派生字段（基于 30d hourly 真实采样） ──
+    percentile_30d_hourly: Optional[float] = None
+    is_near_local_high_7d: Optional[bool] = None
+    history_sample_size: Optional[int] = None  # 透明度：实际使用的样本点数
 
 
 class FundingSnapshot(BaseModel):
-    """S3 · Funding + 多交易所分散度"""
+    """S3 · Funding + 多交易所分散度 + 资金费成本/持续性
+
+    派生字段（基于 7d × 8h 结算点真实采样）：
+      - hourly_cost_usd：按当前费率 × 当前 OI / 8 估算的每小时成本（美元）
+      - cost_24h_usd：近 24h 累计成本（美元，**基于当前 OI 近似**，误差约 ±OI 24h 变化率）
+      - days_negative_streak：最新连续负费率天数（0 表示最新为正）
+      - sign_flip_7d：近 7d 均费率符号相对前 7d 是否翻转（bool）
+    均为采样 + 算术派生，无任何推算；历史样本不足时返回 None。
+    """
     avg_current: float
     avg_7d: Optional[float] = None
     oi_weighted: Optional[float] = None
@@ -51,6 +69,12 @@ class FundingSnapshot(BaseModel):
     exchange_count: int = 0
     dispersion_abs: Optional[float] = None
     # 各交易所 current 的标准差，反映是否一致
+    # ── P0 派生字段（基于 7d × 8h 真实采样） ──
+    hourly_cost_usd: Optional[float] = None
+    cost_24h_usd: Optional[float] = None
+    days_negative_streak: Optional[float] = None
+    sign_flip_7d: Optional[bool] = None
+    history_sample_size: Optional[int] = None  # 透明度：实际使用的 8h 点数（上限 21）
 
 
 class CVDSnapshot(BaseModel):
