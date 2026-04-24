@@ -11,7 +11,7 @@ import MarketActionView from "./MarketActionView";
 
 // Tab 顺序遵循决策链：结构 → 箱体（空间）→ 动作分析（AI 结构化判断）→ 关键位（点位）
 // 动作分析 (Market Action Analyzer · MAA) 替换原「动能/衰竭」模块，基于 14 维真实
-// 市场动作 + DeepSeek-reasoner 交易员思维链产出结构化结论 + 证据矩阵 + 操作建议。
+// 市场动作 + DeepSeek V4-Flash（非思考模式）产出结构化结论 + 证据矩阵 + 操作建议。
 const PRO_TABS = [
   { id: "liquidation", label: "清算地图" },
   { id: "cvd_oi", label: "CVD + OI" },

@@ -120,7 +120,7 @@ class MarketEventSignal(BaseModel):
     tier: NewsTier = "normal"
     processed_by: NewsProcessor = "ai"
     processed_at: int = 0             # 秒级
-    model_used: str = ""              # "deepseek-chat" / ...（空=规则层产出）
+    model_used: str = ""              # "deepseek-v4-flash" / ...（空=规则层产出）
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

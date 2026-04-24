@@ -499,7 +499,7 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
       "tldr_cn": "美联储官员鹰派表态压制风险资产；ETF 连续流出；链上巨鲸转入交易所，短期偏空。",
       "update_trigger": "scheduled",
       "based_on_events_count": 28,
-      "model_used": "deepseek-chat"
+      "model_used": "deepseek-v4-flash"
     },
     "geo_risk": {
       "ts": 1745296800,

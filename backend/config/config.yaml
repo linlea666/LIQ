@@ -124,10 +124,11 @@ engine:
 
 ai:
   active: "deepseek"
-  # deepseek-reasoner 的 reasoning 阶段极耗时（实测 reasoning_tok=5048 可触达 443s）
-  # 300s 曾观测到 BTC 首轮 443s 成功（httpx read_timeout 语义宽松），但无法依赖
-  # 600s = 在 reasoning 深度推理场景下留足裕度；稳态下仍以 240-320s 完成
-  timeout_sec: 600
+  # 全链路统一 deepseek-v4-flash 非思考模式（thinking=disabled）：
+  #   - reasoning_tokens 恒为 0 → 单次响应 P95 ~5-20s，timeout 120s 留足 6-12× 裕度
+  #   - deepseek-chat / deepseek-reasoner 2026-07-24 下线，预先对齐 V4
+  #   - 所有 AI 客户端在 api_kwargs 里显式传 extra_body={"thinking":{"type":"disabled"}}
+  timeout_sec: 120
   max_retries: 2
   cooldown_sec: 30
   max_history: 500
@@ -138,15 +139,15 @@ ai:
       api_base: "https://api.openai.com/v1"
       env_key: "OPENAI_API_KEY"
     deepseek:
-      model: "deepseek-reasoner"
+      model: "deepseek-v4-flash"
       api_base: "https://api.deepseek.com"
       env_key: "DEEPSEEK_API_KEY"
 
-  # D12 · 新闻智能 Agent（共享 DEEPSEEK_API_KEY，独立轻量 chat 模型）
+  # D12 · 新闻智能 Agent（共享 DEEPSEEK_API_KEY，与主 AI 同模型不同限流）
   # 负责 Layer 2 AI 结构化 + Layer 3c 滚动简报
-  # 与主 AI (reasoner) 并行运行，互不阻塞
+  # 与主 AI 并行运行，互不阻塞
   news_agent:
-    model: "deepseek-chat"
+    model: "deepseek-v4-flash"
     timeout_sec: 60
     max_retries: 2
     temperature: 0.2
@@ -212,7 +213,7 @@ server:
 # 输出固定 6 块 JSON + PromptDebug（供前端展示"本轮喂给 AI 的完整数据"）。
 market_action:
   enabled: true
-  auto_interval_sec: 600      # 10 分钟一次；注意 reasoner 单次 ~4-8 min，3 币交错即可
+  auto_interval_sec: 600      # 10 分钟一次；v4-flash 非思考单次 ~5-20s，3 币交错无压力
   max_history: 200            # per-coin 历史保留条数（~33h @ 10min）
   include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
 

@@ -99,7 +99,7 @@ def test_ok_status_with_real_content():
             ),
         ],
         based_on_events_count=8,
-        model_used="deepseek-chat",
+        model_used="deepseek-v4-flash",
     ))
     result = _call()
     assert result["ready"] is True
@@ -125,7 +125,7 @@ def test_history_returns_persisted_briefs_in_version_order():
         append_to_history(NewsBrief(
             version=i + 1, updated_at=now + i,
             tldr_cn=f"v{i+1}", based_on_events_count=i,
-            model_used="deepseek-chat",
+            model_used="deepseek-v4-flash",
         ))
     result = _call_history(limit=30, since_ts=None)
     assert result["ready"] is True
@@ -141,7 +141,7 @@ def test_history_since_ts_filters_newer_only():
     for i in range(5):
         append_to_history(NewsBrief(
             version=i + 1, updated_at=now + i * 100,
-            tldr_cn=f"v{i+1}", model_used="deepseek-chat",
+            tldr_cn=f"v{i+1}", model_used="deepseek-v4-flash",
         ))
     result = _call_history(limit=30, since_ts=now + 150)
     # now+0, now+100 不满足，应只剩 v3/v4/v5
@@ -156,7 +156,7 @@ def test_history_limit_keeps_latest():
     for i in range(10):
         append_to_history(NewsBrief(
             version=i + 1, updated_at=now + i,
-            tldr_cn=f"v{i+1}", model_used="deepseek-chat",
+            tldr_cn=f"v{i+1}", model_used="deepseek-v4-flash",
         ))
     result = _call_history(limit=3, since_ts=None)
     versions = [it["version"] for it in result["items"]]

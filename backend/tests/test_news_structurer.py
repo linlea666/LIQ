@@ -42,7 +42,7 @@ class MockAnalyzer:
             text = self.responses.pop(0)
         else:
             text = "[]"
-        return text, {"tokens": 100, "latency_ms": 50, "model": "deepseek-chat"}
+        return text, {"tokens": 100, "latency_ms": 50, "model": "deepseek-v4-flash"}
 
 
 def _raw(eid: str, title: str = "Test title", content: str = "Test content", tier_hint: str = "normal") -> RawNewsItem:
@@ -111,7 +111,7 @@ def test_structure_single_item_parses_correctly():
     assert sig.impact_score == 3
     assert sig.narrative_theme == "Fed_Rate_Policy"
     assert sig.processed_by == "ai"
-    assert sig.model_used == "deepseek-chat"
+    assert sig.model_used == "deepseek-v4-flash"
     assert len(sig.impact_on_assets) == 1
     assert sig.impact_on_assets[0].asset == "BTC"
 

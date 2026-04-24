@@ -24,7 +24,7 @@ def test_init_without_key_not_available(monkeypatch):
     """无 key 时 analyzer.available=False, call_chat 会 raise"""
     a = NewsChatAnalyzer(api_key="")
     assert a.available is False
-    assert a.model == "deepseek-chat"
+    assert a.model == "deepseek-v4-flash"
     # metrics 初始为 0
     m = a.snapshot_metrics()
     assert m["chat_calls"] == 0
@@ -34,7 +34,7 @@ def test_init_without_key_not_available(monkeypatch):
 def test_init_with_explicit_key():
     a = NewsChatAnalyzer(api_key="sk-test", api_base="https://api.deepseek.com")
     assert a.available is True
-    assert a.model == "deepseek-chat"
+    assert a.model == "deepseek-v4-flash"
 
 
 def test_call_chat_without_client_raises():
@@ -58,7 +58,7 @@ def test_call_chat_success_updates_metrics():
     assert meta["tokens"] == 150
     assert meta["prompt_tokens"] == 100
     assert meta["completion_tokens"] == 50
-    assert meta["model"] == "deepseek-chat"
+    assert meta["model"] == "deepseek-v4-flash"
 
     m = a.snapshot_metrics()
     assert m["chat_calls"] == 1

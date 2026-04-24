@@ -5,15 +5,15 @@
     logs/te_ai_interpret/
         2026-04-20/
             BTC.jsonl            # 结构化结果（小，每条 ~1KB）
-            BTC.thinking.jsonl   # DeepSeek Reasoner 的 reasoning_content（大，几 KB-几十 KB）
+            BTC.thinking.jsonl   # reasoning_content 归档（v4-flash 非思考模式下不再产出；R1/reasoner 时代的旧快照仍可存在）
             ETH.jsonl
             ETH.thinking.jsonl
 
 为什么分两个文件
 ----------------
 结构化结果用于事后统计（AI 准确率、AI vs 规则 A/B），读取频繁。
-reasoning_content 是"调试/教学资产"，只在排查争议信号时偶尔回看，
-单独存避免污染 fast path 读取。
+reasoning_content 是"调试/教学资产"，只在排查争议信号时偶尔回看，单独存避免污染 fast path 读取。
+v4-flash 非思考模式下 reasoning_content 恒为空，thinking 文件不会新增；保留方案以备未来重启思考模式。
 
 写入是同步的（按需触发频率低，不必异步队列）。
 """

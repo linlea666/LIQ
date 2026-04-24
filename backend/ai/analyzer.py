@@ -79,17 +79,18 @@ class AIAnalyzer:
             self._model, self._timeout,
         )
 
-        is_reasoner = "reasoner" in self._model.lower()
-
         raw_text = ""
         for attempt in range(1, self._max_retries + 1):
             try:
                 logger.info(
-                    "AI API call attempt %d/%d | coin=%s model=%s reasoner=%s",
-                    attempt, self._max_retries, snapshot.coin, self._model, is_reasoner,
+                    "AI API call attempt %d/%d | coin=%s model=%s thinking=disabled",
+                    attempt, self._max_retries, snapshot.coin, self._model,
                 )
                 t0 = time.time()
 
+                # 全链路统一 deepseek-v4-flash 非思考模式：
+                #   temperature=0.3 保留少量随机避免复读，thinking=disabled 确保
+                #   reasoning_tokens 恒为 0，响应稳定在 5-20s 区间。
                 api_kwargs: dict = {
                     "model": self._model,
                     "messages": [
@@ -97,9 +98,9 @@ class AIAnalyzer:
                         {"role": "user", "content": user_prompt},
                     ],
                     "timeout": self._timeout,
+                    "temperature": 0.3,
+                    "extra_body": {"thinking": {"type": "disabled"}},
                 }
-                if not is_reasoner:
-                    api_kwargs["temperature"] = 0.3
 
                 response = await self._client.chat.completions.create(**api_kwargs)
                 elapsed = time.time() - t0

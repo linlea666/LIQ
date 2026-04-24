@@ -1,4 +1,4 @@
-"""趋势衰竭模块 · AI 解读器（DeepSeek Reasoner 驱动）
+"""趋势衰竭模块 · AI 解读器（DeepSeek V4-Flash 非思考模式驱动）
 
 职责边界
 --------
@@ -18,11 +18,13 @@
 
 设计决策
 --------
-- 模型：**deepseek-reasoner**（R1 思维链，擅长多因子矛盾消解）
-- 输出：强制 JSON schema，解析失败降级为 error 兜底
-- 缓存：按"信号指纹"缓存 30 分钟
+- 模型：**deepseek-v4-flash**（非思考模式，thinking=disabled）
+  - reasoning_tokens 恒为 0，单次响应 P95 ~5-20s
+  - deepseek-reasoner 2026-07-24 下线，此处已提前对齐 V4
+- 输出：强制 JSON schema（response_format=json_object），解析失败降级为 error 兜底
+- 缓存：按"信号指纹"缓存 5 分钟（配合快变量桶化）
 - 客户端独立：不复用主 AIAnalyzer
-- 思考过程归档：reasoning_content 落盘单独 *.thinking.jsonl
+- reasoning 字段保留（为 R1 时代的兼容），当前恒为空串
 """
 
 from __future__ import annotations
@@ -45,8 +47,8 @@ logger = logging.getLogger(__name__)
 # ── 配置常量 ──────────────────────────────────────
 _CACHE_TTL_SEC = 5 * 60            # 同指纹缓存 5 分钟（配合桶化快变量指纹，支持分钟级刷新）
 _CACHE_MAX_ENTRIES = 200           # LRU 上限
-_MAX_REASONING_STORE_CHARS = 50000 # reasoning 单次入库最大长度
-_DEFAULT_TIMEOUT_SEC = 180         # Reasoner 思考可能慢
+_MAX_REASONING_STORE_CHARS = 50000 # reasoning 单次入库最大长度（v4-flash 非思考恒为空，保留为 R1 兼容）
+_DEFAULT_TIMEOUT_SEC = 60          # v4-flash 非思考模式 P95 ~5-20s，60s 留 3× 裕度
 
 
 @dataclass
@@ -1166,8 +1168,8 @@ class TEInterpreter:
         cfg = get_settings().ai
         self._api_key = cfg.api_key
         self._api_base = cfg.api_base
-        cfg_model = (cfg.model or "").lower()
-        self._model = cfg.model if "reasoner" in cfg_model else "deepseek-reasoner"
+        # 全链路统一：沿用 ai.model（默认 deepseek-v4-flash 非思考模式）
+        self._model = cfg.model or "deepseek-v4-flash"
         self._client: Optional[AsyncOpenAI] = None
         if self._api_key:
             kwargs: dict = {"api_key": self._api_key}
@@ -1343,6 +1345,8 @@ class TEInterpreter:
         tokens_out = 0
         r_tok = 0
         try:
+            # v4-flash 非思考模式：temperature=0.2 保留轻微随机以避免复读，
+            # response_format=json_object 强制合法 JSON，thinking=disabled 禁推理链。
             api_kwargs: dict = {
                 "model": self._model,
                 "messages": [
@@ -1350,11 +1354,10 @@ class TEInterpreter:
                     {"role": "user", "content": user},
                 ],
                 "timeout": _DEFAULT_TIMEOUT_SEC,
+                "temperature": 0.2,
+                "response_format": {"type": "json_object"},
+                "extra_body": {"thinking": {"type": "disabled"}},
             }
-            is_reasoner = "reasoner" in self._model.lower()
-            if not is_reasoner:
-                api_kwargs["temperature"] = 0.2
-                api_kwargs["response_format"] = {"type": "json_object"}
 
             extras_tag = ",".join([
                 "kl" if compact_kl else "",
@@ -1364,8 +1367,8 @@ class TEInterpreter:
                 "liq" if compact_liq else "",
             ]).strip(",").replace(",,", ",")
             logger.info(
-                "[TE-AI] call start | coin=%s fp=%s model=%s reasoner=%s extras=%s kl_sa=%s",
-                coin, fp, self._model, is_reasoner, extras_tag or "none",
+                "[TE-AI] call start | coin=%s fp=%s model=%s thinking=disabled extras=%s kl_sa=%s",
+                coin, fp, self._model, extras_tag or "none",
                 f"{len((compact_kl or {}).get('strong_resistances') or []) + len((compact_kl or {}).get('strong_supports') or [])}"
                 if compact_kl else "0",
             )

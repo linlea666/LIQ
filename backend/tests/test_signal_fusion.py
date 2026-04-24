@@ -105,7 +105,7 @@ def _mk_report(
         coin="BTC",
         ts=int(time.time()),
         price_at_analysis=72500.0,
-        model="deepseek-reasoner",
+        model="deepseek-v4-flash",
         bias=bias,  # type: ignore[arg-type]
         conviction=conviction,
         trading_plans=plans,

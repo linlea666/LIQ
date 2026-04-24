@@ -192,7 +192,7 @@ export default function AIQualityPage() {
             />
             <MetricCard
               title="平均推理 tokens"
-              hint="reasoner thinking tokens"
+              hint="thinking tokens（v4-flash 非思考模式下常为 0）"
               value={data.stats.avg_reasoning_tokens.toLocaleString()}
               tone="neutral"
             />

@@ -55,7 +55,7 @@ def _dump_report(report, *, slim: bool = False, include_prompt: bool = True) -> 
 
     - slim=True：同时去掉 prompt_debug 和 facts_snapshot（列表 API 默认）
     - include_prompt=False：保留 facts_snapshot 但剥离 prompt_debug
-    - 默认完整：保留全部，含 CoT（ai_reasoning_content 可能几千字）
+    - 默认完整：保留全部，含 CoT 字段（v4-flash 非思考模式下恒为空，保留兼容 R1 时代快照）
     """
     if report is None:
         return None

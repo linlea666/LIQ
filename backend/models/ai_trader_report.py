@@ -1,7 +1,7 @@
 """AI 交易员（AI Trader）完整输出模型 —— 双引擎中的 AI 引擎
 
 职责：
-  - AI 主模块（deepseek-reasoner）作为"独立资深交易员"产出的完整交易计划
+  - AI 主模块（deepseek-v4-flash 非思考模式）作为"独立资深交易员"产出的完整交易计划
   - 非简单的 Synthesizer 审计员，而是独立决策方
   - 和 ExecutionPlan 并列输入到融合层（Signal Fusion）
 
@@ -170,8 +170,8 @@ class AITraderReport(BaseModel):
     coin: str
     ts: int = 0                                  # 秒级
     price_at_analysis: float = 0.0
-    model: str = ""                              # "deepseek-reasoner"
-    thinking_tokens: int = 0                     # reasoner 的思考 token 数（成本追踪）
+    model: str = ""                              # "deepseek-v4-flash"
+    thinking_tokens: int = 0                     # 思考 token 数（v4-flash 非思考恒为 0，保留兼容 R1）
     latency_ms: int = 0
 
     # ── 总体判断 ──

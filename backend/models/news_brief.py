@@ -2,7 +2,7 @@
 
 职责：
   - AI 新闻模块维护的"24h 记忆"
-  - 供主 AI 模块（deepseek-reasoner）作为精简新闻上下文注入 prompt
+  - 供主 AI 模块（deepseek-v4-flash 非思考模式）作为精简新闻上下文注入 prompt
   - 避免把 24h 所有原始新闻丢进 prompt（token 爆炸）
 
 更新触发：
@@ -70,7 +70,7 @@ class NewsBrief(BaseModel):
     # ── 元信息 ──
     update_trigger: Literal["scheduled", "blackswan", "user"] = "scheduled"
     based_on_events_count: int = 0               # 本次 rewrite 基于的事件数
-    model_used: str = ""                         # "deepseek-chat"
+    model_used: str = ""                         # "deepseek-v4-flash"
     generation_cost_ms: int = 0
 
     # ── 历史对照（用于 AI 判断"新鲜度"） ──

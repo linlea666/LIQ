@@ -53,7 +53,7 @@ def _mk_record(coin="BTC", matrix_source="ai_json", plans_source="ai_json",
         math_agreement=math_agreement,
         latency_ms=latency_ms,
         reasoning_tokens=tokens,
-        model="deepseek-reasoner",
+        model="deepseek-v4-flash",
     )
 
 

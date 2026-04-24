@@ -402,7 +402,7 @@ export interface TrendExhaustionSignal {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TE · AI 深度解读（DeepSeek Reasoner 驱动）
+// TE · AI 深度解读（DeepSeek V4-Flash 非思考模式驱动）
 //   对齐后端 `models.te_interpretation.TEAIInterpretation`
 //   WebSocket 事件：`te_ai_result` / `te_ai_error`
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

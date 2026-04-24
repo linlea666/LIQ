@@ -1,4 +1,4 @@
-"""Market Action Arbiter · DeepSeek 调用器
+"""Market Action Arbiter · DeepSeek V4-Flash 调用器（非思考模式）
 
 职责：
   - 接 MarketActionFacts → 组装 prompt → 调用 DeepSeek → 解析 → MarketActionReport
@@ -6,6 +6,8 @@
   - 完整记录 PromptDebug（system/user/sections/tokens/latency/raw/parse 状态）
   - 解析失败时返回**降级报告**（range_bound + wait + data_quality=insufficient），
     让上层流程不中断，前端能看到 parse_error 和 raw_response 做复盘
+
+模型：deepseek-v4-flash，thinking=disabled（reasoning_tokens 恒为 0）。
 """
 
 from __future__ import annotations
@@ -148,13 +150,11 @@ class MarketActionArbiter:
                 previous_snapshot=prev_snapshot,
             )
 
-        is_reasoner = "reasoner" in self._model.lower()
-
         logger.info(
             "MAA analyze start | coin=%s | sys=%d chars | user=%d chars | "
-            "model=%s reasoner=%s timeout=%ds",
+            "model=%s thinking=disabled timeout=%ds",
             facts.coin, len(system_prompt), len(user_prompt),
-            self._model, is_reasoner, self._timeout,
+            self._model, self._timeout,
         )
 
         raw_text = ""
@@ -164,6 +164,7 @@ class MarketActionArbiter:
 
         for attempt in range(1, self._max_retries + 1):
             try:
+                # v4-flash 非思考模式：低温 + thinking=disabled，保证 JSON 稳定且响应快
                 api_kwargs: dict = {
                     "model": self._model,
                     "messages": [
@@ -171,14 +172,14 @@ class MarketActionArbiter:
                         {"role": "user", "content": user_prompt},
                     ],
                     "timeout": self._timeout,
+                    "temperature": 0.2,
+                    "extra_body": {"thinking": {"type": "disabled"}},
                 }
-                if not is_reasoner:
-                    api_kwargs["temperature"] = 0.2
 
                 resp = await self._client.chat.completions.create(**api_kwargs)
                 msg = resp.choices[0].message
                 raw_text = msg.content or ""
-                # deepseek-reasoner 把 Chain-of-Thought 放在 msg.reasoning_content
+                # v4-flash 非思考模式下 reasoning_content 恒为空；字段保留向后兼容 R1/reasoner
                 reasoning_text = getattr(msg, "reasoning_content", None) or ""
 
                 if resp.usage:

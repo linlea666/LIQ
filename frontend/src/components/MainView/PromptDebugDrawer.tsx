@@ -6,7 +6,7 @@
  * 展示本轮完整的 AI 交互现场，4 个 tab：
  *   1. System Prompt  —— 角色设定 / 6 步思考流程 / 场景词典 / 输出 schema
  *   2. User Prompt    —— 本轮喂给 AI 的 facts 渲染（§0 前情提要 / §1-§6）
- *   3. AI CoT         —— DeepSeek-reasoner 的 Chain-of-Thought 原文
+ *   3. AI CoT         —— 思考链原文（v4-flash 非思考模式下恒为空，保留兼容 R1/reasoner 旧快照）
  *   4. AI Raw Output  —— AI 返回的原始 JSON 文本
  *
  * 额外信息条：model / tokens / latency / parse_ok
@@ -154,7 +154,7 @@ export default function PromptDebugDrawer({ open, onClose, report }: Props) {
               </pre>
               {tab === "cot" && !text && (
                 <div className="px-4 pb-4 text-[11px] text-slate-500 italic">
-                  DeepSeek-reasoner 的思维链；非 reasoner 模型此字段为空。
+                  思考链原文；当前 v4-flash 运行在非思考模式，此字段常态为空（仅兼容旧快照）。
                 </div>
               )}
               {tab === "raw" && pd?.parse_error && (

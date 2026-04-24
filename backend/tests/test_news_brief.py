@@ -48,7 +48,7 @@ class MockAnalyzer:
         if self.raise_on_call and self._count == self.raise_on_call:
             raise RuntimeError("mock brief failure")
         text = self.responses.pop(0) if self.responses else "{}"
-        return text, {"tokens": 400, "latency_ms": 80, "model": "deepseek-chat"}
+        return text, {"tokens": 400, "latency_ms": 80, "model": "deepseek-v4-flash"}
 
 
 def _enriched(
@@ -401,7 +401,7 @@ def test_collect_news_context_injects_when_events_present():
         version=5, updated_at=int(time.time()), tldr_cn="有真实事件",
         sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=["x"])],
         based_on_events_count=4,
-        model_used="deepseek-chat",
+        model_used="deepseek-v4-flash",
     )
     set_current_brief(brief)
     try:
@@ -473,7 +473,7 @@ def test_d09_status_normal_content_is_ok():
             section_id="macro", section_title_cn="宏观", bullets=["FOMC 将于本周召开"],
         )],
         based_on_events_count=5,
-        model_used="deepseek-chat",
+        model_used="deepseek-v4-flash",
     )
     status, note = _derive_d09_status(brief, bullet_total=1)
     assert status == "ok"
@@ -487,7 +487,7 @@ def test_d09_status_unexpected_empty_is_warn():
         tldr_cn="",
         sections=_normalize_sections(None),
         based_on_events_count=10,
-        model_used="deepseek-chat",  # 非熔断也非 fallback
+        model_used="deepseek-v4-flash",  # 非熔断也非 fallback
     )
     status, note = _derive_d09_status(brief, bullet_total=0)
     assert status == "warn"
@@ -538,7 +538,7 @@ def test_ensure_bootstrap_does_not_pollute_history(tmp_path):
     # 但真正的 v1（非 bootstrap）写入时应落历史
     real = NewsBrief(
         version=2, updated_at=int(time.time()),
-        tldr_cn="真·简报", based_on_events_count=5, model_used="deepseek-chat",
+        tldr_cn="真·简报", based_on_events_count=5, model_used="deepseek-v4-flash",
     )
     append_to_history(real)
     hist = load_history()
@@ -553,12 +553,12 @@ def test_ensure_bootstrap_restores_from_history_on_restart():
     now = int(time.time())
     append_to_history(NewsBrief(
         version=10, updated_at=now - 300,
-        tldr_cn="旧版", based_on_events_count=3, model_used="deepseek-chat",
+        tldr_cn="旧版", based_on_events_count=3, model_used="deepseek-v4-flash",
     ))
     reset_current_brief()
     restored = ensure_bootstrap_brief()
     assert restored.version == 10
-    assert restored.model_used == "deepseek-chat"
+    assert restored.model_used == "deepseek-v4-flash"
     assert restored.tldr_cn == "旧版"
 
 
@@ -587,7 +587,7 @@ def test_history_append_and_load_roundtrip():
             tldr_cn=f"v{i+1}",
             sections=[NewsBriefSection(section_id="macro", section_title_cn="宏观", bullets=[f"bullet {i+1}"])],
             based_on_events_count=i,
-            model_used="deepseek-chat",
+            model_used="deepseek-v4-flash",
         ))
     hist = load_history()
     assert [b.version for b in hist] == [1, 2, 3]
@@ -599,7 +599,7 @@ def test_history_dedupe_same_version_and_ts():
     """同一 (version, updated_at) 不重复写入（防止重启反复 append）。"""
     from processors.news_brief import append_to_history, load_history
     ts = int(time.time())
-    b = NewsBrief(version=5, updated_at=ts, tldr_cn="x", model_used="deepseek-chat")
+    b = NewsBrief(version=5, updated_at=ts, tldr_cn="x", model_used="deepseek-v4-flash")
     append_to_history(b)
     append_to_history(b)
     append_to_history(b)
@@ -613,7 +613,7 @@ def test_history_truncates_to_max_capacity():
     for i in range(MAX_HISTORY + 20):
         append_to_history(NewsBrief(
             version=i + 1, updated_at=now + i,
-            tldr_cn=f"v{i+1}", model_used="deepseek-chat",
+            tldr_cn=f"v{i+1}", model_used="deepseek-v4-flash",
         ))
     hist = load_history()
     assert len(hist) == MAX_HISTORY
@@ -627,7 +627,7 @@ def test_load_history_with_limit():
     for i in range(10):
         append_to_history(NewsBrief(
             version=i + 1, updated_at=now + i,
-            tldr_cn=f"v{i+1}", model_used="deepseek-chat",
+            tldr_cn=f"v{i+1}", model_used="deepseek-v4-flash",
         ))
     recent3 = load_history(limit=3)
     assert [b.version for b in recent3] == [8, 9, 10]
@@ -639,7 +639,7 @@ def test_set_current_brief_auto_persists():
     reset_current_brief()
     b = NewsBrief(
         version=100, updated_at=int(time.time()),
-        tldr_cn="auto-persist test", model_used="deepseek-chat",
+        tldr_cn="auto-persist test", model_used="deepseek-v4-flash",
     )
     set_current_brief(b)
     hist = load_history()

@@ -749,7 +749,7 @@ async def list_te_reports(max_days: int = Query(30, ge=1, le=180)):
 async def te_ai_interpret_trigger(coin: str, force: bool = Query(False)):
     """P0-C · 触发趋势衰竭 AI 解读（fire-and-forget，对齐主 AI 架构）
 
-    HTTP 秒回 → 后台任务跑 DeepSeek Reasoner → 结果通过 WebSocket 事件
+    HTTP 秒回 → 后台任务跑 DeepSeek V4-Flash（非思考模式）→ 结果通过 WebSocket 事件
     `te_ai_result` 推送到订阅该币种的所有客户端；失败 push `te_ai_error`。
 
     响应 schema：

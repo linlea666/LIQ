@@ -1,7 +1,7 @@
 """新闻 AI 结构化 · Layer 2（D08 Layer 2）
 
 职责：
-  - 把 Layer 1 过滤后的 RawNewsItem 通过小模型 LLM（deepseek-chat）转成 MarketEventSignal
+  - 把 Layer 1 过滤后的 RawNewsItem 通过 LLM（deepseek-v4-flash 非思考模式）转成 MarketEventSignal
   - 采用"三层思维"prompt：翻译 → 解读 → 叙事
   - 支持批量（一次 prompt 处理多条，节省 token）
 
@@ -224,7 +224,7 @@ async def _run_single_batch(
         temperature=news_cfg.temperature,
         max_tokens=int(news_cfg.max_tokens_structurer),
     )
-    model_used = str(meta.get("model", "deepseek-chat"))
+    model_used = str(meta.get("model", "deepseek-v4-flash"))
     parsed = _parse_batch_response(raw, batch, tier_map, model_used=model_used)
     return parsed, meta
 

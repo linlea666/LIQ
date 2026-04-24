@@ -87,8 +87,8 @@ class AIProviderConfig:
 
 @dataclass(frozen=True)
 class AINewsAgentConfig:
-    """D12 · 新闻智能 Agent 配置（共享主 AI 的 key，独立轻量模型/预算）"""
-    model: str = "deepseek-chat"
+    """D12 · 新闻智能 Agent 配置（共享主 AI 的 key，可配置独立模型/预算）"""
+    model: str = "deepseek-v4-flash"
     timeout_sec: int = 60
     max_retries: int = 2
     temperature: float = 0.2
@@ -308,7 +308,7 @@ def _build_settings(raw: dict) -> Settings:
     if not news_api_key:
         news_api_key = api_key  # 沿用主 AI key（默认行为）
     news_agent_cfg = AINewsAgentConfig(
-        model=str(news_agent_raw.get("model") or "deepseek-chat"),
+        model=str(news_agent_raw.get("model") or "deepseek-v4-flash"),
         timeout_sec=int(news_agent_raw.get("timeout_sec") or 60),
         max_retries=int(news_agent_raw.get("max_retries") or 2),
         temperature=float(news_agent_raw.get("temperature") or 0.2),

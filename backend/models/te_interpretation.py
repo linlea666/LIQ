@@ -8,7 +8,7 @@
 2. **融合关键位**：通过 `key_levels_snapshot_v2` 把 S/A 级强位 + 牛熊分界 + 挤压带喂给 AI
 3. **五大卡片结构化**：趋势评估 + 关键位投射 + 矛盾消解 + 陷阱 + 触发条件
 4. **显式对齐度**：让用户看到 AI 是否推翻规则，避免盲从
-5. **思考链单独字段**：DeepSeek R1 的 reasoning_content 归档，前端默认折叠
+5. **思考链单独字段**：reasoning_content 归档（v4-flash 非思考模式恒为空，保留兼容 R1）
 
 本模型不直接入 WebSocket 广播（按需触发），触发后通过 WS `te_ai_result` 推送。
 """

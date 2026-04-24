@@ -183,8 +183,8 @@ _DEFAULT_DEFINITIONS: list[DecisionDefinition] = [
         id=D.D12_DS_DUAL_TASK,
         title="DeepSeek 双任务共享 API Key",
         owner_module="ai/analyzer.py",
-        success_criteria="deepseek-reasoner（主）+ deepseek-chat（新闻）各自记录调用",
-        metrics_schema=["reasoner_calls", "chat_calls", "reasoner_avg_ms", "chat_avg_ms"],
+        success_criteria="deepseek-v4-flash（主 + 新闻，均为非思考模式）各自记录调用",
+        metrics_schema=["main_ai_calls", "chat_calls", "main_ai_avg_ms", "chat_avg_ms"],
     ),
     DecisionDefinition(
         id=D.D13_NEWS_AGENT,

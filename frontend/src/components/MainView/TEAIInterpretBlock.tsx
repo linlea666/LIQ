@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * TrendExhaustion · AI 深度解读区块（DeepSeek Reasoner 驱动）
+ * TrendExhaustion · AI 深度解读区块（DeepSeek V4-Flash 非思考模式驱动）
  *
  * 定位：AI 是规则引擎的**审计员 + 再判断者**（不是翻译器）
  *   - 规则只是初步整理数据，AI 拿 sub 原始读数 + 关键位快照再判一遍
@@ -9,7 +9,7 @@
  *
  * 架构：fire-and-forget + WebSocket 推送
  *   1. 点击按钮 → POST /api/te/ai_interpret/{coin} → 秒回
- *   2. 后端跑 Reasoner（30-120s），完成后 push `te_ai_result`
+ *   2. 后端跑 V4-Flash 非思考模式（典型 5-20s），完成后 push `te_ai_result`
  *   3. 失败：后端 push `te_ai_error`，前端在 store 里标红
  */
 
@@ -335,7 +335,7 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
             🤖 AI 深度解读
           </span>
           <span className="text-[10px] text-slate-500">
-            DeepSeek Reasoner · 审计规则 + 关键位再判断
+            DeepSeek V4-Flash · 审计规则 + 关键位再判断
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -369,14 +369,14 @@ export default function TEAIInterpretBlock({ coin }: { coin: string }) {
       {loading && (
         <div className="mt-3 space-y-1.5">
           <div className="text-[12px] text-slate-400 animate-pulse">
-            正在审计规则 + 读取关键位 + 推理矛盾场景…（Reasoner 思考典型 30-90s）
+            正在审计规则 + 读取关键位 + 推理矛盾场景…（V4-Flash 非思考模式典型 5-20s）
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-500">
             <span>已等待 {waitedSec}s</span>
             <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden max-w-[240px]">
               <div
                 className="h-full bg-blue-500/60 transition-all"
-                style={{ width: `${Math.min(100, (waitedSec / 90) * 100)}%` }}
+                style={{ width: `${Math.min(100, (waitedSec / 20) * 100)}%` }}
               />
             </div>
             <span className="text-slate-600">WebSocket 推送到达即显示</span>

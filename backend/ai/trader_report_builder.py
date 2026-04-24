@@ -65,9 +65,9 @@ def build_ai_trader_report(
       analysis      — AIAnalyzer 的原始结构化产物
       snapshot      — 同批次的数据快照（供 FactorMatrix 用）
       math_plan     — 数学引擎输出（用于 G 板块共识评估）
-      model_name    — 实际使用的 AI 模型名（deepseek-reasoner / ...）
+      model_name    — 实际使用的 AI 模型名（deepseek-v4-flash / ...）
       latency_ms    — 本次 AI 调用耗时
-      thinking_tokens — reasoner 思考 token 数
+      thinking_tokens — 思考 token 数（v4-flash 非思考模式恒为 0，保留兼容 R1）
     """
     # P1.7：优先采纳 AI 产出的 matrix_json（若存在且合法）
     ai_json = getattr(analysis, "ai_matrix_json", None) or None

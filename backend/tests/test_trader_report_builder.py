@@ -272,14 +272,14 @@ class TestBuildFullReport:
         analysis = _mk_analysis(direction="bullish", confidence="high")
         math = _mk_math_plan(direction="bullish", action="long", score=75)
         report = build_ai_trader_report(
-            analysis, snap, math_plan=math, model_name="deepseek-reasoner",
+            analysis, snap, math_plan=math, model_name="deepseek-v4-flash",
             latency_ms=1800, thinking_tokens=500,
         )
         assert isinstance(report, AITraderReport)
         assert report.coin == "BTC"
         assert report.bias == "bullish"
         assert report.conviction >= 70
-        assert report.model == "deepseek-reasoner"
+        assert report.model == "deepseek-v4-flash"
         assert report.latency_ms == 1800
         assert report.thinking_tokens == 500
         assert report.factor_matrix is not None

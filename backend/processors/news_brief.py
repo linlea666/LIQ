@@ -141,7 +141,7 @@ async def generate_brief(
 
     # ── AI 调用 ──
     t0 = time.time()
-    model_used = "deepseek-chat"
+    model_used = "deepseek-v4-flash"
     try:
         raw_text, meta = await analyzer.call_chat(
             system_prompt=NEWS_BRIEF_SYSTEM,
@@ -265,7 +265,7 @@ def _parse_brief_response(
     base_events_count: int,
     trigger: str,
     *,
-    model_used: str = "deepseek-chat",
+    model_used: str = "deepseek-v4-flash",
     now: Optional[int] = None,
     coverage_start: Optional[int] = None,
 ) -> NewsBrief:

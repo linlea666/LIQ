@@ -1,7 +1,7 @@
 """D12 · 新闻智能 Agent · 轻量 chat 通道
 
 职责：
-  - 独立于主 AIAnalyzer 的轻量 chat 客户端（deepseek-chat）
+  - 独立于主 AIAnalyzer 的轻量 chat 客户端（deepseek-v4-flash 非思考模式）
   - 供 Layer 2 结构化（news_structurer）和 Layer 3c 简报（news_brief）复用
   - 与主 AIAnalyzer 共享 DEEPSEEK_API_KEY，但独立 model / timeout / 限流
 
@@ -118,6 +118,7 @@ class NewsChatAnalyzer:
                     temperature=temp,
                     max_tokens=max_tokens,
                     timeout=self._timeout,
+                    extra_body={"thinking": {"type": "disabled"}},
                 )
                 latency_ms = int((time.time() - t0) * 1000)
                 raw_text = (resp.choices[0].message.content or "") if resp.choices else ""

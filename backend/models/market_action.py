@@ -425,7 +425,7 @@ class PromptDebug(BaseModel):
     user: str                         # user prompt 原文（含 facts + 规则）
     chars: int                        # user prompt 字符数
     sections: list[PromptSection] = Field(default_factory=list)
-    model: str                        # e.g. "deepseek-reasoner"
+    model: str                        # e.g. "deepseek-v4-flash"
     tokens_prompt: Optional[int] = None
     tokens_completion: Optional[int] = None
     tokens_reasoning: Optional[int] = None
@@ -433,7 +433,8 @@ class PromptDebug(BaseModel):
     generated_at: int = 0             # 秒级 unix
     ai_raw_response: Optional[str] = None  # AI 返回的原始文本（调试/复盘用）
     ai_reasoning_content: Optional[str] = None
-    # deepseek-reasoner 的 Chain-of-Thought 原文；让前端可展开看"AI 是怎么想的"
+    # 历史字段：R1/reasoner 时代的 Chain-of-Thought 原文。v4-flash 非思考模式恒为空，
+    # 保留以兼容旧快照 + 未来重启思考模式时平滑接入。
     parse_ok: bool = True
     parse_error: Optional[str] = None
 
