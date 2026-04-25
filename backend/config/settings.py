@@ -160,6 +160,14 @@ class EmailNotificationConfig:
     cooldown_minutes: int = 45
     include_range: bool = True
     include_key_levels: bool = True
+    # ── MAA（Market Action Analyzer）邮件通道（独立于关键位/箱体）──
+    # 触发口径：accepted_scenario 切换 + bias∈{long,short} + conf≥min + 非 range_bound + dq=ok
+    # 强信号通道（confidence≥strong + continuity.stance=reversal）走独立 dedup_key + 短 cooldown
+    include_market_action: bool = True
+    market_action_min_confidence: int = 75
+    market_action_strong_confidence: int = 85
+    market_action_strong_cooldown_minutes: int = 20
+    market_action_coins: list[str] = field(default_factory=lambda: ["BTC", "ETH"])
 
 
 @dataclass(frozen=True)
@@ -354,6 +362,12 @@ def _build_settings(raw: dict) -> Settings:
 
     notif_raw = raw.get("notifications", {})
     email_raw = notif_raw.get("email", {})
+    # MAA 币种白名单：缺省时只发 BTC/ETH（与 dataclass 默认一致）
+    maa_coins_raw = email_raw.get("market_action_coins")
+    if isinstance(maa_coins_raw, list) and maa_coins_raw:
+        maa_coins = [str(c).upper() for c in maa_coins_raw]
+    else:
+        maa_coins = ["BTC", "ETH"]
     email_cfg = EmailNotificationConfig(
         enabled=email_raw.get("enabled", False),
         smtp_host=email_raw.get("smtp_host", "smtp.163.com"),
@@ -366,6 +380,14 @@ def _build_settings(raw: dict) -> Settings:
         cooldown_minutes=email_raw.get("cooldown_minutes", 45),
         include_range=email_raw.get("include_range", True),
         include_key_levels=email_raw.get("include_key_levels", True),
+        # MAA 通道（默认开 · 阈值与 dataclass 默认一致）
+        include_market_action=email_raw.get("include_market_action", True),
+        market_action_min_confidence=int(email_raw.get("market_action_min_confidence", 75) or 75),
+        market_action_strong_confidence=int(email_raw.get("market_action_strong_confidence", 85) or 85),
+        market_action_strong_cooldown_minutes=int(
+            email_raw.get("market_action_strong_cooldown_minutes", 20) or 20
+        ),
+        market_action_coins=maa_coins,
     )
     notifications_cfg = NotificationsConfig(email=email_cfg)
 

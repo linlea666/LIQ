@@ -25,8 +25,208 @@ _BJ_TZ = timezone(timedelta(hours=8))
 _warned_missing_config = False
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MAA 专属邮件模板（与现有关键位/箱体模板并列，避免互相影响）
+# ─────────────────────────────────────────────────────────────────────────────
+
+# scenario → 中文标签（覆盖 9 大场景；缺省回落英文）
+_MAA_SCENARIO_CN = {
+    "trend_continuation_up": "趋势延续 · 多头",
+    "trend_continuation_down": "趋势延续 · 空头",
+    "exhaustion_top": "顶部衰竭",
+    "exhaustion_bottom": "底部衰竭",
+    "trap_top": "假突破 · 多陷阱",
+    "trap_bottom": "假跌破 · 空陷阱",
+    "range_bound": "区间震荡",
+    "squeeze_pending": "挤压待发",
+    "fakeout_then_continue": "假突 + 继续主方向",
+}
+
+_MAA_PHASE_CN = {
+    "trend": "趋势",
+    "range": "区间",
+    "squeeze": "挤压",
+    "transition": "过渡",
+    "exhaustion": "衰竭",
+}
+
+_MAA_CONTINUITY_CN = {
+    "continuation": "延续",
+    "refinement": "修正",
+    "reversal": "反转",
+    "first_run": "首次",
+}
+
+
+def _maa_color_pack(event: "AlertEvent") -> tuple[str, str, str]:
+    """返回 (主色, 浅底色, 顶部 tag 文本)。
+
+    强信号（reversal + 高 conf）走紫/橙醒目色带，与日常普通通道区分；
+    普通通道走绿/红常规色带（与方向一致）。
+    """
+    is_long = event.direction == "long"
+    if event.maa_is_strong:
+        color = "#7c3aed" if is_long else "#ea580c"      # 紫 / 橙
+        bg_light = "#f5f3ff" if is_long else "#fff7ed"
+        tag = "⚡强信号"
+    else:
+        color = "#16a34a" if is_long else "#dc2626"      # 绿 / 红
+        bg_light = "#f0fdf4" if is_long else "#fef2f2"
+        tag = "方向更新"
+    return color, bg_light, tag
+
+
+def _build_maa_html(event: "AlertEvent") -> str:
+    """MAA（动作分析模块）专属卡片：
+    场景 / 阶段 / 立场 + 交易计划 + 失效条件 + 对立场景 + 推理摘要。
+    """
+    color, bg_light, tag_cn = _maa_color_pack(event)
+    is_long = event.direction == "long"
+    dir_cn = "做多" if is_long else "做空"
+
+    scenario_cn = _MAA_SCENARIO_CN.get(event.maa_scenario, event.maa_scenario or "—")
+    phase_cn = _MAA_PHASE_CN.get(event.maa_phase, event.maa_phase or "—")
+    continuity_cn = _MAA_CONTINUITY_CN.get(event.maa_continuity, event.maa_continuity or "")
+
+    price_str = f"${event.price:,.2f}"
+    entry_str = f"${event.entry:,.1f}" if event.entry else "—"
+    sl_str = f"${event.stop_loss:,.1f}" if event.stop_loss else "—"
+    rr_str = f"{event.rr_ratio:.1f}:1" if event.rr_ratio else "—"
+
+    # 多目标 TP（最多展示 3 个，避免邮件过长）
+    if event.maa_tp_targets:
+        tps = event.maa_tp_targets[:3]
+        tp_str = " / ".join(f"${t:,.1f}" for t in tps)
+    elif event.tp1:
+        tp_str = f"${event.tp1:,.1f}"
+    else:
+        tp_str = "—"
+
+    # 滤波修正提示（accepted ≠ ai_raw）
+    overridden_html = ""
+    if event.maa_stability_overridden:
+        overridden_html = (
+            '<span style="display:inline-block;margin-left:8px;padding:2px 8px;'
+            'border-radius:10px;background:#fef3c7;color:#92400e;'
+            'font-size:11px;font-weight:600;">已防抖</span>'
+        )
+
+    continuity_html = ""
+    if continuity_cn:
+        cont_color = "#7c3aed" if event.maa_continuity == "reversal" else "#475569"
+        cont_bg = "#f5f3ff" if event.maa_continuity == "reversal" else "#f1f5f9"
+        continuity_html = (
+            f'<span style="display:inline-block;margin-left:8px;padding:2px 10px;'
+            f'border-radius:10px;background:{cont_bg};color:{cont_color};'
+            f'font-size:11px;font-weight:600;">立场 · {continuity_cn}</span>'
+        )
+
+    invalidation_html = ""
+    if event.maa_invalidation_top:
+        invalidation_html = f"""
+    <tr><td style="padding:12px 16px;border-top:1px solid #e5e7eb;">
+        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">失效条件（命中即放弃）</div>
+        <div style="background:#fef2f2;border-left:3px solid #dc2626;padding:8px 12px;border-radius:4px;font-size:12px;color:#991b1b;line-height:1.5;">{event.maa_invalidation_top}</div>
+    </td></tr>"""
+
+    alternative_html = ""
+    if event.maa_alternative:
+        alternative_html = f"""
+    <tr><td style="padding:10px 16px;border-top:1px solid #f3f4f6;">
+        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">对立场景</div>
+        <div style="color:#374151;font-size:12px;line-height:1.5;">{event.maa_alternative}</div>
+    </td></tr>"""
+
+    reasoning_html = ""
+    if event.maa_reasoning_short:
+        reasoning_html = f"""
+    <tr><td style="padding:12px 16px;border-top:1px solid #e5e7eb;">
+        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">分析摘要</div>
+        <div style="color:#374151;font-size:13px;line-height:1.6;">{event.maa_reasoning_short}</div>
+    </td></tr>"""
+
+    ts_str = datetime.fromtimestamp(event.ts, tz=_BJ_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
+<tr><td align="center">
+<table width="460" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+
+    <!-- 顶部色带 -->
+    <tr><td style="background:{color};padding:20px 24px;">
+        <div style="color:#ffffff;font-size:12px;font-weight:500;letter-spacing:1px;text-transform:uppercase;opacity:0.85;">{event.coin} · 动作分析 · {tag_cn}</div>
+        <div style="color:#ffffff;font-size:24px;font-weight:700;margin-top:4px;">{dir_cn} · {scenario_cn}</div>
+        <div style="color:rgba(255,255,255,0.85);font-size:12px;margin-top:6px;">阶段 {phase_cn} · 置信度 {event.maa_confidence}{overridden_html}{continuity_html}</div>
+    </td></tr>
+
+    <!-- 当前价 -->
+    <tr><td style="background:{bg_light};padding:14px 24px;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;font-size:12px;">当前价</span>
+        <span style="float:right;font-size:18px;font-weight:700;color:#111827;">{price_str}</span>
+    </td></tr>
+
+    <!-- 交易计划 -->
+    <tr><td style="padding:0;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tr>
+            <td style="padding:12px 16px;color:#6b7280;font-size:13px;border-bottom:1px solid #f3f4f6;">入场参考</td>
+            <td style="padding:12px 16px;font-size:15px;font-weight:600;color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;">{entry_str}</td>
+        </tr>
+        <tr>
+            <td style="padding:12px 16px;color:#6b7280;font-size:13px;border-bottom:1px solid #f3f4f6;">止损</td>
+            <td style="padding:12px 16px;font-size:15px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">{sl_str}</td>
+        </tr>
+        <tr>
+            <td style="padding:12px 16px;color:#6b7280;font-size:13px;border-bottom:1px solid #f3f4f6;">止盈目标</td>
+            <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#16a34a;text-align:right;border-bottom:1px solid #f3f4f6;">{tp_str}</td>
+        </tr>
+        <tr>
+            <td style="padding:12px 16px;color:#6b7280;font-size:13px;border-bottom:1px solid #f3f4f6;">风报比</td>
+            <td style="padding:12px 16px;text-align:right;border-bottom:1px solid #f3f4f6;">
+                <span style="display:inline-block;background:{color};color:#fff;padding:3px 10px;border-radius:12px;font-size:13px;font-weight:600;">R:R {rr_str}</span>
+            </td>
+        </tr>
+    </table>
+    </td></tr>
+
+    {reasoning_html}
+    {invalidation_html}
+    {alternative_html}
+
+    <!-- 底部免责 -->
+    <tr><td style="background:#f9fafb;padding:12px 16px;border-top:1px solid #e5e7eb;">
+        <div style="color:#9ca3af;font-size:11px;text-align:center;">{ts_str} · 动作分析仅作参考，进场前需结合关键位与执行节奏</div>
+    </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body></html>"""
+
+
+def _build_maa_subject(event: "AlertEvent") -> str:
+    dir_cn = "做多" if event.direction == "long" else "做空"
+    scenario_cn = _MAA_SCENARIO_CN.get(event.maa_scenario, event.maa_scenario or "")
+    tag = "⚡强信号" if event.maa_is_strong else "方向更新"
+    scen_part = f" · {scenario_cn}" if scenario_cn else ""
+    return (
+        f"[动作{tag}·{dir_cn}] "
+        f"{event.coin} 置信度{event.maa_confidence}{scen_part} ${event.price:,.0f}"
+    )
+
+
 def _build_html(event: "AlertEvent") -> str:
-    """生成卡片式 HTML 邮件正文。"""
+    """生成卡片式 HTML 邮件正文。
+
+    分流：
+      - source="market_action" → 走 MAA 专属卡片（强信号紫橙色 / 普通蓝绿）
+      - 其他（key_level / range）→ 走原有交易参数表卡片
+    """
+    if event.source == "market_action":
+        return _build_maa_html(event)
+
     is_long = event.direction == "long"
     is_scalp = event.is_scalp
     # scalp 用更醒目的紫/橙色带，与 snipe/flip 区分
@@ -184,6 +384,9 @@ def _build_html(event: "AlertEvent") -> str:
 
 
 def _build_subject(event: "AlertEvent") -> str:
+    if event.source == "market_action":
+        return _build_maa_subject(event)
+
     dir_cn = "做多" if event.direction == "long" else "做空"
     if event.source == "key_level":
         source_cn = "日内⚡" if event.is_scalp else "关键位"

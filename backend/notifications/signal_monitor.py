@@ -1,4 +1,4 @@
-"""S 级信号监控：检测关键位 / 箱体模块的高优信号并触发通知。"""
+"""S 级信号监控：检测关键位 / 箱体 / MAA 三类高优信号并触发通知。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from models.key_level import KeyLevelSnapshotV2, KeyLevelV2
     from models.flow import RangeSignalData
+    from models.market_action import MarketActionReport
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,18 @@ _SCALP_ACTIONS = frozenset({"scalp_long", "scalp_short"})
 
 @dataclass
 class AlertEvent:
-    """一条待发送的通知事件。"""
+    """一条待发送的通知事件。
+
+    支持三类来源（source）：
+      - "key_level"：关键位 snipe/flip/scalp 信号
+      - "range"    ：箱体突破/反弹信号
+      - "market_action"：MAA（Market Action Analyzer）方向切换信号
+        · 普通通道：accepted_scenario 切换 + bias∈{long,short} + conf≥75
+        · 强信号通道：confidence ≥ 85 + continuity.stance="reversal"
+        MAA 专属字段以 maa_* 前缀标注，对其他来源默认空值不影响渲染。
+    """
     coin: str
-    source: str              # "key_level" | "range"
+    source: str              # "key_level" | "range" | "market_action"
     direction: str           # "long" | "short"
     signal_tier: str         # "S" | "A"
     price: float             # 当前价
@@ -47,6 +57,17 @@ class AlertEvent:
     # 从 RangeSignalData.ms_* 派生，用于邮件标题一眼看出"顺势/逆势"判断
     ms_direction: str = ""     # "bullish" / "bearish" / "ranging" / "transitioning"
     ms_alignment: str = ""     # "aligned" / "conflict" / "neutral" / "unknown"
+    # ── MAA 专属字段（source="market_action" 时填充）──
+    maa_scenario: str = ""              # accepted_scenario，9 选 1
+    maa_phase: str = ""                 # market_phase，5 选 1
+    maa_continuity: str = ""            # continuity.stance: continuation/refinement/reversal/first_run
+    maa_confidence: int = 0             # report.confidence
+    maa_is_strong: bool = False         # 强信号通道命中（confidence≥85 + reversal）
+    maa_invalidation_top: str = ""      # 第一条失效条件（截 120 字）
+    maa_alternative: str = ""           # 对立场景摘要（≤80 字）
+    maa_reasoning_short: str = ""       # analyst_reasoning 前 200 字
+    maa_stability_overridden: bool = False   # accepted ≠ ai_raw（被滤波修正过）
+    maa_tp_targets: list[float] = field(default_factory=list)  # take_profit_targets 多目标
 
     @property
     def is_scalp(self) -> bool:
@@ -54,6 +75,10 @@ class AlertEvent:
 
     @property
     def dedup_key(self) -> str:
+        if self.source == "market_action":
+            # 强信号走独立 dedup_key，避免被普通通道占用 cooldown 位
+            kind = "strong" if self.maa_is_strong else "normal"
+            return f"{self.coin}:maa:{kind}:{self.maa_scenario}:{self.direction}"
         if self.source == "key_level":
             # scalp 与 snipe/flip 即使关键位相同也应分别去重（时间尺度不同）
             kind = "scalp" if self.is_scalp else "kl"
@@ -202,3 +227,182 @@ def scan_alerts(
             ))
 
     return events
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAA（Market Action Analyzer）扫描器
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 与 stability_filter._CATEGORY 同义，但避免反向依赖：本模块只关心 long/short/range
+# 触发条件之一（accepted_scenario 切换）天然由 prev_scenario 比较实现。
+_MAA_SHORT_REASON_LIMIT = 200       # analyst_reasoning 截取长度
+_MAA_INVALIDATION_LIMIT = 120       # 单条 invalidation 截取长度
+_MAA_ALTERNATIVE_LIMIT = 80         # 对立场景摘要长度
+_MAA_RANGE_SCENARIO = "range_bound"  # 震荡场景 → 不发邮件（与"等待边界"语义一致）
+
+
+def _maa_truncate(text: str | None, limit: int) -> str:
+    if not text:
+        return ""
+    s = str(text).strip()
+    if len(s) <= limit:
+        return s
+    return s[: max(1, limit - 1)] + "…"
+
+
+def scan_maa_alerts(
+    coin: str,
+    *,
+    report: "MarketActionReport",
+    prev_scenario: str | None,
+    price: float,
+    coin_whitelist: list[str],
+    min_confidence: int,
+    strong_confidence: int,
+) -> list[AlertEvent]:
+    """从 MAA 报告生成待发送邮件事件。
+
+    判定流程（任一不满足直接返回 []，遵循"严进宽出"避免误报刷屏）：
+      1. 币种在白名单内（默认 BTC/ETH）
+      2. report.stability 存在（保证滤波层已跑过）
+      3. accepted_bias ∈ {"long", "short"}（neutral 不发）
+      4. accepted_scenario != "range_bound"（震荡市等边界，不发方向信号）
+      5. confidence ≥ min_confidence（默认 75）
+      6. report.data_quality == "ok"（partial/insufficient 不发，避免低质数据误导）
+      7. accepted_scenario 与 prev_scenario 不同（首次 / 切换才发，避免每 10 分钟发同一方向）
+
+    强信号通道（dedup_key 独立 + 短 cooldown）：
+      - confidence ≥ strong_confidence（默认 85）
+      - continuity.stance == "reversal"（明确翻转才算"强"）
+      两条同时满足 → maa_is_strong=True
+    """
+    if not report:
+        return []
+
+    coin_upper = coin.upper()
+    if coin_upper not in {c.upper() for c in (coin_whitelist or [])}:
+        return []
+
+    stab = report.stability
+    if stab is None:
+        # 滤波器未跑（旧报告兼容路径）→ 跳过，避免发未防抖信号
+        return []
+
+    bias = (stab.accepted_bias or "").lower()
+    if bias not in ("long", "short"):
+        return []
+
+    scenario = (stab.accepted_scenario or "").strip()
+    if not scenario or scenario == _MAA_RANGE_SCENARIO:
+        return []
+
+    confidence = int(report.confidence or 0)
+    if confidence < int(min_confidence):
+        return []
+
+    # 数据质量门禁：partial/insufficient 时数据本身可能误导，不发邮件
+    # （DataQuality Literal: "ok" | "partial" | "insufficient"）
+    # data_quality 是 report 顶层字段（AI 评估的总体质量）；
+    # FactsDataMeta 仅记录 provisional bars / sources，不含 quality 维度
+    dq = str(report.data_quality or "").lower()
+    if dq and dq != "ok":
+        return []
+
+    # 切换判定：与上一份 accepted_scenario 比较
+    prev = (prev_scenario or "").strip()
+    if prev and prev == scenario:
+        # 同一场景重复 → 不发（避免每 10 分钟发同一方向）
+        return []
+
+    continuity_stance = ""
+    if report.continuity:
+        continuity_stance = (report.continuity.stance or "").lower()
+
+    is_strong = (
+        confidence >= int(strong_confidence)
+        and continuity_stance == "reversal"
+    )
+
+    invalidation_top = ""
+    if report.invalidation_conditions:
+        invalidation_top = _maa_truncate(
+            report.invalidation_conditions[0], _MAA_INVALIDATION_LIMIT
+        )
+
+    alternative = ""
+    if report.alternative_scenario:
+        alt = report.alternative_scenario
+        parts = [
+            (alt.scenario or "").strip(),
+            (alt.trigger or "").strip(),
+        ]
+        joined = " · ".join(p for p in parts if p)
+        alternative = _maa_truncate(joined, _MAA_ALTERNATIVE_LIMIT)
+
+    reasoning_short = _maa_truncate(report.analyst_reasoning, _MAA_SHORT_REASON_LIMIT)
+
+    # 交易计划：entry / SL / 多目标 TP
+    tp_targets: list[float] = []
+    entry: float | None = None
+    sl: float | None = None
+    if report.trading_implications:
+        ti = report.trading_implications
+        if ti.entry_zone and len(ti.entry_zone) >= 1:
+            try:
+                entry = float(ti.entry_zone[0])
+            except (TypeError, ValueError):
+                entry = None
+        if ti.stop_loss_beyond is not None:
+            try:
+                sl = float(ti.stop_loss_beyond)
+            except (TypeError, ValueError):
+                sl = None
+        if ti.take_profit_targets:
+            for v in ti.take_profit_targets:
+                try:
+                    tp_targets.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+
+    tp1 = tp_targets[0] if tp_targets else None
+    rr = None
+    if entry is not None and sl is not None and tp1 is not None:
+        risk = abs(entry - sl)
+        reward = abs(tp1 - entry)
+        if risk > 1e-9:
+            rr = round(reward / risk, 2)
+
+    # 滤波是否实际修改了 AI 的 raw 输出（用于邮件正文标注"被防抖压住")
+    overridden = (
+        (stab.ai_raw_scenario or "") != (stab.accepted_scenario or "")
+        or (stab.ai_raw_bias or "") != (stab.accepted_bias or "")
+    )
+
+    # MAA 信号统一映射到 signal_tier（仅用于复用现有展示逻辑/日志）
+    # 强信号 → "S"，普通 → "A"。MAA 自身不归属 ABC 体系，这里只是占位。
+    tier = "S" if is_strong else "A"
+
+    return [AlertEvent(
+        coin=coin_upper,
+        source="market_action",
+        direction="long" if bias == "long" else "short",
+        signal_tier=tier,
+        price=price,
+        entry=entry,
+        stop_loss=sl,
+        tp1=tp1,
+        rr_ratio=rr,
+        reason=reasoning_short,
+        ms_direction="",
+        ms_alignment="",
+        maa_scenario=scenario,
+        maa_phase=(report.market_phase or ""),
+        maa_continuity=continuity_stance,
+        maa_confidence=confidence,
+        maa_is_strong=is_strong,
+        maa_invalidation_top=invalidation_top,
+        maa_alternative=alternative,
+        maa_reasoning_short=reasoning_short,
+        maa_stability_overridden=overridden,
+        maa_tp_targets=tp_targets,
+    )]

@@ -264,13 +264,18 @@ class Engine:
         self._load_kl_history()
         self._load_market_action_history()
 
-        # S 级信号邮件通知
+        # S 级信号邮件通知（关键位/箱体 共享同一冷却池）
         from notifications.signal_monitor import AlertDedup
         self._alert_dedup = AlertDedup(
             cooldown_seconds=self._settings.notifications.email.cooldown_minutes * 60,
         )
         self._notif_cfg = self._settings.notifications.email
         self._alert_config_warned = False
+        # MAA 强信号独立冷却池（默认 20 min < 普通 45 min）
+        # 与普通 dedup 隔离，避免"普通信号占位 → 强信号被压住"
+        self._maa_strong_dedup = AlertDedup(
+            cooldown_seconds=int(self._notif_cfg.market_action_strong_cooldown_minutes) * 60,
+        )
 
         # ── 滚仓模块 · RollService ──
         # 把 on_signal 回调接到 WS 推送：评估产生信号 → roll_signal event
@@ -2139,6 +2144,20 @@ class Engine:
                     get_maa_shadow_logger().record_report(ccy, report, price_now)
             except Exception:
                 logger.debug("[MAA-Shadow] record_report failed | coin=%s", ccy, exc_info=True)
+
+            # ── MAA 邮件提醒：方向切换或强信号触发时发送 ──
+            # 节律完全跟随 MAA 主任务（每 10 分钟），无需额外节流；
+            # 任何异常都不能影响 MAA 主流程，因此包在独立 try 里
+            try:
+                if (
+                    self._notif_cfg.enabled
+                    and getattr(self._notif_cfg, "include_market_action", False)
+                ):
+                    await self._check_maa_alerts(
+                        ccy, report=report, previous_report=previous_report,
+                    )
+            except Exception:
+                logger.debug("MAA alert check failed | coin=%s", ccy, exc_info=True)
         except Exception as e:
             logger.error(
                 "MAA background task failed | coin=%s | %s: %s",
@@ -2146,6 +2165,104 @@ class Engine:
             )
         finally:
             self._maa_running.discard(ccy)
+
+    async def _check_maa_alerts(
+        self,
+        ccy: str,
+        *,
+        report,
+        previous_report,
+    ) -> None:
+        """MAA 信号邮件入口（独立于 _check_alerts，挂在 MAA 任务尾部）。
+
+        与 _check_alerts 的差异：
+          1) 触发时机不是每 5 秒 ticker 刷新，而是 MAA 完成（≈每 10 分钟），
+             所以无需为防刷屏增加任何额外节流，直接复用 AlertDedup
+             即可（普通通道 45 min / 强信号 20 min）。
+          2) 复用同一个 SMTP 闸门 + 配置缺失提示静默策略，避免重复打印。
+          3) 强信号 dedup_key 中包含 "strong" 后缀，且走 `_maa_strong_dedup`
+             这个独立冷却池，避免"普通信号占位 → 同币强信号被压住"。
+        """
+        try:
+            # 复用关键位通道的 SMTP 完整性闸门（同一份 _notif_cfg / _alert_config_warned）
+            if not self._notif_cfg.smtp_user or not self._notif_cfg.to:
+                if not self._alert_config_warned:
+                    logger.warning(
+                        "[alert] email config incomplete, scanning disabled | "
+                        "smtp_user=%s recipients=%d | 修复 .env 后重启后端生效",
+                        "<empty>" if not self._notif_cfg.smtp_user else "<set>",
+                        len(self._notif_cfg.to or []),
+                    )
+                    self._alert_config_warned = True
+                return
+
+            from notifications.signal_monitor import scan_maa_alerts
+            from notifications.email_alert import send_alert_email
+
+            state = self._states.get(ccy)
+            if state is None:
+                return
+            price = float(state.ticker.last) if state.ticker and state.ticker.last else 0.0
+            if price <= 0:
+                return
+
+            prev_scenario = None
+            if previous_report is not None:
+                if previous_report.stability is not None:
+                    prev_scenario = previous_report.stability.accepted_scenario
+                else:
+                    # 老快照可能没 stability（升级前的 facts），回落到 raw scenario
+                    prev_scenario = getattr(previous_report, "scenario", None)
+
+            events = scan_maa_alerts(
+                ccy,
+                report=report,
+                prev_scenario=prev_scenario,
+                price=price,
+                coin_whitelist=list(self._notif_cfg.market_action_coins or []),
+                min_confidence=int(self._notif_cfg.market_action_min_confidence),
+                strong_confidence=int(self._notif_cfg.market_action_strong_confidence),
+            )
+
+            if not events:
+                return
+
+            sent = 0
+            cooled = 0
+            failed = 0
+            for event in events:
+                # 强信号走独立 dedup pool，避免被普通通道占位拖累
+                dedup = (
+                    self._maa_strong_dedup
+                    if event.maa_is_strong else self._alert_dedup
+                )
+                if not dedup.should_send(event.dedup_key):
+                    cooled += 1
+                    continue
+                ok = await send_alert_email(event, self._notif_cfg)
+                if ok:
+                    dedup.mark_sent(event.dedup_key)
+                    sent += 1
+                else:
+                    failed += 1
+
+            logger.info(
+                "[maa-alert] coin=%s scenario=%s strong=%s matched=%d "
+                "cooled=%d sent=%d failed=%d prev=%s",
+                ccy,
+                events[0].maa_scenario if events else "—",
+                bool(events and events[0].maa_is_strong),
+                len(events),
+                cooled,
+                sent,
+                failed,
+                prev_scenario or "—",
+            )
+
+            self._alert_dedup.cleanup()
+            self._maa_strong_dedup.cleanup()
+        except Exception:
+            logger.debug("_check_maa_alerts error | coin=%s", ccy, exc_info=True)
 
     async def _auto_market_action_loop(self, interval_sec: int) -> None:
         """按 interval_sec 节律自动触发每个币种的 MAA 分析（交错启动）。
