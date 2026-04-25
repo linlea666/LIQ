@@ -48,6 +48,13 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 
 10. **未收盘 bar 按 provisional 处理**：当 facts 显示 `latest_bar_closed=false`、`bar_closed=false` 或 `data_meta.has_provisional_bars=true` 时，该 bar 内的强信号（如 footprint stacked imbalance / CVD 30m 拐点 / 1h K 线衰竭）**只能作为 weak/neutral 参考**，不允许据此把主方向从上一份反转或要求 bias 切换；如要据 provisional bar 触发新方向，必须在 invalidation_conditions 里写"等待该 bar 收盘后再确认"。
 
+11. **前情触发器自检（与规则 8 时序连续性 + §0 前情提要配合）**：当 §0 提供了上一份的 `invalidation_conditions[]`、`alternative_scenario.trigger` 或交易计划关键价位时，你必须在 `analyst_reasoning` 的**第一段**用 1-2 句明确回答两件事：(a) 上版**失效条件清单**是否已被本次 facts 触发？逐条标 `已触发 / 未触发 / 无法严格判定（按 X 近似）`；(b) 上版**对立场景 trigger** 是否已被触发？标同上。**判定规则**：
+   - 任一**明确已触发** → `continuity.stance` **必须**填 `reversal` 并把 scenario 切到对应方向；
+   - 全部**明确未触发** → 走 continuation/refinement，不强行 reversal；
+   - **仅 provisional bar 上看似触发**（latest_bar_closed=false / bar_closed=false） → 视为"未严格触发，等收盘后复查"，**不允许据此 reversal**（沿用规则 10）；
+   - **"持续 N 分钟"等无法精确验证的条件** → 写"按本轮跑时仍 X 近似"，不允许据近似拍 reversal。
+   后端 stability filter 在数值层做防抖，本规则在**语义层**做触发器命中判定，两层叠加才能彻底消除"金鱼式重判"。
+
 ━━━━━━━━━━ 你必须按此路径思考（6 步） ━━━━━━━━━━
 
 **Step 1 · 扫描 & 标记方向性**
@@ -60,7 +67,7 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
 **字段定义速查（P0 派生字段 + Absorption · 均基于真实采样，无推算）**：
  - `price.price_kind`：当前价格基准（`last`=交易所成交价 / `mark`=标记价 / `index`=指数价，当前固定为 `last`）
  - `price.latest_bar_closed`：`recent_bars_1h` 最后一根 1h K 线是否已收盘；为 `false` 时该 bar 内的所有派生信号按 provisional 处理
- - `oi.venue_split`：仅纳入 Binance / OKX 两家头部（覆盖 ~80% 市场）；用来识别"某个 venue 在带方向"的情况，关注 `change_1h_pct` 是否两家方向一致
+ - `oi.venue_split`：仅纳入 Binance / OKX 两家衍生品 OI 头部（Binance 全市场最大，OKX 亚洲头部）；两家合计占全市场 OI 仅 20-30%（total 含 Bybit/CME/Bitget 等），**关注 `change_1h_pct` 是否两家同向并与全市场 OI 1h 一致**——一致 = 强证据"两家在带方向"，背离 = 信号矛盾降权
  - `cvd_*.latest_bar_closed`：`recent_delta_5m` 最后一根 5m bar 是否已收盘；同 price 一样未收盘按 provisional
  - `liq_map_clusters.top3_above` / `top3_below`：上下方按 total_usd 降序的 top 3 簇（已成交的杠杆持仓），不仅看最近一个簇
  - `liq_map_clusters.vacuum_zones`：清算真空区（无簇集中的价格通道，扫单后易快速触达，可作为目标区参考）
@@ -309,9 +316,44 @@ def build_user_prompt(
                 f"- 上一份对立场景：`{alt.get('scenario')}`（"
                 f"{alt.get('probability_pct', '—')}% · trigger：{alt.get('trigger', '—')}）"
             )
+
+        # ── 上版交易计划关键价位（用于本次验证是否被触达）──
+        prev_entry = ti.get("entry_zone")
+        prev_stop = ti.get("stop_loss_beyond")
+        prev_targets = ti.get("take_profit_targets") or []
+        plan_parts: list[str] = []
+        if isinstance(prev_entry, list) and len(prev_entry) >= 2 and prev_entry[0] is not None:
+            plan_parts.append(f"入场 ${_fmt(prev_entry[0])}–${_fmt(prev_entry[1])}")
+        if prev_stop is not None:
+            plan_parts.append(f"止损越过 ${_fmt(prev_stop)}")
+        if prev_targets:
+            tp_str = " / ".join(f"${_fmt(t)}" for t in prev_targets[:3] if t is not None)
+            if tp_str:
+                plan_parts.append(f"目标 {tp_str}")
+        if plan_parts:
+            lines.append(f"- 上一份交易计划关键价位：{' · '.join(plan_parts)}")
+
+        # ── 上版失效条件（关键：本次必须逐条验证是否已触发）──
+        prev_inval = prev_snapshot.get("invalidation_conditions") or []
+        if prev_inval:
+            lines.append("- 上一份失效条件清单（**本次必须逐条验证是否已触发**）：")
+            for i, cond in enumerate(prev_inval[:4], 1):
+                cond_str = str(cond).strip()
+                if len(cond_str) > 180:
+                    cond_str = cond_str[:180] + "…"
+                lines.append(f"  {i}. {cond_str}")
+
         lines.append(
-            "\n**你需要**：在本次结论的 `continuity` 字段里诚实回答——"
-            "本次是**延续**上版（主方向相同且证据更强/同级）、**细节修正**（主方向相同但强度/阶段/置信度调整）、还是**方向反转**（scenario 大类切换，例如 exhaustion_top → trend_continuation_up）。"
+            "\n**你需要在 `analyst_reasoning` 开头先用 1-2 句明确做「前情触发器自检」**："
+            "\n（a）上一份**失效条件清单**是否已被本次 facts 触发？逐条标 `已触发 / 未触发 / 无法严格判定（按 X 近似）`；"
+            "\n（b）上一份**对立场景 trigger** 是否已被触发？标同上。"
+            "\n判定规则：**任一明确已触发** → `continuity.stance` **必须**填 `reversal` 并把 scenario 切到对应方向；"
+            "**全部明确未触发** → 走 continuation/refinement；"
+            "**仅在 provisional bar 上看似触发**（latest_bar_closed=false / bar_closed=false）→ 视为「未严格触发，等收盘后复查」，**不允许据此 reversal**；"
+            "**「持续 N 分钟」等无法精确验证的条件** → 写「按本轮跑时仍 X 近似」，不允许据近似拍 reversal。"
+            "\n然后在本次 `continuity` 字段里诚实回答——本次是**延续**上版（主方向相同且证据更强/同级）、"
+            "**细节修正**（主方向相同但强度/阶段/置信度调整）、还是**方向反转**"
+            "（scenario 大类切换，例如 exhaustion_top → trend_continuation_up）。"
             "若反事实测试表明上版主假设已被新数据证伪，请**诚实给出 reversal**，不要因为一致性而硬延续。"
         )
 
@@ -365,9 +407,16 @@ def build_user_prompt(
     # ── 头部 venue 拆分（Binance / OKX）──
     venue_split = oi.get("venue_split") or []
     if venue_split:
+        sum_two_usd = sum(float(v.get("oi_usd") or 0) for v in venue_split)
+        share_vals = [float(v.get("share_pct") or 0) for v in venue_split if v.get("share_pct") is not None]
+        sum_share = sum(share_vals) if share_vals else 0.0
+        rest_share = max(0.0, 100.0 - sum_share) if sum_share > 0 else None
         lines.append(
-            "- venue 拆分（仅 Binance / OKX 两家头部 ~80% 市场；关注两家 1h 是否同向，"
-            "若一家狂升一家平淡 = **某 venue 在带方向**，是 OI 信号的额外语境）："
+            "- venue 拆分（仅 Binance / OKX · Binance 为衍生品 OI 全市场最大，OKX 为亚洲头部）："
+            "**关注两家 `change_1h_pct` 是否同向**——两家同向且与全市场 OI 1h 一致 → "
+            "强证据「两家在带方向」；若两家方向与全市场 OI 1h 背离 → 信号矛盾，降权处理。"
+            "**两家占比天然偏小（合计仅 20-30%）是因 total_oi 含 Bybit/CME/Bitget 等全市场口径，"
+            "不代表两家信号弱；权重看的是 1h 变动方向而非占比绝对值**。"
         )
         for v in venue_split:
             share = v.get("share_pct")
@@ -376,6 +425,15 @@ def build_user_prompt(
                 f"| 占比={_fmt(share, nd=1)}% "
                 f"| 1h={_fmt_pct(v.get('change_1h_pct'))} "
                 f"| 24h={_fmt_pct(v.get('change_24h_pct'))}"
+            )
+        if sum_share > 0:
+            rest_str = (
+                f"，其余 {rest_share:.1f}% 来自 Bybit/CME/Bitget/Gate/HTX 等其他交易所"
+                if rest_share is not None and rest_share > 0
+                else ""
+            )
+            lines.append(
+                f"  - 两家合计 OI=${_fmt(sum_two_usd)}，**占全市场 {sum_share:.1f}%**{rest_str}"
             )
     else:
         lines.append("- venue 拆分：暂无（Binance / OKX 排名数据未获取到）")
@@ -484,10 +542,15 @@ def build_user_prompt(
         f"${_fmt(lc.get('above_nearest_price'))} "
         f"（距离 {_fmt_pct(lc.get('above_distance_pct'))}）"
     )
+    # below_distance_pct 在 facts 里以"绝对值"存（abs(current - below_price)/current），
+    # 但语义上"下方"距离应显示为负号，与下方 top3 行（`-X.XX%`）口径保持一致，
+    # 避免出现"下方簇 +0.38%"这种方向语义混淆
+    _below_dist_abs = lc.get("below_distance_pct")
+    _below_dist_signed = -_below_dist_abs if _below_dist_abs is not None else None
     lines.append(
         f"- 下方簇（聚合）：${_fmt(lc.get('below_cluster_usd'))} @ "
         f"${_fmt(lc.get('below_nearest_price'))} "
-        f"（距离 {_fmt_pct(lc.get('below_distance_pct'))}）"
+        f"（距离 {_fmt_pct(_below_dist_signed)}）"
     )
     # 纯数值对比（不再预设 short_squeeze_fuel / long_squeeze_fuel 立场标签）：
     _above = lc.get("above_cluster_usd") or 0
