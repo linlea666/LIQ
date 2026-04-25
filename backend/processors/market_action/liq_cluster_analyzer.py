@@ -2,14 +2,20 @@
 
 数据源优先级：
   1. LiquidationMap.clusters_above / clusters_below（processors/liquidation.py 已预聚合）
+     · 还会附带 vacuum_zones，用于"路径化"扫单分析
   2. HeatmapData.data（list[HeatmapDataPoint(price, value, ts)]）
+     · 仅作降级路径，无 top3/vacuum 输出（heatmap 是逐价位序列，无簇语义）
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from models.market_action import LiqClusterSnapshot
+from models.market_action import (
+    LiqClusterEntry,
+    LiqClusterSnapshot,
+    VacuumZoneEntry,
+)
 
 
 def _point_price_value(lvl) -> Optional[tuple[float, float]]:
@@ -40,7 +46,12 @@ def _build_from_preaggregated(
     liq_map,
     current_price: float,
 ) -> Optional[LiqClusterSnapshot]:
-    """优先走 LiquidationMap.clusters_above / clusters_below（字段结构更清晰）。"""
+    """优先走 LiquidationMap.clusters_above / clusters_below（字段结构更清晰）。
+
+    扩展输出：
+      - top3_above / top3_below：按 total_usd 降序，距离百分比相对当前价折算
+      - vacuum_zones：直接采用 LiquidationMap.vacuum_zones（processors/liquidation.py 已识别）
+    """
     if liq_map is None:
         return None
     clusters_above = getattr(liq_map, "clusters_above", None) or []
@@ -64,6 +75,54 @@ def _build_from_preaggregated(
         snap.below_distance_pct = round(
             (current_price - nearest_b.price_center) / current_price * 100, 3
         )
+
+    # ── top3 by total_usd（同侧降序）──
+    def _to_entry(cluster, side: str) -> Optional[LiqClusterEntry]:
+        try:
+            price = float(cluster.price_center)
+            total = float(cluster.total_usd)
+            if total <= 0:
+                return None
+            if side == "above":
+                dist = (price - current_price) / current_price * 100
+            else:
+                dist = (current_price - price) / current_price * 100
+            return LiqClusterEntry(
+                price=price,
+                total_usd=round(total, 2),
+                distance_pct=round(dist, 3),
+            )
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    top_a = [_to_entry(c, "above") for c in clusters_above]
+    top_a = [e for e in top_a if e is not None]
+    top_a.sort(key=lambda e: e.total_usd, reverse=True)
+    snap.top3_above = top_a[:3]
+
+    top_b = [_to_entry(c, "below") for c in clusters_below]
+    top_b = [e for e in top_b if e is not None]
+    top_b.sort(key=lambda e: e.total_usd, reverse=True)
+    snap.top3_below = top_b[:3]
+
+    # ── vacuum_zones（直接来自 LiquidationMap，已由 processors/liquidation.py 识别）──
+    vacs_raw = getattr(liq_map, "vacuum_zones", None) or []
+    vacs: list[VacuumZoneEntry] = []
+    for v in vacs_raw:
+        try:
+            pf = float(getattr(v, "price_from", 0))
+            pt = float(getattr(v, "price_to", 0))
+            mp = float(getattr(v, "midpoint", 0) or ((pf + pt) / 2 if pf and pt else 0))
+            note = str(getattr(v, "note", "") or "")
+            if pf <= 0 or pt <= 0:
+                continue
+            vacs.append(VacuumZoneEntry(
+                price_from=pf, price_to=pt, midpoint=mp, note=note,
+            ))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    snap.vacuum_zones = vacs
+
     return snap
 
 

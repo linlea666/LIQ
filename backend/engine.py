@@ -2099,14 +2099,25 @@ class Engine:
                 report.continuity.stance
                 if report.continuity is not None else "n/a"
             )
+            stab_str = "n/a"
+            if report.stability is not None:
+                s = report.stability
+                if s.accepted_scenario == s.ai_raw_scenario:
+                    stab_str = f"pass(stable_for_runs={s.stable_for_runs})"
+                else:
+                    stab_str = (
+                        f"override({s.override_reason or 'unknown'}) "
+                        f"raw={s.ai_raw_scenario}→accepted={s.accepted_scenario} "
+                        f"pending={s.pending_switch_to}/{s.pending_runs}"
+                    )
             logger.info(
                 "MAA ok | coin=%s | %.1fs | scenario=%s phase=%s conf=%d "
-                "bias=%s dq=%s evidence=%d continuity=%s parse_ok=%s",
+                "bias=%s dq=%s evidence=%d continuity=%s stability=%s parse_ok=%s",
                 ccy, elapsed, report.scenario, report.market_phase,
                 report.confidence,
                 report.trading_implications.bias,
                 report.data_quality, len(report.evidence_breakdown),
-                cont_stance,
+                cont_stance, stab_str,
                 bool(report.prompt_debug and report.prompt_debug.parse_ok),
             )
 

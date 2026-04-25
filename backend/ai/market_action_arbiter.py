@@ -32,8 +32,10 @@ from models.market_action import (
     MarketActionFacts,
     MarketActionReport,
     PromptDebug,
+    StabilityVerdict,
     TradingImplications,
 )
+from processors.market_action.stability_filter import apply_stability_filter
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +259,10 @@ class MarketActionArbiter:
             )
 
         try:
-            report = _payload_to_report(payload, facts, prompt_debug, prev_snapshot)
+            report = _payload_to_report(
+                payload, facts, prompt_debug, prev_snapshot,
+                previous_report=previous_report,
+            )
             return report
         except Exception as e:
             logger.warning(
@@ -415,6 +420,8 @@ def _payload_to_report(
     facts: MarketActionFacts,
     prompt_debug: PromptDebug,
     previous_snapshot: Optional[dict] = None,
+    *,
+    previous_report: Optional[MarketActionReport] = None,
 ) -> MarketActionReport:
     evidence_raw = payload.get("evidence_breakdown") or []
     evidence: list[EvidenceItem] = []
@@ -531,12 +538,19 @@ def _payload_to_report(
             note=note or f"本次相对上一份判为 {stance}。",
         )
 
-    return MarketActionReport(
+    ai_raw_scenario = _coerce_scenario(payload.get("scenario"))
+    ai_raw_phase = _coerce_phase(payload.get("market_phase"))
+    ai_raw_confidence = _coerce_int_confidence(payload.get("confidence"))
+    ai_raw_dq = dq if dq in ("ok", "partial", "insufficient") else facts.data_quality
+    ai_raw_ts = int(time.time())
+
+    # ── 先组装 AI 原始 report，再用 stability_filter 出裁决 ──
+    ai_raw_report = MarketActionReport(
         coin=facts.coin,
-        timestamp=int(time.time()),
+        timestamp=ai_raw_ts,
         market_conclusion=conclusion,
-        scenario=_coerce_scenario(payload.get("scenario")),
-        market_phase=_coerce_phase(payload.get("market_phase")),
+        scenario=ai_raw_scenario,
+        market_phase=ai_raw_phase,
         analyst_reasoning=analyst_reasoning,
         confidence_rationale=confidence_rationale,
         alternative_scenario=alternative_scenario,
@@ -544,11 +558,76 @@ def _payload_to_report(
         evidence_breakdown=evidence,
         trading_implications=trading_impl,
         invalidation_conditions=invalidations,
-        confidence=_coerce_int_confidence(payload.get("confidence")),
-        data_quality=dq if dq in ("ok", "partial", "insufficient") else facts.data_quality,
+        confidence=ai_raw_confidence,
+        data_quality=ai_raw_dq,
         stale_minutes=0,
         facts_snapshot=facts,
         prompt_debug=prompt_debug,
+        stability=None,
+    )
+
+    # 兜底：若 previous_report 是降级报告（confidence=0），状态机视为无前情，
+    # 避免被一份不可信报告卡住后续切换。
+    prev_for_stability: Optional[MarketActionReport] = previous_report
+    if previous_report is not None and (previous_report.confidence or 0) == 0:
+        prev_for_stability = None
+
+    try:
+        verdict: StabilityVerdict = apply_stability_filter(
+            facts=facts,
+            ai_raw_report=ai_raw_report,
+            previous_report=prev_for_stability,
+        )
+    except Exception as e:
+        logger.warning(
+            "MAA stability_filter failed | coin=%s | err=%s",
+            facts.coin, e,
+        )
+        verdict = None  # type: ignore[assignment]
+
+    # 默认全采用 AI 原始输出
+    final_scenario = ai_raw_scenario
+    final_phase = ai_raw_phase
+    final_trading = trading_impl
+
+    # 若 stability 裁决"压住"了方向（accepted != raw），则方向相关字段回填上一轮 accepted
+    if verdict is not None and verdict.accepted_scenario != ai_raw_scenario:
+        final_scenario = verdict.accepted_scenario  # type: ignore[assignment]
+        # 锁住 bias，但保留 AI 本轮的 entry_zone/SL/TP/notes/intuition（这些是"如果方向成立的话该怎么打"）
+        final_trading = TradingImplications(
+            bias=verdict.accepted_bias,  # type: ignore[arg-type]
+            entry_zone=trading_impl.entry_zone,
+            stop_loss_beyond=trading_impl.stop_loss_beyond,
+            take_profit_targets=trading_impl.take_profit_targets,
+            notes=(
+                f"[stability:{verdict.override_reason or 'override'}] "
+                + (trading_impl.notes or "")
+            )[:300] or None,
+            trader_intuition=trading_impl.trader_intuition,
+        )
+        # market_phase：保持上一轮 *可信* 报告的 phase（fallback 不算可信，沿用 AI 输出）
+        if prev_for_stability is not None:
+            final_phase = prev_for_stability.market_phase
+
+    return MarketActionReport(
+        coin=facts.coin,
+        timestamp=ai_raw_ts,
+        market_conclusion=conclusion,
+        scenario=final_scenario,
+        market_phase=final_phase,
+        analyst_reasoning=analyst_reasoning,
+        confidence_rationale=confidence_rationale,
+        alternative_scenario=alternative_scenario,
+        continuity=continuity,
+        evidence_breakdown=evidence,
+        trading_implications=final_trading,
+        invalidation_conditions=invalidations,
+        confidence=ai_raw_confidence,
+        data_quality=ai_raw_dq,
+        stale_minutes=0,
+        facts_snapshot=facts,
+        prompt_debug=prompt_debug,
+        stability=verdict,
     )
 
 

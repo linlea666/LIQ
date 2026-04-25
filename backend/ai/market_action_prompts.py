@@ -41,6 +41,13 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
    - `reversal`：**仅当 `scenario` 大类切换到不同项**时使用（例：`exhaustion_top → trend_continuation_up`，`range_bound → fake_breakout_up`）。**scenario 与上一份相同时禁止填 reversal**，即使你认为"证据变强/变弱"也属于 refinement
    - `first_run`：§0 未提供前情提要时使用
 
+9. **Dead Zone 内的微变化只做 neutral**：当某个底层指标（OI 1h 变化 / funding avg_current / basis 当前值）落在下面任一 dead zone 内时，对应 evidence 的 `supports` **必须**填 `neutral`，禁止把它当作 main/contrarian 证据：
+   - BTC / ETH：|OI 1h 变化| < 0.5%、|funding avg_current| < 0.0001、|basis| < 0.1%
+   - SOL：|OI 1h 变化| < 0.65%、|funding avg_current| < 0.00013、|basis| < 0.13%
+   含义：这些幅度在主流币上属于噪声级，不构成方向性反转证据；后端状态机也会用同样的阈值在三项**全部**落入 dead zone 时**强制保持上轮方向**，所以你的 evidence 立场要与这套阈值一致，避免给出"会被后端立刻压住"的方向。
+
+10. **未收盘 bar 按 provisional 处理**：当 facts 显示 `latest_bar_closed=false`、`bar_closed=false` 或 `data_meta.has_provisional_bars=true` 时，该 bar 内的强信号（如 footprint stacked imbalance / CVD 30m 拐点 / 1h K 线衰竭）**只能作为 weak/neutral 参考**，不允许据此把主方向从上一份反转或要求 bias 切换；如要据 provisional bar 触发新方向，必须在 invalidation_conditions 里写"等待该 bar 收盘后再确认"。
+
 ━━━━━━━━━━ 你必须按此路径思考（6 步） ━━━━━━━━━━
 
 **Step 1 · 扫描 & 标记方向性**
@@ -51,6 +58,15 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
  - **本次 facts 已移除 orderbook 挂单/订单墙数据**（软信号、可被 spoof）；支撑/阻力的被动吸收信号改用 `absorption` 区（硬证据）
 
 **字段定义速查（P0 派生字段 + Absorption · 均基于真实采样，无推算）**：
+ - `price.price_kind`：当前价格基准（`last`=交易所成交价 / `mark`=标记价 / `index`=指数价，当前固定为 `last`）
+ - `price.latest_bar_closed`：`recent_bars_1h` 最后一根 1h K 线是否已收盘；为 `false` 时该 bar 内的所有派生信号按 provisional 处理
+ - `oi.venue_split`：仅纳入 Binance / OKX 两家头部（覆盖 ~80% 市场）；用来识别"某个 venue 在带方向"的情况，关注 `change_1h_pct` 是否两家方向一致
+ - `cvd_*.latest_bar_closed`：`recent_delta_5m` 最后一根 5m bar 是否已收盘；同 price 一样未收盘按 provisional
+ - `liq_map_clusters.top3_above` / `top3_below`：上下方按 total_usd 降序的 top 3 簇（已成交的杠杆持仓），不仅看最近一个簇
+ - `liq_map_clusters.vacuum_zones`：清算真空区（无簇集中的价格通道，扫单后易快速触达，可作为目标区参考）
+ - `footprint.*.bar_closed`：本根 footprint bar 是否已收盘；未收盘时其 `top_imbalance_zones` 不可作为 stacked imbalance 的方向性证据
+ - `footprint.*.low_volume`：本根 bar 总成交量低于最小阈值（BTC <$5M / ETH <$3M / SOL <$1.5M）；为 `true` 时 `top_imbalance_zones` 已被强制清空，避免低流动性误判
+ - `data_meta.has_provisional_bars` / `provisional_fields`：本批 facts 是否含未收盘 bar 列表，照此判断哪些字段不可强用
  - `funding.hourly_cost_usd`：按当前费率 × 当前 OI / 8 估算的**每小时**资金费成本（美元，负数=空头在支付多头）
  - `funding.cost_24h_usd`：近 24h（3 个 8h 结算点）累计资金费成本估算（美元，**基于当前 OI 近似**，误差约 ±1-2%）
  - `funding.days_negative_streak`：基于 **OI 加权的 8h 结算点历史**，从最新 1 点往前数连续 rate<0 的天数（3 个 8h 点 = 1 天；0 = 最新 OI 加权结算点 ≥ 0）。
@@ -303,19 +319,27 @@ def build_user_prompt(
     _header("§1", "当前行情速览")
     p = d.get("price") or {}
     lines.append(f"- 币种：**{coin}/USDT**")
-    lines.append(f"- 当前价：${_fmt(p.get('last'))}")
+    price_kind = p.get("price_kind") or "last"
+    lines.append(f"- 当前价：${_fmt(p.get('last'))}（基准：`{price_kind}`）")
     lines.append(f"- 1h 变化：{_fmt_pct(p.get('change_1h_pct'))}")
     lines.append(f"- 4h 变化：{_fmt_pct(p.get('change_4h_pct'))}")
     lines.append(f"- 24h 变化：{_fmt_pct(p.get('change_24h_pct'))}")
     lines.append(f"- 24h 高/低：${_fmt(p.get('high_24h'))} / ${_fmt(p.get('low_24h'))}")
     bars = p.get("recent_bars_1h") or []
+    latest_bar_closed = p.get("latest_bar_closed")
     if bars:
-        lines.append(f"- 近 {len(bars)} 根 1h K 线（ts/O/H/L/C/Vol，ts 为秒级）：")
-        for b in bars[-6:]:
+        closed_hint = (
+            "**最后一根未收盘 → provisional**" if latest_bar_closed is False
+            else ("最后一根已收盘" if latest_bar_closed is True else "收盘状态未知")
+        )
+        lines.append(f"- 近 {len(bars)} 根 1h K 线（ts/O/H/L/C/Vol，ts 为秒级；{closed_hint}）：")
+        for idx, b in enumerate(bars[-6:]):
+            is_last = idx == len(bars[-6:]) - 1
+            tag = "（**未收盘**）" if is_last and latest_bar_closed is False else ""
             if len(b) >= 6:
                 lines.append(
                     f"  - {int(b[0])}: O={_fmt(b[1])} H={_fmt(b[2])} "
-                    f"L={_fmt(b[3])} C={_fmt(b[4])} V={_fmt(b[5])}"
+                    f"L={_fmt(b[3])} C={_fmt(b[4])} V={_fmt(b[5])}{tag}"
                 )
 
     # ── §2 S 级 6 维 ──
@@ -338,6 +362,23 @@ def build_user_prompt(
             f"- 历史分位（30d hourly，n={oi_n}）：`percentile_30d_hourly`={_fmt(oi_pct, nd=1)}% "
             f"| `is_near_local_high_7d`（≥近 7d 最高的 98%）：**{oi_near_high}**"
         )
+    # ── 头部 venue 拆分（Binance / OKX）──
+    venue_split = oi.get("venue_split") or []
+    if venue_split:
+        lines.append(
+            "- venue 拆分（仅 Binance / OKX 两家头部 ~80% 市场；关注两家 1h 是否同向，"
+            "若一家狂升一家平淡 = **某 venue 在带方向**，是 OI 信号的额外语境）："
+        )
+        for v in venue_split:
+            share = v.get("share_pct")
+            lines.append(
+                f"  - **{v.get('venue')}**：OI=${_fmt(v.get('oi_usd'))} "
+                f"| 占比={_fmt(share, nd=1)}% "
+                f"| 1h={_fmt_pct(v.get('change_1h_pct'))} "
+                f"| 24h={_fmt_pct(v.get('change_24h_pct'))}"
+            )
+    else:
+        lines.append("- venue 拆分：暂无（Binance / OKX 排名数据未获取到）")
 
     fd = d.get("funding") or {}
     lines.append(f"\n### Funding · 资金费")
@@ -374,6 +415,14 @@ def build_user_prompt(
     # AI 可以自检：若和与 delta_1h 明显不符，该时窗内可能有数据源跳点
     _cvd_c_n = len(cvd_c.get("recent_delta_5m") or [])
     _cvd_s_n = len(cvd_s.get("recent_delta_5m") or [])
+    def _cvd_closed_tag(cvd_dict: dict) -> str:
+        v = cvd_dict.get("latest_bar_closed")
+        if v is False:
+            return "（**最后 1 根 5m 未收盘 → provisional**）"
+        if v is True:
+            return "（最后 1 根已收盘）"
+        return "（收盘状态未知）"
+
     lines.append(f"\n### CVD 期 · 合约")
     lines.append(
         f"- 1h delta：${_fmt(cvd_c.get('delta_1h'))} "
@@ -382,7 +431,7 @@ def build_user_prompt(
         f"| 背离：{cvd_c.get('has_divergence')}"
     )
     lines.append(
-        f"- 近 1h（{_cvd_c_n}×5m）逐点 delta：{cvd_c.get('recent_delta_5m')}"
+        f"- 近 1h（{_cvd_c_n}×5m）逐点 delta {_cvd_closed_tag(cvd_c)}：{cvd_c.get('recent_delta_5m')}"
     )
 
     lines.append(f"\n### CVD 现 · 现货")
@@ -393,7 +442,7 @@ def build_user_prompt(
         f"| 背离：{cvd_s.get('has_divergence')}"
     )
     lines.append(
-        f"- 近 1h（{_cvd_s_n}×5m）逐点 delta：{cvd_s.get('recent_delta_5m')}"
+        f"- 近 1h（{_cvd_s_n}×5m）逐点 delta {_cvd_closed_tag(cvd_s)}：{cvd_s.get('recent_delta_5m')}"
     )
 
     lq = d.get("liquidation_flow") or {}
@@ -431,12 +480,12 @@ def build_user_prompt(
     lc = d.get("liq_map_clusters") or {}
     lines.append(f"\n### LiqMap · 清算图上下簇")
     lines.append(
-        f"- 上方簇：${_fmt(lc.get('above_cluster_usd'))} @ "
+        f"- 上方簇（聚合）：${_fmt(lc.get('above_cluster_usd'))} @ "
         f"${_fmt(lc.get('above_nearest_price'))} "
         f"（距离 {_fmt_pct(lc.get('above_distance_pct'))}）"
     )
     lines.append(
-        f"- 下方簇：${_fmt(lc.get('below_cluster_usd'))} @ "
+        f"- 下方簇（聚合）：${_fmt(lc.get('below_cluster_usd'))} @ "
         f"${_fmt(lc.get('below_nearest_price'))} "
         f"（距离 {_fmt_pct(lc.get('below_distance_pct'))}）"
     )
@@ -453,6 +502,34 @@ def build_user_prompt(
         lines.append("- 上/下簇比值：仅上方有簇（下方无清算簇可作燃料）")
     elif _below > 0 and _above == 0:
         lines.append("- 上/下簇比值：仅下方有簇（上方无清算簇可作燃料）")
+
+    # ── top3 路径化：逐簇看，让你判断"先扫哪一层、扫完后还有没有真空区"──
+    top3_above = lc.get("top3_above") or []
+    top3_below = lc.get("top3_below") or []
+    if top3_above:
+        lines.append("- top 3 上方簇（按 total_usd 降序）：")
+        for c in top3_above:
+            lines.append(
+                f"  - $@{_fmt(c.get('price'))} = ${_fmt(c.get('total_usd'))} "
+                f"（距 +{_fmt(c.get('distance_pct'), nd=2)}%）"
+            )
+    if top3_below:
+        lines.append("- top 3 下方簇（按 total_usd 降序）：")
+        for c in top3_below:
+            lines.append(
+                f"  - $@{_fmt(c.get('price'))} = ${_fmt(c.get('total_usd'))} "
+                f"（距 -{_fmt(c.get('distance_pct'), nd=2)}%）"
+            )
+
+    # ── vacuum_zones：扫单后易快速触达的真空通道 ──
+    vacs = lc.get("vacuum_zones") or []
+    if vacs:
+        lines.append("- 清算真空区（无簇集中的价格通道，扫单后易快速贯穿到下一组簇）：")
+        for v in vacs[:5]:
+            lines.append(
+                f"  - ${_fmt(v.get('price_from'))} → ${_fmt(v.get('price_to'))} "
+                f"（中点 ${_fmt(v.get('midpoint'))}{('，' + v.get('note')) if v.get('note') else ''}）"
+            )
 
     sw = d.get("liq_sweep_recent") or {}
     lines.append(f"\n### LiqSweep · 清算扫单")
@@ -505,8 +582,16 @@ def build_user_prompt(
         bar = fp.get(key) or {}
         if not bar:
             continue
+        bar_closed = bar.get("bar_closed")
+        low_vol = bar.get("low_volume")
+        flags: list[str] = []
+        if bar_closed is False:
+            flags.append("**未收盘 → provisional**")
+        if low_vol:
+            flags.append("**low_volume → top_imbalance_zones 已被强制清空**")
+        flag_str = (" · " + "、".join(flags)) if flags else ""
         lines.append(
-            f"- **{label}** (ts={bar.get('ts')})：buy=${_fmt(bar.get('total_buy_usd'))} "
+            f"- **{label}** (ts={bar.get('ts')}){flag_str}：buy=${_fmt(bar.get('total_buy_usd'))} "
             f"sell=${_fmt(bar.get('total_sell_usd'))} "
             f"delta=${_fmt(bar.get('delta_usd'))} ({_fmt_pct((bar.get('delta_pct') or 0)*100 if bar.get('delta_pct') else None)}) "
             f"POC=${_fmt(bar.get('poc_price'))}"
@@ -621,6 +706,19 @@ def build_user_prompt(
     _header("§5", "数据质量")
     lines.append(f"- `data_quality`：**{d.get('data_quality')}**")
     lines.append(f"- 缺失字段：{d.get('missing') or '（无）'}")
+    dm = d.get("data_meta") or {}
+    has_prov = dm.get("has_provisional_bars")
+    prov_fields = dm.get("provisional_fields") or []
+    sources_used = dm.get("sources_used") or []
+    if has_prov is True:
+        lines.append(
+            f"- **含未收盘 bar**（provisional）：{prov_fields}"
+            "；这些字段对应的强信号**只能作为参考**，禁止据此切换主方向（见 system 原则 10）"
+        )
+    elif has_prov is False:
+        lines.append("- 未收盘 bar：无（所有 provisional 字段都是已收盘 bar）")
+    if sources_used:
+        lines.append(f"- 本轮真实拉到的数据源：{sources_used}")
 
     # ── §6 任务 ──
     _header("§6", "你的任务（严格按思维流程 Step 1→6 执行）")

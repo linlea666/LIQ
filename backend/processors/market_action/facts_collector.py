@@ -17,10 +17,12 @@ from models.market_action import (
     BasisSnapshot,
     CVDSnapshot,
     DataQuality,
+    FactsDataMeta,
     FundingSnapshot,
     LiquidationSnapshot,
     MarketActionFacts,
     OISnapshot as MAOISnapshot,
+    OIVenueEntry,
     OptionsSnapshot,
     OrderbookSnapshot,
     PriceSnapshot,
@@ -116,14 +118,26 @@ def build_price_snapshot(state: "CoinState") -> Optional[PriceSnapshot]:
             except Exception:
                 continue
 
+    # 最后一根 1h bar 是否已收盘：ts + 3600s 到达当前时间（30s 容忍）
+    latest_bar_closed: Optional[bool] = None
+    if recent_bars:
+        try:
+            last_ts = int(recent_bars[-1][0])
+            now = int(time.time())
+            latest_bar_closed = bool(now + 30 >= last_ts + 3600)
+        except (TypeError, ValueError, IndexError):
+            latest_bar_closed = None
+
     return PriceSnapshot(
         last=last,
+        price_kind="last",
         change_1h_pct=ch_1h,
         change_4h_pct=ch_4h,
         change_24h_pct=c1h,
         high_24h=getattr(state.ticker, "high_24h", None),
         low_24h=getattr(state.ticker, "low_24h", None),
         recent_bars_1h=recent_bars,
+        latest_bar_closed=latest_bar_closed,
     )
 
 
@@ -162,6 +176,45 @@ def _derive_oi_history_fields(
     return out
 
 
+_VENUE_WHITELIST = {"binance", "okx"}
+_VENUE_DISPLAY = {"binance": "Binance", "okx": "OKX"}
+
+
+def _build_oi_venue_split(state: "CoinState") -> list[OIVenueEntry]:
+    """从 state.oi_exchange_rank 提取 Binance / OKX 两家头部分布。
+
+    覆盖逻辑：rank 数据来自 poll_oi_exchange_rank（Coinglass futures-oi list 接口），
+    含 oi_usd / change_1h / change_24h 三列；占比基于全市场 total_oi_usd 计算
+    （含 Bybit/Bitget/Gate 等其他交易所），符合"识别哪个 venue 在带方向"的目标。
+    """
+    rank = getattr(state, "oi_exchange_rank", None) or {}
+    exchanges = rank.get("exchanges") or []
+    total_oi = float(rank.get("total_oi_usd") or 0)
+    out: list[OIVenueEntry] = []
+    for item in exchanges:
+        ex_name = str(item.get("exchange") or "").strip()
+        if ex_name.lower() not in _VENUE_WHITELIST:
+            continue
+        try:
+            oi_usd = float(item.get("oi_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if oi_usd <= 0:
+            continue
+        share = round(oi_usd / total_oi * 100, 2) if total_oi > 0 else None
+        ch_1h = _safe_float(item.get("change_1h"))
+        ch_24h = _safe_float(item.get("change_24h"))
+        out.append(OIVenueEntry(
+            venue=_VENUE_DISPLAY.get(ex_name.lower(), ex_name),
+            oi_usd=oi_usd,
+            share_pct=share,
+            change_1h_pct=ch_1h,
+            change_24h_pct=ch_24h,
+        ))
+    out.sort(key=lambda e: e.oi_usd, reverse=True)
+    return out
+
+
 def build_oi_snapshot(state: "CoinState") -> Optional[MAOISnapshot]:
     oi = state.oi
     if not oi:
@@ -178,6 +231,7 @@ def build_oi_snapshot(state: "CoinState") -> Optional[MAOISnapshot]:
         percentile_30d_hourly=derived["percentile_30d_hourly"],
         is_near_local_high_7d=derived["is_near_local_high_7d"],
         history_sample_size=derived["history_sample_size"],
+        venue_split=_build_oi_venue_split(state),
     )
 
 
@@ -349,6 +403,19 @@ def build_cvd_snapshot(cvd, recent_delta_5m: Optional[list[float]] = None) -> Op
         delta_arr = list(recent_delta_5m)
     # 拐点识别辅助字段：后 6 根 5m = 近 30min
     trend_recent_30m = _trend_label_from_window(delta_arr[-6:]) if len(delta_arr) >= 3 else None
+
+    # 最后一根 5m bar 是否已收盘（Coinglass series 的 ts 单位为秒，5m=300s）
+    latest_bar_closed: Optional[bool] = None
+    try:
+        last_pt = cvd.series[-1]
+        last_ts = int(getattr(last_pt, "ts", 0) or 0)
+        if last_ts > 10_000_000_000:  # 防御毫秒
+            last_ts //= 1000
+        if last_ts > 0:
+            latest_bar_closed = bool(int(time.time()) + 30 >= last_ts + 300)
+    except (AttributeError, TypeError, ValueError, IndexError):
+        latest_bar_closed = None
+
     return CVDSnapshot(
         delta_1h=float(cvd.delta_1h or 0),
         trend_1h=cvd.trend_1h or None,
@@ -356,6 +423,7 @@ def build_cvd_snapshot(cvd, recent_delta_5m: Optional[list[float]] = None) -> Op
         has_divergence=bool(cvd.has_divergence),
         divergence_note=cvd.divergence_note or None,
         recent_delta_5m=delta_arr,
+        latest_bar_closed=latest_bar_closed,
     )
 
 
@@ -582,7 +650,10 @@ def collect(state: "CoinState") -> MarketActionFacts:
 
     fp_contract = list(getattr(state, "footprint_contract", []) or [])
     fp_spot = list(getattr(state, "footprint_spot", []) or [])
-    facts.footprint = build_footprint_snapshot(fp_contract, fp_spot)
+    facts.footprint = build_footprint_snapshot(
+        fp_contract, fp_spot,
+        coin=coin, bar_seconds=3600, now_ts=now,
+    )
     if facts.footprint is None:
         missing.append("footprint")
 
@@ -612,4 +683,43 @@ def collect(state: "CoinState") -> MarketActionFacts:
 
     facts.missing = missing
     facts.data_quality = quality
+
+    # ── data_meta · 透明度元信息（哪些 bar 未收盘、用了哪些数据源）──
+    provisional_fields: list[str] = []
+    if facts.price is not None and facts.price.latest_bar_closed is False:
+        provisional_fields.append("price.recent_bars_1h[last]")
+    if facts.cvd_contract is not None and facts.cvd_contract.latest_bar_closed is False:
+        provisional_fields.append("cvd_contract.recent_delta_5m[last]")
+    if facts.cvd_spot is not None and facts.cvd_spot.latest_bar_closed is False:
+        provisional_fields.append("cvd_spot.recent_delta_5m[last]")
+    if facts.footprint is not None:
+        if facts.footprint.contract_latest is not None and facts.footprint.contract_latest.bar_closed is False:
+            provisional_fields.append("footprint.contract_latest")
+        if facts.footprint.spot_latest is not None and facts.footprint.spot_latest.bar_closed is False:
+            provisional_fields.append("footprint.spot_latest")
+
+    sources_used: list[str] = []
+    for fld in (
+        "price", "oi", "funding", "cvd_contract", "cvd_spot",
+        "liquidation_flow", "basis", "orderbook", "liq_map_clusters",
+        "liq_sweep_recent", "price_context", "footprint", "absorption",
+        "taker_flow_5m", "options",
+    ):
+        v = getattr(facts, fld, None)
+        if v is None:
+            continue
+        if fld == "absorption" and getattr(v, "total_zone_count", 0) == 0:
+            continue
+        if fld == "liq_map_clusters" and (
+            (v.above_cluster_usd or 0) == 0 and (v.below_cluster_usd or 0) == 0
+        ):
+            continue
+        sources_used.append(fld)
+
+    facts.data_meta = FactsDataMeta(
+        generated_at=now,
+        has_provisional_bars=bool(provisional_fields),
+        sources_used=sources_used,
+        provisional_fields=provisional_fields,
+    )
     return facts

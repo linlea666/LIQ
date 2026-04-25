@@ -22,8 +22,17 @@ from pydantic import BaseModel, Field
 # ────────────────────────────────────────────────────────────────────────────
 
 class PriceSnapshot(BaseModel):
-    """S1 · 价格 + 多周期涨跌"""
+    """S1 · 价格 + 多周期涨跌
+
+    `price_kind` 标注 `last` 来源（last/mark/index）。当前 ticker 走交易所 last
+    成交价口径，恒为 "last"；保留字段以便未来 mark/index 接入时不破坏 schema。
+
+    `latest_bar_closed` 标注 `recent_bars_1h` 最后一根是否已收盘——仅最后一根可能
+    未收盘，前面几根都是已收盘。AI 在反事实测试时遇到 latest_bar_closed=False
+    必须把"该 bar 内的强信号"按 provisional 处理，不允许据此切换主方向。
+    """
     last: float
+    price_kind: Literal["last", "mark", "index"] = "last"
     change_1h_pct: Optional[float] = None
     change_4h_pct: Optional[float] = None
     change_24h_pct: Optional[float] = None
@@ -31,15 +40,28 @@ class PriceSnapshot(BaseModel):
     low_24h: Optional[float] = None
     recent_bars_1h: list[list[float]] = Field(default_factory=list)
     # 每根 bar = [ts, open, high, low, close, volume]，近 6 根
+    latest_bar_closed: Optional[bool] = None
+
+
+class OIVenueEntry(BaseModel):
+    """单交易所 OI 拆分（仅纳入 Binance / OKX；占比基于全市场总 OI 计算）"""
+    venue: str                         # "Binance" / "OKX"
+    oi_usd: float
+    share_pct: Optional[float] = None  # = oi_usd / total_oi_usd × 100，全市场口径
+    change_1h_pct: Optional[float] = None
+    change_24h_pct: Optional[float] = None
 
 
 class OISnapshot(BaseModel):
-    """S2 · OI 规模 + 变化率 + 历史分位
+    """S2 · OI 规模 + 变化率 + 历史分位 + 头部 venue 拆分
 
     派生字段（基于 30d hourly 历史）：
       - percentile_30d_hourly：当前 OI 在 30d（按 1h 采样）中的百分位（0-100）
       - is_near_local_high_7d：当前 OI ≥ 近 7d 最高值的 98%
     两项均为真实历史采样计算，无推算成分；若历史样本不足会返回 None。
+
+    `venue_split` 仅纳入 Binance / OKX 两家头部（覆盖 ~80% 市场），用来识别
+    "某个 venue 在带方向"的情况；其余交易所聚合在 total OI 内不单列。
     """
     current_usd: float
     change_5m_pct: Optional[float] = None
@@ -50,6 +72,8 @@ class OISnapshot(BaseModel):
     percentile_30d_hourly: Optional[float] = None
     is_near_local_high_7d: Optional[bool] = None
     history_sample_size: Optional[int] = None  # 透明度：实际使用的样本点数
+    # ── 头部 venue 拆分（Binance / OKX，可空）──
+    venue_split: list[OIVenueEntry] = Field(default_factory=list)
 
 
 class FundingSnapshot(BaseModel):
@@ -78,7 +102,12 @@ class FundingSnapshot(BaseModel):
 
 
 class CVDSnapshot(BaseModel):
-    """S4/S5 · CVD 合约或现货（可贴附短窗 netflow）"""
+    """S4/S5 · CVD 合约或现货（可贴附短窗 netflow）
+
+    `latest_bar_closed` 标注 `recent_delta_5m` 最后一根 5m bar 是否已收盘。
+    Coinglass CVD 序列以 5min 为粒度，距上一个 5min 边界不足 5min 视为未收盘；
+    AI 不应据未收盘 bar 切换主方向。
+    """
     delta_1h: float
     trend_1h: Optional[str] = None  # rising / declining / flat（基于整个 1h 聚合）
     trend_recent_30m: Optional[str] = None  # rising / declining / flat
@@ -89,6 +118,7 @@ class CVDSnapshot(BaseModel):
     divergence_note: Optional[str] = None
     recent_delta_5m: list[float] = Field(default_factory=list)
     # 最近 6 个 5m bar 的 delta（buy - sell），用于看瞬时方向
+    latest_bar_closed: Optional[bool] = None
 
 
 class LiquidationSnapshot(BaseModel):
@@ -133,12 +163,32 @@ class OrderbookSnapshot(BaseModel):
     recent_imbalances: list[float] = Field(default_factory=list)
 
 
+class LiqClusterEntry(BaseModel):
+    """单个清算簇（top3 列表中的元素 · 距离已按当前价折算）"""
+    price: float
+    total_usd: float
+    distance_pct: float
+    # 距当前价的有向百分比：above 簇为正，below 簇为正（距离绝对值，方向看所属列表）
+
+
+class VacuumZoneEntry(BaseModel):
+    """清算真空区（无清算簇集中的价格通道）"""
+    price_from: float
+    price_to: float
+    midpoint: float
+    note: str = ""
+
+
 class LiqClusterSnapshot(BaseModel):
     """A3 · 清算图上下簇对比（只出纯数值，不做立场预判）
 
     刻意去掉"bias"立场字段（short_squeeze_fuel / long_squeeze_fuel / balanced）——
     由 AI 基于 above/below 簇大小 + 距离 + 与其他维度（PriceContext / OI /
     Taker 主动性）交叉后自己推断"燃料偏哪边"，而不是在 facts 层预打标签。
+
+    `top3_above` / `top3_below`：上下方按 total_usd 降序的 top 3 簇；
+    `vacuum_zones`：清算真空区（无簇集中的价格通道，扫单后易快速触达）。
+    现有 `above_*` / `below_*` 字段仅返回**最近一个**簇，保留以兼容旧前端。
     """
     above_cluster_usd: float = 0
     below_cluster_usd: float = 0
@@ -146,6 +196,10 @@ class LiqClusterSnapshot(BaseModel):
     below_nearest_price: Optional[float] = None
     above_distance_pct: Optional[float] = None
     below_distance_pct: Optional[float] = None
+    # ── 路径化扩展（top3 + 真空区）──
+    top3_above: list[LiqClusterEntry] = Field(default_factory=list)
+    top3_below: list[LiqClusterEntry] = Field(default_factory=list)
+    vacuum_zones: list[VacuumZoneEntry] = Field(default_factory=list)
 
 
 class LiqSweepSnapshot(BaseModel):
@@ -178,7 +232,13 @@ class PriceContextSnapshot(BaseModel):
 # ────────────────────────────────────────────────────────────────────────────
 
 class FootprintBarStats(BaseModel):
-    """单根 K 线的足迹统计（派生，不含原始 buckets）"""
+    """单根 K 线的足迹统计（派生，不含原始 buckets）
+
+    `bar_closed` 标注本根 K 线是否已收盘（基于 ts + bar 周期与当前时间的对比）。
+    `low_volume` 标注本根 K 线总成交量是否低于最小阈值（详见 footprint_analyzer
+    `_min_bar_volume_for`）；过滤后的 bar 仍输出聚合数值（buy/sell/delta），但
+    `top_imbalance_zones` 会被清空，避免 AI 在低成交格子上过度解读 stacked imbalance。
+    """
     ts: int
     total_buy_usd: float = 0
     total_sell_usd: float = 0
@@ -193,6 +253,8 @@ class FootprintBarStats(BaseModel):
     # K 线上 1/3 价位区的 delta_pct（用于衰竭识别）
     low_price_delta_pct: Optional[float] = None
     # K 线下 1/3 价位区的 delta_pct
+    bar_closed: bool = True
+    low_volume: bool = False
 
 
 class FootprintSnapshot(BaseModel):
@@ -301,6 +363,20 @@ FundingTrend = Literal["building", "easing", "stable", "extreme"]
 DataQuality = Literal["ok", "partial", "insufficient"]
 
 
+class FactsDataMeta(BaseModel):
+    """Facts 数据透明度元信息（AI 用来识别"哪些 bar 还没收盘"等）
+
+    - `generated_at`：facts 组装时间（秒级 unix，与 timestamp 一致或略晚）
+    - `has_provisional_bars`：本批 facts 是否包含未收盘 bar（price/CVD/Footprint 任一）
+    - `sources_used`：本轮**确实读到**的数据源标签（按 facts 字段是否非空汇总）
+    - `provisional_fields`：未收盘的具体字段名（"price.recent_bars_1h" 等）
+    """
+    generated_at: int = 0
+    has_provisional_bars: bool = False
+    sources_used: list[str] = Field(default_factory=list)
+    provisional_fields: list[str] = Field(default_factory=list)
+
+
 class MarketActionFacts(BaseModel):
     """AI Arbiter 输入契约 · 14 字段 + 元数据"""
     coin: str
@@ -334,6 +410,7 @@ class MarketActionFacts(BaseModel):
     # 元数据
     data_quality: DataQuality = "ok"
     missing: list[str] = Field(default_factory=list)
+    data_meta: FactsDataMeta = Field(default_factory=FactsDataMeta)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -439,6 +516,49 @@ class PromptDebug(BaseModel):
     parse_error: Optional[str] = None
 
 
+StabilityOverrideReason = Literal[
+    "",                       # 未拦截（accepted == ai_raw）
+    "dead_zone",              # 底层指标变化太小，强制保留旧方向
+    "persistence_pending",    # 同大类切换需 1 轮 pending + 1 轮确认
+    "hysteresis_block",       # 跨大类反转证据强度不足
+    "fast_track",             # 命中强信号 fast track，越过 persistence/hysteresis
+    "fallback_skipped",       # 本次为 fallback / data insufficient，跳过滤波
+]
+
+
+class StabilityVerdict(BaseModel):
+    """状态机滤波结果 · 解释 accepted 与 ai_raw 的差别
+
+    后端的 stability filter 会在 AI 给出 raw scenario/bias 之后做一层"防抖 + 滞回"
+    决策，结果写入此字段。前端展示 `accepted_scenario` 和 `accepted_bias`，可同时
+    暴露 `ai_raw_*` 让用户复盘"AI 想怎么切但被压住了"。
+
+    - `ai_raw_scenario` / `ai_raw_bias`：AI 原始输出（未滤波）
+    - `accepted_scenario` / `accepted_bias`：经状态机后实际采用的方向
+    - `previous_accepted_scenario`：上一份 accepted 的 scenario（用于前端做对比）
+    - `stable_for_runs`：accepted 已连续保持多少轮没切换（包含本轮）
+    - `last_change_ts`：accepted 上次切换的秒级 unix 时间
+    - `override_reason`：见 `StabilityOverrideReason`
+    - `allow_switch`：本轮是否允许切换（dead_zone / hysteresis_block 命中时为 False）
+    - `pending_switch_to`：persistence/hysteresis 期间记录的"待切换目标"，下一轮
+      若 AI 仍同向且时窗到位，accepted 会切到该值
+    - `pending_runs`：pending_switch_to 已累计了多少轮（≥1 才会真正切换）
+    - `notes`：状态机内部解释（中文一句话）
+    """
+    ai_raw_scenario: str = "range_bound"
+    ai_raw_bias: Literal["long", "short", "neutral", "wait"] = "wait"
+    accepted_scenario: str = "range_bound"
+    accepted_bias: Literal["long", "short", "neutral", "wait"] = "wait"
+    previous_accepted_scenario: Optional[str] = None
+    stable_for_runs: int = 1
+    last_change_ts: int = 0
+    override_reason: StabilityOverrideReason = ""
+    allow_switch: bool = True
+    pending_switch_to: Optional[str] = None
+    pending_runs: int = 0
+    notes: str = ""
+
+
 class MarketActionReport(BaseModel):
     """AI Arbiter 输出契约
 
@@ -449,6 +569,7 @@ class MarketActionReport(BaseModel):
       3. 证据层：evidence_breakdown（每条含 inference + supports）
       4. 建议层：trading_implications / invalidation_conditions
       5. 置信层：confidence + data_quality
+      6. 稳定性层：**stability**——状态机滤波后的 accepted 方向（前端应以此为准）
     """
     coin: str
     timestamp: int
@@ -477,6 +598,9 @@ class MarketActionReport(BaseModel):
 
     # 置信层
     confidence: int = Field(ge=0, le=100)
+
+    # 稳定性层（后端滤波结果，前端方向应使用此处的 accepted_*）
+    stability: Optional[StabilityVerdict] = None
 
     # 元数据
     data_quality: DataQuality = "ok"

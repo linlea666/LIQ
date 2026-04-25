@@ -97,7 +97,7 @@ def build_price_context(
                     break
                 except (TypeError, ValueError):
                     pass
-        for attr in ("vah_price", "vah"):
+        for attr in ("value_area_high", "vah_price", "vah"):
             v = getattr(volume_profile, attr, None) if not isinstance(volume_profile, dict) else volume_profile.get(attr)
             if v is not None:
                 try:
@@ -105,7 +105,7 @@ def build_price_context(
                     break
                 except (TypeError, ValueError):
                     pass
-        for attr in ("val_price", "val"):
+        for attr in ("value_area_low", "val_price", "val"):
             v = getattr(volume_profile, attr, None) if not isinstance(volume_profile, dict) else volume_profile.get(attr)
             if v is not None:
                 try:
