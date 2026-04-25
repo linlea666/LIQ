@@ -79,12 +79,18 @@ class OISnapshot(BaseModel):
 class FundingSnapshot(BaseModel):
     """S3 · Funding + 多交易所分散度 + 资金费成本/持续性
 
-    派生字段（基于 7d × 8h 结算点真实采样）：
-      - hourly_cost_usd：按当前费率 × 当前 OI / 8 估算的每小时成本（美元）
-      - cost_24h_usd：近 24h 累计成本（美元，**基于当前 OI 近似**，误差约 ±OI 24h 变化率）
+    派生字段（基于 30d × 8h 结算点真实采样，全部"采样 + 算术"，无推算）：
+      - hourly_cost_usd / cost_24h_usd：按当前费率 × 当前 OI 估算的资金费成本
       - days_negative_streak：最新连续负费率天数（0 表示最新为正）
       - sign_flip_7d：近 7d 均费率符号相对前 7d 是否翻转（bool）
-    均为采样 + 算术派生，无任何推算；历史样本不足时返回 None。
+      - **slope_24h**：最近 3 个 8h 点（≈24h）的方向分类，反映资金费短期趋势
+        · `rising_fast / rising / flat / falling / falling_fast`
+        · 用途："funding -0.005% 但 24h 从 -0.018% 上行" → 空头压力衰减 → 偏多
+      - **percentile_30d / percentile_7d**：当前 avg_current 在 30d / 7d 历史里的百分位
+        · 1-100 整数；1=最低（最负），100=最高（最正）
+        · 极端值（< 10 或 > 90）通常对应资金成本极值，是反转 / 挤压前兆
+        · 注：history（OI 加权）与 avg_current（多所均值）口径略有偏差，但量级一致
+    历史样本不足时（slope < 3 点 / pct_7d < 14 点 / pct_30d < 30 点）返回 None。
     """
     avg_current: float
     avg_7d: Optional[float] = None
@@ -98,7 +104,14 @@ class FundingSnapshot(BaseModel):
     cost_24h_usd: Optional[float] = None
     days_negative_streak: Optional[float] = None
     sign_flip_7d: Optional[bool] = None
-    history_sample_size: Optional[int] = None  # 透明度：实际使用的 8h 点数（上限 21）
+    history_sample_size: Optional[int] = None  # 透明度：实际使用的 8h 点数（上限 90）
+    # ── P1 派生字段（短期斜率 + 极值上下文） ──
+    slope_24h: Optional[str] = None
+    # rising_fast / rising / flat / falling / falling_fast；样本不足时 None
+    percentile_30d: Optional[int] = None
+    # 当前 avg_current 在最近 90 个 8h 点（30d）中的百分位 1-100；不足 30 点 None
+    percentile_7d: Optional[int] = None
+    # 当前 avg_current 在最近 21 个 8h 点（7d）中的百分位 1-100；不足 14 点 None
 
 
 class CVDSnapshot(BaseModel):

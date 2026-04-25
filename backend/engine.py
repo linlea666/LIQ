@@ -179,12 +179,14 @@ class CoinState:
         # funding_history_8h：[{ts_sec, rate}]，由 poll_funding_history_8h 写入（5min 调用一次）
         #   - 21 点 = 7 天 × 3 次 8h 结算
         #   - 用于派生 avg_7d / cost_24h_usd / days_negative_streak / sign_flip_7d
+        #   - 90 点 = 30 天 × 3 个 8h 结算点，用于 percentile_30d 极值上下文
         # oi_hourly_history：[{ts_sec, oi_usd}]，由 poll_oi_hourly_30d 写入
         #   - 720 点 = 30 天 × 1h；用于派生 percentile_30d_hourly / is_near_local_high_7d
         from collections import deque as _deque
-        # maxlen=60 = 20 天 × 3 个 8h 结算点，足够诚实地计算 sign_flip_7d
-        # （需要近 7d 与前 7d 两个独立 21 点窗口，共 42 点，留余量）
-        self.funding_history_8h: _deque = _deque(maxlen=60)
+        # maxlen=90 = 30 天 × 3 个 8h 结算点：
+        #   - 上限 90 既覆盖完整 30d 百分位，也保留 sign_flip_7d 所需的 42 点窗口
+        #   - 旧版本为 60（20d），扩容向后兼容（其他算法都用切片，只看尾部 21/42 点）
+        self.funding_history_8h: _deque = _deque(maxlen=90)
         self.oi_hourly_history: _deque = _deque(maxlen=720)
         # 期权派生字段（仅 BTC/ETH 生效，SOL 保持 None）
         self.option_pcr_oi: Optional[float] = None

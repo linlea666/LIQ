@@ -730,7 +730,9 @@ async def poll_funding_history_8h(
 
     raw_points.sort(key=lambda p: p[0])
     state.funding_history_8h.clear()
-    for ts_sec, rate in raw_points[-60:]:
+    # 与 state.funding_history_8h.maxlen 对齐：30d × 3 个 8h 结算点 = 90 点
+    # 用于 percentile_30d；旧版本为 60（20d），扩容不影响 7d/14d 逻辑
+    for ts_sec, rate in raw_points[-90:]:
         state.funding_history_8h.append({"ts_sec": ts_sec, "rate": rate * scale})
 
     # ── 回填 multi_funding.avg_7d / oi_weighted（若对象已存在） ──

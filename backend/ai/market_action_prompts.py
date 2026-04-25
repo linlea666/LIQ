@@ -79,6 +79,8 @@ SYSTEM_PROMPT = """你是"Market Action Arbiter"——一位只基于**真实市
  - `funding.days_negative_streak`：基于 **OI 加权的 8h 结算点历史**，从最新 1 点往前数连续 rate<0 的天数（3 个 8h 点 = 1 天；0 = 最新 OI 加权结算点 ≥ 0）。
    · ⚠ **口径提醒**：`avg_current` 是跨家（OKX+Binance…）**算术均值**，`oi_weighted` / `streak` 基于 **OI 加权历史**，两者符号偶尔可能不一致（当 OKX 和 Binance 方向相反时）；发现不一致请以 `oi_weighted` + `streak` 为主参考，并在 reasoning 里说明
  - `funding.sign_flip_7d`：近 7d 均费率（同样基于 OI 加权历史）与前 7d 符号是否翻转（bool；样本不足时 null）
+ - `funding.slope_24h`：最近 3 个 8h 点（≈24h）的方向分类——`rising_fast / rising / flat / falling / falling_fast`。**用法**：funding 当前值之外的"短期变化方向"——例如 funding=-0.005% 但 slope_24h=rising → 空头压力快速衰减，是"反向充能"信号；funding=+0.01% 但 slope_24h=rising_fast → 散户激情入多，反转风险升高。样本 < 3 点为 null
+ - `funding.percentile_7d` / `percentile_30d`：当前 `avg_current` 在最近 7d / 30d 历史中的**百分位**（1-100；1=最负，100=最正）。**用法**：单看 funding 绝对值无法判断"贵不贵"，百分位才能告诉你"当前在历史里是极端值还是中位数"——< 10 通常是空头压力极值（反弹/挤压前兆），> 90 通常是多头泡沫（反转前兆）。样本不足返回 null（< 14 点没 7d；< 30 点没 30d）。**禁止**把百分位当方向证据，方向看 avg_current/slope；百分位只是**强度上下文**
  - `oi.percentile_30d_hourly`：当前 OI 在过去 30d（按 1h 采样）中的百分位（0-100）
  - `oi.is_near_local_high_7d`：当前 OI ≥ 近 7d 最高值的 98%（bool）
  - `history_sample_size`：对应历史样本点数，若为 0 / 过小，该组派生字段可能为 null 或不可信
@@ -466,6 +468,18 @@ def build_user_prompt(
             f"  - `days_negative_streak`：{_fmt(fd.get('days_negative_streak'), nd=2)} 天 "
             f"| `sign_flip_7d`（近 7d 均值 vs 前 7d 是否符号翻转）：**{fd.get('sign_flip_7d')}**"
         )
+        # P1：短期斜率 + 极值上下文（不取代 avg_current，提供方向变化 + 极端度上下文）
+        # 任一字段非 null 就渲染整行，让 AI 看到"已计算但样本不够"与"完全没数据"的差别
+        slope = fd.get("slope_24h")
+        pct_7d = fd.get("percentile_7d")
+        pct_30d = fd.get("percentile_30d")
+        if slope is not None or pct_7d is not None or pct_30d is not None:
+            lines.append(
+                f"  - `slope_24h`：**{slope or 'n/a'}**（最近 24h funding 方向变化）"
+                f" | `percentile_7d`：**{pct_7d if pct_7d is not None else 'n/a'}**"
+                f" | `percentile_30d`：**{pct_30d if pct_30d is not None else 'n/a'}**"
+                f"（百分位 1-100，1=最负 / 100=最正；<10 或 >90 视为极端）"
+            )
 
     cvd_c = d.get("cvd_contract") or {}
     cvd_s = d.get("cvd_spot") or {}

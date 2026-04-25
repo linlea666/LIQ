@@ -235,18 +235,54 @@ def build_oi_snapshot(state: "CoinState") -> Optional[MAOISnapshot]:
     )
 
 
+# ── slope_24h 阈值（与 SYSTEM_PROMPT dead zone funding=0.0001 同根源） ──
+# 8h 一个点，最近 3 个点跨度 ≈ 24h；用 (p[-1] - p[-3]) 作为方向变化度量
+_FUNDING_SLOPE_FLAT = 0.0001       # |Δ| < flat → "flat"
+_FUNDING_SLOPE_FAST = 0.0003       # |Δ| ≥ fast → "rising_fast" / "falling_fast"
+
+
+def _classify_funding_slope(delta: float) -> str:
+    """把 24h funding 变化幅度映射到 5 档自然语言标签。"""
+    abs_d = abs(delta)
+    if abs_d < _FUNDING_SLOPE_FLAT:
+        return "flat"
+    if abs_d >= _FUNDING_SLOPE_FAST:
+        return "rising_fast" if delta > 0 else "falling_fast"
+    return "rising" if delta > 0 else "falling"
+
+
+def _percentile_of(value: float, sample: list[float]) -> Optional[int]:
+    """当前值在样本里的百分位（1-100，越大代表越偏正向）。
+
+    定义：percentile = round( (#sample < value + 0.5 × #sample == value) / N × 100 )
+    采用"中点修正"避免相同值堆积造成 0 或 100 偏差；空样本返回 None。
+    """
+    n = len(sample)
+    if n == 0:
+        return None
+    less = sum(1 for x in sample if x < value)
+    eq = sum(1 for x in sample if x == value)
+    pct = (less + 0.5 * eq) / n * 100.0
+    # 钳制到 [1, 100]，让 AI 看到 1/100 就知道是极端
+    return max(1, min(100, int(round(pct))))
+
+
 def _derive_funding_history_fields(
     avg_current: float,
     current_oi_usd: Optional[float],
     history_8h: list,
 ) -> dict:
-    """基于 7d × 8h 结算点历史派生 4 个 P0 字段。
+    """基于 30d × 8h 结算点历史派生派生字段（采样 + 算术，无推算）。
 
-    采样 + 算术：
+    P0：
       - hourly_cost_usd  = avg_current × current_oi / 8（8h 一结算，折算每小时）
       - cost_24h_usd     = Σ(最近 3 个 8h 点) × current_oi（**基于当前 OI 近似**）
       - days_negative_streak = 从最新往前数连续 rate < 0 的点数 / 3
       - sign_flip_7d     = 近 7d 均值与"前 7 天滚动参考"符号相反
+    P1（短期斜率 + 极值上下文）：
+      - slope_24h        = 最近 3 个 8h 点 (p[-1]-p[-3]) 映射到 5 档；< 3 点返回 None
+      - percentile_7d    = 当前 avg_current 在 21 个 8h 点中的百分位；< 14 点 None
+      - percentile_30d   = 当前 avg_current 在 90 个 8h 点中的百分位；< 30 点 None
     """
     out: dict = {
         "hourly_cost_usd": None,
@@ -254,6 +290,10 @@ def _derive_funding_history_fields(
         "days_negative_streak": None,
         "sign_flip_7d": None,
         "history_sample_size": None,
+        # P1 新字段
+        "slope_24h": None,
+        "percentile_7d": None,
+        "percentile_30d": None,
     }
     pts = [p for p in (history_8h or []) if p.get("rate") is not None]
     n = len(pts)
@@ -290,6 +330,24 @@ def _derive_funding_history_fields(
         if abs(recent_7d) > 1e-9 and abs(prior_7d) > 1e-9:
             out["sign_flip_7d"] = bool((recent_7d > 0) != (prior_7d > 0))
     # n < 42 时 sign_flip_7d 保持 None，AI 看到 history_sample_size 会知道为何
+
+    # ── P1：短期斜率 + 极值上下文 ──
+    # 5) slope_24h：最近 3 个 8h 点跨度 ≈ 24h 的方向变化分类
+    if n >= 3:
+        delta = float(pts[-1]["rate"]) - float(pts[-3]["rate"])
+        out["slope_24h"] = _classify_funding_slope(delta)
+
+    # 6) percentile_7d：当前值在最近 21 点里的百分位（要求 ≥ 14 点才有意义）
+    #    口径说明：history（OI 加权）与 avg_current（多所均值）虽来源略不同，
+    #    但量级一致，作为"当前 funding 在历史里偏高/偏低"的近似指标足够
+    if n >= 14:
+        sample_7d = [float(p["rate"]) for p in pts[-21:]]
+        out["percentile_7d"] = _percentile_of(avg_current, sample_7d)
+
+    # 7) percentile_30d：当前值在最近 90 点里的百分位（要求 ≥ 30 点）
+    if n >= 30:
+        sample_30d = [float(p["rate"]) for p in pts[-90:]]
+        out["percentile_30d"] = _percentile_of(avg_current, sample_30d)
 
     return out
 
@@ -352,6 +410,9 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
             days_negative_streak=derived["days_negative_streak"],
             sign_flip_7d=derived["sign_flip_7d"],
             history_sample_size=derived["history_sample_size"],
+            slope_24h=derived["slope_24h"],
+            percentile_7d=derived["percentile_7d"],
+            percentile_30d=derived["percentile_30d"],
         )
     f = state.funding
     if f:
@@ -369,6 +430,9 @@ def build_funding_snapshot(state: "CoinState") -> Optional[FundingSnapshot]:
             days_negative_streak=derived["days_negative_streak"],
             sign_flip_7d=derived["sign_flip_7d"],
             history_sample_size=derived["history_sample_size"],
+            slope_24h=derived["slope_24h"],
+            percentile_7d=derived["percentile_7d"],
+            percentile_30d=derived["percentile_30d"],
         )
     return None
 
