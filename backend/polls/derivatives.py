@@ -663,9 +663,12 @@ async def poll_funding_history_8h(
       0.001 小数在"绝对量级法"下 0.001 < 0.003，不会被误判
     """
     try:
-        # limit=60 = 20 天 × 3 个 8h 点，足够计算 sign_flip_7d（需要 42+ 点）
+        # limit=90 = 30 天 × 3 个 8h 点：
+        #   - 满 30d 用于 percentile_30d（< 30 点返回 None）
+        #   - 旧版本 60（20d）只够算 sign_flip_7d（42 点窗口），不够 30d 百分位
+        #   - 与 state.funding_history_8h.maxlen / raw_points[-90:] 切片三处一致
         data = await cg.fetch_fr_oi_weight_history(
-            coin.symbol_cg, interval="8h", limit=60,
+            coin.symbol_cg, interval="8h", limit=90,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("[funding-hist-8h] %s fetch fail: %s", coin.ccy, e)
