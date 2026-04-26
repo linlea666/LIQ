@@ -141,7 +141,7 @@ class CoinState:
         self.option_max_pain: Optional[OptionMaxPainData] = None
         self.option_info: Optional[OptionInfoData] = None
         self.large_orders: Optional[LargeOrderSnapshot] = None
-        # ── Orderbook Pressure Monitor (独立 snipe 信号源) ──
+        # ── Orderbook Pressure Monitor (盘口订单流仪表盘，辅助参考) ──
         # 由 polls/orderflow.poll_large_orders 写入：snapshot active + history ended 合并去重
         from models.orderbook_pressure import (
             LargeOrderLifecycle as _LargeOrderLifecycle,
@@ -1326,10 +1326,10 @@ class Engine:
         if state.temperature:
             state.waterfall = build_waterfall(state.temperature, _factor_scores)
 
-        # ── Orderbook Pressure Monitor（独立 snipe 信号源，前置于 KL tracker）──
-        # 数据全部复用 state（depth/large_orders_history/taker/cvd/footprint/candles_15m），
-        # 不触发新 cg 请求。前置原因：KL tracker 需要读取本轮 pressure_snapshot
-        # 作为 confirmation/warning 入参（real_S 共振 / fake_R 撤单警告）。
+        # ── Orderbook Pressure Monitor（盘口订单流仪表盘，前置于 KL tracker）──
+        # 定位：辅助参考工具，不再产出独立 snipe 信号（已砍 OP-Signal 通道）。
+        # 数据全部复用 state（depth/large_orders_history/footprint），不触发新 cg 请求。
+        # 前置原因：KL tracker 读取本轮 pressure_snapshot 作 tier-based 共振判定。
         op_cfg = self._settings.processors.orderbook_pressure or {}
         try:
             from processors.orderbook_pressure import compute_pressure_snapshot
@@ -1338,21 +1338,6 @@ class Engine:
             )
         except Exception:
             logger.debug("[OP] compute_pressure_snapshot failed", exc_info=True)
-
-        # ── OP 信号化 + 异步 push（独立 snipe 通道，30min 同价去重）──
-        try:
-            from processors.orderbook_pressure_signal import generate_pressure_signals
-            new_op_signals = generate_pressure_signals(
-                state.orderbook_pressure_snapshot, cfg_overrides=op_cfg or None,
-            )
-            if new_op_signals:
-                from api.ws import push_to_coin
-                for sig in new_op_signals:
-                    asyncio.create_task(push_to_coin(
-                        ccy, "orderbook_pressure_signal", sig.model_dump(),
-                    ))
-        except Exception:
-            logger.debug("[OP-Signal] generate/push failed", exc_info=True)
 
         # V2 关键位先行：独立于 calculate_levels，产出信号供后者桥接
         self._recompute_key_levels_v2(ccy)

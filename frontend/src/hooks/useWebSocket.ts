@@ -8,7 +8,6 @@ import type {
   AIAnalysisResult,
   MarketActionReport,
   MarketUpdate,
-  OrderbookPressureSignal,
   TEAIInterpretation,
 } from "@/lib/types";
 
@@ -23,9 +22,6 @@ export function useWebSocket() {
   const setTEAIError = useMarketStore((s) => s.setTEAIError);
   const setMAAReport = useMarketStore((s) => s.setMAAReport);
   const loadMAAReport = useMarketStore((s) => s.loadMAAReport);
-  const pushOrderbookPressureSignal = useMarketStore(
-    (s) => s.pushOrderbookPressureSignal,
-  );
 
   coinRef.current = coin;
 
@@ -83,15 +79,6 @@ export function useWebSocket() {
         data.coin, data.scenario, data.confidence, data.trading_implications?.bias,
       );
       setMAAReport(data);
-    });
-
-    // 挂单压力监测器 · 独立 snipe 信号（后端 30min 同价去重，已是新触发）
-    socket.on("orderbook_pressure_signal", (data: OrderbookPressureSignal) => {
-      console.log(
-        "[WS] op_signal | coin=%s side=%s label=%s entry=%s conf=%s",
-        data.coin, data.side, data.wall_label, data.entry_price, data.confidence,
-      );
-      pushOrderbookPressureSignal(data);
     });
 
     socket.on("disconnect", () => {

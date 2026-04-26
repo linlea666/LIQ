@@ -119,23 +119,33 @@ processors:
     whale_threshold_usd: 500000
     spoofing_ttl_sec: 3
 
-  # 挂单压力监测器（独立 snipe 信号源，与关键位平级）
-  # L1 detect_walls → L1+ tag_with_large_orders → L2 classify_change → L3 classify_pressure → L4 augment_with_absorption
+  # 挂单压力监测器（盘口订单流仪表盘，辅助参考工具）
+  # 数据源分层：
+  #   - 近+中距 (≤4%): 5min 订单簿热力图（撮合面真实压力）
+  #   - 远距 (4-12%) : 大单 lifecycle（精确知挂单时长，可分级时间衰减/累积）
+  # 强度评分：strength = size_usd × duration_factor × (1+0.3·whale) × (1+0.2·absorption)
+  # 强度等级：S ≥ $30M / A ≥ $10M / B ≥ $3M / C ≥ $500K（绝对 USD 阈值，跨币种通用）
   orderbook_pressure:
-    range_pct: 12.0               # 上下方 ±12% 价格带筛选（API 实测单笔即返 ±50% 全量数据；
-                                  # 12% 覆盖 BTC「日内+1 周可达」操作区，与关键位"近/中/远"距离段
-                                  # (0.25-1.5 / 1.5-4 / 4-12%) 完全对齐；超出 12% 进入清算地图辖区）
+    # ── 数据源边界 ────────────────────────────────────────────────────
+    depth_range_pct: 4.0          # depth 路径只看 ±4%（近+中距）
+    large_orders_min_pct: 4.0     # large_orders 路径起点 4%
+    large_orders_max_pct: 12.0    # large_orders 路径终点 12%（与关键位远距对齐）
+    # ── depth 路径阈值 ───────────────────────────────────────────────
     wall_size_top_pct: 0.20       # 价格带内 top 20% USD 视为 wall
-    wall_min_usd: 500000          # 单 wall 最低 USD 阈值
+    wall_min_usd: 500000          # 单 wall 最低 USD 阈值（C 级门槛）
     merge_tol_pct: 0.0005         # 同价位合并 ±0.05%
+    # ── large_orders 路径阈值 ────────────────────────────────────────
+    large_orders_merge_tol_pct: 0.0010  # 大单聚合 ±0.10%
+    large_match_tol_pct: 0.0010   # depth 路径补 has_active_whale 标记的容差
+    # ── 输出限制 ──────────────────────────────────────────────────────
     max_walls_per_side: 8         # 每侧最多输出 8 个堆
-    large_match_tol_pct: 0.0010   # 大单关联 ±0.10%
-    eaten_threshold: 0.70         # executed_ratio ≥ 0.7 → eaten
-    cancelled_threshold: 0.30     # executed_ratio ≤ 0.3 + 减量大 → cancelled
-    react_window_sec: 1800        # 价格反应窗口 30 min
-    absorption_atr_mult: 0.5      # L4 共振价位容差 ±0.5×ATR
+    # ── L2 共振 ───────────────────────────────────────────────────────
+    absorption_atr_mult: 0.5      # absorption_zone 共振容差 ±0.5×ATR
     min_atr_pct_fallback: 0.005   # 无 ATR 时退化为 0.5% 价距
-    signal_dedup_window_sec: 1800 # snipe 信号 30min 同价去重
+    # ── 强度阈值（USD 绝对值）─────────────────────────────────────────
+    tier_s_min_usd: 30000000      # S ≥ $30M
+    tier_a_min_usd: 10000000      # A ≥ $10M
+    tier_b_min_usd: 3000000       # B ≥ $3M（其余 ≥ $500K 为 C）
 
 engine:
   inactive_poll_sec: 120

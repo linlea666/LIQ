@@ -1061,33 +1061,32 @@ def _apply_pressure_alignment(
     pressure_snapshot: OrderbookPressureSnapshot,
     atr: float,
 ) -> None:
-    """挂单压力监测器对 KL 信号的 confirmation / warning 叠加。
+    """挂单压力监测器对 KL 信号的 confirmation 叠加（仅强 wall 共振）。
 
-    匹配规则（同价位定义）：
-      - |wall.price_mid - sig.level_price| ≤ 0.5×ATR（无 ATR 时退化为 0.3% × level_price）
-      - 仅看本轮 OP snapshot.walls（已分类好 label）
+    重构（2026-04）后使用 **tier-based** 匹配 —— OP 模块不再判定真假阻力/支撑，
+    KL tracker 也对应改为按强度等级判断"是否值得叠加确认"：
 
-    叠加规则：
-      做多信号：
-        ├─ 同价位 wall.label == "real_S"     → confirmations += "ob_real_support"
-        ├─ 同价位 wall.label == "fake_S"     → warnings += "OP 显示下方挂单已撤单(spoof)"
-        ├─ 同价位 wall.label == "fake_S_break"→ warnings += "OP 显示下方支撑已假突破"
-        └─ 上方近距离(≤ 1.5×ATR) wall.label == "real_R" → warnings += "OP 显示上方有真阻力@…"
-      做空信号 对称处理（real_R / fake_R / fake_R_break + 下方 real_S 警告）
+      - 仅 S/A 级 wall（强度评分 ≥ $10M、含时间/whale 加成）参与叠加
+      - 同侧匹配：做多信号 ↔ bid wall，做空信号 ↔ ask wall
+      - 同价位（≤ 0.5×ATR）→ 加 confirmation（不再产生 warning，避免误导）
 
-      被打 warning 的 A 级信号自动降为 B（和 mtf/cvd 背离一致），最多降 1 档。
+    去掉的旧逻辑：
+      - fake_S/fake_R 警告 → 已不再判真假，无 fake_* 标签
+      - 上方真阻力/下方真支撑警告 → 改由用户在前端"挂单压力"卡片自行查阅
+
+    设计原则：OP 仅作辅助参考，不做带方向性的降级；KL 信号置信度只受
+    自身规则（sweep/pattern/MTF/CVD）控制，避免单一辅助模块过度拉扯。
     """
     if not pressure_snapshot.walls:
         return
 
-    # 预先按 side 分组，避免 N×M
-    real_S_walls = [w for w in pressure_snapshot.walls if w.label == "real_S"]
-    fake_S_walls = [w for w in pressure_snapshot.walls if w.label in ("fake_S", "fake_S_break")]
-    real_R_walls = [w for w in pressure_snapshot.walls if w.label == "real_R"]
-    fake_R_walls = [w for w in pressure_snapshot.walls if w.label in ("fake_R", "fake_R_break")]
+    # 仅 S/A 级 wall 参与叠加，过滤掉 B/C 级避免噪声
+    strong_asks = [w for w in pressure_snapshot.walls
+                   if w.side == "ask" and w.strength_tier in ("S", "A")]
+    strong_bids = [w for w in pressure_snapshot.walls
+                   if w.side == "bid" and w.strength_tier in ("S", "A")]
 
-    same_tol = max(atr * 0.5, 1e-9) if atr > 0 else 0.0  # 无 ATR 用百分比
-    warn_dist = max(atr * 1.5, 1e-9) if atr > 0 else 0.0
+    same_tol = max(atr * 0.5, 1e-9) if atr > 0 else 0.0
 
     for sig in signals:
         long_side = sig.action in _LONG_ACTIONS_OP
@@ -1096,49 +1095,16 @@ def _apply_pressure_alignment(
             continue
 
         lvl_price = sig.level_price
-        # ATR 缺失时退化为 0.3% × level_price
         local_same = same_tol if same_tol > 0 else lvl_price * 0.003
-        local_warn = warn_dist if warn_dist > 0 else lvl_price * 0.01
-
-        degraded = False
 
         if long_side:
-            # 同价位 real_S → confirmation
-            if any(abs(w.price_mid - lvl_price) <= local_same for w in real_S_walls):
-                sig.confirmations.append("ob_real_support")
-            # 同价位 fake_S* → warning
-            for w in fake_S_walls:
-                if abs(w.price_mid - lvl_price) <= local_same:
-                    label_cn = "已撤单(spoof)" if w.label == "fake_S" else "已假突破"
-                    sig.warnings.append(f"OP 下方挂单{label_cn}@{w.price_mid:.4f}")
-                    degraded = True
-                    break
-            # 上方近距离 real_R → warning
-            for w in real_R_walls:
-                gap = w.price_mid - lvl_price
-                if 0 < gap <= local_warn:
-                    sig.warnings.append(f"OP 上方真阻力@{w.price_mid:.4f}(距 +{gap / max(lvl_price, 1e-9) * 100:.2f}%)")
-                    degraded = True
-                    break
-
-        if short_side:
-            if any(abs(w.price_mid - lvl_price) <= local_same for w in real_R_walls):
-                sig.confirmations.append("ob_real_resistance")
-            for w in fake_R_walls:
-                if abs(w.price_mid - lvl_price) <= local_same:
-                    label_cn = "已撤单(spoof)" if w.label == "fake_R" else "已假突破"
-                    sig.warnings.append(f"OP 上方挂单{label_cn}@{w.price_mid:.4f}")
-                    degraded = True
-                    break
-            for w in real_S_walls:
-                gap = lvl_price - w.price_mid
-                if 0 < gap <= local_warn:
-                    sig.warnings.append(f"OP 下方真支撑@{w.price_mid:.4f}(距 -{gap / max(lvl_price, 1e-9) * 100:.2f}%)")
-                    degraded = True
-                    break
-
-        if degraded and sig.confidence == "A":
-            sig.confidence = "B"
+            # 做多信号同价位有 S/A 级 bid wall → confirmation
+            if any(abs(w.price_mid - lvl_price) <= local_same for w in strong_bids):
+                sig.confirmations.append("ob_strong_bid")
+        elif short_side:
+            # 做空信号同价位有 S/A 级 ask wall → confirmation
+            if any(abs(w.price_mid - lvl_price) <= local_same for w in strong_asks):
+                sig.confirmations.append("ob_strong_ask")
 
         sig.score = _compute_score(sig)
 

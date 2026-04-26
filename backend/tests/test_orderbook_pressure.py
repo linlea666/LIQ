@@ -1,23 +1,26 @@
-"""挂单压力监测器单元测试 (L1-L4 + 顶层 + 信号生成器)
+"""挂单压力监测器单元测试 (重构后 · 盘口订单流仪表盘)
 
 覆盖要点：
-- L1 detect_walls：±range 过滤 / 双闸阈值 / 同价位合并 / 排序与 max_walls
-- L1+ tag_with_large_orders：同价位关联 / side 隔离 / has_active_whale
-- L2 classify_change：大单优先 (eaten / cancelled / holding) / 散堆减量 (eaten / cancelled)
-- L3 classify_pressure：ask/bid 全分支 (real_R/fake_R/fake_R_break/untested)
-- L4 augment_with_absorption：confluence + confidence +25
-- compute_pressure_snapshot：数据不足返回 None / 正常组装 / 汇总字段
-- generate_pressure_signals：触发条件 + 30min 同价去重
+  - L1 路径 A · detect_walls_from_depth：±depth_range_pct 过滤、双闸阈值、合并、排序
+  - L1 路径 B · detect_walls_from_large_orders：远距筛选、聚合、holding-only
+  - tag_with_large_orders：depth 路径补 has_active_whale + holding_avg_age_sec
+  - augment_with_absorption：confluence 标记（不再加 confidence）
+  - _duration_factor / _compute_strength_score：时间阶梯 × USD × whale × absorption
+  - _assign_strength_tier：USD 绝对阈值（S ≥ $30M / A ≥ $10M / B ≥ $3M / C 默认）
+  - compute_pressure_snapshot：双路径合并、source 字段、reason 文案、tier 派生
+  - LargeOrderLifecycle.holding_age_sec：holding/ended/异常时间戳
+
+注意：本次重构后已砍 OP-Signal 通道，相关测试一并删除。
 """
 from __future__ import annotations
 
 import os
 import sys
+import time
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from models.market import CandleData
 from models.market_action import AbsorptionSnapshot, AbsorptionZone
 from models.orderbook_pressure import (
     DepthBin,
@@ -27,16 +30,14 @@ from models.orderbook_pressure import (
 )
 from processors.orderbook_pressure import (
     DEFAULTS,
+    _assign_strength_tier,
+    _compute_strength_score,
+    _duration_factor,
     augment_with_absorption,
-    classify_change,
-    classify_pressure,
     compute_pressure_snapshot,
-    detect_walls,
+    detect_walls_from_depth,
+    detect_walls_from_large_orders,
     tag_with_large_orders,
-)
-from processors.orderbook_pressure_signal import (
-    generate_pressure_signals,
-    reset_dedup_for_test,
 )
 
 # ── 公共工具 ──────────────────────────────────────────────────────────────
@@ -66,58 +67,103 @@ def _depth(
     return snap
 
 
-def _candle(ts_sec: int, close: float, *, high: float | None = None,
-            low: float | None = None) -> CandleData:
-    return CandleData(coin="BTC", ts=ts_sec * 1000,
-                      o=close, h=high if high is not None else close,
-                      l=low if low is not None else close, c=close)
+def _make_lo(
+    *, id: int, side: str, limit_price: float, current_qty: float = 50.0,
+    start_ms: int | None = None, end_ms: int | None = None,
+    state: str = "holding",
+) -> LargeOrderLifecycle:
+    """造一个测试用大单 lifecycle。"""
+    if start_ms is None:
+        start_ms = int(time.time() * 1000) - 3600 * 1000  # 默认 1h 前
+    return LargeOrderLifecycle(
+        id=id, side=side, limit_price=limit_price,
+        start_time_ms=start_ms, end_time_ms=end_ms,
+        start_quantity=current_qty, current_quantity=current_qty,
+        executed_volume=0.0, executed_usd_value=0.0,
+        start_usd_value=limit_price * current_qty,
+        current_usd_value=limit_price * current_qty,
+        state=state,    # type: ignore[arg-type]
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# L1 — detect_walls
+# LargeOrderLifecycle.holding_age_sec
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def test_holding_age_sec_holding_uses_now():
+    """holding 状态：从 start_time 到现在的秒数。"""
+    now_ms = int(time.time() * 1000)
+    lo = _make_lo(id=1, side="ask", limit_price=100.0,
+                  start_ms=now_ms - 7200 * 1000, state="holding")
+    age = lo.holding_age_sec
+    # 7200 ± 30s 容差（避免测试时序漂移）
+    assert 7170 <= age <= 7230
 
-def test_detect_walls_filters_range_and_picks_top():
-    """±2% 内挑出大单堆，±2% 外的不算（本测试聚焦"范围过滤"，
-    显式 override range_pct=2.0 与全局默认值解耦）。"""
+
+def test_holding_age_sec_ended_uses_end_time():
+    """ended 状态：用 end_time - start_time，不再随时间增长。"""
+    lo = _make_lo(
+        id=1, side="ask", limit_price=100.0,
+        start_ms=1_000_000_000_000,
+        end_ms=1_000_000_000_000 + 3_600_000,    # 1 小时后结束
+        state="ended",
+    )
+    assert lo.holding_age_sec == 3600
+
+
+def test_holding_age_sec_invalid_returns_zero():
+    """异常时间戳防御。"""
+    lo1 = _make_lo(id=1, side="ask", limit_price=100.0, start_ms=0, state="holding")
+    assert lo1.holding_age_sec == 0
+    # ended 但 end_time < start_time 的脏数据
+    lo2 = _make_lo(
+        id=2, side="ask", limit_price=100.0,
+        start_ms=2_000_000_000_000, end_ms=1_000_000_000_000,
+        state="ended",
+    )
+    assert lo2.holding_age_sec == 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# L1 路径 A · detect_walls_from_depth (近+中距 ≤4%)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_detect_walls_from_depth_filters_range_and_picks_top():
+    """±depth_range_pct(默认 4%) 内挑出大单堆，超出范围的过滤。
+
+    detect_walls_from_depth 返回 _RawWall（内部结构），仅含 price_lo/price_hi。
+    """
     last = 100.0
     asks = [
-        _bin(101.0, 100),    # $10100  ── 在范围内
-        _bin(101.5, 100),    # $10150
-        _bin(102.0, 60_000),  # $6,000,000  ✓ 大单墙
-        _bin(105.0, 80_000),  # $8,400,000 但超出 ±2% 范围 → 过滤掉
+        _bin(101.0, 100),       # +1.0% 在范围内
+        _bin(102.0, 60_000),    # +2.0% $6,120,000 ✓ 大墙
+        _bin(110.0, 80_000),    # +10% 超出 ±4% 范围 → 过滤
     ]
     bids = [
-        _bin(99.0, 50_000),  # $4,950,000  ✓ 买墙
-        _bin(98.5, 200),     # $19,700
+        _bin(99.0, 50_000),     # -1.0% $4,950,000 ✓ 大墙
+        _bin(95.0, 80_000),     # -5.0% 超出范围 → 过滤
     ]
-    cfg = {**DEFAULTS, "range_pct": 2.0}
-    walls = detect_walls(_depth(last, bids, asks), last, cfg)
+    walls = detect_walls_from_depth(_depth(last, bids, asks), last, DEFAULTS)
     sides = sorted({w.side for w in walls})
     assert sides == ["ask", "bid"]
+    # 102 入选，110 不入选
     ask_w = next(w for w in walls if w.side == "ask")
+    assert 101.5 <= ask_w.price_lo <= 102.5
     bid_w = next(w for w in walls if w.side == "bid")
-    # 范围外 105 不应入选
-    assert 101.5 <= ask_w.price_mid <= 102.5
-    # 仅大单达到 wall_min_usd，小数额被双闸过滤
-    assert ask_w.size_usd >= DEFAULTS["wall_min_usd"]
     assert bid_w.size_usd >= DEFAULTS["wall_min_usd"]
+    # source 字段标识来源
+    assert all(w.source == "depth_5m" for w in walls)
 
 
-def test_detect_walls_merges_neighbouring_bins():
-    """相邻 ±0.05% 价位的大单合并成一个墙。
-
-    用 cfg_override 把 wall_size_top_pct 提高到 1.0，让两个 bin 都过双闸阈值；
-    主要验证合并逻辑（默认 top 20% 在 2 个 bin 时只取 1 个，覆盖不到 merge）。
-    """
+def test_detect_walls_from_depth_merges_neighbouring_bins():
+    """相邻 ±0.05% 价位合并成一个墙。"""
     last = 1000.0
     asks = [
-        _bin(1010.0, 700),    # $707,000  ✓ 大墙
-        _bin(1010.4, 800),    # $808,000  ✓ 大墙，与 1010.0 相距 0.4 < 0.5 (merge_tol)
+        _bin(1010.0, 700),    # $707,000
+        _bin(1010.4, 800),    # $808,000；与 1010 相距 0.4 < 0.5 (merge_tol)
     ]
-    cfg = {**DEFAULTS, "wall_size_top_pct": 1.0}
-    walls = detect_walls(_depth(last, [], asks), last, cfg)
+    cfg = {**DEFAULTS, "wall_size_top_pct": 1.0}  # 让两个 bin 都过双闸
+    walls = detect_walls_from_depth(_depth(last, [], asks), last, cfg)
     asks_w = [w for w in walls if w.side == "ask"]
     assert len(asks_w) == 1
     merged = asks_w[0]
@@ -125,544 +171,395 @@ def test_detect_walls_merges_neighbouring_bins():
     assert merged.size_usd >= 707_000 + 808_000 - 1
 
 
-def test_detect_walls_skips_when_no_data():
-    """空 depth / last_price=0 → 直接返回空，不抛错。"""
-    assert detect_walls(_depth(100.0, [], []), 100.0, DEFAULTS) == []
+def test_detect_walls_from_depth_skips_when_no_data():
+    """空 depth / last_price=0 → 直接返回空。"""
+    assert detect_walls_from_depth(_depth(100.0, [], []), 100.0, DEFAULTS) == []
     snap = _depth(100.0, [_bin(99, 1)], [_bin(101, 1)])
-    assert detect_walls(snap, 0.0, DEFAULTS) == []
+    assert detect_walls_from_depth(snap, 0.0, DEFAULTS) == []
+
+
+def test_detect_walls_from_depth_excludes_far_distance():
+    """≥ 4% 距离的 bin 被 depth 路径过滤（应该走 large_orders 路径）。"""
+    last = 100.0
+    asks = [
+        _bin(102.0, 60_000),    # +2% 在范围内
+        _bin(106.0, 60_000),    # +6% 超出 4%
+    ]
+    walls = detect_walls_from_depth(_depth(last, [], asks), last, DEFAULTS)
+    # 只有 102 价位的 wall
+    asks_w = [w for w in walls if w.side == "ask"]
+    assert len(asks_w) == 1
+    assert 101.5 <= asks_w[0].price_lo <= 102.5
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# L1+ — tag_with_large_orders
+# L1 路径 B · detect_walls_from_large_orders (远距 4-12%)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-
-def test_tag_with_large_orders_associates_same_side_only():
-    """ask wall 只关联 ask 大单，对侧 bid 大单不应误关联。"""
-    wall_ask = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.2, price_mid=100.1,
-        distance_pct=0.1, size_usd=1_000_000, size_base=10,
-    )
-    wall_bid = PressureWall(
-        side="bid", price_lo=98.0, price_hi=98.2, price_mid=98.1,
-        distance_pct=-1.9, size_usd=900_000, size_base=10,
-    )
+def test_detect_walls_from_large_orders_filters_to_far_distance():
+    """只挑选距现价 4-12% 的 holding 大单（近+中距留给 depth 路径）。"""
+    last = 1000.0
     los = [
-        LargeOrderLifecycle(id=1, side="ask", limit_price=100.05,
-                            start_time_ms=1, start_quantity=100,
-                            current_quantity=100, state="holding",
-                            start_usd_value=10_000, current_usd_value=10_000),
-        LargeOrderLifecycle(id=2, side="bid", limit_price=100.05,  # 价格落在 ask 区间
-                            start_time_ms=1, start_quantity=80,
-                            current_quantity=80, state="holding",
-                            start_usd_value=8_000, current_usd_value=8_000),
-        LargeOrderLifecycle(id=3, side="bid", limit_price=98.10,
-                            start_time_ms=1, start_quantity=60,
-                            current_quantity=60, state="holding",
-                            start_usd_value=6_000, current_usd_value=6_000),
+        _make_lo(id=1, side="ask", limit_price=1020.0, current_qty=10_000),  # +2% < 4% 过滤
+        _make_lo(id=2, side="ask", limit_price=1080.0, current_qty=10_000),  # +8% ✓
+        _make_lo(id=3, side="ask", limit_price=1200.0, current_qty=10_000),  # +20% > 12% 过滤
+        _make_lo(id=4, side="bid", limit_price=950.0, current_qty=10_000),   # -5% ✓
     ]
-    tag_with_large_orders([wall_ask, wall_bid], los, last_price=100.0, cfg=DEFAULTS)
-    assert wall_ask.large_order_ids == [1]
-    assert wall_ask.has_active_whale is True
-    assert wall_bid.large_order_ids == [3]
-    assert wall_bid.has_active_whale is True
+    walls = detect_walls_from_large_orders(los, last, DEFAULTS)
+    asks = [w for w in walls if w.side == "ask"]
+    bids = [w for w in walls if w.side == "bid"]
+    assert len(asks) == 1
+    assert len(bids) == 1
+    assert abs(asks[0].price_lo - 1080.0) < 0.5
+    assert abs(bids[0].price_lo - 950.0) < 0.5
+    # source 字段
+    assert all(w.source == "large_orders" for w in walls)
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# L2 — classify_change
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-def _make_tagged_wall(side="ask") -> PressureWall:
-    w = PressureWall(
-        side=side, price_lo=100.0, price_hi=100.2, price_mid=100.1,
-        distance_pct=0.1, size_usd=1_000_000, size_base=10,
-    )
-    w.large_order_ids = [42]
-    w.large_order_count = 1
-    return w
-
-
-def test_classify_change_eaten_via_large_order():
-    wall = _make_tagged_wall("ask")
-    now = 1_700_000_000
-    los = [LargeOrderLifecycle(
-        id=42, side="ask", limit_price=100.1,
-        start_time_ms=(now - 1000) * 1000,
-        start_quantity=10.0, current_quantity=1.0,
-        executed_volume=9.0, executed_usd_value=900.0,
-        start_usd_value=1000.0, current_usd_value=100.0,
-        state="ended", end_time_ms=(now - 100) * 1000,
-    )]
-    classify_change([wall], depth=_depth(100.0, [], []), large_orders=los,
-                    taker_series=[], cfg=DEFAULTS, now_sec=now)
-    assert wall.change_kind == "eaten"
-    assert wall.eaten_usd >= 900.0
-
-
-def test_classify_change_cancelled_via_large_order():
-    wall = _make_tagged_wall("ask")
-    now = 1_700_000_000
-    los = [LargeOrderLifecycle(
-        id=42, side="ask", limit_price=100.1,
-        start_time_ms=(now - 500) * 1000,
-        start_quantity=10.0, current_quantity=0.5,
-        executed_volume=0.5, executed_usd_value=50.0,
-        start_usd_value=1000.0, current_usd_value=50.0,
-        state="ended", end_time_ms=(now - 100) * 1000,
-    )]
-    classify_change([wall], depth=_depth(100.0, [], []), large_orders=los,
-                    taker_series=[], cfg=DEFAULTS, now_sec=now)
-    assert wall.change_kind == "cancelled"
-    assert wall.cancelled_usd > wall.eaten_usd
-
-
-def test_classify_change_holding_via_large_order():
-    wall = _make_tagged_wall("bid")
-    now = 1_700_000_000
-    los = [LargeOrderLifecycle(
-        id=42, side="bid", limit_price=100.1,
-        start_time_ms=(now - 200) * 1000,
-        start_quantity=10.0, current_quantity=10.0,
-        executed_volume=0.0, executed_usd_value=0.0,
-        start_usd_value=1000.0, current_usd_value=1000.0,
-        state="holding",
-    )]
-    classify_change([wall], depth=_depth(100.0, [], []), large_orders=los,
-                    taker_series=[], cfg=DEFAULTS, now_sec=now)
-    assert wall.change_kind == "holding"
-
-
-def test_classify_change_depth_delta_eaten():
-    """无大单关联时走散堆减量路径：减少量 ≤ taker_buy → eaten。"""
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=600_000, size_base=6,
-    )
-    prev_asks = [_bin(100.1, 60), _bin(100.4, 40)]   # $10,016 prev
-    cur_asks = [_bin(100.1, 10), _bin(100.4, 5)]     # 减少了 ~$8500 base coin
-    depth = _depth(100.0, [], cur_asks, prev_asks=prev_asks)
-    # 同窗内主动买盘成交 ≥ 减少量
-    taker = [{"ts": now - 10, "buy_usd": 20_000, "sell_usd": 0}]
-    classify_change([wall], depth=depth, large_orders=[], taker_series=taker,
-                    cfg=DEFAULTS, now_sec=now)
-    assert wall.change_kind == "eaten"
-
-
-def test_classify_change_depth_delta_cancelled():
-    """减少量远 > taker → cancelled。"""
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=600_000, size_base=6,
-    )
-    prev_asks = [_bin(100.1, 60), _bin(100.4, 40)]
-    cur_asks = [_bin(100.1, 5), _bin(100.4, 5)]
-    depth = _depth(100.0, [], cur_asks, prev_asks=prev_asks)
-    taker = [{"ts": now - 10, "buy_usd": 200, "sell_usd": 0}]
-    classify_change([wall], depth=depth, large_orders=[], taker_series=taker,
-                    cfg=DEFAULTS, now_sec=now)
-    assert wall.change_kind == "cancelled"
-    assert wall.cancelled_usd > 0
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# L3 — classify_pressure
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-def _state_with_candles(last: float, candles: list[CandleData],
-                        *, cvd_trend: str | None = None):
-    """构造最小 state 给 classify_pressure 使用（仅访问 candles_15m / cvd_contract）。"""
-    cvd = SimpleNamespace(trend_1h=cvd_trend) if cvd_trend else None
-    return SimpleNamespace(
-        coin="BTC", ticker=SimpleNamespace(last=last),
-        candles_15m=candles, cvd_contract=cvd,
-        atr=None, large_orders_history=[],
-        taker_contract_series=[],
-        footprint_contract=[], footprint_spot=[],
-        orderbook_depth_snapshot=None,
-    )
-
-
-def test_classify_pressure_real_resistance_with_cvd_rising():
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-    )
-    wall.change_kind = "eaten"
-    candles = [_candle(now - 600, close=100.0, high=100.3, low=99.8)]
-    state = _state_with_candles(100.0, candles, cvd_trend="rising")
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "real_R"
-    assert wall.confidence >= 80
-
-
-def test_classify_pressure_fake_resistance_break():
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-    )
-    wall.change_kind = "cancelled"
-    # 价格已突破到 102 → broken_up=True
-    candles = [
-        _candle(now - 400, close=100.6, high=100.8, low=100.0),
-        _candle(now - 100, close=102.0, high=102.0, low=100.5),
+def test_detect_walls_from_large_orders_excludes_ended():
+    """ended（已平/已撤）的大单不计入远距 wall。"""
+    last = 1000.0
+    los = [
+        _make_lo(id=1, side="ask", limit_price=1080.0, current_qty=10_000,
+                 state="holding"),
+        _make_lo(id=2, side="ask", limit_price=1080.0, current_qty=10_000,
+                 state="ended", end_ms=int(time.time() * 1000)),
     ]
-    state = _state_with_candles(102.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "fake_R_break"
+    walls = detect_walls_from_large_orders(los, last, DEFAULTS)
+    asks = [w for w in walls if w.side == "ask"]
+    assert len(asks) == 1
+    # 仅 holding 的那笔，size 是单笔大小（不是合并）
+    assert asks[0].size_usd <= 1080.0 * 10_000 + 1
 
 
-def test_classify_pressure_real_support_with_cvd_declining():
-    now = 1_700_000_000
+def test_detect_walls_from_large_orders_merges_close_prices():
+    """相邻 ±0.10% 价位的大单聚合 + 计算加权平均 holding_age。"""
+    last = 1000.0
+    now_ms = int(time.time() * 1000)
+    los = [
+        _make_lo(id=1, side="ask", limit_price=1080.0, current_qty=5_000,
+                 start_ms=now_ms - 3600 * 1000),   # 1h 前
+        _make_lo(id=2, side="ask", limit_price=1080.5, current_qty=5_000,
+                 start_ms=now_ms - 7200 * 1000),   # 2h 前
+    ]
+    walls = detect_walls_from_large_orders(los, last, DEFAULTS)
+    asks = [w for w in walls if w.side == "ask"]
+    assert len(asks) == 1  # merge 成 1 个
+    merged = asks[0]
+    assert merged.bin_count == 2
+    # 加权平均：两个 USD 接近相等，age 应该约等于 (3600+7200)/2 = 5400
+    assert 4500 <= merged.holding_avg_age_sec <= 6300
+
+
+def test_detect_walls_from_large_orders_skips_below_min_usd():
+    """单笔/聚合后低于 wall_min_usd($500K) 的过滤。"""
+    last = 1000.0
+    los = [
+        _make_lo(id=1, side="ask", limit_price=1080.0, current_qty=100),  # $108K < $500K
+    ]
+    assert detect_walls_from_large_orders(los, last, DEFAULTS) == []
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# tag_with_large_orders — depth 路径补 has_active_whale + holding_avg_age
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_tag_with_large_orders_depth_path():
+    """depth_5m 路径的 wall 通过 tag_with_large_orders 补 has_active_whale。"""
     wall = PressureWall(
-        side="bid", price_lo=99.0, price_hi=99.5, price_mid=99.25,
-        distance_pct=-0.75, size_usd=1_000_000, size_base=10,
+        side="ask", price_lo=100.0, price_hi=100.2, price_mid=100.1,
+        distance_pct=0.1, size_usd=1_000_000, size_base=10, source="depth_5m",
     )
-    wall.change_kind = "eaten"
-    candles = [_candle(now - 600, close=100.0, high=100.2, low=99.4)]
-    state = _state_with_candles(100.0, candles, cvd_trend="declining")
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "real_S"
-    assert wall.confidence >= 80
+    now_ms = int(time.time() * 1000)
+    los = [_make_lo(id=10, side="ask", limit_price=100.05,
+                    current_qty=50, start_ms=now_ms - 7200 * 1000, state="holding")]
+    tag_with_large_orders([wall], los, last_price=100.0, cfg=DEFAULTS)
+    assert wall.large_order_ids == [10]
+    assert wall.has_active_whale is True
+    assert wall.holding_avg_age_sec > 7000
 
 
-def test_classify_pressure_untested_when_price_far():
-    now = 1_700_000_000
+def test_tag_with_large_orders_skips_opposite_side():
+    """ask wall 不应被 bid 大单关联。"""
     wall = PressureWall(
-        side="ask", price_lo=110.0, price_hi=110.5, price_mid=110.25,
-        distance_pct=10.25, size_usd=1_000_000, size_base=10,
+        side="ask", price_lo=100.0, price_hi=100.2, price_mid=100.1,
+        distance_pct=0.1, size_usd=1_000_000, size_base=10, source="depth_5m",
     )
-    wall.change_kind = "holding"
-    candles = [_candle(now - 600, close=100.0, high=100.5, low=99.8)]
-    state = _state_with_candles(100.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "untested"
+    los = [_make_lo(id=10, side="bid", limit_price=100.05, current_qty=50)]
+    tag_with_large_orders([wall], los, last_price=100.0, cfg=DEFAULTS)
+    assert wall.large_order_ids == []
+    assert wall.has_active_whale is False
 
 
-def test_classify_pressure_partial_ask_touched_unbroken_is_real_R():
-    """partial + touched + 未破：卖墙部分被吃 + 价格被压住 → real_R 候选。
+def test_tag_with_large_orders_preserves_large_orders_path():
+    """large_orders 路径来源的 wall 自带 ids 与 has_active_whale，tag 函数不应覆盖它们。
 
-    回归 P0 bug：之前 _label_one 没有 partial 分支，全部 fallthrough 到 untested 25。
+    has_active_whale 在 _raw_to_pressure_wall 中创建时已写入；本函数对
+    source == 'large_orders' 的 wall 直接 continue。
     """
-    now = 1_700_000_000
     wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        side="ask", price_lo=110.0, price_hi=110.2, price_mid=110.1,
+        distance_pct=10.1, size_usd=10_000_000, size_base=900,
+        source="large_orders", large_order_ids=[1, 2], large_order_count=2,
+        has_active_whale=True,
     )
-    wall.change_kind = "partial"
-    candles = [_candle(now - 600, close=100.0, high=100.3, low=99.8)]
-    state = _state_with_candles(100.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "real_R"
-    assert wall.confidence == 60
-
-
-def test_classify_pressure_partial_bid_touched_unbroken_is_real_S():
-    """partial + touched + 未破：买墙部分被吃 + 价格守住 → real_S 候选。"""
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="bid", price_lo=99.0, price_hi=99.5, price_mid=99.25,
-        distance_pct=-0.75, size_usd=1_000_000, size_base=10,
-    )
-    wall.change_kind = "partial"
-    candles = [_candle(now - 600, close=100.0, high=100.2, low=99.4)]
-    state = _state_with_candles(100.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "real_S"
-    assert wall.confidence == 60
-
-
-def test_classify_pressure_partial_broken_is_fake_break():
-    """partial + 已破 → fake_R_break（部分被吃但顶不住，墙已失效）。"""
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-    )
-    wall.change_kind = "partial"
-    candles = [
-        _candle(now - 400, close=100.6, high=100.8, low=100.0),
-        _candle(now - 100, close=102.0, high=102.0, low=100.5),
-    ]
-    state = _state_with_candles(102.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "fake_R_break"
-    assert wall.confidence == 45
-
-
-def test_classify_pressure_partial_untouched_is_untested_higher_score():
-    """partial + 未触：减量来源不清 + 价格未到 → untested 但置信度 40（高于 holding+untouched 的 30）。"""
-    now = 1_700_000_000
-    wall = PressureWall(
-        side="ask", price_lo=110.0, price_hi=110.5, price_mid=110.25,
-        distance_pct=10.25, size_usd=1_000_000, size_base=10,
-    )
-    wall.change_kind = "partial"
-    candles = [_candle(now - 600, close=100.0, high=100.5, low=99.8)]
-    state = _state_with_candles(100.0, candles)
-    classify_pressure([wall], state, DEFAULTS, now)
-    assert wall.label == "untested"
-    assert wall.confidence == 40  # 比 holding+untouched 的 30 高
+    # 即使传入 large_orders 列表（包含价位远的散单），ids/whale 标记也不应被覆盖
+    los = [_make_lo(id=99, side="bid", limit_price=50.0, current_qty=100)]
+    tag_with_large_orders([wall], los, last_price=100.0, cfg=DEFAULTS)
+    assert wall.large_order_ids == [1, 2]
+    assert wall.has_active_whale is True
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# L4 — augment_with_absorption
+# augment_with_absorption — 共振只打标，不加分
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-
-def test_augment_with_absorption_boosts_confidence():
+def test_augment_with_absorption_marks_confluence_only():
+    """重构后只打 confluence_with_absorption 标记，不再 +25 confidence。"""
     wall = PressureWall(
         side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=70, reason="卖墙被吃",
+        distance_pct=0.25, size_usd=1_000_000, size_base=10, source="depth_5m",
     )
     zone = AbsorptionZone(
         price=100.20, side="resistance", taker_volume_usd=5_000_000,
         delta_pct_abs_avg=0.05, bar_count=2, age_hours=0.5,
     )
-    snap = AbsorptionSnapshot(zones_resistance=[zone], total_zone_count=1,
-                              strongest_resistance=zone, lookback_bars=3)
+    snap = AbsorptionSnapshot(
+        zones_resistance=[zone], total_zone_count=1,
+        strongest_resistance=zone, lookback_bars=3,
+    )
     augment_with_absorption([wall], snap, last_price=100.0, atr=2.0, cfg=DEFAULTS)
     assert wall.confluence_with_absorption is True
-    assert wall.confidence == 95
-    assert "absorption_zone" in wall.reason
+    assert wall.absorption_zone_price == 100.20
 
 
 def test_augment_with_absorption_no_match_when_far():
     wall = PressureWall(
         side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=70,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10, source="depth_5m",
     )
     zone = AbsorptionZone(
         price=110.0, side="resistance", taker_volume_usd=5_000_000,
         delta_pct_abs_avg=0.05, bar_count=2, age_hours=0.5,
     )
-    snap = AbsorptionSnapshot(zones_resistance=[zone], total_zone_count=1,
-                              strongest_resistance=zone, lookback_bars=3)
+    snap = AbsorptionSnapshot(
+        zones_resistance=[zone], total_zone_count=1,
+        strongest_resistance=zone, lookback_bars=3,
+    )
     augment_with_absorption([wall], snap, last_price=100.0, atr=2.0, cfg=DEFAULTS)
     assert wall.confluence_with_absorption is False
-    assert wall.confidence == 70
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 强度 tier 派生（_assign_strength_tier）
+# _duration_factor — 时间阶梯
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def test_duration_factor_depth_5m_always_one():
+    """depth_5m 路径无法精确知挂单时长 → 统一 1.0。"""
+    assert _duration_factor(0, "depth_5m") == 1.0
+    assert _duration_factor(7 * 86400, "depth_5m") == 1.0
 
-def test_assign_strength_tier_real_with_boost_promotes_to_s():
-    from processors.orderbook_pressure import _assign_strength_tier
 
-    # real_R + confidence 78 + 共振大单 → S（boost 把 75-84 区间提升到 S）
+def test_duration_factor_large_orders_ladder():
+    """large_orders 路径阶梯：<1h → 0.7；1-6h → 1.0；6-24h → 1.3；1-7d → 1.6；>7d → 2.0。"""
+    assert _duration_factor(30 * 60, "large_orders") == 0.7      # 30min
+    assert _duration_factor(3 * 3600, "large_orders") == 1.0     # 3h
+    assert _duration_factor(12 * 3600, "large_orders") == 1.3    # 12h
+    assert _duration_factor(3 * 86400, "large_orders") == 1.6    # 3d
+    assert _duration_factor(10 * 86400, "large_orders") == 2.0   # 10d
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _compute_strength_score — 综合公式
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_compute_strength_score_base_usd_only():
+    """无 whale + 无 absorption + depth_5m → score == size_usd × 1 × 1 × 1。"""
     wall = PressureWall(
-        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=78, large_order_count=2,
+        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10, source="depth_5m",
     )
-    assert _assign_strength_tier(wall) == "S"
+    assert _compute_strength_score(wall) == 1_000_000
 
 
-def test_assign_strength_tier_real_high_confidence_is_s():
-    from processors.orderbook_pressure import _assign_strength_tier
-
-    # real_S + confidence ≥ 85 即使无 boost 也是 S
+def test_compute_strength_score_with_whale_and_absorption():
+    """有 whale + 有 absorption → 1 × 1.3 × 1.2 = 1.56× 加成。"""
     wall = PressureWall(
-        side="bid", price_lo=99.5, price_hi=100, price_mid=99.75,
-        distance_pct=-0.25, size_usd=1_000_000, size_base=10,
-        label="real_S", confidence=88,
+        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10, source="depth_5m",
+        has_active_whale=True, confluence_with_absorption=True,
     )
-    assert _assign_strength_tier(wall) == "S"
+    score = _compute_strength_score(wall)
+    assert abs(score - 1_000_000 * 1.3 * 1.2) < 1
 
 
-def test_assign_strength_tier_real_70_is_a():
-    from processors.orderbook_pressure import _assign_strength_tier
-
+def test_compute_strength_score_large_orders_long_duration():
+    """large_orders + 5d holding → 1 × 1.6 = 1.6× 加成。"""
     wall = PressureWall(
-        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=70,
+        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=10_000_000, size_base=100, source="large_orders",
+        holding_avg_age_sec=5 * 86400,
     )
-    assert _assign_strength_tier(wall) == "A"
+    score = _compute_strength_score(wall)
+    assert abs(score - 10_000_000 * 1.6) < 1
 
 
-def test_assign_strength_tier_fake_capped_to_b():
-    from processors.orderbook_pressure import _assign_strength_tier
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _assign_strength_tier — 绝对 USD 阈值
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    # spoof 撤单墙即使 confidence 很高也封顶 B（避免误导）
-    wall = PressureWall(
+def test_assign_strength_tier_thresholds():
+    """S ≥ $30M / A ≥ $10M / B ≥ $3M / C 默认。"""
+    def _w(score: float) -> PressureWall:
+        w = PressureWall(
+            side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+            distance_pct=0.25, size_usd=score, size_base=1, source="depth_5m",
+        )
+        w.strength_score = score
+        return w
+
+    assert _assign_strength_tier(_w(50_000_000), DEFAULTS) == "S"
+    assert _assign_strength_tier(_w(15_000_000), DEFAULTS) == "A"
+    assert _assign_strength_tier(_w(5_000_000), DEFAULTS) == "B"
+    assert _assign_strength_tier(_w(1_000_000), DEFAULTS) == "C"
+
+
+def test_assign_strength_tier_uses_score_not_size():
+    """tier 用 strength_score 而非 size_usd（确保时间衰减/累积生效）。"""
+    # size_usd $5M（B 阈值），但 score 因 30min 快闪挂单变 $3.5M（仍 B 但贴边）
+    w = PressureWall(
         side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="fake_R", confidence=90,
+        distance_pct=0.25, size_usd=5_000_000, size_base=50, source="large_orders",
+        holding_avg_age_sec=30 * 60,   # 30min
     )
-    assert _assign_strength_tier(wall) == "B"
+    w.strength_score = _compute_strength_score(w)
+    # 30min < 1h → factor 0.7 → 5M × 0.7 = 3.5M ≥ tier_b
+    assert _assign_strength_tier(w, DEFAULTS) == "B"
 
-
-def test_assign_strength_tier_fake_break_is_c():
-    from processors.orderbook_pressure import _assign_strength_tier
-
-    # 已突破墙强制 C
-    wall = PressureWall(
+    # 同样 $5M 但持有 2 天 → score 5M × 1.6 = $8M < $10M → 仍 B
+    w2 = PressureWall(
         side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="fake_R_break", confidence=80,
+        distance_pct=0.25, size_usd=5_000_000, size_base=50, source="large_orders",
+        holding_avg_age_sec=2 * 86400,
     )
-    assert _assign_strength_tier(wall) == "C"
+    w2.strength_score = _compute_strength_score(w2)
+    assert _assign_strength_tier(w2, DEFAULTS) == "B"
 
 
-def test_assign_strength_tier_untested_is_b_or_c():
-    from processors.orderbook_pressure import _assign_strength_tier
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 顶层 compute_pressure_snapshot — 端到端
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    high = PressureWall(
-        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="untested", confidence=60,
-    )
-    low = PressureWall(
-        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
-        distance_pct=0.25, size_usd=1_000_000, size_base=10,
-        label="untested", confidence=30,
-    )
-    assert _assign_strength_tier(high) == "B"
-    assert _assign_strength_tier(low) == "C"
+def test_compute_pressure_snapshot_returns_none_on_missing_ticker():
+    s = SimpleNamespace(coin="BTC", ticker=None, orderbook_depth_snapshot=None,
+                        large_orders_history=[])
+    assert compute_pressure_snapshot(s) is None
 
 
-def test_compute_snapshot_writes_tier_for_each_wall():
-    """端到端：确保 compute_pressure_snapshot 输出的每个 wall 都带 tier。"""
-    now = 1_700_000_000
-    last = 100.0
-    asks = [_bin(100.4, 60_000)]
-    bids = [_bin(99.6, 50_000)]
-    depth = _depth(last, bids, asks)
-    state = SimpleNamespace(
-        coin="BTC", ticker=SimpleNamespace(last=last),
-        orderbook_depth_snapshot=depth,
+def test_compute_pressure_snapshot_returns_empty_when_no_walls():
+    """有 ticker 但 depth/large_orders 都为空 → 返回空 walls 但不 None。"""
+    s = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=100.0),
+        orderbook_depth_snapshot=None,
         large_orders_history=[],
-        taker_contract_series=[],
-        candles_15m=[],
-        cvd_contract=None,
         footprint_contract=[], footprint_spot=[],
         atr=1.0,
     )
-    snap = compute_pressure_snapshot(state, now_sec=now)
+    snap = compute_pressure_snapshot(s)
+    assert snap is not None
+    assert snap.walls == []
+    assert snap.data_quality == "missing"
+
+
+def test_compute_pressure_snapshot_combines_both_sources():
+    """近+中距走 depth_5m，远距走 large_orders，输出合并后 source 字段正确。"""
+    last = 100.0
+    now_ms = int(time.time() * 1000)
+    asks = [_bin(101.0, 60_000)]   # +1% depth 路径 ($6.06M)
+    bids = [_bin(99.0, 60_000)]
+    depth = _depth(last, bids, asks)
+    los = [
+        _make_lo(id=1, side="ask", limit_price=110.0, current_qty=200_000,
+                 start_ms=now_ms - 86400 * 1000),    # +10% large_orders 路径 ($22M, 1d)
+    ]
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=depth,
+        large_orders_history=los,
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state)
+    assert snap is not None
+    sources = {w.source for w in snap.walls}
+    assert "depth_5m" in sources
+    assert "large_orders" in sources
+    # 远距来源的 wall 必须填了 holding_avg_age_sec
+    far_walls = [w for w in snap.walls if w.source == "large_orders"]
+    assert all(w.holding_avg_age_sec > 0 for w in far_walls)
+
+
+def test_compute_pressure_snapshot_assigns_tier_and_reason():
+    """每个 wall 都带 tier + reason 文案（中性）。"""
+    last = 100.0
+    asks = [_bin(101.0, 60_000)]
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=_depth(last, [], asks),
+        large_orders_history=[],
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state)
     assert snap is not None and snap.walls
     for w in snap.walls:
         assert w.strength_tier in ("S", "A", "B", "C")
+        assert w.reason  # 非空
+        # 文案不能再含"真假"语义
+        assert "真" not in w.reason
+        assert "假" not in w.reason
+        assert "spoof" not in w.reason.lower()
+        # 标签必须是新中性枚举
+        assert w.label in ("wall_ask", "wall_bid", "wall_vanished", "wall_broken")
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 顶层 compute_pressure_snapshot
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-def test_compute_pressure_snapshot_returns_none_on_missing_data():
-    # 无 ticker
-    s1 = SimpleNamespace(coin="BTC", ticker=None, orderbook_depth_snapshot=None)
-    assert compute_pressure_snapshot(s1) is None
-
-    # 有 ticker 无 depth
-    s2 = SimpleNamespace(coin="BTC", ticker=SimpleNamespace(last=100.0),
-                         orderbook_depth_snapshot=None)
-    assert compute_pressure_snapshot(s2) is None
-
-
-def test_compute_pressure_snapshot_full_assembly():
-    now = 1_700_000_000
+def test_compute_pressure_snapshot_top_resistance_uses_strong_tier():
+    """top_resistance 取 S/A 级最近的 ask wall（B/C 级降级为最后兜底）。"""
     last = 100.0
-    asks = [_bin(100.2, 50), _bin(100.4, 60_000)]   # 100.4 是大墙 ($6.024M)
-    bids = [_bin(99.6, 50_000), _bin(99.4, 200)]    # 99.6 是大墙 ($4.98M)
-    depth = _depth(last, bids, asks,
-                   prev_bids=[_bin(99.6, 60_000), _bin(99.4, 200)],
-                   prev_asks=[_bin(100.2, 50), _bin(100.4, 70_000)])
-    candles = [_candle(now - 500, close=100.0, high=100.3, low=99.7)]
+    now_ms = int(time.time() * 1000)
+    # 1) 近距弱墙（B 级，~$6M score with depth_5m factor=1.0）
+    asks_close = [_bin(101.0, 60_000)]
+    # 2) 远距强墙（>$30M 进入 S 级；+8% 远距）
+    los = [_make_lo(id=1, side="ask", limit_price=108.0, current_qty=400_000,
+                    start_ms=now_ms - 7 * 86400 * 1000)]   # 7d holding → factor 2.0
     state = SimpleNamespace(
         coin="BTC", ticker=SimpleNamespace(last=last),
-        orderbook_depth_snapshot=depth,
-        large_orders_history=[],
-        taker_contract_series=[
-            {"ts": now - 30, "buy_usd": 5_000_000, "sell_usd": 4_000_000},
-        ],
-        candles_15m=candles,
-        cvd_contract=SimpleNamespace(trend_1h="rising"),
+        orderbook_depth_snapshot=_depth(last, [], asks_close),
+        large_orders_history=los,
         footprint_contract=[], footprint_spot=[],
         atr=1.0,
     )
-    snap = compute_pressure_snapshot(state, now_sec=now)
+    snap = compute_pressure_snapshot(state)
     assert snap is not None
-    assert snap.coin == "BTC"
-    assert snap.ts_sec == now
-    assert snap.last_price == last
-    assert len(snap.walls) >= 2
-    # 顶层汇总：买墙落在 99.6 区间，理论应作为 top_support 候选
-    assert snap.top_support is None or 99.4 <= snap.top_support <= 99.7
+    # S/A 级远距强墙应被选为 top_resistance（虽然距离更远）
+    s_a_asks = [w for w in snap.walls
+                if w.side == "ask" and w.strength_tier in ("S", "A")]
+    assert s_a_asks, "expected at least one S/A ask wall"
+    assert snap.top_resistance is not None
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 信号生成 + 30min 同价去重
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-def test_generate_signals_and_dedup_window():
-    reset_dedup_for_test()
-    now = 1_700_000_000
-    real_R = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.2, price_mid=100.1,
-        distance_pct=0.1, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=80, reason="ok",
+def test_compute_pressure_snapshot_no_signal_field():
+    """重构后 snapshot 不应再产出任何 signal 字段（OP-Signal 通道已砍）。"""
+    last = 100.0
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=_depth(last, [], [_bin(101.0, 60_000)]),
+        large_orders_history=[],
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
     )
-    real_S = PressureWall(
-        side="bid", price_lo=99.5, price_hi=99.7, price_mid=99.6,
-        distance_pct=-0.4, size_usd=1_000_000, size_base=10,
-        label="real_S", confidence=80, reason="ok",
-    )
-    snap = compute_snap_for_signals(now, last=100.0, walls=[real_R, real_S], atr=1.0)
-
-    sigs1 = generate_pressure_signals(snap, now_sec=now)
-    sides = sorted(s.side for s in sigs1)
-    assert sides == ["long", "short"]
-
-    # 30 min 内重复 → 全部去重
-    sigs2 = generate_pressure_signals(snap, now_sec=now + 60)
-    assert sigs2 == []
-
-    # 跨过 30 min 窗口 → 重新触发
-    sigs3 = generate_pressure_signals(snap, now_sec=now + 1900)
-    assert len(sigs3) == 2
-
-
-def test_generate_signals_skip_low_confidence():
-    reset_dedup_for_test()
-    now = 1_700_000_000
-    weak_R = PressureWall(
-        side="ask", price_lo=100.0, price_hi=100.2, price_mid=100.1,
-        distance_pct=0.1, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=40,  # < 60 默认门槛
-    )
-    snap = compute_snap_for_signals(now, last=100.0, walls=[weak_R], atr=1.0)
-    assert generate_pressure_signals(snap, now_sec=now) == []
-
-
-def test_generate_signals_skip_when_far_from_price():
-    reset_dedup_for_test()
-    now = 1_700_000_000
-    far_R = PressureWall(
-        side="ask", price_lo=110.0, price_hi=110.2, price_mid=110.1,
-        distance_pct=10.1, size_usd=1_000_000, size_base=10,
-        label="real_R", confidence=80,
-    )
-    snap = compute_snap_for_signals(now, last=100.0, walls=[far_R], atr=1.0)
-    assert generate_pressure_signals(snap, now_sec=now) == []
-
-
-# 辅助：构造 OrderbookPressureSnapshot 给 signal 测试用
-def compute_snap_for_signals(ts_sec, last, walls, atr):
-    from models.orderbook_pressure import OrderbookPressureSnapshot
-    return OrderbookPressureSnapshot(
-        coin="BTC", ts_sec=ts_sec, last_price=last, atr=atr,
-        walls=walls, sample_count_depth=2, sample_count_large_history=0,
-        data_quality="ok",
-    )
+    snap = compute_pressure_snapshot(state)
+    assert snap is not None
+    # 模型无 signals/last_signals 字段
+    assert not hasattr(snap, "signals")
+    assert not hasattr(snap, "last_signals")

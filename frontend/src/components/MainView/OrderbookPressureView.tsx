@@ -5,27 +5,22 @@ import { useMarketStore } from "@/stores/marketStore";
 import { formatCnUsd, formatPrice } from "@/lib/format";
 import type {
   OrderbookPressureSnapshot,
-  OrderbookPressureSignal,
   PressureWall,
-  WallChangeKind,
   WallLabel,
+  WallSource,
 } from "@/lib/types";
 import OrderbookPressureCard from "./OrderbookPressureCard";
 
 /**
- * 挂单压力监测器主视图（顶级 Tab）
+ * 挂单压力监测器主视图（顶级 Tab · 盘口订单流仪表盘）
  *
- * 设计思路：
- *   - 与「关键位」Tab 平级，但聚焦短中期订单流真实压力（非历史结构位）
- *   - 视觉语言完全对齐 StrongLevelsCard：Tab 切换卖墙/买墙 + 桶分组 + 卡片化
- *   - 距离桶与 KL 一致（近 0.25-1.5% / 中 1.5-4% / 远 4-12%），让两个模块互补
- *   - 默认展示「近/中/远 各 1 位」（取桶内 confidence 最高），底部"展开详情"折叠完整列表
+ * 重构（2026-04）后定位：辅助参考工具，不再产出独立 snipe 信号。
+ *   - 数据源分层：≤4% 走 5min 订单簿热力图；4-12% 走大单 lifecycle
+ *   - 中性标签：wall_ask/wall_bid/wall_vanished/wall_broken（不再判真假）
+ *   - 强度等级：S/A/B/C 按 USD 绝对阈值（30M/10M/3M/500K）
+ *   - 数据来源（depth_5m / large_orders）以徽章呈现，挂单时长显式标注
  *
- * 数据来源（与 OrderbookPressureCard 共用）：
- *   - data.orderbook_pressure ← market_update WS 推送
- *   - obPressureSignalsByCoin ← orderbook_pressure_signal WS 推送
- *
- * 视觉一致性：复用 StrongLevelsCard 的桶定义 / 星级 / 进度条 / 状态语言
+ * 视觉一致性：复用 StrongLevelsCard 的桶定义 / 星级 / 进度条
  * （提取复用思路而非代码复用——OP/KL 数据模型不同，硬复用会造成不相关耦合）
  */
 
@@ -48,7 +43,7 @@ const BUCKET_DEFS: Array<{
     minPct: 0.0,
     maxPct: 1.5,
     label: "近距",
-    hint: "0~1.5% 当前正在交锋的撮合压力",
+    hint: "0~1.5% 5min 订单簿撮合面（depth_5m）",
     dotColor: "bg-sky-400",
     textColor: "text-sky-300",
     bgColor: "bg-sky-500/10",
@@ -58,7 +53,7 @@ const BUCKET_DEFS: Array<{
     minPct: 1.5,
     maxPct: 4.0,
     label: "中距",
-    hint: "1.5~4% 日内可达决战位",
+    hint: "1.5~4% 5min 订单簿撮合面（depth_5m）",
     dotColor: "bg-violet-400",
     textColor: "text-violet-300",
     bgColor: "bg-violet-500/10",
@@ -68,7 +63,7 @@ const BUCKET_DEFS: Array<{
     minPct: 4.0,
     maxPct: 12.0,
     label: "远距",
-    hint: "4~12% 1-2 天可达；超出 12% 进入清算地图辖区，请查看「关键位」Tab",
+    hint: "4~12% 大单 lifecycle（large_orders）· 精确知挂单时长",
     dotColor: "bg-orange-400",
     textColor: "text-orange-300",
     bgColor: "bg-orange-500/10",
@@ -76,71 +71,61 @@ const BUCKET_DEFS: Array<{
 ];
 
 const LABEL_STYLES: Record<WallLabel, { text: string; bg: string; fg: string; hint: string }> = {
-  real_R: {
-    text: "真阻力",
-    bg: "bg-red-500/20",
+  wall_ask: {
+    text: "卖方挂单",
+    bg: "bg-red-500/15",
     fg: "text-red-300",
-    hint: "卖墙被吃但价格被压住 → 真实阻力（高确定性）",
+    hint: "上方挂单墙，潜在阻力位（不判真假，按强度参考）",
   },
-  fake_R: {
-    text: "假阻力(撤)",
-    bg: "bg-slate-600/30",
-    fg: "text-slate-300",
-    hint: "卖墙撤单且价格还没到，疑似 spoof 操纵",
-  },
-  fake_R_break: {
-    text: "假阻力(已破)",
-    bg: "bg-slate-700/40",
-    fg: "text-slate-400",
-    hint: "卖墙撤单后价格已突破，spoof 已确认，墙已失效",
-  },
-  real_S: {
-    text: "真支撑",
-    bg: "bg-green-500/20",
+  wall_bid: {
+    text: "买方挂单",
+    bg: "bg-green-500/15",
     fg: "text-green-300",
-    hint: "买墙被吃但价格守住 → 真实支撑（高确定性）",
+    hint: "下方挂单墙，潜在支撑位（不判真假，按强度参考）",
   },
-  fake_S: {
-    text: "假支撑(撤)",
-    bg: "bg-slate-600/30",
-    fg: "text-slate-300",
-    hint: "买墙撤单且价格还没到，疑似 spoof 操纵",
-  },
-  fake_S_break: {
-    text: "假支撑(已破)",
+  wall_vanished: {
+    text: "已消失",
     bg: "bg-slate-700/40",
     fg: "text-slate-400",
-    hint: "买墙撤单后价格已跌穿，spoof 已确认，墙已失效",
+    hint: "上轮存在、本轮消失（撤单/吃单未区分）",
   },
-  untested: {
-    text: "待观察",
-    bg: "bg-slate-700/30",
-    fg: "text-slate-500",
-    hint: "墙存在但价格还没接近，先观察",
+  wall_broken: {
+    text: "已穿越",
+    bg: "bg-purple-500/15",
+    fg: "text-purple-300",
+    hint: "价格已穿越该墙",
   },
 };
 
-const CHANGE_LABELS: Record<WallChangeKind, { text: string; color: string; hint: string }> = {
-  eaten: { text: "被吃", color: "text-amber-400", hint: "被市价单吃掉为主（≥70% executed）" },
-  cancelled: { text: "撤单", color: "text-slate-400", hint: "被撤单为主（≥70% canceled）" },
-  partial: { text: "部分", color: "text-slate-400", hint: "撤单与被吃各占一部分" },
-  growing: { text: "堆积", color: "text-cyan-400", hint: "反而在增加（有人继续堆挂单）" },
-  holding: { text: "保持", color: "text-blue-300", hint: "几乎没变化，墙仍挂着" },
-  unknown: { text: "未知", color: "text-slate-500", hint: "数据不足无法判断" },
+const SOURCE_STYLES: Record<WallSource, { text: string; bg: string; fg: string; hint: string }> = {
+  depth_5m: {
+    text: "5m订单簿",
+    bg: "bg-blue-500/15",
+    fg: "text-blue-300",
+    hint: "数据源：5min 订单簿热力图（撮合面真实压力）",
+  },
+  large_orders: {
+    text: "巨鲸大单",
+    bg: "bg-amber-500/15",
+    fg: "text-amber-300",
+    hint: "数据源：单笔 ≥ $1M 大单 lifecycle（精确知挂单时长）",
+  },
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────────
 
 function tierRank(t: string): number {
-  if (t === "S") return 3;
-  if (t === "A") return 2;
-  if (t === "B") return 1;
-  return 0;
+  if (t === "S") return 4;
+  if (t === "A") return 3;
+  if (t === "B") return 2;
+  return 1;
 }
 
-function scoreToStars(conf: number): number {
-  // confidence 0-100 → 1-5 星
-  return Math.max(1, Math.min(5, Math.round(conf / 20)));
+function tierToStars(tier: string): number {
+  if (tier === "S") return 5;
+  if (tier === "A") return 4;
+  if (tier === "B") return 3;
+  return 2;
 }
 
 function formatTime(tsSec: number): string {
@@ -151,15 +136,21 @@ function formatTime(tsSec: number): string {
   });
 }
 
+function formatHoldingAge(sec: number): string {
+  if (!sec || sec <= 0) return "";
+  if (sec >= 86400) return `已挂 ${Math.floor(sec / 86400)} 天`;
+  if (sec >= 3600) return `已挂 ${Math.floor(sec / 3600)} 小时`;
+  if (sec >= 60) return `已挂 ${Math.floor(sec / 60)} 分钟`;
+  return `已挂 ${sec} 秒`;
+}
+
 interface Picked {
   wall: PressureWall | null;
   bucket: Bucket;
 }
 
 /**
- * 按距离段分桶选位：每桶独立选 tier 最高 + confidence 最高的代表。
- *
- * 选位策略与 StrongLevelsCard 完全一致，确保两个模块视觉语言对齐。
+ * 按距离段分桶选位：每桶独立选 tier 最高 + score 最高的代表。
  */
 function pickByBuckets(walls: PressureWall[], side: "ask" | "bid"): Picked[] {
   const sameSide = walls.filter((w) => w.side === side);
@@ -172,8 +163,8 @@ function pickByBuckets(walls: PressureWall[], side: "ask" | "bid"): Picked[] {
     const sorted = [...inBucket].sort((a, c) => {
       const rd = tierRank(c.strength_tier) - tierRank(a.strength_tier);
       if (rd !== 0) return rd;
-      const cd = c.confidence - a.confidence;
-      if (cd !== 0) return cd;
+      const sd = c.strength_score - a.strength_score;
+      if (sd !== 0) return sd;
       return Math.abs(a.distance_pct) - Math.abs(c.distance_pct);
     });
     return { wall: sorted[0], bucket: b.key };
@@ -189,9 +180,7 @@ function getBucketDef(key: Bucket) {
 export default function OrderbookPressureView() {
   const coin = useMarketStore((s) => s.coin);
   const data = useMarketStore((s) => s.data[s.coin]);
-  const signalsAll = useMarketStore((s) => s.obPressureSignalsByCoin);
   const snap = data?.orderbook_pressure;
-  const signals = useMemo(() => signalsAll[coin] ?? [], [signalsAll, coin]);
 
   if (!snap) {
     return (
@@ -206,8 +195,8 @@ export default function OrderbookPressureView() {
 
   return (
     <div className="space-y-3">
+      <Banner />
       <Header snap={snap} coin={coin} />
-      <SignalsList signals={signals} coin={coin} />
       <StrongPressureCard walls={snap.walls || []} price={snap.last_price} coin={coin} />
       <DetailDrawer />
       <Footer snap={snap} />
@@ -215,19 +204,34 @@ export default function OrderbookPressureView() {
   );
 }
 
+// ── 横幅：明确"辅助参考"定位 ────────────────────────────────────────────
+
+function Banner() {
+  return (
+    <div className="bg-blue-950/30 border border-blue-700/40 rounded-lg px-3 py-2 text-[11px] text-blue-200/80 leading-relaxed">
+      <span className="font-semibold text-blue-200">📊 辅助参考工具</span>
+      <span className="text-blue-300/60"> · </span>
+      仅展示当前盘口订单流的强度分级（不判真假、不发独立信号）。建议与「关键位」「市场行为分析」配合使用：
+      <span className="text-blue-300/80"> S/A 级</span> 是值得关注的强压力，
+      <span className="text-slate-400">B/C 级</span> 仅作背景信息。
+    </div>
+  );
+}
+
 // ── Header（顶部摘要） ───────────────────────────────────────────────────
 
 function Header({ snap, coin }: { snap: OrderbookPressureSnapshot; coin: string }) {
-  const realR = snap.has_real_pressure_above;
-  const realS = snap.has_real_pressure_below;
-  const fakeBreakUp = snap.has_fake_break_above;
-  const fakeBreakDown = snap.has_fake_break_below;
+  const strongAsk = snap.walls.filter(
+    (w) => w.side === "ask" && (w.strength_tier === "S" || w.strength_tier === "A"),
+  ).length;
+  const strongBid = snap.walls.filter(
+    (w) => w.side === "bid" && (w.strength_tier === "S" || w.strength_tier === "A"),
+  ).length;
 
   let borderColor = "border-slate-600";
-  if (realR && realS) borderColor = "border-amber-500/50";
-  else if (realR) borderColor = "border-red-500/50";
-  else if (realS) borderColor = "border-green-500/50";
-  else if (fakeBreakUp || fakeBreakDown) borderColor = "border-purple-500/40";
+  if (strongAsk > 0 && strongBid > 0) borderColor = "border-amber-500/50";
+  else if (strongAsk > 0) borderColor = "border-red-500/50";
+  else if (strongBid > 0) borderColor = "border-green-500/50";
 
   return (
     <div className={`bg-slate-800/60 border ${borderColor} rounded-lg p-4`}>
@@ -246,88 +250,23 @@ function Header({ snap, coin }: { snap: OrderbookPressureSnapshot; coin: string 
       </div>
       <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-slate-400">
         <div>
-          <span className="text-slate-500">最近真阻力：</span>
+          <span className="text-slate-500">最近强阻力（S/A）：</span>
           <span className="text-red-400 font-mono">
             {snap.top_resistance ? formatPrice(snap.top_resistance, coin) : "—"}
           </span>
+          {strongAsk > 0 && (
+            <span className="ml-2 text-[10px] text-red-400/70">×{strongAsk}</span>
+          )}
         </div>
         <div>
-          <span className="text-slate-500">最近真支撑：</span>
+          <span className="text-slate-500">最近强支撑（S/A）：</span>
           <span className="text-green-400 font-mono">
             {snap.top_support ? formatPrice(snap.top_support, coin) : "—"}
           </span>
+          {strongBid > 0 && (
+            <span className="ml-2 text-[10px] text-green-400/70">×{strongBid}</span>
+          )}
         </div>
-        {fakeBreakUp && (
-          <div className="col-span-2 text-purple-400">
-            ⚠ 上方有假突破墙（spoof 已确认），关注主动盘是否能续推
-          </div>
-        )}
-        {fakeBreakDown && (
-          <div className="col-span-2 text-purple-400">
-            ⚠ 下方有假支撑墙（spoof 已确认），关注是否继续下探
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── 信号列表 ─────────────────────────────────────────────────────────────
-
-function SignalsList({
-  signals, coin,
-}: {
-  signals: OrderbookPressureSignal[]; coin: string;
-}) {
-  if (signals.length === 0) {
-    return (
-      <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg px-4 py-2 text-xs text-slate-500 text-center">
-        🎯 挂单压力 snipe 信号：暂无新触发（同价位 30 min 内不重复推送）
-      </div>
-    );
-  }
-  return (
-    <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-3">
-      <div className="text-xs text-slate-400 mb-2">
-        🎯 最近 snipe 信号（{signals.length}/20）
-      </div>
-      <div className="space-y-1.5">
-        {signals.slice(0, 5).map((sig, idx) => {
-          const isLong = sig.side === "long";
-          const labelStyle = LABEL_STYLES[sig.wall_label];
-          return (
-            <div
-              key={`${sig.dedup_key}-${sig.ts_sec}-${idx}`}
-              className={`flex items-center gap-3 px-2 py-1.5 rounded ${
-                isLong ? "bg-green-900/20" : "bg-red-900/20"
-              }`}
-              title={sig.reason}
-            >
-              <span
-                className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
-                  isLong ? "bg-green-500/30 text-green-300" : "bg-red-500/30 text-red-300"
-                }`}
-              >
-                {isLong ? "做多" : "做空"}
-              </span>
-              <span
-                className={`text-[11px] px-1.5 py-0.5 rounded ${labelStyle.bg} ${labelStyle.fg}`}
-                title={labelStyle.hint}
-              >
-                {labelStyle.text}
-              </span>
-              <span className="text-xs font-mono text-slate-200">
-                {formatPrice(sig.entry_price, coin)}
-              </span>
-              <span className="text-[11px] text-slate-500">
-                SL {formatPrice(sig.stop_loss, coin)} / TP {formatPrice(sig.take_profit, coin)}
-              </span>
-              <span className="ml-auto text-[10px] text-slate-500">
-                conf {sig.confidence} · {formatTime(sig.ts_sec)}
-              </span>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -345,7 +284,7 @@ function StrongPressureCard({
   const picked = useMemo(() => pickByBuckets(walls, tab), [walls, tab]);
   const validCount = picked.filter((p) => p.wall !== null).length;
 
-  const titleCn = tab === "ask" ? "强卖墙（阻力）" : "强买墙（支撑）";
+  const titleCn = tab === "ask" ? "卖方挂单墙" : "买方挂单墙";
   const sideColor = tab === "ask" ? "text-red-400" : "text-green-400";
   const barColor = tab === "ask" ? "bg-red-500" : "bg-green-500";
   const bgTint = tab === "ask" ? "bg-red-950/10" : "bg-green-950/10";
@@ -369,7 +308,7 @@ function StrongPressureCard({
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            卖墙
+            卖方
           </button>
           <button
             type="button"
@@ -380,7 +319,7 @@ function StrongPressureCard({
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            买墙
+            买方
           </button>
         </div>
       </div>
@@ -404,7 +343,7 @@ function StrongPressureCard({
             ±12% 内暂无满足条件的{titleCn}
             <br />
             <span className="text-[10px] text-slate-600">
-              （wall_min_usd=$500K 双闸过滤；价格可能处于挂单稀疏区）
+              （wall_min_usd=$500K 阈值过滤；价格可能处于挂单稀疏区）
             </span>
           </div>
         ) : (
@@ -472,11 +411,16 @@ function WallBlock({
   sideColor: string;
   barColor: string;
 }) {
-  const stars = scoreToStars(wall.confidence);
+  const stars = tierToStars(wall.strength_tier);
   const labelStyle = LABEL_STYLES[wall.label];
-  const change = CHANGE_LABELS[wall.change_kind];
+  const sourceStyle = SOURCE_STYLES[wall.source];
   const distPct = wall.distance_pct;
-  const barWidth = Math.min(100, wall.confidence);
+  // 进度条按 tier 派生：S=100% / A=75% / B=50% / C=25%
+  const barWidth =
+    wall.strength_tier === "S" ? 100
+    : wall.strength_tier === "A" ? 75
+    : wall.strength_tier === "B" ? 50 : 25;
+  const ageText = formatHoldingAge(wall.holding_avg_age_sec);
 
   return (
     <div className="px-4 py-3">
@@ -503,7 +447,7 @@ function WallBlock({
         <div className="flex-1" />
         <span
           className="text-xs tracking-tighter shrink-0"
-          title={`置信度 ${wall.confidence}/100 · 等级 ${wall.strength_tier}`}
+          title={`等级 ${wall.strength_tier}（按 USD 阈值：S ≥ $30M / A ≥ $10M / B ≥ $3M / C ≥ $500K）`}
         >
           {"★".repeat(stars)}
           <span className="text-slate-700">{"★".repeat(5 - stars)}</span>
@@ -527,13 +471,12 @@ function WallBlock({
       <div className="h-1.5 bg-slate-700/50 rounded-full overflow-hidden mb-2">
         <div
           className={`h-full ${barColor} rounded-full transition-all`}
-          style={{ width: `${barWidth}%`, opacity: 0.35 + barWidth * 0.0065 }}
+          style={{ width: `${barWidth}%`, opacity: 0.4 + barWidth * 0.006 }}
         />
       </div>
 
-      {/* 标签 + 状态 + 共振徽章 */}
+      {/* 标签 + 数据源 + 时长 + 共振徽章 */}
       <div className="flex items-center gap-1.5 flex-wrap mb-1">
-        <span className="text-[10px] text-slate-500 shrink-0">📍 标签：</span>
         <span
           className={`px-1.5 py-0.5 rounded text-[11px] cursor-help ${labelStyle.bg} ${labelStyle.fg}`}
           title={labelStyle.hint}
@@ -541,15 +484,23 @@ function WallBlock({
           {labelStyle.text}
         </span>
         <span
-          className={`text-[11px] cursor-help ${change.color}`}
-          title={change.hint}
+          className={`px-1.5 py-0.5 rounded text-[10px] cursor-help ${sourceStyle.bg} ${sourceStyle.fg}`}
+          title={sourceStyle.hint}
         >
-          · {change.text}
+          📡 {sourceStyle.text}
         </span>
-        {wall.has_active_whale && (
+        {ageText && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-slate-700/40 text-slate-300 cursor-help"
+            title="该价位大单加权平均挂单时长（仅 large_orders 路径有意义）"
+          >
+            ⏱ {ageText}
+          </span>
+        )}
+        {wall.has_active_whale && wall.source === "depth_5m" && (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 cursor-help"
-            title={`大单 lifecycle 关联：${wall.large_order_count} 笔（含 ≥1 笔 holding）`}
+            title={`该 depth_5m 墙覆盖 ${wall.large_order_count} 笔活跃大单`}
           >
             🐳 大单 ×{wall.large_order_count}
           </span>
@@ -557,35 +508,17 @@ function WallBlock({
         {wall.confluence_with_absorption && (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300 cursor-help"
-            title="与 footprint absorption_zone 共振 (+25 confidence)"
+            title="与 footprint absorption_zone 共振 (强度 ×1.2)"
           >
-            ✓ 吸收
-          </span>
-        )}
-        {wall.cvd_state && (
-          <span
-            className="text-[10px] text-slate-500"
-            title="当前 CVD 1h 趋势"
-          >
-            CVD {wall.cvd_state}
+            ✓ 吸收共振
           </span>
         )}
       </div>
 
-      {/* 数额 + reason */}
-      <div className="flex items-start gap-1.5 text-[11px]">
+      {/* 数额 */}
+      <div className="flex items-center gap-1.5 text-[11px]">
         <span className="text-slate-500 shrink-0">💰 数额：</span>
         <span className="font-mono text-slate-300">{formatCnUsd(wall.size_usd)}</span>
-        {wall.eaten_usd > 0 && (
-          <span className="text-amber-400" title="窗口内被市价单吃掉的金额">
-            · 被吃 {formatCnUsd(wall.eaten_usd)}
-          </span>
-        )}
-        {wall.cancelled_usd > 0 && (
-          <span className="text-slate-400" title="窗口内被撤掉的金额">
-            · 撤单 {formatCnUsd(wall.cancelled_usd)}
-          </span>
-        )}
       </div>
       {wall.reason && (
         <div className="mt-1 text-[10px] text-slate-500 leading-snug">{wall.reason}</div>
@@ -616,7 +549,7 @@ function DetailDrawer() {
         className="w-full px-4 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-700/20 transition-colors flex items-center justify-between"
       >
         <span>
-          {open ? "▼" : "▶"} 展开完整明细（所有 wall · 信号原始流）
+          {open ? "▼" : "▶"} 展开完整明细（所有 wall · 高阶视图）
         </span>
         <span className="text-[10px] text-slate-600">高阶分析视图</span>
       </button>
@@ -646,6 +579,10 @@ function Footer({ snap }: { snap: OrderbookPressureSnapshot }) {
       <span>
         大单 lifecycle{" "}
         <span className="text-slate-300">{snap.sample_count_large_history}</span>
+      </span>
+      <span>
+        large_orders 墙{" "}
+        <span className="text-slate-300">{snap.sample_count_large_orders_walls}</span>
       </span>
       <span>
         数据质量 <span className={qualityColor}>{snap.data_quality}</span>

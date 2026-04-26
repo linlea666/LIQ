@@ -728,28 +728,22 @@ export interface KeyLevelSnapshotV2 {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 挂单压力监测器（Orderbook Pressure Monitor）独立 snipe 信号源
-// 与关键位卡平级，对应后端 models/orderbook_pressure.py
+// 挂单压力监测器（Orderbook Pressure Monitor）· 盘口订单流仪表盘
+// 重构（2026-04）后定位 = 辅助参考，不再产出 snipe 信号。
+// 对应后端 models/orderbook_pressure.py
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export type WallSide = "ask" | "bid";
 
-export type WallChangeKind =
-  | "eaten"
-  | "cancelled"
-  | "partial"
-  | "growing"
-  | "holding"
-  | "unknown";
+/** 数据来源：5min 订单簿热力图（近+中距）/ 大单 lifecycle（远距） */
+export type WallSource = "depth_5m" | "large_orders";
 
-export type WallLabel =
-  | "real_R"
-  | "fake_R"
-  | "fake_R_break"
-  | "real_S"
-  | "fake_S"
-  | "fake_S_break"
-  | "untested";
+/** 中性挂单标签（不再含真假语义）：
+ *   wall_ask / wall_bid       - 当前活跃挂单墙
+ *   wall_vanished             - 上轮存在、本轮消失（撤单/吃单未区分）
+ *   wall_broken               - 价格已穿越该墙
+ */
+export type WallLabel = "wall_ask" | "wall_bid" | "wall_vanished" | "wall_broken";
 
 export interface PressureWall {
   side: WallSide;
@@ -760,25 +754,21 @@ export interface PressureWall {
   size_usd: number;
   size_base: number;
   rank: number;
+  source: WallSource;
   large_order_ids: number[];
   large_order_count: number;
   has_active_whale: boolean;
-  change_kind: WallChangeKind;
-  eaten_usd: number;
-  cancelled_usd: number;
-  delta_usd: number;
+  /** 加权平均挂单时长（秒），仅 large_orders 路径有意义 */
+  holding_avg_age_sec: number;
   label: WallLabel;
-  confidence: number;
   confluence_with_absorption: boolean;
   absorption_zone_price: number | null;
-  /**
-   * 强度等级（派生字段，与 KeyLevelV2.strength_tier 对齐）。
-   *   S = real_R/real_S 高分 + 共振；A = real_R/real_S 70+；B = 50+ 候选/spoof；C = 低分/已破墙
-   * 后端在 compute_pressure_snapshot 末尾综合 confidence + label + 共振写入。
-   */
+  /** 综合强度评分 = size_usd × duration × (1+0.3·whale) × (1+0.2·absorption) */
+  strength_score: number;
+  /** 强度等级（USD 绝对阈值）：S ≥ $30M / A ≥ $10M / B ≥ $3M / C ≥ $500K */
   strength_tier: "S" | "A" | "B" | "C";
+  /** 中性摘要文案（前端 tooltip / 卡片说明用） */
   reason: string;
-  cvd_state: string | null;
 }
 
 export interface OrderbookPressureSnapshot {
@@ -789,31 +779,11 @@ export interface OrderbookPressureSnapshot {
   walls: PressureWall[];
   top_resistance: number | null;
   top_support: number | null;
-  has_real_pressure_above: boolean;
-  has_real_pressure_below: boolean;
-  has_fake_break_above: boolean;
-  has_fake_break_below: boolean;
   sample_count_depth: number;
   sample_count_large_history: number;
+  sample_count_large_orders_walls: number;
   data_quality: "ok" | "partial" | "stale" | "missing";
   notes: string[];
-}
-
-export interface OrderbookPressureSignal {
-  coin: string;
-  ts_sec: number;
-  side: "long" | "short";
-  wall_label: WallLabel;
-  wall_price: number;
-  distance_pct: number;
-  last_price: number;
-  confidence: number;
-  entry_price: number;
-  stop_loss: number;
-  take_profit: number;
-  reason: string;
-  factors: string[];
-  dedup_key: string;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
