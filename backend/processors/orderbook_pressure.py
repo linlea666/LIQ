@@ -400,6 +400,9 @@ def classify_pressure(
       holding   + 未触                              → untested
       holding   + 触及 + 未破                       → real_R 候选 (50)
       growing                                       → real_R 候选 (55)
+      partial   + 触及 + 未破                       → real_R 候选 (60)
+      partial   + 触及 + 已破                       → fake_R_break (45)
+      partial   + 未触                              → untested (40, 高于 holding+untouched)
     bid 对称。
     """
     candles_15m = state.candles_15m or []
@@ -434,6 +437,13 @@ def _label_one(wall: PressureWall, react: dict, cvd_dir: Optional[str]) -> tuple
             return ("fake_R_break", 35, "卖墙撤单后价格突破，spoof 已确认")
         if kind == "growing":
             return ("real_R", 55, "卖墙正在堆积")
+        # partial: 部分被吃 + 部分撤单/留存（混合状态，介于 eaten 和 holding 之间）
+        if kind == "partial" and touched and not broken:
+            return ("real_R", 60, "卖墙部分被吃但价格被压住")
+        if kind == "partial" and touched and broken:
+            return ("fake_R_break", 45, "卖墙部分被吃且价格已突破")
+        if kind == "partial" and not touched:
+            return ("untested", 40, "卖墙部分减量但价格未到")
         if kind == "holding" and touched and not broken:
             return ("real_R", 50, "卖墙挂着且价格触及未破")
         if kind == "holding" and not touched:
@@ -454,6 +464,13 @@ def _label_one(wall: PressureWall, react: dict, cvd_dir: Optional[str]) -> tuple
         return ("fake_S_break", 35, "买墙撤单后价格跌穿，spoof 已确认")
     if kind == "growing":
         return ("real_S", 55, "买墙正在堆积")
+    # partial: 部分被吃 + 部分撤单/留存（混合状态，介于 eaten 和 holding 之间）
+    if kind == "partial" and touched and not broken:
+        return ("real_S", 60, "买墙部分被吃但价格守住")
+    if kind == "partial" and touched and broken:
+        return ("fake_S_break", 45, "买墙部分被吃且价格已跌穿")
+    if kind == "partial" and not touched:
+        return ("untested", 40, "买墙部分减量但价格未到")
     if kind == "holding" and touched and not broken:
         return ("real_S", 50, "买墙挂着且价格触及未破")
     if kind == "holding" and not touched:

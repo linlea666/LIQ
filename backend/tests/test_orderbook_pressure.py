@@ -344,6 +344,72 @@ def test_classify_pressure_untested_when_price_far():
     assert wall.label == "untested"
 
 
+def test_classify_pressure_partial_ask_touched_unbroken_is_real_R():
+    """partial + touched + 未破：卖墙部分被吃 + 价格被压住 → real_R 候选。
+
+    回归 P0 bug：之前 _label_one 没有 partial 分支，全部 fallthrough 到 untested 25。
+    """
+    now = 1_700_000_000
+    wall = PressureWall(
+        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+    )
+    wall.change_kind = "partial"
+    candles = [_candle(now - 600, close=100.0, high=100.3, low=99.8)]
+    state = _state_with_candles(100.0, candles)
+    classify_pressure([wall], state, DEFAULTS, now)
+    assert wall.label == "real_R"
+    assert wall.confidence == 60
+
+
+def test_classify_pressure_partial_bid_touched_unbroken_is_real_S():
+    """partial + touched + 未破：买墙部分被吃 + 价格守住 → real_S 候选。"""
+    now = 1_700_000_000
+    wall = PressureWall(
+        side="bid", price_lo=99.0, price_hi=99.5, price_mid=99.25,
+        distance_pct=-0.75, size_usd=1_000_000, size_base=10,
+    )
+    wall.change_kind = "partial"
+    candles = [_candle(now - 600, close=100.0, high=100.2, low=99.4)]
+    state = _state_with_candles(100.0, candles)
+    classify_pressure([wall], state, DEFAULTS, now)
+    assert wall.label == "real_S"
+    assert wall.confidence == 60
+
+
+def test_classify_pressure_partial_broken_is_fake_break():
+    """partial + 已破 → fake_R_break（部分被吃但顶不住，墙已失效）。"""
+    now = 1_700_000_000
+    wall = PressureWall(
+        side="ask", price_lo=100.0, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+    )
+    wall.change_kind = "partial"
+    candles = [
+        _candle(now - 400, close=100.6, high=100.8, low=100.0),
+        _candle(now - 100, close=102.0, high=102.0, low=100.5),
+    ]
+    state = _state_with_candles(102.0, candles)
+    classify_pressure([wall], state, DEFAULTS, now)
+    assert wall.label == "fake_R_break"
+    assert wall.confidence == 45
+
+
+def test_classify_pressure_partial_untouched_is_untested_higher_score():
+    """partial + 未触：减量来源不清 + 价格未到 → untested 但置信度 40（高于 holding+untouched 的 30）。"""
+    now = 1_700_000_000
+    wall = PressureWall(
+        side="ask", price_lo=110.0, price_hi=110.5, price_mid=110.25,
+        distance_pct=10.25, size_usd=1_000_000, size_base=10,
+    )
+    wall.change_kind = "partial"
+    candles = [_candle(now - 600, close=100.0, high=100.5, low=99.8)]
+    state = _state_with_candles(100.0, candles)
+    classify_pressure([wall], state, DEFAULTS, now)
+    assert wall.label == "untested"
+    assert wall.confidence == 40  # 比 holding+untouched 的 30 高
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # L4 — augment_with_absorption
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
