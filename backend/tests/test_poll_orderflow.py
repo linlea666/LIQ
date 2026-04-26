@@ -25,17 +25,23 @@ def _make_coin(ccy="BTC", symbol="BTC", pair="BTCUSDT", exchange="Binance"):
 
 class TestPollLargeOrders:
 
+    # Coinglass /large-limit-order(-history) 实测约定（curl 验证）：
+    #   order_side=1 → bid（买单 / 下方支撑）
+    #   order_side=2 → ask（卖单 / 上方阻力）
+    # 历史上代码写反了导致 bid/ask 全链路反向，已在 _parse_side 中修正。
     SAMPLE = [
-        {"price": 74500, "order_side": "2", "order_size_usd": 5000000},
-        {"price": 74800, "order_side": "1", "order_size_usd": 3000000},
+        {"price": 74500, "order_side": "2", "order_size_usd": 5000000},  # ask
+        {"price": 74800, "order_side": "1", "order_size_usd": 3000000},  # bid
     ]
 
     @pytest.mark.asyncio
     async def test_side_mapping(self, cg, btc_state):
-        """order_side 2=bid(买), 1=ask(卖)"""
+        """order_side 1=bid(买), 2=ask(卖)。"""
         cg.fetch_large_orders = AsyncMock(return_value=self.SAMPLE)
+        # history 端点也会被 poll 调用（双轨合并），mock 成空列表避免真实请求
+        cg.fetch_large_orders_history = AsyncMock(return_value=[])
         coin = _make_coin()
-        await poll_large_orders(cg, coin, btc_state)  # 注意: 签名是 (cg, coin, state)
+        await poll_large_orders(cg, coin, btc_state)
 
         assert btc_state.large_orders is not None
         orders = btc_state.large_orders.orders
@@ -43,9 +49,9 @@ class TestPollLargeOrders:
         bid = [o for o in orders if o.side == "bid"]
         ask = [o for o in orders if o.side == "ask"]
         assert len(bid) == 1
-        assert bid[0].price == 74500
+        assert bid[0].price == 74800
         assert len(ask) == 1
-        assert ask[0].price == 74800
+        assert ask[0].price == 74500
 
 
 # ──────────────────────────────────────────────

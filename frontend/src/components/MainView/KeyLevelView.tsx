@@ -16,6 +16,7 @@ import StrongLevelsCard from "./StrongLevelsCard";
 import MarketStructureBadge from "./MarketStructureBadge";
 import ExecutionPlanCard from "./ExecutionPlanCard";
 import FinalDecisionCard from "./FinalDecisionCard";
+import OrderbookPressureCard from "./OrderbookPressureCard";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -80,6 +81,7 @@ export default function KeyLevelView() {
       )}
       {kl.breakout_zone && <BreakoutCard zone={kl.breakout_zone} coin={coin} />}
       <StrongLevelsCard levels={kl.levels} price={price} coin={coin} />
+      <OrderbookPressureCard />
       <PriceRuler levels={kl.levels} price={price} coin={coin} />
       {activeSignals.length > 0 ? (
         <SignalCards signals={activeSignals} coin={coin} />

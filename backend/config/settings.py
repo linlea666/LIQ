@@ -74,6 +74,7 @@ class ProcessorsConfig:
     orderbook: dict[str, Any]
     range_signal: dict[str, Any] = field(default_factory=dict)
     key_level_tracker: dict[str, Any] = field(default_factory=dict)
+    orderbook_pressure: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

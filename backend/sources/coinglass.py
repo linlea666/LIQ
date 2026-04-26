@@ -472,9 +472,19 @@ class CoinglassSource(DataSource):
         }, cache_ttl=30)
 
     async def fetch_orderbook_heatmap(self, exchange: str, symbol: str,
-                                      limit: int = 100) -> Optional[list]:
+                                      interval: str = "5m",
+                                      limit: int = 2) -> Optional[list]:
+        """合约订单簿热力图（分价位深度）。
+
+        返回 list[ [ts_sec, [[bid_price, bid_qty_base], ...升序],
+                            [[ask_price, ask_qty_base], ...升序] ] ]
+        每个 snapshot 给上下方各 ~700+ 个固定步长的价位 bin（base coin 数量，需自行 ×price 得 USD）。
+        interval 为必填（API 实测若缺会返回 400）。
+        limit=2 时返回最近 2 个 snapshot，可做"前后帧减量"对比。
+        """
         return await self._request("/api/futures/orderbook/history", {
-            "exchange": exchange, "symbol": symbol, "limit": str(limit),
+            "exchange": exchange, "symbol": symbol,
+            "interval": interval, "limit": str(limit),
         })
 
     async def fetch_large_orders(self, exchange: str, symbol: str) -> Optional[list]:

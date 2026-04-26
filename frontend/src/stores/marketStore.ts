@@ -4,6 +4,7 @@ import type {
   MAAEvalSummary,
   MarketActionReport,
   MarketUpdate,
+  OrderbookPressureSignal,
   SourceHealth,
   TEAIInterpretation,
 } from "@/lib/types";
@@ -64,6 +65,11 @@ interface MarketStore {
   maaEvalByCoin: Record<string, MAAEvalSummary>;
   maaEvalLoadingByCoin: Record<string, boolean>;
   loadMAAEval: (coin: string, opts?: { refresh?: boolean; window_days?: number }) => Promise<void>;
+
+  // 挂单压力监测器 · 独立 snipe 信号（WS 推送 orderbook_pressure_signal 驱动）
+  // 按 coin 分存最近 N 条，方便前端展示历史触发列表
+  obPressureSignalsByCoin: Record<string, OrderbookPressureSignal[]>;
+  pushOrderbookPressureSignal: (signal: OrderbookPressureSignal) => void;
 }
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
@@ -286,4 +292,21 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
       }));
     }
   },
+
+  obPressureSignalsByCoin: {},
+  pushOrderbookPressureSignal: (signal) =>
+    set((state) => {
+      const c = (signal.coin || "").toUpperCase();
+      if (!c) return {};
+      const existing = state.obPressureSignalsByCoin[c] ?? [];
+      // 去重：dedup_key 重复（理论上后端已过滤，前端再防一次）
+      if (existing.some((s) => s.dedup_key === signal.dedup_key
+                              && Math.abs(s.ts_sec - signal.ts_sec) < 60)) {
+        return {};
+      }
+      const merged = [signal, ...existing].slice(0, 20);
+      return {
+        obPressureSignalsByCoin: { ...state.obPressureSignalsByCoin, [c]: merged },
+      };
+    }),
 }));

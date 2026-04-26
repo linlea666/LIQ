@@ -12,6 +12,7 @@ from config.settings import CoinConfig
 from models.flow import CVDData, CVDPoint, TakerFlowData
 from models.market import OrderBookAnalysis
 from models.orderbook_ext import LargeOrder, LargeOrderSnapshot
+from models.orderbook_pressure import LargeOrderLifecycle
 from processors.cvd import detect_cvd_price_divergence
 from sources.coinglass import CoinglassSource
 
@@ -217,36 +218,121 @@ async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: Coi
         pass
 
 
-async def poll_large_orders(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
-    """获取大单追踪"""
-    data = await cg.fetch_large_orders(coin.exchange_primary, coin.symbol_cg_pair)
-    if not data:
-        return
+def _parse_side(raw) -> str:
+    """Coinglass /large-limit-order(-history) 的 order_side 约定（实测）：
+        1 = bid（买单 / 下方支撑）
+        2 = ask（卖单 / 上方阻力）
+    旧代码把 "2" 当 bid，全链路 bid/ask 反向 — 已修复。
+    """
+    if isinstance(raw, (int, float)):
+        return "bid" if int(raw) == 1 else "ask"
+    s = str(raw).strip().lower()
+    if s in ("1", "bid", "buy"):
+        return "bid"
+    if s in ("2", "ask", "sell"):
+        return "ask"
+    return "ask"
 
-    orders = []
-    total_bid = total_ask = 0.0
-    for item in data:
-        try:
-            raw_side = str(item.get("order_side", item.get("side", ""))).lower()
-            side = "bid" if raw_side in ("buy", "bid", "2") else "ask"
-            size_usd = float(item.get("start_usd_value", item.get("volUsd", 0)))
-            orders.append(LargeOrder(
-                ts=int(item.get("start_time", item.get("time", 0))),
-                exchange=item.get("exchange_name", coin.exchange_primary),
-                symbol=item.get("symbol", coin.symbol_cg_pair),
-                price=float(item.get("limit_price", item.get("price", 0))),
-                size_usd=size_usd,
-                side=side,
-                status=item.get("order_state", item.get("status", "active")),
-            ))
-            if side == "bid":
-                total_bid += size_usd
-            else:
-                total_ask += size_usd
-        except (ValueError, KeyError):
+
+def _parse_state(raw) -> str:
+    """Coinglass order_state: 1=holding, 2=ended"""
+    try:
+        return "holding" if int(raw) == 1 else "ended"
+    except (TypeError, ValueError):
+        return "holding"
+
+
+def _build_lifecycles(raw_list, fallback_exchange: str) -> list[LargeOrderLifecycle]:
+    """把 Coinglass /large-limit-order(-history) 的 raw items 转成 Pydantic Lifecycle 列表。
+
+    与 LargeOrderSnapshot 是兄弟数据：snapshot 只取 active 简化字段，lifecycle 保留全套。
+    """
+    out: list[LargeOrderLifecycle] = []
+    if not raw_list or not isinstance(raw_list, list):
+        return out
+    for item in raw_list:
+        if not isinstance(item, dict):
             continue
+        try:
+            out.append(LargeOrderLifecycle(
+                id=int(item.get("id", 0)),
+                side=_parse_side(item.get("order_side")),
+                limit_price=float(item.get("limit_price", 0) or 0),
+                start_time_ms=int(item.get("start_time", 0) or 0),
+                end_time_ms=int(item["order_end_time"]) if item.get("order_end_time") else None,
+                start_quantity=float(item.get("start_quantity", 0) or 0),
+                current_quantity=float(item.get("current_quantity", 0) or 0),
+                executed_volume=float(item.get("executed_volume", 0) or 0),
+                executed_usd_value=float(item.get("executed_usd_value", 0) or 0),
+                start_usd_value=float(item.get("start_usd_value", 0) or 0),
+                current_usd_value=float(item.get("current_usd_value", 0) or 0),
+                trade_count=int(item.get("trade_count", 0) or 0),
+                state=_parse_state(item.get("order_state")),
+            ))
+        except (TypeError, ValueError):
+            continue
+    return out
 
-    state.large_orders = LargeOrderSnapshot(
-        symbol=coin.symbol_cg_pair, ts=int(time.time()),
-        orders=orders, total_bid_usd=total_bid, total_ask_usd=total_ask,
-    )
+
+async def poll_large_orders(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """获取大单追踪：当前快照(LargeOrderSnapshot) + lifecycle 历史(state.large_orders_history)。
+
+    实测：
+      - /large-limit-order            ：含 holding(1) + 部分 ended(2) ~ 数百条
+      - /large-limit-order-history    ：最近 1000 条 ended 大单的完整 lifecycle (~24h 跨度)
+    两者合并后由 Orderbook Pressure 模块用于 L2"撤单 vs 被吃"判定。
+    """
+    snapshot_data = await cg.fetch_large_orders(coin.exchange_primary, coin.symbol_cg_pair)
+    history_data = await cg.fetch_large_orders_history(coin.exchange_primary, coin.symbol_cg_pair)
+
+    # ── (1) 当前快照（兼容旧前端 / KL tracker bid_walls/ask_walls） ──
+    if snapshot_data:
+        orders: list[LargeOrder] = []
+        total_bid = total_ask = 0.0
+        for item in snapshot_data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                side = _parse_side(item.get("order_side", item.get("side")))
+                size_usd = float(item.get("start_usd_value", item.get("volUsd", 0)) or 0)
+                state_str = _parse_state(item.get("order_state"))
+                orders.append(LargeOrder(
+                    ts=int(item.get("start_time", item.get("time", 0)) or 0),
+                    exchange=str(item.get("exchange_name", coin.exchange_primary)),
+                    symbol=str(item.get("symbol", coin.symbol_cg_pair)),
+                    price=float(item.get("limit_price", item.get("price", 0)) or 0),
+                    size_usd=size_usd, side=side,
+                    status="active" if state_str == "holding" else "ended",
+                ))
+                if side == "bid":
+                    total_bid += size_usd
+                else:
+                    total_ask += size_usd
+            except (ValueError, KeyError, TypeError):
+                continue
+        state.large_orders = LargeOrderSnapshot(
+            symbol=coin.symbol_cg_pair, ts=int(time.time()),
+            orders=orders, total_bid_usd=total_bid, total_ask_usd=total_ask,
+        )
+
+    # ── (2) Lifecycle 双轨：snapshot active + history ended，去重后写入 state ──
+    snapshot_life = _build_lifecycles(snapshot_data or [], coin.exchange_primary)
+    history_life = _build_lifecycles(history_data or [], coin.exchange_primary)
+
+    seen: set[int] = set()
+    merged: list[LargeOrderLifecycle] = []
+    for lo in snapshot_life + history_life:
+        if lo.id in seen or lo.id == 0:
+            continue
+        seen.add(lo.id)
+        merged.append(lo)
+    state.large_orders_history = merged
+
+    if "large_orders_lifecycle_ready" not in state._log_once_keys and merged:
+        state._log_once_keys.add("large_orders_lifecycle_ready")
+        n_hold = sum(1 for x in merged if x.state == "holding")
+        n_ended = len(merged) - n_hold
+        logger.info(
+            "大单 lifecycle 接通 | coin=%s total=%d holding=%d ended=%d",
+            coin.ccy, len(merged), n_hold, n_ended,
+        )

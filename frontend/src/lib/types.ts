@@ -728,6 +728,89 @@ export interface KeyLevelSnapshotV2 {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 挂单压力监测器（Orderbook Pressure Monitor）独立 snipe 信号源
+// 与关键位卡平级，对应后端 models/orderbook_pressure.py
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type WallSide = "ask" | "bid";
+
+export type WallChangeKind =
+  | "eaten"
+  | "cancelled"
+  | "partial"
+  | "growing"
+  | "holding"
+  | "unknown";
+
+export type WallLabel =
+  | "real_R"
+  | "fake_R"
+  | "fake_R_break"
+  | "real_S"
+  | "fake_S"
+  | "fake_S_break"
+  | "untested";
+
+export interface PressureWall {
+  side: WallSide;
+  price_lo: number;
+  price_hi: number;
+  price_mid: number;
+  distance_pct: number;
+  size_usd: number;
+  size_base: number;
+  rank: number;
+  large_order_ids: number[];
+  large_order_count: number;
+  has_active_whale: boolean;
+  change_kind: WallChangeKind;
+  eaten_usd: number;
+  cancelled_usd: number;
+  delta_usd: number;
+  label: WallLabel;
+  confidence: number;
+  confluence_with_absorption: boolean;
+  absorption_zone_price: number | null;
+  reason: string;
+  cvd_state: string | null;
+}
+
+export interface OrderbookPressureSnapshot {
+  coin: string;
+  ts_sec: number;
+  last_price: number;
+  atr: number | null;
+  walls: PressureWall[];
+  top_resistance: number | null;
+  top_support: number | null;
+  has_real_pressure_above: boolean;
+  has_real_pressure_below: boolean;
+  has_fake_break_above: boolean;
+  has_fake_break_below: boolean;
+  sample_count_depth: number;
+  sample_count_large_history: number;
+  data_quality: "ok" | "partial" | "stale" | "missing";
+  notes: string[];
+}
+
+export interface OrderbookPressureSignal {
+  coin: string;
+  ts_sec: number;
+  side: "long" | "short";
+  wall_label: WallLabel;
+  wall_price: number;
+  distance_pct: number;
+  last_price: number;
+  confidence: number;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  reason: string;
+  factors: string[];
+  dedup_key: string;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // L4 数学引擎输出：ExecutionPlan（对应后端 models/execution_plan.py）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -831,6 +914,7 @@ export interface MarketUpdate {
   ladder_plans?: LadderPlan[];
   range_signal?: RangeSignalData;
   key_levels_v2?: KeyLevelSnapshotV2;
+  orderbook_pressure?: OrderbookPressureSnapshot;
   trend_exhaustion?: TrendExhaustionSignal;
   market_structure_1d?: MarketStructureSnapshot;
   market_structure_1w?: MarketStructureSnapshot;

@@ -29,6 +29,7 @@ from models.flow import CVDData
 from models.key_level import KeyLevelSignal, KeyLevelSnapshotV2, KeyLevelV2
 from models.liquidation import LiquidationMap
 from models.market import CandleData
+from models.orderbook_pressure import OrderbookPressureSnapshot
 from processors.candlestick_patterns import PatternResult, detect_reversal_pattern
 from processors.level_discovery import fmt_usd_cn
 
@@ -115,13 +116,15 @@ def run_tracker_v2(
     candles_15m: list[CandleData] | None = None,
     candles_1h: list[CandleData] | None = None,
     cvd: CVDData | None = None,
+    pressure_snapshot: OrderbookPressureSnapshot | None = None,
     cfg: dict | None = None,
 ) -> KeyLevelSnapshotV2:
     """在 confluence_scoring 产出的快照基础上，运行状态机 + 信号生成。
 
-    candles_1h · cvd 均为可选（防御式编程，测试与旧调用无痛兼容）：
-      - candles_1h 缺失 → MTF 确认跳过（不加减分）
-      - cvd 缺失     → CVD 确认跳过（不加减分）
+    candles_1h · cvd · pressure_snapshot 均为可选（防御式编程，测试与旧调用无痛兼容）：
+      - candles_1h 缺失     → MTF 确认跳过（不加减分）
+      - cvd 缺失           → CVD 确认跳过（不加减分）
+      - pressure_snapshot 缺失 → 挂单压力共振/警告跳过（不加减分）
     """
     cfg = {**_DEFAULT_CFG, **(cfg or {})}
     now = int(time.time())
@@ -165,6 +168,11 @@ def run_tracker_v2(
         scalp = _generate_scalp_signal(lv, price, atr, opposite_levels, candles_15m, cfg, now, cvd=cvd)
         if scalp:
             signals.append(scalp)
+
+    # ── 挂单压力共振/警告（OP snapshot 已在本轮 _recompute 前置阶段算好）──
+    # 行为：对每条 KL 信号叠加 OP confirmation/warning，必要时降级；不影响信号本身的产出。
+    if pressure_snapshot is not None and signals:
+        _apply_pressure_alignment(signals, pressure_snapshot, atr)
 
     # 冲突解决：同时有多空 A 级时，按温度计方向保留主信号（涵盖 snipe/flip/scalp）
     _LONG_ACTIONS = ("snipe_long", "flip_long", "scalp_long")
@@ -1042,6 +1050,97 @@ def _generate_signal(
         return _finalize_signal(base, "flip_retest")
 
     return None
+
+
+_LONG_ACTIONS_OP = frozenset({"snipe_long", "flip_long", "scalp_long"})
+_SHORT_ACTIONS_OP = frozenset({"snipe_short", "flip_short", "scalp_short"})
+
+
+def _apply_pressure_alignment(
+    signals: list[KeyLevelSignal],
+    pressure_snapshot: OrderbookPressureSnapshot,
+    atr: float,
+) -> None:
+    """挂单压力监测器对 KL 信号的 confirmation / warning 叠加。
+
+    匹配规则（同价位定义）：
+      - |wall.price_mid - sig.level_price| ≤ 0.5×ATR（无 ATR 时退化为 0.3% × level_price）
+      - 仅看本轮 OP snapshot.walls（已分类好 label）
+
+    叠加规则：
+      做多信号：
+        ├─ 同价位 wall.label == "real_S"     → confirmations += "ob_real_support"
+        ├─ 同价位 wall.label == "fake_S"     → warnings += "OP 显示下方挂单已撤单(spoof)"
+        ├─ 同价位 wall.label == "fake_S_break"→ warnings += "OP 显示下方支撑已假突破"
+        └─ 上方近距离(≤ 1.5×ATR) wall.label == "real_R" → warnings += "OP 显示上方有真阻力@…"
+      做空信号 对称处理（real_R / fake_R / fake_R_break + 下方 real_S 警告）
+
+      被打 warning 的 A 级信号自动降为 B（和 mtf/cvd 背离一致），最多降 1 档。
+    """
+    if not pressure_snapshot.walls:
+        return
+
+    # 预先按 side 分组，避免 N×M
+    real_S_walls = [w for w in pressure_snapshot.walls if w.label == "real_S"]
+    fake_S_walls = [w for w in pressure_snapshot.walls if w.label in ("fake_S", "fake_S_break")]
+    real_R_walls = [w for w in pressure_snapshot.walls if w.label == "real_R"]
+    fake_R_walls = [w for w in pressure_snapshot.walls if w.label in ("fake_R", "fake_R_break")]
+
+    same_tol = max(atr * 0.5, 1e-9) if atr > 0 else 0.0  # 无 ATR 用百分比
+    warn_dist = max(atr * 1.5, 1e-9) if atr > 0 else 0.0
+
+    for sig in signals:
+        long_side = sig.action in _LONG_ACTIONS_OP
+        short_side = sig.action in _SHORT_ACTIONS_OP
+        if not (long_side or short_side):
+            continue
+
+        lvl_price = sig.level_price
+        # ATR 缺失时退化为 0.3% × level_price
+        local_same = same_tol if same_tol > 0 else lvl_price * 0.003
+        local_warn = warn_dist if warn_dist > 0 else lvl_price * 0.01
+
+        degraded = False
+
+        if long_side:
+            # 同价位 real_S → confirmation
+            if any(abs(w.price_mid - lvl_price) <= local_same for w in real_S_walls):
+                sig.confirmations.append("ob_real_support")
+            # 同价位 fake_S* → warning
+            for w in fake_S_walls:
+                if abs(w.price_mid - lvl_price) <= local_same:
+                    label_cn = "已撤单(spoof)" if w.label == "fake_S" else "已假突破"
+                    sig.warnings.append(f"OP 下方挂单{label_cn}@{w.price_mid:.4f}")
+                    degraded = True
+                    break
+            # 上方近距离 real_R → warning
+            for w in real_R_walls:
+                gap = w.price_mid - lvl_price
+                if 0 < gap <= local_warn:
+                    sig.warnings.append(f"OP 上方真阻力@{w.price_mid:.4f}(距 +{gap / max(lvl_price, 1e-9) * 100:.2f}%)")
+                    degraded = True
+                    break
+
+        if short_side:
+            if any(abs(w.price_mid - lvl_price) <= local_same for w in real_R_walls):
+                sig.confirmations.append("ob_real_resistance")
+            for w in fake_R_walls:
+                if abs(w.price_mid - lvl_price) <= local_same:
+                    label_cn = "已撤单(spoof)" if w.label == "fake_R" else "已假突破"
+                    sig.warnings.append(f"OP 上方挂单{label_cn}@{w.price_mid:.4f}")
+                    degraded = True
+                    break
+            for w in real_S_walls:
+                gap = lvl_price - w.price_mid
+                if 0 < gap <= local_warn:
+                    sig.warnings.append(f"OP 下方真支撑@{w.price_mid:.4f}(距 -{gap / max(lvl_price, 1e-9) * 100:.2f}%)")
+                    degraded = True
+                    break
+
+        if degraded and sig.confidence == "A":
+            sig.confidence = "B"
+
+        sig.score = _compute_score(sig)
 
 
 def _apply_mtf_cvd(

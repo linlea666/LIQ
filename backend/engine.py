@@ -141,6 +141,18 @@ class CoinState:
         self.option_max_pain: Optional[OptionMaxPainData] = None
         self.option_info: Optional[OptionInfoData] = None
         self.large_orders: Optional[LargeOrderSnapshot] = None
+        # ── Orderbook Pressure Monitor (独立 snipe 信号源) ──
+        # 由 polls/orderflow.poll_large_orders 写入：snapshot active + history ended 合并去重
+        from models.orderbook_pressure import (
+            LargeOrderLifecycle as _LargeOrderLifecycle,
+            OrderbookDepthSnapshot as _OrderbookDepthSnapshot,
+            OrderbookPressureSnapshot as _OrderbookPressureSnapshot,
+        )
+        self.large_orders_history: list[_LargeOrderLifecycle] = []
+        # 由 polls/orderbook_pressure.poll_orderbook_pressure 写入（90s 间隔）
+        self.orderbook_depth_snapshot: Optional[_OrderbookDepthSnapshot] = None
+        # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
+        self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
         self.news: Optional[NewsData] = None
         # Phase 4: 已接入的机构级数据
@@ -763,6 +775,7 @@ class Engine:
         netflow_interval = 900
         td_seq_interval = 3600
         footprint_interval = self._poll_cfg.get("footprint", 180)
+        ob_pressure_interval = self._poll_cfg.get("orderbook_pressure", 90)
         return [
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, s,
@@ -851,6 +864,12 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_footprint_{ccy}", self._poll_footprint, coin,
                 footprint_interval, s + 33.0,
+            )),
+            # ── Orderbook Pressure Monitor (独立 snipe 信号源) ──
+            # 仅新增 1 个 cg 请求/cycle (深度热力图)；大单 lifecycle 走 _poll_large_orders 复用
+            asyncio.create_task(self._poll_loop(
+                f"cg_orderbook_pressure_{ccy}", self._poll_orderbook_pressure, coin,
+                ob_pressure_interval, s + 36.0,
             )),
         ]
 
@@ -1238,6 +1257,14 @@ class Engine:
         from polls.orderflow import poll_large_orders
         await poll_large_orders(self._cg, coin, self._states[coin.ccy])
 
+    async def _poll_orderbook_pressure(self, coin: CoinConfig):
+        """挂单压力监测器：拉 /orderbook/history 分价位深度。
+
+        大单 lifecycle 由 _poll_large_orders 写入，本 poll 不重复请求。
+        """
+        from polls.orderbook_pressure import poll_orderbook_pressure
+        await poll_orderbook_pressure(self._cg, coin, self._states[coin.ccy])
+
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data
         await poll_whale_data(self._cg, self._states, self._settings.supported_coins)
@@ -1298,6 +1325,34 @@ class Engine:
 
         if state.temperature:
             state.waterfall = build_waterfall(state.temperature, _factor_scores)
+
+        # ── Orderbook Pressure Monitor（独立 snipe 信号源，前置于 KL tracker）──
+        # 数据全部复用 state（depth/large_orders_history/taker/cvd/footprint/candles_15m），
+        # 不触发新 cg 请求。前置原因：KL tracker 需要读取本轮 pressure_snapshot
+        # 作为 confirmation/warning 入参（real_S 共振 / fake_R 撤单警告）。
+        op_cfg = self._settings.processors.orderbook_pressure or {}
+        try:
+            from processors.orderbook_pressure import compute_pressure_snapshot
+            state.orderbook_pressure_snapshot = compute_pressure_snapshot(
+                state, cfg_overrides=op_cfg or None,
+            )
+        except Exception:
+            logger.debug("[OP] compute_pressure_snapshot failed", exc_info=True)
+
+        # ── OP 信号化 + 异步 push（独立 snipe 通道，30min 同价去重）──
+        try:
+            from processors.orderbook_pressure_signal import generate_pressure_signals
+            new_op_signals = generate_pressure_signals(
+                state.orderbook_pressure_snapshot, cfg_overrides=op_cfg or None,
+            )
+            if new_op_signals:
+                from api.ws import push_to_coin
+                for sig in new_op_signals:
+                    asyncio.create_task(push_to_coin(
+                        ccy, "orderbook_pressure_signal", sig.model_dump(),
+                    ))
+        except Exception:
+            logger.debug("[OP-Signal] generate/push failed", exc_info=True)
 
         # V2 关键位先行：独立于 calculate_levels，产出信号供后者桥接
         self._recompute_key_levels_v2(ccy)
@@ -1619,6 +1674,8 @@ class Engine:
             candles_1h=state.candles_1h or None,
             # V · CVD 背离确认：优先取合约 CVD，其次现货（现货数据更稳）
             cvd=state.cvd_contract or state.cvd_spot or None,
+            # OP · 挂单压力监测器：当轮 snapshot 已在 _recompute 前置阶段算好
+            pressure_snapshot=state.orderbook_pressure_snapshot,
             cfg=kl_cfg if kl_cfg else None,
         )
 
@@ -1760,6 +1817,8 @@ class Engine:
             payload["option_info"] = state.option_info.model_dump()
         if state.large_orders:
             payload["large_orders"] = state.large_orders.model_dump()
+        if state.orderbook_pressure_snapshot:
+            payload["orderbook_pressure"] = state.orderbook_pressure_snapshot.model_dump()
         if state.whale_data:
             payload["whale_data"] = {
                 "hl_alerts_count": len(state.whale_data.hl_alerts),
