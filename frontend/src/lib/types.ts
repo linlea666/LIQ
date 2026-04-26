@@ -771,6 +771,12 @@ export interface PressureWall {
   confidence: number;
   confluence_with_absorption: boolean;
   absorption_zone_price: number | null;
+  /**
+   * 强度等级（派生字段，与 KeyLevelV2.strength_tier 对齐）。
+   *   S = real_R/real_S 高分 + 共振；A = real_R/real_S 70+；B = 50+ 候选/spoof；C = 低分/已破墙
+   * 后端在 compute_pressure_snapshot 末尾综合 confidence + label + 共振写入。
+   */
+  strength_tier: "S" | "A" | "B" | "C";
   reason: string;
   cvd_state: string | null;
 }

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useMarketStore } from "@/stores/marketStore";
-import { formatPrice } from "@/lib/format";
+import { formatCnUsd, formatPrice } from "@/lib/format";
 import type {
   OrderbookPressureSnapshot,
   OrderbookPressureSignal,
@@ -12,12 +12,14 @@ import type {
 } from "@/lib/types";
 
 /**
- * 挂单压力监测器卡片（Orderbook Pressure Monitor）
+ * 挂单压力监测器明细卡（Orderbook Pressure Monitor · Detail）
  *
- * 与关键位卡平级的独立 snipe 信号源：
- *   - 顶部徽章：top_resistance / top_support 一眼看真阻力 / 真支撑
- *   - 主表格：每个 wall 的 side / 距离 / size / change_kind / label / confidence
- *   - 信号区：最近 N 条 OrderbookPressureSignal（30min 同价去重后，纯新触发）
+ * 当前作为 OrderbookPressureView 的"展开详情"折叠区子组件：
+ *   - 顶部徽章：top_resistance / top_support
+ *   - 信号区：最近 N 条 OrderbookPressureSignal（30min 同价去重后）
+ *   - 主表格：完整 wall 列表（side / 距离 / size / change_kind / label / confidence）
+ *
+ * 视觉桶分组的"近/中/远 各 1 位"概览在 OrderbookPressureView 主视图里渲染。
  *
  * 数据来源：
  *   - data.orderbook_pressure ← engine.py _build_payload 推送（market_update 通道）
@@ -42,13 +44,6 @@ const CHANGE_LABELS: Record<WallChangeKind, { text: string; color: string }> = {
   holding: { text: "保持", color: "text-blue-300" },
   unknown: { text: "未知", color: "text-slate-500" },
 };
-
-function formatUsdShort(usd: number): string {
-  if (!usd || !isFinite(usd)) return "-";
-  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(2)}M`;
-  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(0)}K`;
-  return `$${usd.toFixed(0)}`;
-}
 
 function formatTime(tsSec: number): string {
   if (!tsSec) return "-";
@@ -89,13 +84,13 @@ export default function OrderbookPressureCard() {
         title="上方卖墙（潜在阻力）"
         walls={askWalls}
         coin={coin}
-        emptyHint="±2% 内未发现卖单堆"
+        emptyHint="±12% 内未发现卖单堆"
       />
       <WallsTable
         title="下方买墙（潜在支撑）"
         walls={bidWalls}
         coin={coin}
-        emptyHint="±2% 内未发现买单堆"
+        emptyHint="±12% 内未发现买单堆"
       />
       <Footer snap={snap} />
     </div>
@@ -255,7 +250,7 @@ function WallsTable({
                 {w.distance_pct >= 0 ? "+" : ""}
                 {w.distance_pct.toFixed(2)}%
               </span>
-              <span className="w-20 text-slate-300 font-mono">{formatUsdShort(w.size_usd)}</span>
+              <span className="w-20 text-slate-300 font-mono">{formatCnUsd(w.size_usd)}</span>
               <span className={`w-12 text-[11px] ${change.color}`}>{change.text}</span>
               <span className={`text-[11px] px-1.5 py-0.5 rounded ${labelStyle.bg} ${labelStyle.fg}`}>
                 {labelStyle.text}

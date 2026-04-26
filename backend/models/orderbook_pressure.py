@@ -151,6 +151,10 @@ class PressureWall(BaseModel):
     confluence_with_absorption: bool = False
     absorption_zone_price: Optional[float] = None
 
+    # 强度等级（派生字段，根据 confidence + label 综合算出）
+    # 与关键位 KeyLevelV2.strength_tier (S/A/B/C) 视觉语言对齐，便于前端复用 UI 模式。
+    strength_tier: Literal["S", "A", "B", "C"] = "C"
+
     # 诊断字段（前端 tooltip / 日志）
     reason: str = ""                            # 简短自然语言摘要
     cvd_state: Optional[str] = None             # 当前 CVD 趋势 rising/declining/flat

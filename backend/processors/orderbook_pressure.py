@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # ── 默认阈值（与文档/README 同源；可由 settings 覆盖） ─────────────────────
 DEFAULTS = {
-    "range_pct": 2.0,                 # ±2% 价格带筛选
+    "range_pct": 12.0,                # ±12% 价格带筛选（与 KL 距离段 0.25-1.5/1.5-4/4-12% 对齐）
     "wall_size_top_pct": 0.20,        # top 20% by USD
     "wall_min_usd": 500_000.0,        # 单个 wall ≥ $500K
     "merge_tol_pct": 0.0005,          # 合并同价位 ±0.05%
@@ -489,6 +489,41 @@ def augment_with_absorption(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 强度等级派生（与 KeyLevelV2.strength_tier 视觉语言对齐）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _assign_strength_tier(wall: PressureWall) -> str:
+    """根据 wall.confidence + label + 共振 派生 S/A/B/C。
+
+    设计要点：
+      - real_R/real_S 才能进 S/A（spoof/已破墙不能给高级别，避免误导）
+      - 共振（大单关联 或 absorption_zone）有 +1 等级 boost
+      - fake_*_break (墙已失效) 强制 C
+      - 阈值与关键位 displayScore→tier 风格对齐：≥85→S, ≥70→A, ≥50→B
+    """
+    c = wall.confidence
+    label = wall.label
+
+    # 已失效/已突破的墙：操作意义低，统一 C
+    if label in ("fake_R_break", "fake_S_break"):
+        return "C"
+
+    # spoof / untested：封顶 B（不能误导成 S/A）
+    if label in ("fake_R", "fake_S", "untested"):
+        return "B" if c >= 50 else "C"
+
+    # real_R / real_S：可达 S/A
+    boost = bool(wall.large_order_count > 0 or wall.confluence_with_absorption)
+    if c >= 85 or (c >= 75 and boost):
+        return "S"
+    if c >= 70:
+        return "A"
+    if c >= 50:
+        return "B"
+    return "C"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 顶层组装入口
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -570,6 +605,10 @@ def compute_pressure_snapshot(
     absorption = _load_absorption(state, last_price, now)
     augment_with_absorption(walls, absorption, last_price,
                             getattr(state, "atr", None) or None, cfg)
+
+    # 派生强度 tier（在 L1-L4 全部完成、confidence/label 稳定后再算）
+    for wall in walls:
+        wall.strength_tier = _assign_strength_tier(wall)
 
     snap = OrderbookPressureSnapshot(
         coin=state.coin, ts_sec=now, last_price=last_price,

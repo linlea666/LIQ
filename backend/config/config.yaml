@@ -122,7 +122,9 @@ processors:
   # 挂单压力监测器（独立 snipe 信号源，与关键位平级）
   # L1 detect_walls → L1+ tag_with_large_orders → L2 classify_change → L3 classify_pressure → L4 augment_with_absorption
   orderbook_pressure:
-    range_pct: 2.0                # 上下方 ±2% 价格带筛选
+    range_pct: 12.0               # 上下方 ±12% 价格带筛选（API 实测单笔即返 ±50% 全量数据；
+                                  # 12% 覆盖 BTC「日内+1 周可达」操作区，与关键位"近/中/远"距离段
+                                  # (0.25-1.5 / 1.5-4 / 4-12%) 完全对齐；超出 12% 进入清算地图辖区）
     wall_size_top_pct: 0.20       # 价格带内 top 20% USD 视为 wall
     wall_min_usd: 500000          # 单 wall 最低 USD 阈值
     merge_tol_pct: 0.0005         # 同价位合并 ±0.05%

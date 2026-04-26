@@ -79,7 +79,8 @@ def _candle(ts_sec: int, close: float, *, high: float | None = None,
 
 
 def test_detect_walls_filters_range_and_picks_top():
-    """±2% 内挑出大单堆，±2% 外的不算。"""
+    """±2% 内挑出大单堆，±2% 外的不算（本测试聚焦"范围过滤"，
+    显式 override range_pct=2.0 与全局默认值解耦）。"""
     last = 100.0
     asks = [
         _bin(101.0, 100),    # $10100  ── 在范围内
@@ -91,7 +92,8 @@ def test_detect_walls_filters_range_and_picks_top():
         _bin(99.0, 50_000),  # $4,950,000  ✓ 买墙
         _bin(98.5, 200),     # $19,700
     ]
-    walls = detect_walls(_depth(last, bids, asks), last, DEFAULTS)
+    cfg = {**DEFAULTS, "range_pct": 2.0}
+    walls = detect_walls(_depth(last, bids, asks), last, cfg)
     sides = sorted({w.side for w in walls})
     assert sides == ["ask", "bid"]
     ask_w = next(w for w in walls if w.side == "ask")
@@ -380,6 +382,110 @@ def test_augment_with_absorption_no_match_when_far():
     augment_with_absorption([wall], snap, last_price=100.0, atr=2.0, cfg=DEFAULTS)
     assert wall.confluence_with_absorption is False
     assert wall.confidence == 70
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 强度 tier 派生（_assign_strength_tier）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def test_assign_strength_tier_real_with_boost_promotes_to_s():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    # real_R + confidence 78 + 共振大单 → S（boost 把 75-84 区间提升到 S）
+    wall = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="real_R", confidence=78, large_order_count=2,
+    )
+    assert _assign_strength_tier(wall) == "S"
+
+
+def test_assign_strength_tier_real_high_confidence_is_s():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    # real_S + confidence ≥ 85 即使无 boost 也是 S
+    wall = PressureWall(
+        side="bid", price_lo=99.5, price_hi=100, price_mid=99.75,
+        distance_pct=-0.25, size_usd=1_000_000, size_base=10,
+        label="real_S", confidence=88,
+    )
+    assert _assign_strength_tier(wall) == "S"
+
+
+def test_assign_strength_tier_real_70_is_a():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    wall = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="real_R", confidence=70,
+    )
+    assert _assign_strength_tier(wall) == "A"
+
+
+def test_assign_strength_tier_fake_capped_to_b():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    # spoof 撤单墙即使 confidence 很高也封顶 B（避免误导）
+    wall = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="fake_R", confidence=90,
+    )
+    assert _assign_strength_tier(wall) == "B"
+
+
+def test_assign_strength_tier_fake_break_is_c():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    # 已突破墙强制 C
+    wall = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="fake_R_break", confidence=80,
+    )
+    assert _assign_strength_tier(wall) == "C"
+
+
+def test_assign_strength_tier_untested_is_b_or_c():
+    from processors.orderbook_pressure import _assign_strength_tier
+
+    high = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="untested", confidence=60,
+    )
+    low = PressureWall(
+        side="ask", price_lo=100, price_hi=100.5, price_mid=100.25,
+        distance_pct=0.25, size_usd=1_000_000, size_base=10,
+        label="untested", confidence=30,
+    )
+    assert _assign_strength_tier(high) == "B"
+    assert _assign_strength_tier(low) == "C"
+
+
+def test_compute_snapshot_writes_tier_for_each_wall():
+    """端到端：确保 compute_pressure_snapshot 输出的每个 wall 都带 tier。"""
+    now = 1_700_000_000
+    last = 100.0
+    asks = [_bin(100.4, 60_000)]
+    bids = [_bin(99.6, 50_000)]
+    depth = _depth(last, bids, asks)
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=depth,
+        large_orders_history=[],
+        taker_contract_series=[],
+        candles_15m=[],
+        cvd_contract=None,
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state, now_sec=now)
+    assert snap is not None and snap.walls
+    for w in snap.walls:
+        assert w.strength_tier in ("S", "A", "B", "C")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
