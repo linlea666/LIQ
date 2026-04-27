@@ -47,6 +47,105 @@ CONSENSUS_MULTIPLIER_CAP = 1.6
 # S 级越强 → 失效阈值越远（市场需更大反向力量才能否定 S 级位）
 INVALIDATION_ATR_MULT = {"S": 2.0, "A": 1.5, "B": 1.0, "C": 0.5}
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 · TTL & 时间衰减（GPT V3 评审采纳）
+# 旧 _time_decay 用 24h/168h 阶梯，对短 TTL 数据（footprint/orderbook）过粗
+# 新 apply_ttl_decay：按 source_tag → SOURCE_TTL_HOURS 取 TTL 后做 exp 衰减
+# 对 macro 源（200W SMA、月线 EMA）TTL 极长，几乎不衰减
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE_TTL_HOURS: dict[str, float] = {
+    # 微结构（极短 TTL）
+    "footprint_stacked": 2.0,
+    "absorption_zone_support": 4.0,
+    "absorption_zone_resistance": 4.0,
+    "oi_surge_zone": 4.0,
+    # 短周期清算
+    "liq_cluster_below_1d": 24.0,
+    "liq_cluster_above_1d": 24.0,
+    # 中周期清算
+    "liq_cluster_below_7d": 168.0,
+    "liq_cluster_above_7d": 168.0,
+    # 长周期清算
+    "liq_cluster_below_30d": 720.0,
+    "liq_cluster_above_30d": 720.0,
+    # 本地技术（中 TTL）
+    "vwap": 24.0,
+    "vp_poc": 168.0,
+    "vp_val": 168.0,
+    "vp_vah": 168.0,
+    "ichimoku_cloud_top": 24.0,
+    "ichimoku_cloud_bottom": 24.0,
+    "ichimoku_kijun": 24.0,
+    "fib_0.382": 168.0,
+    "fib_0.5": 168.0,
+    "fib_0.618": 168.0,
+    "fib_0.786": 168.0,
+    "pivot_p": 24.0,
+    "pivot_r1": 24.0,
+    "pivot_r2": 24.0,
+    "pivot_s1": 24.0,
+    "pivot_s2": 24.0,
+    "ma_cluster": 168.0,
+    "ema_50_1d": 168.0,
+    "ema_100_1d": 168.0,
+    # 宏观（长 TTL）
+    "ema_200_1d": 720.0,
+    "sma_200_1d": 8760.0,    # 200d SMA — 1 年 TTL
+    "bmsa_upper": 8760.0,
+    "bmsa_lower": 8760.0,
+    # 结构锚点（中长 TTL）
+    "round_major": 8760.0,    # 整数关口几乎不过期
+    "round_minor": 720.0,
+    "unfilled_wick_low": 168.0,
+    "unfilled_wick_high": 168.0,
+    "hvn": 168.0,
+    "onchain_real": 8760.0,
+    "onchain_btc-": 8760.0,
+    "onchain_etfm": 8760.0,
+}
+
+# 默认 TTL（未匹配的 source_tag fallback）
+DEFAULT_TTL_HOURS = 24.0
+
+
+def _resolve_ttl_hours(source_tag: str) -> float:
+    """source_tag → TTL 小时数（含通配兜底）。"""
+    if source_tag in SOURCE_TTL_HOURS:
+        return SOURCE_TTL_HOURS[source_tag]
+    if source_tag.startswith("swing_"):
+        # swing_*_1w / 1d / 4h / 1h 按时间框架定 TTL
+        if "_1w" in source_tag:
+            return 720.0
+        if "_1d" in source_tag:
+            return 168.0
+        if "_4h" in source_tag:
+            return 48.0
+        return 24.0
+    if source_tag.startswith("liq_cluster_"):
+        if source_tag.endswith("_30d"):
+            return 720.0
+        if source_tag.endswith("_7d"):
+            return 168.0
+        return 24.0
+    return DEFAULT_TTL_HOURS
+
+
+def apply_ttl_decay(base_score: float, source_tag: str, age_hours: float) -> float:
+    """对单候选位 base_score 做 TTL 指数衰减（M2 · 替代 _time_decay 阶梯）。
+
+    公式：score' = base_score × exp(-age_hours / ttl)
+    - age_hours = 0 → 1.0 不衰减
+    - age_hours = ttl → ~0.37
+    - age_hours = 2×ttl → ~0.135
+    设计：对 macro 源（ttl=8760h）几乎不衰减；对 footprint（ttl=2h）严格衰减。
+    """
+    if age_hours <= 0:
+        return base_score
+    ttl = _resolve_ttl_hours(source_tag)
+    if ttl <= 0:
+        return base_score
+    return base_score * math.exp(-age_hours / ttl)
+
 
 @dataclass
 class _Cluster:
@@ -70,12 +169,22 @@ def score_and_build_snapshot(
     boll_4h_data: dict | None = None,
     macd_histogram: float | None = None,
     freshness: DataFreshness | None = None,
+    # M2 新增（全部 Optional/默认值，向后兼容）
+    cvd_divergence: str = "",
+    funding_rate: float = 0.0,
+    oi_high_percentile: bool = False,
 ) -> KeyLevelSnapshotV2:
     """主入口：从 DiscoveryResult 生成 KeyLevelSnapshotV2。
 
     M1 新参数：
       - freshness：DataFreshness（来自 key_level_freshness.compute_freshness(state)）
         若提供，对每个 level 应用 _apply_freshness_to_level 软衰减（不破坏 tier）。
+
+    M2 新参数：
+      - cvd_divergence: 当前 CVD 背离方向（"bullish"/"bearish"/""）
+        用于 _calc_contradiction_penalty 第 3 类（CVD 反向矛盾扣分）
+      - funding_rate: 当前 funding 费率（用于矛盾扣分 + 方向 modifier）
+      - oi_high_percentile: OI 是否处于历史高百分位（局部加分）
     """
     now = int(time.time())
     if current_price <= 0 or atr <= 0:
@@ -107,21 +216,45 @@ def score_and_build_snapshot(
         lv.historical_validity = _calc_historical_validity(lv)
         lv.barrier_score = _calc_barrier_score(lv, now)
         lv.final_score = _calc_final_score(lv, now)
-        lv.strength_tier = _calc_tier(lv.final_score)
-        lv.category = _classify(lv)
         _update_distance(lv, current_price)
 
-        # M1: 算法化失效价（基于 strength_tier × ATR）
-        inv_price, inv_cond, inv_mult = _calc_invalidation(lv, atr)
-        lv.invalidation_price = inv_price
-        lv.invalidation_condition = inv_cond
-        lv.invalidation_atr_mult = inv_mult
-
     # M1: 应用数据血统软衰减（不改 tier，只衰减 final_score）
+    #     必须先于 _calc_tier_v2，因 stale 软衰减影响分数 → tier
     if freshness is not None:
         from processors.key_level_freshness import apply_freshness_to_level
         for lv in scored_levels:
             apply_freshness_to_level(lv, freshness)
+
+    # M2: 方向化 OI/Funding modifier（局部加/扣分，非全局）
+    #     必须在 freshness 之后、tier 判定之前应用
+    for lv in scored_levels:
+        delta = apply_directional_modifier(
+            lv, oi_high_percentile=oi_high_percentile, funding_extreme=funding_rate,
+        )
+        lv.final_score = round(max(0.0, min(100.0, lv.final_score + delta)), 1)
+
+    # M2: 矛盾扣分（contradiction_penalty）— 6 类，仅扣分不重置 tier
+    for lv in scored_levels:
+        penalty, reasons = _calc_contradiction_penalty(
+            lv, cvd_divergence=cvd_divergence, funding_rate=funding_rate,
+        )
+        lv.contradiction_penalty = penalty
+        lv.contradiction_reasons = reasons
+        if penalty > 0:
+            lv.final_score = round(max(0.0, lv.final_score - penalty), 1)
+
+    # 5. tier 判定（M2: 双因子；旧 _calc_tier 保留可回退）
+    for lv in scored_levels:
+        lv.strength_tier = _calc_tier_v2(lv)
+        # M2: S 级 4 分型
+        lv.s_class = classify_s_level(lv)
+        lv.category = _classify(lv)
+
+        # M1: 算法化失效价（必须放在 tier 之后，因 mult 由 tier 决定）
+        inv_price, inv_cond, inv_mult = _calc_invalidation(lv, atr)
+        lv.invalidation_price = inv_price
+        lv.invalidation_condition = inv_cond
+        lv.invalidation_atr_mult = inv_mult
 
     # 5. 排序：非 idle 优先 → final_score 高 → 距离近
     scored_levels.sort(key=lambda lv: (
@@ -237,6 +370,7 @@ def _score_cluster(
     sources: list[str] = []
     source_tags: set[str] = set()
     dimensions: set[str] = set()
+    evidence_groups_set: set[str] = set()  # M2: 独立证据组
     best_tf = ""
     best_tf_score = 0.0
 
@@ -249,14 +383,19 @@ def _score_cluster(
 
     for cand in cl.candidates:
         dim_weight = DIMENSION_WEIGHTS.get(cand.dimension, 1.0)
-        time_decay = _time_decay(cand.data_age_hours)
+        # M2: 用 TTL exp 衰减替代旧 _time_decay 阶梯（按 source_tag 取 TTL）
+        decayed_base = apply_ttl_decay(cand.base_score, cand.source_tag, cand.data_age_hours)
         dist_pct = abs(cl.price - price) / price * 100
         dist_bonus = _distance_bonus(dist_pct)
-        score = cand.base_score * dim_weight * time_decay * dist_bonus
+        score = decayed_base * dim_weight * dist_bonus
         total_score += score
         sources.append(cand.source)
         source_tags.add(cand.source_tag)
         dimensions.add(cand.dimension)
+
+        # M2: 收集独立证据组（兜底用 resolve_evidence_group，但 discover 出口已 fill）
+        if cand.evidence_group:
+            evidence_groups_set.add(cand.evidence_group)
 
         if score > best_tf_score:
             best_tf_score = score
@@ -299,6 +438,9 @@ def _score_cluster(
         sources, dimensions, max_exchange_count, dominant_leverage_label,
     )
 
+    # M2: 输出独立证据组（按预定义 8 组顺序排列，方便 UI 渲染）
+    evidence_groups_ordered = _order_evidence_groups(evidence_groups_set)
+
     return KeyLevelV2(
         price=round(cl.price, 2),
         side=cl.side,
@@ -315,7 +457,36 @@ def _score_cluster(
         dominant_leverage=dominant_leverage_label,
         leverage_intensity=round(max_leverage_intensity, 3),
         explain_chips=chips,
+        # M2 新增字段
+        evidence_groups=evidence_groups_ordered,
+        independent_group_count=len(evidence_groups_ordered),
     )
+
+
+# M2: 8 组定义顺序（前端渲染稳定性）
+_EVIDENCE_GROUP_ORDER = (
+    "structure_anchor",
+    "macro_technical",
+    "local_technical",
+    "liquidation_macro",
+    "liquidation_meso",
+    "liquidation_short",
+    "microstructure_local",
+    "flow_dynamic",
+)
+
+
+def _order_evidence_groups(groups: set[str]) -> list[str]:
+    """将 set → list 按 8 组预定义顺序输出（保证 UI 渲染稳定）。"""
+    return [g for g in _EVIDENCE_GROUP_ORDER if g in groups]
+
+
+def count_independent_groups(lv: KeyLevelV2) -> int:
+    """对外接口：返回该 level 的独立证据组数。
+
+    使用场景：confluence_scoring 评级、AI 解释、单元测试
+    """
+    return len(set(lv.evidence_groups))
 
 
 def _build_explain_chips(
@@ -401,10 +572,193 @@ def _distance_bonus(dist_pct: float) -> float:
 
 
 def _calc_tier(score: float) -> str:
+    """旧版 tier 判定（保留向后兼容；M2 新逻辑见 _calc_tier_v2）。"""
     for tier, threshold in STRENGTH_THRESHOLDS.items():
         if score >= threshold:
             return tier
     return "C"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 · 评级核心：独立组数 + final_score 双因子（GPT V3 评审采纳）
+# 旧版只看 final_score，导致"单一来源高分"也能升 S（伪 S 信号）
+# 新版：先看独立组数（≥3 才有资格 S），再看分数；解决"虚高 S"问题
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _calc_tier_v2(lv: KeyLevelV2) -> str:
+    """M2 评级：独立组数（gating）+ final_score（gating）双因子。
+
+    规则：
+      - S：独立组数 ≥ 3 且 final_score ≥ 70  （任一不满足降 A）
+      - A：独立组数 ≥ 2 且 final_score ≥ 45  （或 S gating 不够但分数 ≥ 70）
+      - B：独立组数 ≥ 1 且 final_score ≥ 25
+      - C：其他
+
+    设计：
+      - 独立组数 = 8 大证据组中命中的不同组数（同组多源仅算 1）
+      - 这是 GPT 评审的核心建议：避免"5 个清算源 + 0 技术源"也升 S
+      - 保留 final_score gating：低分位即使多组也只能 B（如 5 弱源）
+    """
+    n = lv.independent_group_count
+    s = lv.final_score
+    if n >= 3 and s >= 70:
+        return "S"
+    if (n >= 2 and s >= 45) or (n >= 1 and s >= 70):
+        return "A"
+    if n >= 1 and s >= 25:
+        return "B"
+    return "C"
+
+
+def classify_s_level(lv: KeyLevelV2) -> str:
+    """对 S 级位做 4 分型（仅 strength_tier == 'S' 时调用，否则返回 ""）。
+
+    4 分型：
+      - S-Macro:     长周期独占（macro_technical / liquidation_macro / structure_anchor 周月线）
+      - S-Liquidity: 跨所共振强清算簇（exchange_count ≥ 4 且 liquidation_* 至少 2 组）
+      - S-Micro:     盘口微结构 + flow 共振（microstructure_local + flow_dynamic）
+      - S-Composite: 默认/兜底（≥3 独立组但不属上述任一类）
+
+    设计：
+      - 优先级 Liquidity > Macro > Micro > Composite（专业交易语言：先看流动性证据）
+      - 仅返回类型字符串，不影响评分；UI/AI 用此做 badge / 文案分流
+    """
+    if lv.strength_tier != "S":
+        return ""
+    groups = set(lv.evidence_groups)
+
+    # 1. S-Liquidity：≥4 所共振 + 至少 2 个清算组
+    liq_groups = groups & {"liquidation_macro", "liquidation_meso", "liquidation_short"}
+    if lv.exchange_count >= 4 and len(liq_groups) >= 2:
+        return "S-Liquidity"
+
+    # 2. S-Macro：宏观技术或长周期清算独占（且无微结构）
+    macro_groups = groups & {"macro_technical", "liquidation_macro"}
+    has_micro = bool(groups & {"microstructure_local", "flow_dynamic"})
+    if macro_groups and not has_micro:
+        return "S-Macro"
+
+    # 3. S-Micro：微结构 + flow 共振（无宏观证据 → 是短期挤压位）
+    micro_groups = groups & {"microstructure_local", "flow_dynamic"}
+    if len(micro_groups) >= 2 and not (groups & {"macro_technical", "liquidation_macro"}):
+        return "S-Micro"
+
+    # 4. 兜底：复合型
+    return "S-Composite"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 · 矛盾扣分（contradiction_penalty） × 6 类
+# 设计：单源/单组/方向冲突等"软矛盾"在 final_score 末段扣分（不重置 tier）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _calc_contradiction_penalty(
+    lv: KeyLevelV2,
+    cvd_divergence: str = "",   # "bullish" / "bearish" / ""（来自 CVD divergence detector）
+    funding_rate: float = 0.0,  # 当前 funding_rate（>0.0001 视为偏多拥挤）
+) -> tuple[float, list[str]]:
+    """计算 6 类矛盾扣分（M2 · GPT V3 评审采纳）。
+
+    6 类（每类最多扣 1 项，避免重复扣分）：
+      1. 来源单一：仅 1 独立组 → -10
+      2. 距离过远：abs(distance_pct) > 15 → -8
+      3. CVD 反向：support 但 cvd 持续看跌 / resistance 但持续看涨 → -12
+      4. Funding 反向拥挤：support 但 funding 极正（多头拥挤）/ resistance 但极负 → -10
+      5. 数据 stale：is_stale=True → -5（已被 freshness 软衰减后再扣一次警示）
+      6. 多周期清算冲突：仅有 liquidation_short 但无 meso/macro 支撑 → -6
+
+    返回：(penalty_total, reasons)
+    """
+    penalty = 0.0
+    reasons: list[str] = []
+
+    # 1. 来源单一
+    if lv.independent_group_count <= 1:
+        penalty += 10
+        reasons.append("单一证据组")
+
+    # 2. 距离过远
+    if abs(lv.distance_pct) > 15:
+        penalty += 8
+        reasons.append("距现价>15%")
+
+    # 3. CVD 反向
+    if cvd_divergence:
+        if lv.side == "support" and cvd_divergence == "bearish":
+            penalty += 12
+            reasons.append("CVD 持续看跌")
+        elif lv.side == "resistance" and cvd_divergence == "bullish":
+            penalty += 12
+            reasons.append("CVD 持续看涨")
+
+    # 4. Funding 反向拥挤（funding 极值阈值：±0.0001 = 0.01%）
+    if funding_rate >= 0.0003 and lv.side == "support":
+        # 多头极拥挤 + 期望支撑反弹 → 反向风险
+        penalty += 10
+        reasons.append("多头资金极拥挤")
+    elif funding_rate <= -0.0003 and lv.side == "resistance":
+        penalty += 10
+        reasons.append("空头资金极拥挤")
+
+    # 5. 数据 stale
+    if lv.is_stale:
+        penalty += 5
+        reasons.append("主源数据偏旧")
+
+    # 6. 多周期清算冲突（仅短周期清算无中长周期支撑）
+    groups = set(lv.evidence_groups)
+    has_short_only = (
+        "liquidation_short" in groups
+        and "liquidation_meso" not in groups
+        and "liquidation_macro" not in groups
+        and len(groups) == 1
+    )
+    if has_short_only:
+        penalty += 6
+        reasons.append("仅 1d 清算（中长周期未确认）")
+
+    return round(penalty, 1), reasons
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 · 方向化 OI/Funding modifier（局部化，非全局）
+# GPT 评审：原全局 OI 高百分位 +5 会影响所有 level；M2 改为按方向局部加分
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def apply_directional_modifier(
+    lv: KeyLevelV2,
+    oi_high_percentile: bool = False,   # OI 是否处于高百分位（来自 facts_collector）
+    funding_extreme: float = 0.0,       # funding 极值方向：>0=多头极拥挤 / <0=空头极拥挤
+) -> float:
+    """对单个 level 的 final_score 应用方向化 OI/Funding modifier。
+
+    设计：
+      - OI 高百分位：仅对距离 < 5% 的近 level 加分（远位不受 OI 影响）
+        - support: +3
+        - resistance: +3
+      - Funding 极值：方向化（多头极拥挤 → 阻力位 +4，加速被吃；支撑位 -2，被吃概率高）
+        - 注意：这与 _calc_contradiction_penalty 第 4 类不冲突
+          那里是"极拥挤位 + 支撑"扣分（直接矛盾）；
+          这里是"极拥挤位 + 阻力"加分（顺势放大）
+
+    返回：modifier delta（直接 += 到 final_score；可正可负）
+    """
+    delta = 0.0
+    if oi_high_percentile and abs(lv.distance_pct) < 5:
+        delta += 3.0
+
+    if funding_extreme >= 0.0003:  # 多头极拥挤
+        if lv.side == "resistance":
+            delta += 4.0
+        elif lv.side == "support":
+            delta -= 2.0
+    elif funding_extreme <= -0.0003:  # 空头极拥挤
+        if lv.side == "support":
+            delta += 4.0
+        elif lv.side == "resistance":
+            delta -= 2.0
+
+    return round(delta, 1)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

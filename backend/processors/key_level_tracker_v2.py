@@ -26,7 +26,12 @@ import logging
 import time
 
 from models.flow import CVDData
-from models.key_level import KeyLevelSignal, KeyLevelSnapshotV2, KeyLevelV2
+from models.key_level import (
+    CascadeComponents,
+    KeyLevelSignal,
+    KeyLevelSnapshotV2,
+    KeyLevelV2,
+)
 from models.liquidation import LiquidationMap
 from models.market import CandleData
 from models.orderbook_pressure import OrderbookPressureSnapshot
@@ -714,6 +719,8 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
         # M1: 无 cascade 也清空 magnet/vacuum
         lv.next_magnet_price = None
         lv.vacuum_gap_pct = 0.0
+        # M2: 4 子分清空
+        lv.cascade_components = CascadeComponents()
         return
 
     lv.cascade_layers = min(len(clusters), 5)
@@ -743,6 +750,36 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
     lv.next_magnet_price = round(nearest.price_center, 2)
     lv.vacuum_gap_pct = round(
         abs(lv.price - nearest.price_center) / max(price, 1) * 100, 2,
+    )
+
+    # ── M2 新增：cascade 4 子分（GPT V3 评审采纳）──────────────────
+    # 拆原 cascade_risk(0-1) 为 4 子分：count/usd/velocity/leverage，
+    # 让 UI/AI 看清"风险来自哪一面"，便于解释
+    # 子分均归一到 0-1
+    count_score = min(1.0, len(clusters) / 5.0)
+    usd_score = min(1.0, lv.cascade_total_usd / 200_000_000)  # 200M USD 满分
+    # velocity_score: 真空跨度越紧凑，破位越急速；以 vacuum_gap_pct 为基础
+    # vacuum_gap_pct ≤ 0.5% → 1.0；≥ 5% → 0.2
+    if lv.vacuum_gap_pct <= 0.5:
+        velocity_score = 1.0
+    elif lv.vacuum_gap_pct >= 5.0:
+        velocity_score = 0.2
+    else:
+        velocity_score = 1.0 - (lv.vacuum_gap_pct - 0.5) / 4.5 * 0.8
+    # leverage_score: 取簇内最大 leverage_intensity（>0.6 主导算高风险）
+    # LiqCluster M1 已有 leverage_intensity 字段；fallback 0
+    max_leverage_intensity = 0.0
+    for c in clusters[:5]:
+        li = float(getattr(c, "leverage_intensity", 0.0) or 0.0)
+        if li > max_leverage_intensity:
+            max_leverage_intensity = li
+    leverage_score = min(1.0, max_leverage_intensity / 0.7)  # 0.7+ 算满分
+
+    lv.cascade_components = CascadeComponents(
+        count_score=round(count_score, 3),
+        usd_score=round(usd_score, 3),
+        velocity_score=round(velocity_score, 3),
+        leverage_score=round(leverage_score, 3),
     )
 
 

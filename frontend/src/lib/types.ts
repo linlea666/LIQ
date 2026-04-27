@@ -694,6 +694,27 @@ export interface KeyLevelV2 {
   is_stale?: boolean;                 // 主源是否过期；UI 据此显示 "⏳ 数据偏旧"
 
   explain_chips?: string[];           // 白话证据芯片（"7d清算簇"、"3所共振"…）
+
+  // ── M2（V3 评分体系核心升级）— 独立证据组 + S 4 分型 + 矛盾扣分 ──
+  evidence_groups?: string[];         // 8 组之一或多个：structure_anchor / macro_technical /
+                                      //   local_technical / liquidation_macro / liquidation_meso /
+                                      //   liquidation_short / microstructure_local / flow_dynamic
+  independent_group_count?: number;   // 去重后的组数；A/B/C 评级核心因子
+
+  s_class?: "" | "S-Macro" | "S-Liquidity" | "S-Micro" | "S-Composite";
+
+  contradiction_penalty?: number;     // 矛盾扣分（0~30+）
+  contradiction_reasons?: string[];   // 矛盾原因（白话）
+
+  cascade_components?: CascadeComponents | null;
+}
+
+// M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）
+export interface CascadeComponents {
+  count_score: number;       // 0-1: 穿越簇数量
+  usd_score: number;         // 0-1: 累计 USD
+  velocity_score: number;    // 0-1: 真空跨度紧凑度
+  leverage_score: number;    // 0-1: 主导杠杆密度
 }
 
 // M1 新增：清算磁铁通道（独立列表，不参与 levels 评分）

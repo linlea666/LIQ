@@ -422,9 +422,28 @@ function LevelBlock({
                 ? "bg-red-500/15 text-red-400"
                 : "bg-blue-500/15 text-blue-400"
           }`}
+          title={
+            typeof level.independent_group_count === "number"
+              ? `${level.strength_tier} 级 · ${level.independent_group_count} 个独立证据组`
+              : `${level.strength_tier} 级`
+          }
         >
           {level.strength_tier}
         </span>
+        {/* M2: S 级 4 分型 badge（仅 S 级显示） */}
+        {level.s_class && level.strength_tier === "S" && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 bg-amber-700/20 text-amber-300"
+            title={
+              level.s_class === "S-Macro" ? "宏观级关键位（长周期独占）" :
+              level.s_class === "S-Liquidity" ? "流动性级关键位（跨所清算共振）" :
+              level.s_class === "S-Micro" ? "微观级关键位（盘口微结构 + 资金流共振）" :
+              "复合级关键位（≥3 独立证据组）"
+            }
+          >
+            {level.s_class}
+          </span>
+        )}
         {/* M1: 跨所共识徽标（≥2 所共振） */}
         {typeof level.exchange_count === "number" && level.exchange_count >= 2 && (
           <span
@@ -538,6 +557,25 @@ function LevelBlock({
           </div>
         );
       })()}
+
+      {/* M2: 矛盾扣分（仅 penalty > 0 显示） */}
+      {typeof level.contradiction_penalty === "number" && level.contradiction_penalty > 0 && (
+        <div className="mt-1 flex items-start gap-1.5 flex-wrap">
+          <span className="text-[10px] text-slate-500 shrink-0 pt-0.5">⚠️ 矛盾扣分：</span>
+          <div className="flex flex-wrap gap-1 text-[10px]">
+            {(level.contradiction_reasons || []).map((r, i) => (
+              <span
+                key={i}
+                className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 cursor-help"
+                title={`矛盾扣分项（共扣 ${level.contradiction_penalty?.toFixed(1)} 分）`}
+              >
+                {r}
+              </span>
+            ))}
+            <span className="text-rose-400">-{level.contradiction_penalty.toFixed(1)}</span>
+          </div>
+        </div>
+      )}
 
       {/* M1: 失效条件 + 真空跨度（合并一行展示） */}
       {(level.invalidation_condition || level.next_magnet_price) && (

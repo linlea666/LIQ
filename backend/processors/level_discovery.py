@@ -193,6 +193,105 @@ class RawCandidate:
     # 透传到 _score_cluster，使共识 multiplier / explain_chips 能正确生成。
     # 设为 dict 而非独立字段：避免 RawCandidate 持续膨胀，扩展性好。
     cluster_meta: dict = field(default_factory=dict)
+    # ── M2 新增：独立证据组（GPT V3 评审采纳）──
+    # 由 source_tag 在 _score_cluster 阶段映射；非 cluster 候选可在 discover 阶段直接填。
+    # 8 组：structure_anchor / macro_technical / local_technical /
+    #       liquidation_macro / liquidation_meso / liquidation_short /
+    #       microstructure_local / flow_dynamic
+    evidence_group: str = ""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 · source_tag → evidence_group 映射（8 组）
+# 用法：(1) discover 时 explicit 设置；(2) _score_cluster 末段 fallback 用此 dict
+# 设计要点：每个 source_tag 必属唯一组（避免 GPT 担心的"重复计数"）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE_TAG_TO_EVIDENCE_GROUP: dict[str, str] = {
+    # ── structure_anchor: 价格结构锚点（swing/wick/HVN/round_number/onchain）──
+    "round_major": "structure_anchor",
+    "round_minor": "structure_anchor",
+    "unfilled_wick_low": "structure_anchor",
+    "unfilled_wick_high": "structure_anchor",
+    "hvn": "structure_anchor",
+    "swing_high_1h": "structure_anchor",
+    "swing_low_1h": "structure_anchor",
+    "swing_high_4h": "structure_anchor",
+    "swing_low_4h": "structure_anchor",
+    "swing_high_1d": "structure_anchor",
+    "swing_low_1d": "structure_anchor",
+    "swing_high_1w": "structure_anchor",
+    "swing_low_1w": "structure_anchor",
+    "onchain_real": "structure_anchor",        # CVDD/真实成本
+    "onchain_btc-": "structure_anchor",        # BTC 历史均价
+    "onchain_etfm": "structure_anchor",        # ETF 平均成本
+    # ── macro_technical: 宏观技术指标（200W SMA/CVDD/BMSA/月线 EMA200）──
+    "sma_200_1d": "macro_technical",
+    "bmsa_upper": "macro_technical",
+    "bmsa_lower": "macro_technical",
+    "ema_200_1d": "macro_technical",
+    # ── local_technical: 本地技术指标（EMA cluster/Fib/Pivot/Ichimoku/VWAP）──
+    "ema_50_1d": "local_technical",
+    "ema_100_1d": "local_technical",
+    "ma_cluster": "local_technical",
+    "fib_0.382": "local_technical",
+    "fib_0.5": "local_technical",
+    "fib_0.618": "local_technical",
+    "fib_0.786": "local_technical",
+    "pivot_p": "local_technical",
+    "pivot_r1": "local_technical",
+    "pivot_r2": "local_technical",
+    "pivot_s1": "local_technical",
+    "pivot_s2": "local_technical",
+    "ichimoku_cloud_top": "local_technical",
+    "ichimoku_cloud_bottom": "local_technical",
+    "ichimoku_kijun": "local_technical",
+    "vwap": "local_technical",
+    "vp_poc": "local_technical",
+    "vp_val": "local_technical",
+    "vp_vah": "local_technical",
+    # ── liquidation_*: 清算簇按周期分 3 组 ──
+    "liq_cluster_below_1d": "liquidation_short",
+    "liq_cluster_above_1d": "liquidation_short",
+    "liq_cluster_below_7d": "liquidation_meso",
+    "liq_cluster_above_7d": "liquidation_meso",
+    "liq_cluster_below_30d": "liquidation_macro",
+    "liq_cluster_above_30d": "liquidation_macro",
+    # ── microstructure_local: 盘口微结构（footprint/absorption）──
+    "footprint_stacked": "microstructure_local",
+    "absorption_zone_support": "microstructure_local",
+    "absorption_zone_resistance": "microstructure_local",
+    # ── flow_dynamic: 资金流/持仓动态（OI 突增）──
+    "oi_surge_zone": "flow_dynamic",
+}
+
+
+def resolve_evidence_group(source_tag: str) -> str:
+    """source_tag → evidence_group 映射（含 swing 前缀通配）。
+
+    Fallback：未映射 source_tag 兜底为 "local_technical"
+    （比纯空字符串更有用，避免 count_independent_groups 漏算）
+    """
+    if source_tag in SOURCE_TAG_TO_EVIDENCE_GROUP:
+        return SOURCE_TAG_TO_EVIDENCE_GROUP[source_tag]
+    # swing_* 通配（_discover_price_structure 动态生成 swing_<kind>_<tf>）
+    if source_tag.startswith("swing_"):
+        return "structure_anchor"
+    if source_tag.startswith("liq_cluster_"):
+        # liq_cluster_<...>_30d / 7d / 1d 兜底
+        if source_tag.endswith("_30d"):
+            return "liquidation_macro"
+        if source_tag.endswith("_7d"):
+            return "liquidation_meso"
+        return "liquidation_short"
+    if source_tag.startswith("fib_") or source_tag.startswith("pivot_"):
+        return "local_technical"
+    if source_tag.startswith("ema_"):
+        return "macro_technical" if "200" in source_tag else "local_technical"
+    if source_tag.startswith("onchain_"):
+        return "structure_anchor"
+    if source_tag.startswith("ichimoku_"):
+        return "local_technical"
+    return "local_technical"
 
 
 @dataclass
@@ -262,6 +361,12 @@ def discover_levels(
         cycle_position,
         oi_history, candles_1h,
     )
+
+    # M2 · 出口统一 fill evidence_group（零侵入：不动 30+ 处 RawCandidate(...) 调用）
+    # 设计：根据稳定 source_tag 做映射，map miss 兜底"local_technical"
+    for c in cands:
+        if not c.evidence_group:
+            c.evidence_group = resolve_evidence_group(c.source_tag)
 
     return result
 

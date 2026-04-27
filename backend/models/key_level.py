@@ -132,6 +132,57 @@ class KeyLevelV2(BaseModel):
     # 例: ["7d清算簇", "3所共振", "50x主导", "VWAP叠加", "EMA200"]
     explain_chips: list[str] = Field(default_factory=list)
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M2（V3 评分体系核心升级）— 独立证据组 + S 4 分型 + 矛盾扣分 + cascade 4 子分
+    # 全部 Optional/默认值，向后兼容（旧 snapshot 反序列化无破坏）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 独立证据组（8 组之一或多个）— 由 _score_cluster 从 RawCandidate.evidence_group
+    # 聚合而来，决定独立组数 (count_independent_groups)
+    # 8 组：structure_anchor / macro_technical / local_technical /
+    #       liquidation_macro / liquidation_meso / liquidation_short /
+    #       microstructure_local / flow_dynamic
+    evidence_groups: list[str] = Field(default_factory=list)
+    independent_group_count: int = 0     # 去重后的组数；A/B/C 评级核心因子
+
+    # S 级 4 分型（GPT V3 评审采纳）— 仅 strength_tier=='S' 时填充
+    # S-Macro:     长周期独占（200W SMA/CVDD/月线 EMA + 周线 swing 等）
+    # S-Liquidity: 跨所共振强清算簇（≥4 所 + USD ≥ 50M）
+    # S-Micro:     盘口微结构 + flow 动态共振（短期，TTL 短）
+    # S-Composite: ≥3 独立组 + 综合分高
+    s_class: str = ""
+
+    # 矛盾扣分（contradiction_penalty）— 6 类一票否决式扣分
+    # 在 _calc_final_score 末段统一应用：final_score -= contradiction_penalty
+    contradiction_penalty: float = 0.0
+    contradiction_reasons: list[str] = Field(default_factory=list)
+
+    # cascade 4 子分（M1 cascade_risk 单值 → M2 拆解可解释）
+    cascade_components: Optional["CascadeComponents"] = None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class CascadeComponents(BaseModel):
+    """级联风险拆 4 子分（M2 · GPT V3 评审采纳）。
+
+    设计原则：
+      - 总 cascade_risk 仍是 0-1（向后兼容），但 4 子分让用户/AI 看清"风险来自哪"
+      - 子分各自归一到 0-1；总值 = max(0,1, 加权和)，权重见 _calc_cascade_risk
+      - 4 子分独立于现有 cascade_layers/cascade_total_usd（保留向后兼容）
+
+    含义：
+      count_score:    破位后穿越的清算簇数量（0=无穿越/5+簇=满分）
+      usd_score:      穿越簇累计 USD（0-200M+ 满分）
+      velocity_score: 真空跨度紧凑度（gap 越小越易急速穿越）
+      leverage_score: 主导杠杆密度（50x+ 主导 → 满分）
+    """
+    count_score: float = 0.0
+    usd_score: float = 0.0
+    velocity_score: float = 0.0
+    leverage_score: float = 0.0
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M1 新增：清算磁铁通道（与 levels 平行，独立显示）

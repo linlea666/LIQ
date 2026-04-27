@@ -1754,6 +1754,32 @@ class Engine:
         if state.macd_data:
             macd_hist = state.macd_data.get("histogram")
 
+        # M2: 提取 CVD 背离方向（用于矛盾扣分）
+        # CVDData.has_divergence + trend_1h → "bullish"/"bearish"/""
+        cvd_div_dir = ""
+        cvd_obj = state.cvd_contract or state.cvd_spot
+        if cvd_obj and cvd_obj.has_divergence:
+            tr = (cvd_obj.trend_1h or "").lower()
+            if tr in ("up", "rising", "bullish"):
+                cvd_div_dir = "bullish"
+            elif tr in ("down", "falling", "bearish"):
+                cvd_div_dir = "bearish"
+
+        # M2: 提取 funding 极值（取 OKX/Binance 中绝对值最大者）
+        funding_extreme = 0.0
+        if state.funding:
+            for r in (state.funding.okx_rate, state.funding.binance_rate):
+                if r is not None and abs(r) > abs(funding_extreme):
+                    funding_extreme = float(r)
+
+        # M2: OI 高百分位判定（≥10 历史样本时计算 P80）
+        oi_high_pct = False
+        if state.oi and state.oi.history and len(state.oi.history) >= 10:
+            sorted_oi = sorted(s.oi_usd for s in state.oi.history)
+            p80_idx = int(len(sorted_oi) * 0.8)
+            if state.oi.current_usd >= sorted_oi[p80_idx]:
+                oi_high_pct = True
+
         snapshot = score_and_build_snapshot(
             discovery=discovery,
             current_price=price,
@@ -1763,6 +1789,10 @@ class Engine:
             boll_4h_data=state.boll_4h_data,
             macd_histogram=macd_hist,
             freshness=freshness,
+            # M2 新增（向后兼容默认值）
+            cvd_divergence=cvd_div_dir,
+            funding_rate=funding_extreme,
+            oi_high_percentile=oi_high_pct,
         )
 
         # M1: 独立磁铁通道（max_pain + heatmap top density）
