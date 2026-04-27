@@ -159,6 +159,67 @@ class KeyLevelV2(BaseModel):
     # cascade 4 子分（M1 cascade_risk 单值 → M2 拆解可解释）
     cascade_components: Optional["CascadeComponents"] = None
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M3（V3 架构精装）— level_id + lifecycle_events + regime-aware scoring
+    # 全部 Optional/默认值，向后兼容（旧 snapshot 反序列化无破坏）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # R9：稳定 level_id（基于 ATR/price bucket 的 sha1[:12]）
+    # 设计：side 翻转时 level_id 保持不变（只记录 flipped 事件），跨币种内唯一
+    # 用于 lifecycle 追踪 + diff API 关联同一关键位的不同时刻
+    level_id: str = ""
+
+    # R9：生命周期事件流（最多保留 20 条最近事件）
+    # 事件类型：born / strengthening / weakening / tier_upgraded / tier_downgraded
+    #          / tested / reacted / broken / fake_break / flipped / expired
+    # 由 confluence_scoring._diff_lifecycle 在每轮快照生成时 diff 推入
+    # 由 key_level_tracker_v2._set_state 在状态变化时追加
+    lifecycle_events: list["LifecycleEvent"] = Field(default_factory=list)
+
+    # R8：regime-aware scoring（市场状态自适应权重）
+    # 在 score_and_build_snapshot 末段、tier 判定之前应用：
+    #   final_score *= regime_modifier_applied
+    # 取值范围 [0.85, 1.10]，按 evidence_groups 主组在 6×8 表查询
+    # regime_at_score：本次评分时的 regime 标签（用于 NOFX/前端审计）
+    regime_modifier_applied: float = 1.0
+    regime_at_score: str = ""  # "" / "trend_up" / "trend_down" / "range" / "squeeze" / "high_vol_chop" / "extreme"
+    regime_weight_version: str = ""  # "3.0" 表示 M3 权重版本
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 新增：生命周期事件（关键位演化追踪）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class LifecycleEvent(BaseModel):
+    """关键位生命周期单条事件（M3 · GPT V3 评审采纳）。
+
+    用途：
+    - 让前端展示"该支撑过去 24h 的演化时间线"
+    - 让外部 AI / NOFX 知道"哪些位刚增强 / 刚失效 / 刚翻转"
+    - 配合 /api/key-levels/lifecycle/{coin}/{level_id} 实现历史追溯
+
+    事件分类（11 种）：
+      born              首次出现（prev_levels 中无匹配）
+      strengthening     final_score 上涨 ≥ 5 分
+      weakening         final_score 下跌 ≥ 5 分
+      tier_upgraded     strength_tier 提升（C→B / B→A / A→S）
+      tier_downgraded   strength_tier 下降
+      tested            进入 testing 状态
+      reacted           bounced / 反弹成功
+      broken            被有效突破
+      fake_break        假突破后重夺
+      flipped           support↔resistance 翻转
+      expired           不再出现在新快照（由 history 端点检测，不写入 lv 自身）
+    """
+    ts: int
+    event_type: str
+    detail: str = ""             # 中文白话说明
+    score_before: float = 0.0
+    score_after: float = 0.0
+    tier_before: str = ""
+    tier_after: str = ""
+    state_before: str = ""
+    state_after: str = ""
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）
@@ -300,3 +361,14 @@ class KeyLevelSnapshotV2(BaseModel):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     magnet_levels: list[LiqMagnetLevel] = Field(default_factory=list)
     data_freshness: Optional[DataFreshness] = None
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M3（V3 架构精装）— regime 上下文（snapshot 级）
+    # 全部 Optional/默认值，向后兼容
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 本快照评分时所处的 regime（来自 RegimeSnapshot.regime）
+    # 前端可在头部显示 "📊 当前 Regime: 趋势上涨 · 0.72"
+    regime: str = ""
+    regime_confidence: float = 0.0
+    regime_description: str = ""
+    regime_weight_version: str = ""  # "3.0" 表示 M3 权重版本

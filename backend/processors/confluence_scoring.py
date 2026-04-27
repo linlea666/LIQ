@@ -9,10 +9,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 from models.key_level import (
     BullBearLine,
@@ -21,7 +23,9 @@ from models.key_level import (
     FibSnapshot,
     KeyLevelSnapshotV2,
     KeyLevelV2,
+    LifecycleEvent,
 )
+from models.regime import RegimeSnapshot
 from processors.level_discovery import DiscoveryResult, RawCandidate
 from processors.ta_core import BBSqueezeResult, detect_bb_squeeze
 
@@ -147,6 +151,252 @@ def apply_ttl_decay(base_score: float, source_tag: str, age_hours: float) -> flo
     return base_score * math.exp(-age_hours / ttl)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 · R8 · regime-aware scoring 权重表（GPT V3 评审采纳）
+# 设计：
+#   - 6 种 regime × 8 evidence_groups → modifier ∈ [0.85, 1.10]
+#   - 趋势市：结构 / 趋势相关组加权，短线清算降权
+#   - 震荡市：本地技术 / 短线清算加权（扫单频繁），结构降权
+#   - squeeze：所有组温和降权（待方向选择，可信度暂降）
+#   - high_vol_chop / extreme：大幅降权（噪声大，关键位失效频发）
+# 对每个 level 取「其 evidence_groups 中 modifier 最大值」作为最终乘子，
+# 避免单一弱组拖累多组共振强位。
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REGIME_WEIGHT_VERSION = "3.0"
+
+REGIME_MODIFIER_TABLE: dict[str, dict[str, float]] = {
+    "trend_up": {
+        "structure_anchor": 1.10,
+        "macro_technical": 1.05,
+        "local_technical": 0.95,
+        "liquidation_macro": 1.05,
+        "liquidation_meso": 1.00,
+        "liquidation_short": 0.95,
+        "microstructure_local": 0.95,
+        "flow_dynamic": 1.05,
+    },
+    "trend_down": {
+        "structure_anchor": 1.10,
+        "macro_technical": 1.05,
+        "local_technical": 0.95,
+        "liquidation_macro": 1.05,
+        "liquidation_meso": 1.00,
+        "liquidation_short": 0.95,
+        "microstructure_local": 0.95,
+        "flow_dynamic": 1.05,
+    },
+    "range": {
+        "structure_anchor": 1.05,
+        "macro_technical": 0.95,
+        "local_technical": 1.10,
+        "liquidation_macro": 0.95,
+        "liquidation_meso": 1.05,
+        "liquidation_short": 1.10,
+        "microstructure_local": 1.10,
+        "flow_dynamic": 1.00,
+    },
+    "squeeze": {
+        "structure_anchor": 0.95,
+        "macro_technical": 0.95,
+        "local_technical": 0.95,
+        "liquidation_macro": 0.95,
+        "liquidation_meso": 0.95,
+        "liquidation_short": 0.95,
+        "microstructure_local": 0.95,
+        "flow_dynamic": 0.95,
+    },
+    "high_vol_chop": {
+        "structure_anchor": 0.90,
+        "macro_technical": 0.90,
+        "local_technical": 0.90,
+        "liquidation_macro": 0.90,
+        "liquidation_meso": 0.90,
+        "liquidation_short": 0.90,
+        "microstructure_local": 0.90,
+        "flow_dynamic": 0.90,
+    },
+    "extreme": {
+        "structure_anchor": 0.85,
+        "macro_technical": 0.85,
+        "local_technical": 0.85,
+        "liquidation_macro": 0.85,
+        "liquidation_meso": 0.85,
+        "liquidation_short": 0.85,
+        "microstructure_local": 0.85,
+        "flow_dynamic": 0.85,
+    },
+}
+
+# regime label 中文映射（前端 / NOFX 可解释性）
+REGIME_LABEL_CN: dict[str, str] = {
+    "trend_up": "趋势上涨",
+    "trend_down": "趋势下跌",
+    "range": "箱体震荡",
+    "squeeze": "蓄力收敛",
+    "high_vol_chop": "高波动无序",
+    "extreme": "极端行情",
+}
+
+
+def apply_regime_modifier(lv: KeyLevelV2, regime: str) -> float:
+    """根据 regime + lv.evidence_groups 返回 final_score 的乘子（M3 · R8）。
+
+    返回 multiplier ∈ [0.85, 1.10]；若 regime 为空 / 不识别 / lv 无 evidence_groups
+    则返回 1.0（中性，不影响）。
+
+    取值规则：
+      - 取 lv.evidence_groups 中各组对应 modifier 的最大值（避免单一弱组拖累强位）
+      - 若 lv.evidence_groups 为空 → 用 8 组中位数 1.0 不调整
+    """
+    if not regime or regime not in REGIME_MODIFIER_TABLE:
+        return 1.0
+    if not lv.evidence_groups:
+        return 1.0
+    table = REGIME_MODIFIER_TABLE[regime]
+    return max((table.get(g, 1.0) for g in lv.evidence_groups), default=1.0)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 · R9 · level_id 稳定 hash（GPT V3 评审采纳）
+# 设计：
+#   - 基于 ATR 自适应价格桶 → 同一关键位在不同 ATR 下保持 ID 稳定
+#   - 不含 side：side 翻转时 level_id 保留（生命周期里记录 flipped 事件）
+#   - 不含 coin：API 路径已带 {coin}，coin 内唯一即可
+# 输出：12 字符 hex（约 16M 桶空间，单币种内极不可能碰撞）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def make_level_id(price: float, atr: float) -> str:
+    """生成稳定 level_id：sha1("bucket:{round(price/bucket_size)}")[:12]。
+
+    bucket_size = max(atr * 0.5, price * 0.001)
+      - 小币 ATR 大 → 桶大；大币 ATR 小 → 桶小
+      - price * 0.001 兜底（避免 ATR=0 时除零）
+
+    例：BTC price=63000 atr=400 → bucket_size=200 → bucket=315 → id="abc123def456"
+    同一 level 在 ±0.5×ATR 范围内移动均得到相同 ID（保持稳定）
+    """
+    if price <= 0:
+        return ""
+    bucket_size = max(atr * 0.5, price * 0.001)
+    if bucket_size <= 0:
+        return ""
+    bucket = round(price / bucket_size)
+    raw = f"bucket:{bucket}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 · R9 · lifecycle 事件 diff（每轮快照与 prev 比较）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 事件门槛（可调）
+_LIFECYCLE_SCORE_DELTA_THRESHOLD = 5.0   # final_score 变化 ≥ 5 分才记为 strengthen/weaken
+_LIFECYCLE_MAX_EVENTS = 20               # 单 level 最多保留事件数（防内存膨胀）
+
+_TIER_RANK = {"S": 4, "A": 3, "B": 2, "C": 1, "": 0}
+
+
+def _detect_lifecycle_events(
+    prev: Optional[KeyLevelV2],
+    new: KeyLevelV2,
+    now: int,
+) -> list[LifecycleEvent]:
+    """对比 prev 与 new，产出本轮新增的 lifecycle events（M3 · R9）。
+
+    检测：
+      - born:                prev 为 None 时
+      - strengthening:       final_score 上涨 ≥ 阈值
+      - weakening:           final_score 下跌 ≥ 阈值
+      - tier_upgraded:       strength_tier 提升（C→B / B→A / A→S）
+      - tier_downgraded:     strength_tier 下降
+      - flipped:             side 翻转（support↔resistance）
+
+    不在此处检测的（由 tracker_v2._set_state 直接 push）：
+      - tested / reacted / broken / fake_break
+      （这些状态在 tracker 主循环中确定，且需考虑 OI/CVD 确认逻辑）
+
+    expired 由 history API 端在快照对比时识别（不属 lv 自身字段）
+    """
+    events: list[LifecycleEvent] = []
+    if prev is None:
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="born",
+            detail=f"首次出现 · {new.strength_tier}级 · score {new.final_score:.0f}",
+            score_after=new.final_score,
+            tier_after=new.strength_tier,
+            state_after=new.state,
+        ))
+        return events
+
+    # final_score 变化检测
+    delta = new.final_score - prev.final_score
+    if delta >= _LIFECYCLE_SCORE_DELTA_THRESHOLD:
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="strengthening",
+            detail=f"评分上涨 +{delta:.1f}（{prev.final_score:.0f}→{new.final_score:.0f}）",
+            score_before=prev.final_score,
+            score_after=new.final_score,
+        ))
+    elif delta <= -_LIFECYCLE_SCORE_DELTA_THRESHOLD:
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="weakening",
+            detail=f"评分下跌 {delta:.1f}（{prev.final_score:.0f}→{new.final_score:.0f}）",
+            score_before=prev.final_score,
+            score_after=new.final_score,
+        ))
+
+    # tier 变化检测
+    pr = _TIER_RANK.get(prev.strength_tier, 0)
+    nr = _TIER_RANK.get(new.strength_tier, 0)
+    if nr > pr:
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="tier_upgraded",
+            detail=f"强度等级提升 {prev.strength_tier} → {new.strength_tier}",
+            tier_before=prev.strength_tier,
+            tier_after=new.strength_tier,
+            score_before=prev.final_score,
+            score_after=new.final_score,
+        ))
+    elif nr < pr:
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="tier_downgraded",
+            detail=f"强度等级下降 {prev.strength_tier} → {new.strength_tier}",
+            tier_before=prev.strength_tier,
+            tier_after=new.strength_tier,
+            score_before=prev.final_score,
+            score_after=new.final_score,
+        ))
+
+    # side 翻转检测（support↔resistance）
+    if prev.side and new.side and prev.side != new.side:
+        side_cn = {"support": "支撑", "resistance": "阻力"}
+        events.append(LifecycleEvent(
+            ts=now,
+            event_type="flipped",
+            detail=f"角色翻转 {side_cn.get(prev.side, prev.side)} → {side_cn.get(new.side, new.side)}",
+            score_before=prev.final_score,
+            score_after=new.final_score,
+            tier_before=prev.strength_tier,
+            tier_after=new.strength_tier,
+            state_before=prev.state,
+            state_after=new.state,
+        ))
+
+    return events
+
+
+def _trim_lifecycle_events(events: list[LifecycleEvent]) -> list[LifecycleEvent]:
+    """保留最近 N 条事件，防止内存膨胀。"""
+    if len(events) > _LIFECYCLE_MAX_EVENTS:
+        return events[-_LIFECYCLE_MAX_EVENTS:]
+    return events
+
+
 @dataclass
 class _Cluster:
     """内部聚类桶"""
@@ -173,6 +423,8 @@ def score_and_build_snapshot(
     cvd_divergence: str = "",
     funding_rate: float = 0.0,
     oi_high_percentile: bool = False,
+    # M3 新增（全部 Optional/默认值，向后兼容）
+    regime_snapshot: Optional[RegimeSnapshot] = None,
 ) -> KeyLevelSnapshotV2:
     """主入口：从 DiscoveryResult 生成 KeyLevelSnapshotV2。
 
@@ -185,6 +437,12 @@ def score_and_build_snapshot(
         用于 _calc_contradiction_penalty 第 3 类（CVD 反向矛盾扣分）
       - funding_rate: 当前 funding 费率（用于矛盾扣分 + 方向 modifier）
       - oi_high_percentile: OI 是否处于历史高百分位（局部加分）
+
+    M3 新参数：
+      - regime_snapshot: 当前市场 regime 快照（来自 state.regime_snapshot）
+        若提供，对每个 level 按 evidence_groups 应用 regime_modifier，
+        并在 snapshot 头部写入 regime / regime_confidence 上下文。
+        regime_modifier ∈ [0.85, 1.10]，影响 final_score 进而影响 tier。
     """
     now = int(time.time())
     if current_price <= 0 or atr <= 0:
@@ -243,6 +501,20 @@ def score_and_build_snapshot(
         if penalty > 0:
             lv.final_score = round(max(0.0, lv.final_score - penalty), 1)
 
+    # M3 · R8: regime-aware modifier（contradiction 之后、tier 之前）
+    # 极端 regime 下乘子 0.85 会主动降级 tier；趋势市强位 1.10 升级
+    regime_label = ""
+    if regime_snapshot is not None:
+        regime_label = regime_snapshot.regime or ""
+    if regime_label:
+        for lv in scored_levels:
+            mult = apply_regime_modifier(lv, regime_label)
+            lv.regime_modifier_applied = round(mult, 3)
+            lv.regime_at_score = regime_label
+            lv.regime_weight_version = REGIME_WEIGHT_VERSION
+            if mult != 1.0:
+                lv.final_score = round(max(0.0, min(100.0, lv.final_score * mult)), 1)
+
     # 5. tier 判定（M2: 双因子；旧 _calc_tier 保留可回退）
     for lv in scored_levels:
         lv.strength_tier = _calc_tier_v2(lv)
@@ -255,6 +527,31 @@ def score_and_build_snapshot(
         lv.invalidation_price = inv_price
         lv.invalidation_condition = inv_cond
         lv.invalidation_atr_mult = inv_mult
+
+    # M3 · R9: level_id 赋值（基于 ATR/price 桶的稳定 hash）
+    # 在 _merge_with_prev 阶段已继承 prev.level_id 的 level，保留其 ID 不变；
+    # 未匹配 prev（新出现）的 level，此处生成新 ID
+    for lv in scored_levels:
+        if not lv.level_id:
+            lv.level_id = make_level_id(lv.price, atr)
+
+    # M3 · R9: lifecycle 事件 diff（与 prev_levels 按 level_id 比较）
+    # 必须放最后：依赖 strength_tier / final_score / side 全部确定
+    if prev_levels:
+        prev_by_id: dict[str, KeyLevelV2] = {p.level_id: p for p in prev_levels if p.level_id}
+    else:
+        prev_by_id = {}
+    now_int = int(now)
+    for lv in scored_levels:
+        prev_lv = prev_by_id.get(lv.level_id)
+        new_events = _detect_lifecycle_events(prev_lv, lv, now_int)
+        if prev_lv and prev_lv.lifecycle_events:
+            lv.lifecycle_events = _trim_lifecycle_events(
+                list(prev_lv.lifecycle_events) + new_events
+            )
+        else:
+            # 无 prev：本轮第一次见 → born 事件已在 _detect_lifecycle_events 中产出
+            lv.lifecycle_events = _trim_lifecycle_events(new_events)
 
     # 5. 排序：非 idle 优先 → final_score 高 → 距离近
     scored_levels.sort(key=lambda lv: (
@@ -278,6 +575,18 @@ def score_and_build_snapshot(
     # 8. 多周期分层
     tf_info = _find_tf_levels(scored_levels, current_price)
 
+    # M3: regime 上下文（snapshot 头部，便于前端 chip 渲染）
+    snap_regime = ""
+    snap_regime_conf = 0.0
+    snap_regime_desc = ""
+    snap_regime_weight_ver = ""
+    if regime_snapshot is not None:
+        snap_regime = regime_snapshot.regime or ""
+        snap_regime_conf = float(regime_snapshot.confidence or 0.0)
+        snap_regime_desc = regime_snapshot.description_cn or ""
+        if snap_regime:
+            snap_regime_weight_ver = REGIME_WEIGHT_VERSION
+
     return KeyLevelSnapshotV2(
         ts=now,
         current_price=round(current_price, 2),
@@ -298,6 +607,11 @@ def score_and_build_snapshot(
         # M1: magnet_levels 由 engine 层在 discover_magnets 之后塞入
         magnet_levels=[],
         data_freshness=freshness,
+        # M3: regime 上下文
+        regime=snap_regime,
+        regime_confidence=round(snap_regime_conf, 3),
+        regime_description=snap_regime_desc,
+        regime_weight_version=snap_regime_weight_ver,
     )
 
 
@@ -914,6 +1228,11 @@ def _merge_with_prev(
                 # 必须从 prev 继承（每轮 discovery 重新打分会重置这些字段）
                 lv.next_magnet_price = prev.next_magnet_price
                 lv.vacuum_gap_pct = prev.vacuum_gap_pct
+                # M3 · R9: 继承 level_id 保持稳定（生命周期连续性的关键）
+                # lifecycle_events 不在此处继承——由主流程末尾的 _detect_lifecycle_events
+                # 按 level_id 二次配对，避免双重写入
+                if prev.level_id:
+                    lv.level_id = prev.level_id
                 matched.add(i)
                 break
 

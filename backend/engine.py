@@ -1793,6 +1793,8 @@ class Engine:
             cvd_divergence=cvd_div_dir,
             funding_rate=funding_extreme,
             oi_high_percentile=oi_high_pct,
+            # M3 新增：regime-aware scoring + regime 上下文
+            regime_snapshot=getattr(state, "regime_snapshot", None),
         )
 
         # M1: 独立磁铁通道（max_pain + heatmap top density）

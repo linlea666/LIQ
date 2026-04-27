@@ -31,6 +31,7 @@ from models.key_level import (
     KeyLevelSignal,
     KeyLevelSnapshotV2,
     KeyLevelV2,
+    LifecycleEvent,
 )
 from models.liquidation import LiquidationMap
 from models.market import CandleData
@@ -506,6 +507,43 @@ def _set_state(lv: KeyLevelV2, new_state: str, now: int):
     # Phase 2：一次"新反弹事件"才累加 bounce_count（testing→bounced 而非 bounced→bounced）
     if new_state == "bounced" and lv.state != "bounced":
         lv.bounce_count += 1
+
+    # M3 · R9: 记录关键状态变化为 lifecycle event（仅当确实变化时）
+    # 仅追踪有交易语义的状态转移（避免 idle↔approaching 噪声）
+    _LIFECYCLE_TRACKED_STATES = {"testing", "swept", "bounced", "broken", "fake_break", "flipped"}
+    _STATE_TO_EVENT = {
+        "testing": "tested",
+        "swept": "tested",
+        "bounced": "reacted",
+        "broken": "broken",
+        "fake_break": "fake_break",
+        "flipped": "flipped",
+    }
+    if new_state in _LIFECYCLE_TRACKED_STATES and new_state != lv.state:
+        evt_type = _STATE_TO_EVENT.get(new_state, new_state)
+        side_cn = {"support": "支撑", "resistance": "阻力"}.get(lv.side, lv.side)
+        detail_map = {
+            "tested": f"进入测试 · {side_cn} ${lv.price:.2f}",
+            "reacted": f"反弹生效 · {side_cn} ${lv.price:.2f}（第{lv.bounce_count}次）",
+            "broken": f"被有效突破 · {side_cn} ${lv.price:.2f}",
+            "fake_break": f"假突破后重夺 · {side_cn} ${lv.price:.2f}",
+            "flipped": f"角色翻转 · {side_cn} ${lv.price:.2f}",
+        }
+        lv.lifecycle_events.append(LifecycleEvent(
+            ts=now,
+            event_type=evt_type,
+            detail=detail_map.get(evt_type, f"{lv.state} → {new_state}"),
+            score_before=lv.final_score,
+            score_after=lv.final_score,
+            tier_before=lv.strength_tier,
+            tier_after=lv.strength_tier,
+            state_before=lv.state,
+            state_after=new_state,
+        ))
+        # 限长 20 条
+        if len(lv.lifecycle_events) > 20:
+            lv.lifecycle_events = lv.lifecycle_events[-20:]
+
     lv.prev_state = lv.state
     lv.state = new_state
     lv.state_ts = now
