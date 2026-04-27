@@ -707,6 +707,39 @@ export interface KeyLevelV2 {
   contradiction_reasons?: string[];   // 矛盾原因（白话）
 
   cascade_components?: CascadeComponents | null;
+
+  // ── M3（V3 评分体系精装）— regime-aware + 稳定 level_id + 生命周期 ──
+  // 全部 optional，向后兼容
+  level_id?: string;                  // 稳定 ID（基于 price_bucket，跨快照持久化）
+  regime_modifier_applied?: number;   // 当前 regime 下作用于该位的乘数（0.85-1.10）
+  regime_at_score?: string;           // 评分时的 regime 标签
+  regime_weight_version?: string;     // regime 权重表版本号
+  lifecycle_events?: LifecycleEvent[]; // 该位最近的生命周期事件（最多 20 条）
+}
+
+// M3 新增：关键位生命周期单条事件
+export interface LifecycleEvent {
+  ts: number;
+  event_type:
+    | "born"
+    | "strengthening"
+    | "weakening"
+    | "tier_upgraded"
+    | "tier_downgraded"
+    | "tested"
+    | "reacted"
+    | "broken"
+    | "fake_break"
+    | "flipped"
+    | "expired"
+    | string;
+  detail?: string;
+  score_before?: number;
+  score_after?: number;
+  tier_before?: string;
+  tier_after?: string;
+  state_before?: string;
+  state_after?: string;
 }
 
 // M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）
@@ -790,6 +823,11 @@ export interface KeyLevelSnapshotV2 {
   // ── M1 新增：磁铁通道 + 数据新鲜度 ──
   magnet_levels?: LiqMagnetLevel[];
   data_freshness?: DataFreshness | null;
+  // ── M3 新增：snapshot 级 regime 上下文（来自 RegimeSnapshot） ──
+  regime?: string;                  // trend_up / trend_down / range / extreme_volatility / squeeze / high_vol_chop
+  regime_confidence?: number;       // 0-1
+  regime_description?: string;      // 中文描述
+  regime_weight_version?: string;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

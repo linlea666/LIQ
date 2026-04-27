@@ -18,6 +18,8 @@ import StrongLevelsCard from "./StrongLevelsCard";
 import MarketStructureBadge from "./MarketStructureBadge";
 import ExecutionPlanCard from "./ExecutionPlanCard";
 import FinalDecisionCard from "./FinalDecisionCard";
+import RegimeChip from "./RegimeChip";
+import LifecyclePanel from "./LifecyclePanel";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -70,6 +72,8 @@ export default function KeyLevelView() {
   return (
     <div className="space-y-4 max-w-4xl">
       <MarketStructureBadge />
+      {/* M3 · F2 · 当前 regime chip（KL snapshot 内嵌的 regime 字段） */}
+      <RegimeChip kl={kl} />
       {/* P1.4 · L7.5 双引擎融合最终决策（置顶，代表对外最终结论） */}
       <FinalDecisionCard coin={coin} />
       {/* D06 · 数学引擎 L4 执行计划（红绿灯 + 仓位 + 一句话） */}
@@ -896,52 +900,64 @@ function LevelRow({
         ? "bg-slate-700/20"
         : "";
 
+  const hasLifecycle =
+    Array.isArray(level.lifecycle_events) && level.lifecycle_events.length > 0;
+  const rowBg = level.state !== "idle" ? "bg-slate-700/20" : tierDepth;
+
   return (
-    <tr
-      className={`border-b border-slate-800/50 ${
-        level.state !== "idle" ? "bg-slate-700/20" : tierDepth
-      }`}
-    >
-      <td className="px-3 py-2 font-mono text-slate-200">
-        {formatPrice(level.price, coin)}
-      </td>
-      <td className="px-3 py-2">
-        <span className={sideColor}>
-          {isAbove ? "阻力" : "支撑"}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-center">
-        <span
-          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${tier.bg} ${tier.text}`}
+    <>
+      <tr className={`${rowBg} ${hasLifecycle ? "" : "border-b border-slate-800/50"}`}>
+        <td className="px-3 py-2 font-mono text-slate-200">
+          {formatPrice(level.price, coin)}
+        </td>
+        <td className="px-3 py-2">
+          <span className={sideColor}>
+            {isAbove ? "阻力" : "支撑"}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-center">
+          <span
+            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${tier.bg} ${tier.text}`}
+          >
+            {level.strength_tier}
+          </span>
+        </td>
+        <td className="px-3 py-2">
+          <span className={stateInfo.color}>{stateInfo.text}</span>
+        </td>
+        <td
+          className={`px-3 py-2 text-right font-mono ${
+            isAbove ? "text-red-400" : "text-green-400"
+          }`}
         >
-          {level.strength_tier}
-        </span>
-      </td>
-      <td className="px-3 py-2">
-        <span className={stateInfo.color}>{stateInfo.text}</span>
-      </td>
-      <td
-        className={`px-3 py-2 text-right font-mono ${
-          isAbove ? "text-red-400" : "text-green-400"
-        }`}
-      >
-        {level.distance_pct > 0 ? "+" : ""}
-        {level.distance_pct.toFixed(2)}%
-      </td>
-      <td className="px-3 py-2 text-right text-slate-300">
-        {level.confluence_score.toFixed(0)}
-      </td>
-      <td className={`px-3 py-2 text-right ${cascadeColor}`}>
-        {level.cascade_risk > 0
-          ? `${(level.cascade_risk * 100).toFixed(0)}%`
-          : "低"}
-      </td>
-      <td className="px-3 py-2 text-slate-500 max-w-[160px]">
-        <span className="truncate block" title={level.sources.join(", ")}>
-          {level.sources.slice(0, 3).join(", ")}
-        </span>
-      </td>
-    </tr>
+          {level.distance_pct > 0 ? "+" : ""}
+          {level.distance_pct.toFixed(2)}%
+        </td>
+        <td className="px-3 py-2 text-right text-slate-300">
+          {level.confluence_score.toFixed(0)}
+        </td>
+        <td className={`px-3 py-2 text-right ${cascadeColor}`}>
+          {level.cascade_risk > 0
+            ? `${(level.cascade_risk * 100).toFixed(0)}%`
+            : "低"}
+        </td>
+        <td className="px-3 py-2 text-slate-500 max-w-[160px]">
+          <span className="truncate block" title={level.sources.join(", ")}>
+            {level.sources.slice(0, 3).join(", ")}
+          </span>
+        </td>
+      </tr>
+      {hasLifecycle && (
+        <tr className={`${rowBg} border-b border-slate-800/50`}>
+          <td colSpan={8} className="px-3 pb-2">
+            <LifecyclePanel
+              events={level.lifecycle_events}
+              level_id={level.level_id}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
