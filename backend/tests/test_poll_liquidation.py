@@ -296,3 +296,27 @@ class TestPollLiqMaxPain:
         item = btc_state.liq_max_pain["24h"].items[0]
         assert not hasattr(item, "long_liq_usd")
         assert not hasattr(item, "short_liq_usd")
+
+    @pytest.mark.asyncio
+    async def test_pick_for_coin_isolates_per_coin(self, cg, states):
+        """跨币种回归（保护 P1-E）：BTC/ETH state 共享同一 LiqMaxPainData 引用，
+        但 _pick_max_pain_for_coin 必须只取出当前 coin 的 item，不能让 BTC
+        socket payload 看到 ETH 痛点。
+        """
+        from engine import _pick_max_pain_for_coin
+        cg.fetch_liquidation_max_pain = AsyncMock(return_value=self.SAMPLE_REAL)
+        await poll_liq_max_pain(cg, ["BTC", "ETH"], states)
+
+        btc_pain = states["BTC"].liq_max_pain["24h"]
+        eth_pain = states["ETH"].liq_max_pain["24h"]
+        assert btc_pain is eth_pain, "poll 层共享同一引用是预期实现（节省内存）"
+
+        btc_item = _pick_max_pain_for_coin(btc_pain, "BTC")
+        eth_item = _pick_max_pain_for_coin(eth_pain, "ETH")
+        assert btc_item is not None and btc_item.symbol == "BTC"
+        assert eth_item is not None and eth_item.symbol == "ETH"
+        assert btc_item.long_pain_price != eth_item.long_pain_price
+
+        # 不支持币种应返回 None
+        assert _pick_max_pain_for_coin(btc_pain, "DOGE") is None
+        assert _pick_max_pain_for_coin(None, "BTC") is None

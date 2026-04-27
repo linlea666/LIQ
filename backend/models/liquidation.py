@@ -125,11 +125,13 @@ class LiqMaxPainItem(BaseModel):
     这是导致旧 max-pain 数据死链路的直接原因。本版按真实 API 4 字段重新建模。
     """
     symbol: str
-    price: float = 0           # 当前价（API 实测有 `price` 字段）
-    long_pain_price: float = 0  # 多头痛点价（价格上行触发空爆）
-    long_pain_usd: float = 0   # 多头痛点金额（USD）
-    short_pain_price: float = 0  # 空头痛点价
-    short_pain_usd: float = 0  # 空头痛点金额（USD）
+    price: float = 0             # 当前价（API 实测有 `price` 字段）
+    # 多头痛点：价格"下行"触达该位 → 多头集中爆仓；通常 < 当前价
+    long_pain_price: float = 0
+    long_pain_usd: float = 0     # 多头痛点对应的爆仓 USD 金额
+    # 空头痛点：价格"上行"触达该位 → 空头集中爆仓；通常 > 当前价
+    short_pain_price: float = 0
+    short_pain_usd: float = 0    # 空头痛点对应的爆仓 USD 金额
 
 
 class LiqMaxPainData(BaseModel):

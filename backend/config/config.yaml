@@ -27,6 +27,10 @@ sources:
     timeout_sec: 15
     rate_limit_per_min: 10
     daily_limit: 50000
+    # ── 缓存策略全局基线（见 sources/coinglass.py:_MIN_CACHE_TTL）──
+    # 所有非 _FAST_PATHS 端点强制 cache_ttl ≥ 300s。下面 poll_interval 应当
+    # ≥ 对应端点缓存 TTL，避免 task wakeup 频繁但实际仅命中缓存。
+    # 清算相关端点合计约 2 req/min（占 10/min 限额的 20%），健康。
     poll_intervals:
       ticker: 15
       oi: 60
@@ -35,6 +39,7 @@ sources:
       liquidation_map: 90       # 1d 清算地图变化温和，60→90s（释放配额）
       liquidation_heatmap: 600       # 24h 热力图（与 24h 时间窗匹配）
       liquidation_heatmap_7d: 1800   # 7d 热力图（数据冷，30 分钟一次足够）
+      liquidation_max_pain: 300      # 全币种共享一次拉取，与缓存 TTL=300s 对齐
       orderbook: 60
       large_orders: 120         # snapshot active + history ended 双轨合并（poll_large_orders 内部）
       long_short: 120

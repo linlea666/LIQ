@@ -820,7 +820,6 @@ def build_nofx_snapshot(
         "long_short_ratio": _build_ls_ratio(state),
         "liquidation_map": {
             "24h": _build_liq_map(liq_maps.get("1d") or liq_maps.get("24h")),
-            "3d": _build_liq_map(liq_maps.get("3d")),
             "7d": _build_liq_map(liq_maps.get("7d")),
             "30d": _build_liq_map(liq_maps.get("30d")),
         },

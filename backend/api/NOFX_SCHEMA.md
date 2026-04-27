@@ -239,9 +239,10 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
 }
 ```
 
-### 3.6 `liquidation_map` · 清算地图（4 个周期）
+### 3.6 `liquidation_map` · 清算地图（3 个周期）
 
-`24h` / `3d` / `7d` / `30d`，每个周期结构一致：
+`24h` / `7d` / `30d`，每个周期结构一致（数据源仅采集这三个周期；旧版 `3d`
+key 已下线，请勿再读取）：
 
 ```json
 {
@@ -260,7 +261,6 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
         {"leverage":"25", "short_bands":[...], "long_bands":[...], "short_total_usd":..., "long_total_usd":...}
       ]
     },
-    "3d":  { /* 或 null */ },
     "7d":  { /* 或 null */ },
     "30d": { /* 或 null */ }
   }
@@ -307,9 +307,11 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
 ```
 
 字段说明：
-- `long_pain_price/usd`：多头痛点（价格上行触达 → 多头集中爆仓的金额）
-- `short_pain_price/usd`：空头痛点（价格下行/上行触达 → 空头集中爆仓的金额）
-- `*_pct_from_price`：与当前价的偏离百分比（正=上方，负=下方），可能为 null
+- `long_pain_price/usd`：多头痛点（价格**下行**触达该价位 → 多头集中爆仓的 USD 金额）。
+  通常 `long_pain_price < current_price`（位于当前价下方），`*_pct_from_price < 0`。
+- `short_pain_price/usd`：空头痛点（价格**上行**触达该价位 → 空头集中爆仓的 USD 金额）。
+  通常 `short_pain_price > current_price`（位于当前价上方），`*_pct_from_price > 0`。
+- `*_pct_from_price`：与当前价的偏离百分比（正=上方，负=下方），可能为 null。
 
 ### 3.8 `recent_sweeps_1h` · 流动性扫取事件（原始事件）
 

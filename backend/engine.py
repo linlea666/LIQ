@@ -622,7 +622,7 @@ class Engine:
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_liq_max_pain", self._poll_liq_max_pain, btc_coin,
-                self._poll_cfg.get("liquidation_map", 60), 0.9,
+                self._poll_cfg.get("liquidation_max_pain", 300), 0.9,
             )),
             asyncio.create_task(self._poll_loop(
                 "bbx_index", self._poll_bbx_index, btc_coin,
@@ -1835,7 +1835,17 @@ class Engine:
                 "transfers_count": len(state.whale_data.transfers),
             }
         if state.liq_max_pain:
-            payload["liq_max_pain"] = {k: v.model_dump() for k, v in state.liq_max_pain.items()}
+            # 仅下发当前 coin 通道的痛点，避免把 BTC 通道收到 ETH/SOL items（poll
+            # 层多币种共享同一 LiqMaxPainData 引用，原始 items 含全部 supported_coins）
+            payload["liq_max_pain"] = {}
+            for k, v in state.liq_max_pain.items():
+                picked = _pick_max_pain_for_coin(v, coin.ccy)
+                if picked is not None:
+                    payload["liq_max_pain"][k] = {
+                        "ts": int(getattr(v, "ts", 0) or 0),
+                        "range": getattr(v, "range", k) or k,
+                        "items": [picked.model_dump()],
+                    }
         if state.liq_heatmaps:
             payload["liq_heatmaps"] = {k: v.model_dump() for k, v in state.liq_heatmaps.items()}
         if state.rsi_14 is not None:
