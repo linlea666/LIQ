@@ -107,6 +107,7 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
     "long_short_ratio":   { /* 多空比（3 维度） */ },
     "liquidation_map":    { /* 清算地图（4 周期） */ },
     "liquidation_heatmap":{ /* 清算热力图密度峰值 */ },
+    "liquidation_max_pain":{ /* 24h 清算最大痛点（多/空） */ },
     "liquidation_stats":  { /* 24h 爆仓统计 */ },
     "recent_sweeps_1h":   [ /* 近 1h 流动性扫取事件 */ ],
     "orderbook":          { /* 订单簿墙 + 总量 */ },
@@ -283,6 +284,32 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
   }
 }
 ```
+
+### 3.7b `liquidation_max_pain` · 24h 清算最大痛点
+
+Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最大规模清算"的关键
+价位与对应金额。多/空分别给出，与 `liquidation_heatmap.hotspots` 互为印证。
+
+```json
+{
+  "liquidation_max_pain": {
+    "range": "24h",
+    "current_price": 77903.2,
+    "long_pain_price": 76963.86,
+    "long_pain_usd": 86909802.27,
+    "long_pain_pct_from_price": -1.20,
+    "short_pain_price": 78536.6,
+    "short_pain_usd": 86909802.27,
+    "short_pain_pct_from_price": 0.81,
+    "ts": 1745297000
+  }
+}
+```
+
+字段说明：
+- `long_pain_price/usd`：多头痛点（价格上行触达 → 多头集中爆仓的金额）
+- `short_pain_price/usd`：空头痛点（价格下行/上行触达 → 空头集中爆仓的金额）
+- `*_pct_from_price`：与当前价的偏离百分比（正=上方，负=下方），可能为 null
 
 ### 3.8 `recent_sweeps_1h` · 流动性扫取事件（原始事件）
 

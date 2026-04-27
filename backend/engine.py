@@ -29,7 +29,7 @@ from models.key_level import KeyLevelSnapshotV2
 from models.market_structure import MarketStructure
 from models.levels import LevelAnalysis
 from models.liquidation import (
-    HeatmapData, LiqHistoryData, LiqMaxPainData,
+    HeatmapData, LiqHistoryData, LiqMaxPainData, LiqMaxPainItem,
     LiquidationMap, LiquidationStats,
 )
 from models.macro import (
@@ -54,6 +54,22 @@ from sources.coinglass import CoinglassSource, create_coinglass_source
 from sources.binance_futures import BinanceFuturesSource, create_binance_source
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_max_pain_for_coin(
+    pain_data: Optional[LiqMaxPainData], ccy: str,
+) -> Optional[LiqMaxPainItem]:
+    """从 LiqMaxPainData.items 中按 symbol 提取当前币种的 LiqMaxPainItem。
+
+    poll 层用 supported_coins 过滤后写入的 items 里仅含 BTC/ETH/SOL 三条；
+    此处再做一次按 symbol 取值，避免 BTC 看到 ETH 的痛点。
+    """
+    if pain_data is None or not pain_data.items:
+        return None
+    for it in pain_data.items:
+        if it.symbol == ccy:
+            return it
+    return None
 
 
 class CoinState:
@@ -765,6 +781,7 @@ class Engine:
         liq_history_interval = max(liq_map_interval * 5, 300)
         large_orders_interval = max(self._poll_cfg.get("large_orders", 120), 180)
         heatmap_interval = self._poll_cfg.get("liquidation_heatmap", 600)
+        heatmap_7d_interval = self._poll_cfg.get("liquidation_heatmap_7d", 1800)
         indicators_interval = 120
         candles_1d_interval = 600
         candles_1w_interval = 3600
@@ -821,8 +838,12 @@ class Engine:
                 indicators_interval, s + 3.2,
             )),
             asyncio.create_task(self._poll_loop(
-                f"cg_heatmap_{ccy}", self._poll_liq_heatmap, coin,
+                f"cg_heatmap_24h_{ccy}", self._poll_liq_heatmap_24h, coin,
                 heatmap_interval, s + 3.6,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_heatmap_7d_{ccy}", self._poll_liq_heatmap_7d, coin,
+                heatmap_7d_interval, s + 4.4,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
@@ -1141,9 +1162,13 @@ class Engine:
         from polls.liquidation import detect_and_store_sweep
         detect_and_store_sweep(state, new_map, price)
 
-    async def _poll_liq_heatmap(self, coin: CoinConfig):
+    async def _poll_liq_heatmap_24h(self, coin: CoinConfig):
         from polls.liquidation import poll_liq_heatmap
-        await poll_liq_heatmap(self._cg, coin, self._states[coin.ccy])
+        await poll_liq_heatmap(self._cg, coin, self._states[coin.ccy], ranges=("24h",))
+
+    async def _poll_liq_heatmap_7d(self, coin: CoinConfig):
+        from polls.liquidation import poll_liq_heatmap
+        await poll_liq_heatmap(self._cg, coin, self._states[coin.ccy], ranges=("7d",))
 
     async def _poll_liq_max_pain(self, _coin: CoinConfig):
         from polls.liquidation import poll_liq_max_pain
@@ -2618,7 +2643,8 @@ class Engine:
             stablecoin_7d_change_pct=self._calc_stablecoin_change(state.stablecoin_mcap),
             oi_exchange_rank=state.oi_exchange_rank.get("exchanges", []) if state.oi_exchange_rank else [],
             candles_4h=state.candles_4h or None,
-            liq_heatmap=state.liq_heatmaps.get("24h") or state.liq_heatmaps.get("3d"),
+            liq_heatmap=state.liq_heatmaps.get("24h") or state.liq_heatmaps.get("7d"),
+            liq_max_pain_24h=_pick_max_pain_for_coin(state.liq_max_pain.get("24h"), ccy),
             net_position_latest=state.net_position_latest,
             net_position_trend=state.net_position_trend,
             net_position_change_24h=state.net_position_change_24h,

@@ -12,7 +12,7 @@ from models.flow import (
 )
 from models.key_level import KeyLevelSnapshotV2
 from models.levels import LevelAnalysis
-from models.liquidation import HeatmapData, LiquidationMap, LiquidationStats
+from models.liquidation import HeatmapData, LiqMaxPainItem, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
 from models.market_structure import MarketStructure
 from models.snapshot import AISnapshot
@@ -113,6 +113,7 @@ def build_ai_snapshot(
     td_sequential_count: Optional[int] = None,
     td_sequential_direction: str = "",
     liq_heatmap: Optional[HeatmapData] = None,
+    liq_max_pain_24h: Optional[LiqMaxPainItem] = None,
     poll_failures: dict[str, str] | None = None,
     market_structure: Optional[MarketStructure] = None,
     market_structure_1d: Optional[MarketStructure] = None,
@@ -377,6 +378,10 @@ def build_ai_snapshot(
         stablecoin_7d_change_pct=stablecoin_7d_change_pct,
         oi_exchange_rank=oi_exchange_rank or [],
         liq_heatmap_hotspots=heatmap_hotspots,
+        liq_max_pain_long_price=(liq_max_pain_24h.long_pain_price if liq_max_pain_24h else None),
+        liq_max_pain_long_usd=(liq_max_pain_24h.long_pain_usd if liq_max_pain_24h else None),
+        liq_max_pain_short_price=(liq_max_pain_24h.short_pain_price if liq_max_pain_24h else None),
+        liq_max_pain_short_usd=(liq_max_pain_24h.short_pain_usd if liq_max_pain_24h else None),
         candlestick_pattern_name=pattern_name,
         candlestick_pattern_side=pattern_side,
         candlestick_pattern_strength=pattern_strength,

@@ -221,6 +221,14 @@ class AISnapshot(BaseModel):
     # 清算热力图摘要（价格-时间维度密度峰值）
     liq_heatmap_hotspots: list[dict] = []  # [{price, total_usd, pct_above}]
 
+    # 清算最大痛点（24h）—— Coinglass `liquidation/max-pain` 当前币种数据
+    # 含义：long_pain 是"价格上行 → 多头被强平"压力最大点；short_pain 反之
+    # 用途：AI 终审 §三 "清算结构"章节引用；前端清算地图标注可选展示
+    liq_max_pain_long_price: Optional[float] = None
+    liq_max_pain_long_usd: Optional[float] = None
+    liq_max_pain_short_price: Optional[float] = None
+    liq_max_pain_short_usd: Optional[float] = None
+
     # 30d 清算地图（超远距阶梯参考）
     liq_clusters_above_30d: list[dict] = []
     liq_clusters_below_30d: list[dict] = []

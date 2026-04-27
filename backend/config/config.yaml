@@ -33,7 +33,8 @@ sources:
       indicators: 600
       funding_rate: 120         # 资金费率变化慢，60→120s（释放配额给 orderbook_pressure）
       liquidation_map: 90       # 1d 清算地图变化温和，60→90s（释放配额）
-      liquidation_heatmap: 600
+      liquidation_heatmap: 600       # 24h 热力图（与 24h 时间窗匹配）
+      liquidation_heatmap_7d: 1800   # 7d 热力图（数据冷，30 分钟一次足够）
       orderbook: 60
       large_orders: 120         # snapshot active + history ended 双轨合并（poll_large_orders 内部）
       long_short: 120

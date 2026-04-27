@@ -776,6 +776,29 @@ def build_user_prompt(snapshot: dict) -> str:
             )
         lines.append("说明: 热力图反映价格-时间维度的清算订单密集程度，密度越高=该价位附近被清算的概率越大=更强的磁吸效应。")
 
+    mp_long_price = snapshot.get("liq_max_pain_long_price")
+    mp_long_usd = snapshot.get("liq_max_pain_long_usd")
+    mp_short_price = snapshot.get("liq_max_pain_short_price")
+    mp_short_usd = snapshot.get("liq_max_pain_short_usd")
+    if (mp_long_price and mp_long_usd) or (mp_short_price and mp_short_usd):
+        lines.extend(["", "### 1e. 清算最大痛点 [24h·Coinglass]"])
+        cur_price = snapshot.get("price", 0) or 0
+        if mp_long_price and mp_long_usd:
+            pct = ((mp_long_price - cur_price) / cur_price * 100) if cur_price > 0 else 0
+            pos = f"下方{abs(pct):.1f}%" if pct < 0 else (f"上方{pct:.1f}%" if pct > 0 else "当前价")
+            lines.append(
+                f"  - 多头痛点: ${mp_long_price:,.2f} ({pos}) → "
+                f"该价位多头集中爆仓量 {_fmt_usd_for_prompt(mp_long_usd)}"
+            )
+        if mp_short_price and mp_short_usd:
+            pct = ((mp_short_price - cur_price) / cur_price * 100) if cur_price > 0 else 0
+            pos = f"上方{pct:.1f}%" if pct > 0 else (f"下方{abs(pct):.1f}%" if pct < 0 else "当前价")
+            lines.append(
+                f"  - 空头痛点: ${mp_short_price:,.2f} ({pos}) → "
+                f"该价位空头集中爆仓量 {_fmt_usd_for_prompt(mp_short_usd)}"
+            )
+        lines.append("说明: 痛点价是 Coinglass 计算的'若价格触及则会引发最大规模清算'的关键位，与热力图密度峰值互为印证。")
+
     lines.extend([
         "",
         "### 2. 资金流数据 [核心·实时]",

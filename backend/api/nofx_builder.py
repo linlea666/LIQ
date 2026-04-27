@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-SCHEMA_VERSION = "1.0.1"
+SCHEMA_VERSION = "1.1.0"
 
 
 # ── 工具函数 ────────────────────────────────────────────────
@@ -276,8 +276,9 @@ def _build_liq_map(liq_map: Any) -> Optional[dict]:
 
 
 def _build_liq_heatmap(state: Any) -> Optional[dict]:
+    # poll 层写入 key 已统一为 "24h"/"7d"（旧版 m1_24h 已废弃，理论不会再出现）
     heatmaps = getattr(state, "liq_heatmaps", None) or {}
-    hm = heatmaps.get("24h") or heatmaps.get("3d") or heatmaps.get("7d")
+    hm = heatmaps.get("24h") or heatmaps.get("7d")
     if hm is None:
         return None
     data = getattr(hm, "data", None) or []
@@ -302,6 +303,46 @@ def _build_liq_heatmap(state: Any) -> Optional[dict]:
         "exchange": getattr(hm, "exchange", "") or "",
         "hotspots": hotspots,
         "points_total": len(data),
+    }
+
+
+def _build_liq_max_pain(state: Any, ccy: str) -> Optional[dict]:
+    """组装 24h 清算最大痛点（仅当前币种）。
+
+    数据源：state.liq_max_pain["24h"].items（已被 poll 层按 supported_coins 过滤）。
+    返回字段含义见 NOFX_SCHEMA.md §3.x · liquidation_max_pain。
+    """
+    pain_dict = getattr(state, "liq_max_pain", None) or {}
+    pain_data = pain_dict.get("24h")
+    if pain_data is None:
+        return None
+    items = getattr(pain_data, "items", None) or []
+    target = next((it for it in items if getattr(it, "symbol", "") == ccy), None)
+    if target is None:
+        return None
+
+    ticker = getattr(state, "ticker", None)
+    cur_price = float(getattr(ticker, "last", 0) or 0) if ticker else 0
+    long_p = float(getattr(target, "long_pain_price", 0) or 0)
+    long_u = float(getattr(target, "long_pain_usd", 0) or 0)
+    short_p = float(getattr(target, "short_pain_price", 0) or 0)
+    short_u = float(getattr(target, "short_pain_usd", 0) or 0)
+
+    def _pct(p: float) -> Optional[float]:
+        if cur_price <= 0 or p <= 0:
+            return None
+        return round((p - cur_price) / cur_price * 100, 4)
+
+    return {
+        "range": "24h",
+        "current_price": float(getattr(target, "price", 0) or 0) or cur_price,
+        "long_pain_price": long_p,
+        "long_pain_usd": long_u,
+        "long_pain_pct_from_price": _pct(long_p),
+        "short_pain_price": short_p,
+        "short_pain_usd": short_u,
+        "short_pain_pct_from_price": _pct(short_p),
+        "ts": int(getattr(pain_data, "ts", 0) or 0),
     }
 
 
@@ -784,6 +825,7 @@ def build_nofx_snapshot(
             "30d": _build_liq_map(liq_maps.get("30d")),
         },
         "liquidation_heatmap": _build_liq_heatmap(state),
+        "liquidation_max_pain": _build_liq_max_pain(state, getattr(state, "coin", "")),
         "liquidation_stats": _build_liq_stats(state),
         "recent_sweeps_1h": _build_sweeps(state, now),
         "orderbook": _build_orderbook(state),
@@ -810,7 +852,9 @@ def build_nofx_snapshot(
     news_brief_ts = snapshot["news"]["brief"]["updated_at"] if snapshot["news"]["brief"] else 0
     liq_map_24h = liq_maps.get("1d") or liq_maps.get("24h")
     heatmaps = getattr(state, "liq_heatmaps", None) or {}
-    hm_obj = heatmaps.get("24h") or heatmaps.get("3d") or heatmaps.get("7d")
+    hm_obj = heatmaps.get("24h") or heatmaps.get("7d")
+    pain_dict = getattr(state, "liq_max_pain", None) or {}
+    pain_24h_obj = pain_dict.get("24h")
 
     def _model_ts(obj: Any) -> int:
         if obj is None:
@@ -838,6 +882,7 @@ def build_nofx_snapshot(
         "cvd_spot": _age_sec(_cvd_last_ts(getattr(state, "cvd_spot", None)), now),
         "liquidation_map_24h": _age_sec(_model_ts(liq_map_24h), now),
         "liquidation_heatmap": _age_sec(_model_ts(hm_obj), now),
+        "liquidation_max_pain": _age_sec(_model_ts(pain_24h_obj), now),
         "orderbook": _age_sec(_model_ts(getattr(state, "orderbook", None)), now),
         "long_short_ratio": _age_sec(_model_ts(getattr(state, "ls_ratio", None)), now),
         "taker_volume": _age_sec(_model_ts(getattr(state, "taker_flow", None)), now),

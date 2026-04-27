@@ -43,7 +43,16 @@ class VacuumZone(BaseModel):
 
 
 class LiquidationMap(BaseModel):
-    """完整清算地图（支持多周期）"""
+    """完整清算地图（支持多周期）
+
+    数据契约说明：
+    - Coinglass `aggregated-map` 返回 `data.data: [{liqMapV2, instrument:{exName}}, ...]`
+      是按交易所并列的列表（非真正合并），故采集层会做两件事：
+        1. 按 `exName` 分组累加，写入 `by_exchange`（保留分交易所明细）
+        2. 跨交易所合并产 short/long bands（用于整体可视化与算法消费）
+    - 这样既兼容现有 processor/前端只看 leverage_groups 的逻辑，又为未来"分交易所
+      切换""失衡比交叉验证"等高级功能提供原始数据。
+    """
     coin: str
     ts: int
     cycle: str  # "1d" | "3d" | "7d" | "30d"
@@ -53,6 +62,9 @@ class LiquidationMap(BaseModel):
     vacuum_zones: list[VacuumZone] = []
     imbalance_ratio: float = 0
     exchange: str = ""  # 空=聚合所有交易所
+    # 按交易所拆分的明细：{exName: {price_str: usd_total}}
+    # None 表示该字段未填充（兼容旧调用方 / 单交易所数据源）
+    by_exchange: Optional[dict[str, dict[str, float]]] = None
 
 
 class LiquidationEvent(BaseModel):
@@ -101,11 +113,23 @@ class HeatmapData(BaseModel):
 # ── 新增：清算最大痛点 ──
 
 class LiqMaxPainItem(BaseModel):
-    """单个币种清算最大痛点"""
+    """单个币种清算最大痛点
+
+    Coinglass `liquidation/max-pain` 实际返回 4 个核心字段（每币种各一份）：
+      - long_max_pain_liq_level   多头清算压力最大的"金额"（USD）
+      - long_max_pain_liq_price   多头清算压力最大的"价格"
+      - short_max_pain_liq_level  空头清算压力最大的"金额"（USD）
+      - short_max_pain_liq_price  空头清算压力最大的"价格"
+
+    旧模型只有 long_liq_usd / short_liq_usd（且字段名错），且**完全丢掉了价格信息**，
+    这是导致旧 max-pain 数据死链路的直接原因。本版按真实 API 4 字段重新建模。
+    """
     symbol: str
-    price: float
-    long_liq_usd: float = 0
-    short_liq_usd: float = 0
+    price: float = 0           # 当前价（API 实测有 `price` 字段）
+    long_pain_price: float = 0  # 多头痛点价（价格上行触发空爆）
+    long_pain_usd: float = 0   # 多头痛点金额（USD）
+    short_pain_price: float = 0  # 空头痛点价
+    short_pain_usd: float = 0  # 空头痛点金额（USD）
 
 
 class LiqMaxPainData(BaseModel):
