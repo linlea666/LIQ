@@ -624,7 +624,7 @@ def _attach_kl_and_regime(state, *, with_kl: bool = True, with_regime: bool = Tr
                 regime_modifier_applied=1.05, regime_at_score="trend_up",
                 level_id="kl_a1b2c3d4e5f6",
                 lifecycle_events=events_a,
-                invalidation_price=75200.0, invalidation_condition="1h close < 75200",
+                invalidation_price=75200.0, invalidation_condition="15m 收盘 < $75,200",
             ),
             KeyLevelV2(
                 price=78500.0, side="resistance", category="strong_resistance",

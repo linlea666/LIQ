@@ -117,6 +117,8 @@ def run_tracker_v2(
     taker_buy_vol: float = 0,
     taker_sell_vol: float = 0,
     oi_change_pct_1h: float = 0,
+    *,
+    liq_map_7d: LiquidationMap | None = None,  # V3-P2-10：cascade magnet 7d 回退源
     temperature_score: float = 50,
     candles_4h: list[CandleData] | None = None,
     candles_15m: list[CandleData] | None = None,
@@ -149,10 +151,13 @@ def run_tracker_v2(
                     taker_buy_vol, taker_sell_vol, oi_change_pct_1h,
                     candles_15m, cfg, now)
 
-    # 级联风险
-    if liq_map:
+    # 级联风险（V3-P2-10：1d 簇为空时回退到 7d 计算 magnet）
+    if liq_map or liq_map_7d:
         for lv in snapshot.levels:
-            _calc_cascade_risk(lv, liq_map, price, cfg)
+            _calc_cascade_risk(
+                lv, liq_map, price, cfg,
+                liq_map_7d=liq_map_7d,
+            )
 
     # ── Commit 4：质量标注（在信号生成前，让信号也能读到 stage/quality）──
     for lv in snapshot.levels:
@@ -539,6 +544,7 @@ def _set_state(lv: KeyLevelV2, new_state: str, now: int):
             tier_after=lv.strength_tier,
             state_before=lv.state,
             state_after=new_state,
+            layer="tracker",
         ))
         # 限长 20 条
         if len(lv.lifecycle_events) > 20:
@@ -742,13 +748,36 @@ def _check_sweep(lv: KeyLevelV2, sweep_events: list[dict], proximity_pct: float)
     return total
 
 
-def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cfg: dict):
-    if lv.side == "support":
-        clusters = [c for c in liq_map.clusters_below if c.price_center < lv.price]
-        clusters.sort(key=lambda c: c.price_center, reverse=True)
-    else:
-        clusters = [c for c in liq_map.clusters_above if c.price_center > lv.price]
-        clusters.sort(key=lambda c: c.price_center)
+def _calc_cascade_risk(
+    lv: KeyLevelV2,
+    liq_map: LiquidationMap | None,
+    price: float,
+    cfg: dict,
+    *,
+    liq_map_7d: LiquidationMap | None = None,
+):
+    """V3-P2-10：当 24h liq_map 没有方向上的簇时，回退到 7d 计算 magnet。
+
+    设计：
+      - 1d/24h 是首选（最新鲜，方向最准）
+      - 但 1d 簇有时为空（清算清淡 / 周末 / 数据短暂缺失）
+      - 此时若 7d 有相同方向的簇，回退使用之，避免 next_magnet_price=None
+      - 关键标识：当走 7d 回退时，cascade_components 不会假装满分（仍然按真实数据算）
+    """
+    def _pick_clusters(lm: LiquidationMap | None) -> list:
+        if lm is None:
+            return []
+        if lv.side == "support":
+            cs = [c for c in lm.clusters_below if c.price_center < lv.price]
+            cs.sort(key=lambda c: c.price_center, reverse=True)
+        else:
+            cs = [c for c in lm.clusters_above if c.price_center > lv.price]
+            cs.sort(key=lambda c: c.price_center)
+        return cs
+
+    clusters = _pick_clusters(liq_map)
+    if not clusters and liq_map_7d is not None:
+        clusters = _pick_clusters(liq_map_7d)
 
     if not clusters:
         lv.cascade_risk = 0
@@ -764,48 +793,37 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
     lv.cascade_layers = min(len(clusters), 5)
     lv.cascade_total_usd = sum(c.total_usd for c in clusters[:5])
 
-    weight_cap = cfg.get("cascade_weight_cap_m", 20.0)
-    # fallback 与 _DEFAULT_CFG 保持一致（避免 cfg 丢失该键时出现 4x 偏差）
-    norm = cfg.get("cascade_norm", 120.0)
-    risk_score = 0.0
-    prev_price = lv.price
-    for c in clusters[:5]:
-        gap_pct = abs(c.price_center - prev_price) / max(price, 1) * 100
-        gap_pct = max(gap_pct, 0.2)
-        weight = min(c.total_usd / 1e6, weight_cap)
-        risk_score += weight / gap_pct
-        prev_price = c.price_center
-
-    dist_from_price = abs(lv.price - price) / max(price, 1) * 100
-    dist_decay = 1.0 / (1.0 + dist_from_price / 3.0)
-    lv.cascade_risk = round(min(1.0, risk_score / norm * dist_decay), 2)
-
-    # ── M1 新增：破位后的下一个磁铁价位 + 真空跨度 ──────────────────
+    # ── M1：破位后的下一个磁铁价位 + 真空跨度 ──────────────────
     # 设计：破位后价格会被最近的清算簇磁吸；该簇就是 next_magnet_price
     # vacuum_gap_pct = 当前 level.price → next_magnet_price 之间的价格间距 %
-    # 用途：UI 展示"破位后预计下探/上探到 X，真空跨度 Y%（建议止损放在跨度外）"
     nearest = clusters[0]
     lv.next_magnet_price = round(nearest.price_center, 2)
     lv.vacuum_gap_pct = round(
         abs(lv.price - nearest.price_center) / max(price, 1) * 100, 2,
     )
 
-    # ── M2 新增：cascade 4 子分（GPT V3 评审采纳）──────────────────
-    # 拆原 cascade_risk(0-1) 为 4 子分：count/usd/velocity/leverage，
-    # 让 UI/AI 看清"风险来自哪一面"，便于解释
-    # 子分均归一到 0-1
+    # ── M2 + V3-P1-1：cascade 4 子分 + 真聚合 cascade_risk ──────────
+    # 历史背景（D05 修复 → 2025-04 V3 验收 P1-1）：
+    #   旧公式 cascade_risk = risk_score / norm * dist_decay 与 4 子分
+    #   并行计算，互不一致。模型注释承诺"加权和"但代码未真聚合 → 伪落地。
+    #   本次（P1-1）改为 cascade_risk 由 4 子分加权聚合得出，让模型注释、
+    #   UI 展示、AI 解释三者完全对账。
+    #
+    # 4 子分（均归一到 0-1）：
+    #   count_score    : 簇数量（≤5 上限避免双重计数 usd）
+    #   usd_score      : 累计 USD 规模
+    #   velocity_score : 真空跨度倒推的破位加速度
+    #   leverage_score : 簇内最大 leverage 强度（杠杆主导风险）
     count_score = min(1.0, len(clusters) / 5.0)
     usd_score = min(1.0, lv.cascade_total_usd / 200_000_000)  # 200M USD 满分
-    # velocity_score: 真空跨度越紧凑，破位越急速；以 vacuum_gap_pct 为基础
-    # vacuum_gap_pct ≤ 0.5% → 1.0；≥ 5% → 0.2
+    # velocity_score: 真空跨度越紧凑，破位越急速
+    # vacuum_gap_pct ≤ 0.5% → 1.0；≥ 5% → 0.2；中间线性
     if lv.vacuum_gap_pct <= 0.5:
         velocity_score = 1.0
     elif lv.vacuum_gap_pct >= 5.0:
         velocity_score = 0.2
     else:
         velocity_score = 1.0 - (lv.vacuum_gap_pct - 0.5) / 4.5 * 0.8
-    # leverage_score: 取簇内最大 leverage_intensity（>0.6 主导算高风险）
-    # LiqCluster M1 已有 leverage_intensity 字段；fallback 0
     max_leverage_intensity = 0.0
     for c in clusters[:5]:
         li = float(getattr(c, "leverage_intensity", 0.0) or 0.0)
@@ -819,6 +837,18 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
         velocity_score=round(velocity_score, 3),
         leverage_score=round(leverage_score, 3),
     )
+
+    # 加权聚合：USD 权重最高（绝对压力），velocity 次之（破位加速），
+    # leverage 反映杠杆主导，count 已被 usd 部分代理故权重最低
+    weighted = (
+        0.35 * usd_score
+        + 0.30 * velocity_score
+        + 0.20 * leverage_score
+        + 0.15 * count_score
+    )
+    dist_from_price = abs(lv.price - price) / max(price, 1) * 100
+    dist_decay = 1.0 / (1.0 + dist_from_price / 3.0)
+    lv.cascade_risk = round(min(1.0, weighted * dist_decay), 2)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

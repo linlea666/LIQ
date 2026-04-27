@@ -326,6 +326,7 @@ def _detect_lifecycle_events(
             score_after=new.final_score,
             tier_after=new.strength_tier,
             state_after=new.state,
+            layer="scoring",
         ))
         return events
 
@@ -338,6 +339,7 @@ def _detect_lifecycle_events(
             detail=f"评分上涨 +{delta:.1f}（{prev.final_score:.0f}→{new.final_score:.0f}）",
             score_before=prev.final_score,
             score_after=new.final_score,
+            layer="scoring",
         ))
     elif delta <= -_LIFECYCLE_SCORE_DELTA_THRESHOLD:
         events.append(LifecycleEvent(
@@ -346,6 +348,7 @@ def _detect_lifecycle_events(
             detail=f"评分下跌 {delta:.1f}（{prev.final_score:.0f}→{new.final_score:.0f}）",
             score_before=prev.final_score,
             score_after=new.final_score,
+            layer="scoring",
         ))
 
     # tier 变化检测
@@ -360,6 +363,7 @@ def _detect_lifecycle_events(
             tier_after=new.strength_tier,
             score_before=prev.final_score,
             score_after=new.final_score,
+            layer="scoring",
         ))
     elif nr < pr:
         events.append(LifecycleEvent(
@@ -370,6 +374,7 @@ def _detect_lifecycle_events(
             tier_after=new.strength_tier,
             score_before=prev.final_score,
             score_after=new.final_score,
+            layer="scoring",
         ))
 
     # side 翻转检测（support↔resistance）
@@ -385,16 +390,28 @@ def _detect_lifecycle_events(
             tier_after=new.strength_tier,
             state_before=prev.state,
             state_after=new.state,
+            layer="scoring",
         ))
 
     return events
 
 
 def _trim_lifecycle_events(events: list[LifecycleEvent]) -> list[LifecycleEvent]:
-    """保留最近 N 条事件，防止内存膨胀。"""
-    if len(events) > _LIFECYCLE_MAX_EVENTS:
-        return events[-_LIFECYCLE_MAX_EVENTS:]
-    return events
+    """保留最近 N 条事件，防止内存膨胀（V3-P2-9：永远保留首个 born）。
+
+    设计：
+      1. 事件数 ≤ N：原样返回
+      2. 事件数 > N：取最近 N 条；若首个 `born` 不在尾部 N 条内，则
+         保留首个 born + 最近 (N-1) 条，确保 lifecycle API 不丢失"出生事件"
+         （这是 lifecycle 时间线的语义起点，丢失会让 UI 时间线无头）
+    """
+    if len(events) <= _LIFECYCLE_MAX_EVENTS:
+        return events
+    tail = events[-_LIFECYCLE_MAX_EVENTS:]
+    first_born = next((e for e in events if e.event_type == "born"), None)
+    if first_born is not None and first_born not in tail:
+        return [first_born, *events[-(_LIFECYCLE_MAX_EVENTS - 1):]]
+    return tail
 
 
 @dataclass
@@ -485,11 +502,21 @@ def score_and_build_snapshot(
 
     # M2: 方向化 OI/Funding modifier（局部加/扣分，非全局）
     #     必须在 freshness 之后、tier 判定之前应用
+    # V3-P2-1：modifier 触发时同步追加 explain_chips，让 UI/AI 能看到原因
     for lv in scored_levels:
         delta = apply_directional_modifier(
             lv, oi_high_percentile=oi_high_percentile, funding_extreme=funding_rate,
         )
         lv.final_score = round(max(0.0, min(100.0, lv.final_score + delta)), 1)
+        # ── explain chip 透传（与 contradiction_reasons 互补）──
+        # contradiction_reasons：处理"反向矛盾"（资金对立 → 扣分）
+        # explain_chips：处理 OI 拥挤 + funding 顺势放大（加分场景）
+        if oi_high_percentile and abs(lv.distance_pct) < 5:
+            lv.explain_chips.append("📊 OI 拥挤近位")
+        if funding_rate >= 0.0003 and lv.side == "resistance":
+            lv.explain_chips.append("🔥 多头极拥挤·阻力顺势")
+        elif funding_rate <= -0.0003 and lv.side == "support":
+            lv.explain_chips.append("🔥 空头极拥挤·支撑顺势")
 
     # M2: 矛盾扣分（contradiction_penalty）— 6 类，仅扣分不重置 tier
     for lv in scored_levels:
@@ -515,7 +542,7 @@ def score_and_build_snapshot(
             if mult != 1.0:
                 lv.final_score = round(max(0.0, min(100.0, lv.final_score * mult)), 1)
 
-    # 5. tier 判定（M2: 双因子；旧 _calc_tier 保留可回退）
+    # 5. tier 判定（M2 双因子；旧 _calc_tier 已 deprecated，仅历史测试引用）
     for lv in scored_levels:
         lv.strength_tier = _calc_tier_v2(lv)
         # M2: S 级 4 分型
@@ -629,12 +656,14 @@ def _calc_invalidation(lv: KeyLevelV2, atr: float) -> tuple[float | None, str, f
     if atr <= 0 or lv.price <= 0:
         return None, "", 0.0
     mult = INVALIDATION_ATR_MULT.get(lv.strength_tier, 1.0)
+    # V3-P2-8：状态机 broken 判定使用 15m 已收盘 bar（_closed_bar_confirms_break），
+    # 文案需对齐同一 timeframe，避免用户/AI 误用 1h 口径判定失效。
     if lv.side == "support":
         inv = lv.price - mult * atr
-        cond = f"1h 收盘 < ${inv:,.0f}"
+        cond = f"15m 收盘 < ${inv:,.0f}"
     else:
         inv = lv.price + mult * atr
-        cond = f"1h 收盘 > ${inv:,.0f}"
+        cond = f"15m 收盘 > ${inv:,.0f}"
     return round(inv, 2), cond, mult
 
 
@@ -886,7 +915,11 @@ def _distance_bonus(dist_pct: float) -> float:
 
 
 def _calc_tier(score: float) -> str:
-    """旧版 tier 判定（保留向后兼容；M2 新逻辑见 _calc_tier_v2）。"""
+    """[DEPRECATED] 旧版单因子 tier 判定。
+
+    生产路径已切换到 `_calc_tier_v2`（双因子：独立组数 + final_score）。
+    保留此函数仅为兼容历史单测（test_key_levels_v2.py），新代码不应使用。
+    """
     for tier, threshold in STRENGTH_THRESHOLDS.items():
         if score >= threshold:
             return tier
@@ -946,10 +979,13 @@ def classify_s_level(lv: KeyLevelV2) -> str:
     if lv.exchange_count >= 4 and len(liq_groups) >= 2:
         return "S-Liquidity"
 
-    # 2. S-Macro：宏观技术或长周期清算独占（且无微结构）
+    # 2. S-Macro：宏观技术 / 长周期清算 + 至少 1 个旁证组（且无微结构）
+    # V3-P2-5 修订：旧版 `if macro_groups and not has_micro` 门槛过松，
+    # 单一 200W SMA 即可成 S-Macro。现要求 evidence_groups 至少 2 组（含 macro），
+    # 与"S 必须 ≥3 独立组"整体哲学呼应（S-Macro 至少 1 macro + 1 旁证）。
     macro_groups = groups & {"macro_technical", "liquidation_macro"}
     has_micro = bool(groups & {"microstructure_local", "flow_dynamic"})
-    if macro_groups and not has_micro:
+    if macro_groups and not has_micro and len(groups) >= 2:
         return "S-Macro"
 
     # 3. S-Micro：微结构 + flow 共振（无宏观证据 → 是短期挤压位）
@@ -966,20 +1002,30 @@ def classify_s_level(lv: KeyLevelV2) -> str:
 # 设计：单源/单组/方向冲突等"软矛盾"在 final_score 末段扣分（不重置 tier）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# V3-P2-3：contradiction 总扣分上限（防止 6 类极端共触积累 ~50 分误杀真位）
+# 25 分阈值 = 强 A 级或弱 S 级允许的最大降级幅度（A=70 → 45 落到 B；S=85 → 60 落到 A）
+_MAX_CONTRADICTION_PENALTY = 25.0
+
+
 def _calc_contradiction_penalty(
     lv: KeyLevelV2,
     cvd_divergence: str = "",   # "bullish" / "bearish" / ""（来自 CVD divergence detector）
     funding_rate: float = 0.0,  # 当前 funding_rate（>0.0001 视为偏多拥挤）
 ) -> tuple[float, list[str]]:
-    """计算 6 类矛盾扣分（M2 · GPT V3 评审采纳）。
+    """计算 6 类矛盾扣分（M2 · GPT V3 评审采纳；V3 验收 P1-4 / P2-3 修订）。
 
     6 类（每类最多扣 1 项，避免重复扣分）：
       1. 来源单一：仅 1 独立组 → -10
       2. 距离过远：abs(distance_pct) > 15 → -8
       3. CVD 反向：support 但 cvd 持续看跌 / resistance 但持续看涨 → -12
       4. Funding 反向拥挤：support 但 funding 极正（多头拥挤）/ resistance 但极负 → -10
-      5. 数据 stale：is_stale=True → -5（已被 freshness 软衰减后再扣一次警示）
+      5. 数据 stale：is_stale=True → -2（V3 P1-4 减半：freshness 已 ×0.85 软衰减，
+         此处仅做"轻量提示"避免与 freshness 双重重罚；保留 reason 让 UI/AI 仍能解释）
       6. 多周期清算冲突：仅有 liquidation_short 但无 meso/macro 支撑 → -6
+
+    总扣分上限（V3 P2-3）：
+      所有类别累加后不超过 _MAX_CONTRADICTION_PENALTY=25，避免极端组合（如 1+3+4+6
+      合计 ~38）把一个本来 80 分的强位直接打到 40 分以下造成误杀。
 
     返回：(penalty_total, reasons)
     """
@@ -1014,9 +1060,9 @@ def _calc_contradiction_penalty(
         penalty += 10
         reasons.append("空头资金极拥挤")
 
-    # 5. 数据 stale
+    # 5. 数据 stale（V3-P1-4：减半到 2 分，避免与 freshness ×0.85 双重重罚）
     if lv.is_stale:
-        penalty += 5
+        penalty += 2
         reasons.append("主源数据偏旧")
 
     # 6. 多周期清算冲突（仅短周期清算无中长周期支撑）
@@ -1031,6 +1077,8 @@ def _calc_contradiction_penalty(
         penalty += 6
         reasons.append("仅 1d 清算（中长周期未确认）")
 
+    # V3-P2-3：总扣分 cap
+    penalty = min(penalty, _MAX_CONTRADICTION_PENALTY)
     return round(penalty, 1), reasons
 
 
@@ -1044,23 +1092,26 @@ def apply_directional_modifier(
     oi_high_percentile: bool = False,   # OI 是否处于高百分位（来自 facts_collector）
     funding_extreme: float = 0.0,       # funding 极值方向：>0=多头极拥挤 / <0=空头极拥挤
 ) -> float:
-    """对单个 level 的 final_score 应用方向化 OI/Funding modifier。
+    """对单个 level 的 final_score 应用 OI 近位拥挤加成 + Funding 方向化 modifier。
 
-    设计：
-      - OI 高百分位：仅对距离 < 5% 的近 level 加分（远位不受 OI 影响）
-        - support: +3
-        - resistance: +3
-      - Funding 极值：方向化（多头极拥挤 → 阻力位 +4，加速被吃；支撑位 -2，被吃概率高）
-        - 注意：这与 _calc_contradiction_penalty 第 4 类不冲突
-          那里是"极拥挤位 + 支撑"扣分（直接矛盾）；
-          这里是"极拥挤位 + 阻力"加分（顺势放大）
+    设计（V3-P1-3 修订：OI 改为非方向化语义）：
+      - OI 高百分位 + 近位（distance < 5%）：support / resistance 都 +3
+        理由：OI 高百分位仅表示"持仓拥挤"，本身不含价格方向，故只做"近位风险加成"。
+        若未来接入 OI slope/方向化数据，可在此基础上扩展真方向化判定（M4 候选）。
+      - Funding 极值：真方向化（funding 极值含明确方向信息）
+        - 多头极拥挤（>=0.0003）：阻力位 +4（顺势加速被吃），支撑位 -2（被吃概率高）
+        - 空头极拥挤（<=-0.0003）：支撑位 +4，阻力位 -2
+        - 注意：与 _calc_contradiction_penalty 第 4 类（"极拥挤位 + 反向"扣分）不冲突，
+          那里软扣分，这里方向化加减分。
 
     返回：modifier delta（直接 += 到 final_score；可正可负）
     """
     delta = 0.0
+    # OI 近位拥挤加成（非方向化）
     if oi_high_percentile and abs(lv.distance_pct) < 5:
         delta += 3.0
 
+    # Funding 方向化
     if funding_extreme >= 0.0003:  # 多头极拥挤
         if lv.side == "resistance":
             delta += 4.0

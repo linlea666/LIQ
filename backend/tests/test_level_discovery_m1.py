@@ -199,6 +199,24 @@ def test_footprint_stacked_buy_above_price_flips_to_resistance():
     assert "被吸收" in fp_cands[0].source
 
 
+def test_footprint_stacked_low_volume_filtered():
+    """V3-P2-2：单 zone 总成交量（buy+sell）< 30K USD 应被过滤为低量噪声。"""
+    price = 100_000
+    fp = _make_fp_snap_with_stacked(
+        contract_zones=[
+            # 高 ratio 但极低成交量 → 噪声
+            {"price": 99_500, "buy": 8_000, "sell": 500,
+             "ratio": 16.0, "side": "stacked_buy"},
+        ],
+    )
+    result = discover_levels(
+        current_price=price, atr=500,
+        footprint_snapshot=fp,
+    )
+    fp_cands = [c for c in result.candidates if c.source_tag == "footprint_stacked"]
+    assert len(fp_cands) == 0, "低成交量 zone 应被过滤"
+
+
 def test_footprint_stacked_distance_filter():
     """超过 5×ATR 的失衡带应被过滤"""
     price = 100_000
@@ -247,7 +265,7 @@ def test_invalidation_price_for_support_s_tier():
     inv, cond, mult = _calc_invalidation(lv, atr=200)
     assert mult == INVALIDATION_ATR_MULT["S"] == 2.0
     assert inv == 63_000 - 2 * 200
-    assert "1h 收盘 <" in cond
+    assert "15m 收盘 <" in cond
     assert "$62,600" in cond
 
 
@@ -261,7 +279,7 @@ def test_invalidation_price_for_resistance_a_tier():
     inv, cond, mult = _calc_invalidation(lv, atr=300)
     assert mult == INVALIDATION_ATR_MULT["A"] == 1.5
     assert inv == 66_000 + 1.5 * 300
-    assert "1h 收盘 >" in cond
+    assert "15m 收盘 >" in cond
 
 
 def test_invalidation_disabled_when_atr_zero():

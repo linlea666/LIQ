@@ -239,6 +239,32 @@ class TestDiffEndpoint:
         assert s["removed"] == 1
         assert s["strengthened"] == 1
 
+    def test_legacy_snapshot_without_level_id(self, client):
+        """V3-P1-5：缺 level_id 的旧快照不参与 diff（严格按 ID 配对）。
+
+        旧的 1.0 时代 snapshot 的 lv.level_id 为空字符串，验证此时返回
+        from_count/to_count=0，所有列表为空（不会被 price 近似匹配误判）。
+        """
+        c, eng = client
+        # 故意构造无 level_id 的 level（KeyLevelV2.level_id 默认 ""）
+        from models.key_level import KeyLevelV2 as _Lv
+        legacy_lv_a = _Lv(price=100, side="support", final_score=70)
+        legacy_lv_b = _Lv(price=110, side="resistance", final_score=60)
+        snap_from = _make_snapshot(100, [legacy_lv_a, legacy_lv_b])
+        snap_to = _make_snapshot(200, [legacy_lv_a, legacy_lv_b])
+        eng.set_history("BTC", [snap_from, snap_to])
+
+        r = c.get("/api/key-levels/diff/BTC?from_ts=100&to_ts=200")
+        assert r.status_code == 200
+        data = r.json()
+        # 缺 level_id 的 levels 全部被过滤
+        assert data["from_count"] == 0
+        assert data["to_count"] == 0
+        assert data["added"] == []
+        assert data["removed"] == []
+        assert data["strengthened"] == []
+        assert data["weakened"] == []
+
 
 # ─────────────────────────────────────────────────────────────────
 # 3. /lifecycle endpoint
@@ -313,16 +339,38 @@ class TestLifecycleEndpoint:
         assert ts_list == sorted(ts_list)
 
     def test_dedup_same_ts_and_event_type(self, client):
-        """同 ts + 同 event_type → 视为同事件去重。"""
+        """同 ts + 同 event_type + 同 layer → 视为同事件去重。"""
         c, eng = client
         snap1 = _make_snapshot(100, [_make_level(
             "aaa",
             lifecycle_events=[
-                LifecycleEvent(ts=99, event_type="born"),
-                LifecycleEvent(ts=99, event_type="born"),  # 同 ts 同类型
+                LifecycleEvent(ts=99, event_type="born", layer="scoring"),
+                LifecycleEvent(ts=99, event_type="born", layer="scoring"),  # 同 ts/类型/层
             ],
         )])
         eng.set_history("BTC", [snap1])
         r = c.get("/api/key-levels/lifecycle/BTC/aaa")
         data = r.json()
         assert len(data["events"]) == 1
+
+    def test_no_dedup_when_layer_differs(self, client):
+        """V3-P1-6：同 ts + 同 event_type 但不同 layer → 保留两条。
+
+        典型场景：同一秒内 confluence_scoring 检测到 flipped（评分翻转），
+        tracker_v2 状态机也检测到 flipped（state 转移），二者反映不同维度，
+        都应在 lifecycle API 中可见。
+        """
+        c, eng = client
+        snap1 = _make_snapshot(100, [_make_level(
+            "aaa",
+            lifecycle_events=[
+                LifecycleEvent(ts=99, event_type="flipped", layer="scoring"),
+                LifecycleEvent(ts=99, event_type="flipped", layer="tracker"),
+            ],
+        )])
+        eng.set_history("BTC", [snap1])
+        r = c.get("/api/key-levels/lifecycle/BTC/aaa")
+        data = r.json()
+        assert len(data["events"]) == 2
+        layers = {e["layer"] for e in data["events"]}
+        assert layers == {"scoring", "tracker"}

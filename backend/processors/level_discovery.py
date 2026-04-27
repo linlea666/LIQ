@@ -938,6 +938,10 @@ def _discover_capital_flow(
     #   - 取 latest + prev 两根 bar，去重合并（防止单 bar 噪声）
     #   - base_score = min(volume_ratio×8, 22)；ATR 自适应距离过滤（|d| ≤ 5×ATR）
     #   - data_age_hours：latest=0.25h，prev=0.5h（保守按 15min bar）
+    #   - V3-P2-2：单 zone 总成交量（buy+sell）必须 ≥ _FOOTPRINT_ZONE_MIN_USD
+    #     避免 ratio=15 但绝对成交量极小的"高比例噪声"污染候选
+    #     注：footprint_analyzer 已对整 bar 做 low_volume 过滤；此处补单 zone 维度
+    _FOOTPRINT_ZONE_MIN_USD = 30_000.0
     if footprint_snapshot is not None and price > 0:
         atr_safe = atr if atr > 0 else price * 0.005
         max_dist = atr_safe * 5  # 5×ATR：约 1-3% 价格范围
@@ -957,6 +961,10 @@ def _discover_capital_flow(
                 if z_price <= 0 or ratio <= 0:
                     continue
                 if abs(z_price - price) > max_dist:
+                    continue
+                # V3-P2-2：单 zone 成交量门槛（绝对量过滤）
+                z_volume_usd = float(z.get("buy") or 0) + float(z.get("sell") or 0)
+                if z_volume_usd < _FOOTPRINT_ZONE_MIN_USD:
                     continue
                 # 去重：同一价格 ±0.3×ATR 视为同一带
                 bucket = round(z_price / max(atr_safe * 0.3, 1), 2)

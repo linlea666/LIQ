@@ -1677,6 +1677,8 @@ class Engine:
             taker_buy_vol=taker_buy,
             taker_sell_vol=taker_sell,
             oi_change_pct_1h=oi_change_1h,
+            # V3-P2-10：1d 清算簇为空时，cascade magnet 回退用 7d 计算
+            liq_map_7d=state.liq_maps.get("7d"),
             temperature_score=temp_score,
             candles_4h=state.candles_4h or None,
             candles_15m=state.candles_15m or None,

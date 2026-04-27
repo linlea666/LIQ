@@ -561,9 +561,17 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
 }
 ```
 
-### 3.21 `key_levels_raw` · 关键位候选 + 演化时间线（M3 · 1.2.0）
+### 3.21 `key_levels_raw` · 关键位评分摘要 + 演化时间线（M3 · 1.2.0）
 
 **给外部 AI 的"评分摘要 + 生命周期"，不是"已下结论"。**
+
+> **命名说明（V3-P2-4 修订）**：字段名虽为 `key_levels_raw`，**实质是"评分后的候选摘要"**，
+> 不是完全未加工的原始数据。包含 `tier` / `final_score` / `regime_modifier_applied`
+> / `invalidation_*` 等本系统加工字段，目的是给外部 AI 一份"自带分数与失效条件"的候选清单，
+> 而非直接接入 `liq_cluster` 等原始流。如需更原始的清算/订单流数据，请走 `liquidation_*` 字段。
+> 设计哲学：暴露 evidence_groups / explain_chips / contradiction_reasons 让外部 AI 自验，
+> tier 字段仅作"系统视角"提示，外部 AI 可不采信。
+
 - 暴露 top12 候选（按 `final_score` 降序）+ 最近 24h 生命周期事件（最多 30 条）
 - 暴露：evidence_groups / explain_chips / contradiction_reasons / level_id / regime_modifier_applied
 - 不暴露：状态机内部状态（state / break_start_ts / cascade_*）/ snipe_signal / break_impact_projection 等加工层结论
@@ -601,7 +609,7 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
         "regime_modifier_applied": 1.05,              // M3 R8：当前 regime 下该候选的乘数
         "regime_at_score": "trend_up",
         "invalidation_price": 75200.0,
-        "invalidation_condition": "1h close < 75200"
+        "invalidation_condition": "15m 收盘 < $75,200"
       }
     ],
     "recent_events_24h": [
@@ -636,7 +644,7 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
 ### 3.22 `regime_context` · 市场状态上下文（M3 · 1.2.0）
 
 **给外部 AI 的"市场宏观状态摘要"，不暴露 action_weights 等结论性字段。**
-- 6 类 regime：`trend_up` / `trend_down` / `range` / `extreme_volatility` / `squeeze` / `high_vol_chop`
+- 6 类 regime：`trend_up` / `trend_down` / `range` / `extreme` / `squeeze` / `high_vol_chop`
 - `stable_duration_sec` 反映该 regime 的稳定时长，可用于判断 regime shift 风险
 - `features` 暴露关键技术特征（atr_pct / adx / structure_alignment），让外部 AI 可独立校验
 

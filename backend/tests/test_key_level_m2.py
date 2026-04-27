@@ -289,6 +289,7 @@ class TestContradictionPenalty:
         assert "多头资金极拥挤" in reasons
 
     def test_stale_data(self):
+        """V3-P1-4：stale penalty 减半到 -2（freshness 已 ×0.85 软衰减）。"""
         lv = KeyLevelV2(
             price=100, side="support", distance_pct=2,
             is_stale=True,
@@ -296,8 +297,24 @@ class TestContradictionPenalty:
             evidence_groups=["local_technical", "liquidation_meso"],
         )
         penalty, reasons = _calc_contradiction_penalty(lv)
-        assert penalty >= 5
+        assert penalty == 2
         assert "主源数据偏旧" in reasons
+
+    def test_total_penalty_capped(self):
+        """V3-P2-3：6 类极端共触不超过 25 分上限。"""
+        # 同时触发 1（单组）+3（CVD 反向）+4（funding 极拥挤）+5（stale）+6（仅 1d 清算）
+        # 原始累加：10+12+10+2+6 = 40 → cap 后 25
+        lv = KeyLevelV2(
+            price=100, side="support", distance_pct=2,
+            is_stale=True,
+            independent_group_count=1,
+            evidence_groups=["liquidation_short"],
+        )
+        penalty, reasons = _calc_contradiction_penalty(
+            lv, cvd_divergence="bearish", funding_rate=0.0005,
+        )
+        assert penalty == 25  # cap 上限
+        assert len(reasons) >= 5
 
     def test_short_only_liquidation_conflict(self):
         """仅 1d 清算无中长周期支撑 → 扣 6 分。"""
@@ -407,6 +424,151 @@ class TestCascadeComponents:
         )
         assert cc.count_score == 0.6
         assert cc.velocity_score == 0.8
+
+
+# ─────────────────────────────────────────────────────────────────
+# 8b. cascade_risk 与 4 子分一致性（V3 P1-1 修复）
+# ─────────────────────────────────────────────────────────────────
+
+class TestCascadeRiskAggregation:
+    """验证 cascade_risk 由 4 子分加权聚合得出（P1-1 真聚合修复）。
+
+    权重：usd 0.35 / velocity 0.30 / leverage 0.20 / count 0.15
+    距离衰减：dist_decay = 1 / (1 + dist_pct / 3)
+    """
+
+    def _run_cascade(self, clusters_below, lv_price=100.0, current_price=100.0):
+        from processors.key_level_tracker_v2 import _calc_cascade_risk
+        lv = KeyLevelV2(price=lv_price, side="support")
+        liq_map = LiquidationMap(
+            coin="BTC",
+            ts=int(time.time()),
+            cycle="1d",
+            current_price=current_price,
+            leverage_groups=[],
+            clusters_below=clusters_below,
+            clusters_above=[],
+        )
+        _calc_cascade_risk(lv, liq_map, current_price, cfg={})
+        return lv
+
+    def test_no_clusters_zero_risk(self):
+        lv = self._run_cascade([])
+        assert lv.cascade_risk == 0
+        assert lv.cascade_components.count_score == 0
+
+    def test_full_score_clusters(self):
+        # 5 个紧凑 + 高 USD + 高杠杆的簇 → 4 子分都接近 1
+        clusters = [
+            LiqCluster(
+                price_from=99.5 - i * 0.1,
+                price_to=99.6 - i * 0.1,
+                price_center=99.55 - i * 0.1,
+                total_usd=80_000_000,  # 累计 ≥ 200M → usd_score=1
+                side="long",
+                leverage_intensity=0.8,  # >0.7 → leverage_score=1
+            )
+            for i in range(5)
+        ]
+        lv = self._run_cascade(clusters, lv_price=100.0, current_price=100.0)
+        cc = lv.cascade_components
+        assert cc.count_score == 1.0
+        assert cc.usd_score == 1.0
+        assert cc.leverage_score == 1.0
+        # vacuum_gap_pct = (100 - 99.55)/100*100 = 0.45 ≤ 0.5 → velocity=1
+        assert cc.velocity_score == 1.0
+        # dist_decay = 1/(1+0/3) = 1，weighted=1 → cascade_risk=1.0
+        assert lv.cascade_risk == 1.0
+
+    def test_aggregation_formula(self):
+        # 单簇受控：count=1/5=0.2，USD=100M→usd=0.5，leverage=0.35→0.5
+        clusters = [
+            LiqCluster(
+                price_from=98.5, price_to=99.0, price_center=98.75,
+                total_usd=100_000_000,
+                side="long",
+                leverage_intensity=0.35,
+            )
+        ]
+        lv = self._run_cascade(clusters, lv_price=100.0, current_price=100.0)
+        cc = lv.cascade_components
+        assert cc.count_score == 0.2
+        assert cc.usd_score == 0.5
+        assert cc.leverage_score == 0.5
+        # vacuum_gap_pct = 1.25%（0.5< 1.25 < 5），velocity 线性插值
+        # = 1 - (1.25-0.5)/4.5*0.8 ≈ 0.867
+        assert 0.85 < cc.velocity_score < 0.88
+        # weighted = 0.35*0.5 + 0.30*0.867 + 0.20*0.5 + 0.15*0.2 ≈ 0.565
+        # dist_decay = 1（lv 在当前价）
+        assert 0.55 < lv.cascade_risk < 0.58
+
+    def test_distance_decay_applied(self):
+        clusters = [
+            LiqCluster(
+                price_from=88.5, price_to=89.0, price_center=88.75,
+                total_usd=200_000_000, side="long", leverage_intensity=0.8,
+            )
+        ]
+        # lv 距当前价 10%，dist_decay = 1/(1+10/3) ≈ 0.231
+        lv = self._run_cascade(clusters, lv_price=90.0, current_price=100.0)
+        # weighted ≈ 0.35*1 + 0.30*0.2 + 0.20*1 + 0.15*0.2 = 0.64
+        # （vacuum_gap_pct = (90-88.75)/100*100 = 1.25% → velocity≈0.867)
+        # 但 dist_decay 仅作用于聚合后总分
+        # 这里仅断言 cascade_risk 显著低于 1.0（验证 dist_decay 生效）
+        assert lv.cascade_risk < 0.3
+
+    def test_fallback_to_7d_when_1d_empty(self):
+        """V3-P2-10：1d liq_map 无簇时，回退到 7d 计算 magnet。"""
+        from processors.key_level_tracker_v2 import _calc_cascade_risk
+        lv = KeyLevelV2(price=100.0, side="support")
+        # 1d 没有簇
+        liq_map_1d = LiquidationMap(
+            coin="BTC", ts=int(time.time()), cycle="1d",
+            current_price=100.0, leverage_groups=[],
+            clusters_below=[], clusters_above=[],
+        )
+        # 7d 有簇
+        liq_map_7d = LiquidationMap(
+            coin="BTC", ts=int(time.time()), cycle="7d",
+            current_price=100.0, leverage_groups=[],
+            clusters_below=[
+                LiqCluster(
+                    price_from=98.0, price_to=98.5, price_center=98.25,
+                    total_usd=50_000_000, side="long", leverage_intensity=0.5,
+                ),
+            ],
+            clusters_above=[],
+        )
+        _calc_cascade_risk(lv, liq_map_1d, 100.0, cfg={}, liq_map_7d=liq_map_7d)
+        assert lv.next_magnet_price == 98.25
+        assert lv.cascade_layers == 1
+        assert lv.cascade_total_usd == 50_000_000
+
+
+# ─────────────────────────────────────────────────────────────────
+# 4b. S-Macro 门槛收紧（V3 P2-5）
+# ─────────────────────────────────────────────────────────────────
+
+class TestSMacroTightened:
+    """单一 macro 来源不再能成 S-Macro，必须有至少 1 个旁证组。"""
+
+    def test_single_macro_demoted(self):
+        lv = KeyLevelV2(
+            price=100, side="support", strength_tier="S",
+            exchange_count=1,
+            evidence_groups=["macro_technical"],  # 仅 1 组
+        )
+        assert classify_s_level(lv) != "S-Macro"
+        assert classify_s_level(lv) == "S-Composite"
+
+    def test_macro_with_supporting_group_pass(self):
+        # macro + structure_anchor 旁证 → 仍然 S-Macro
+        lv = KeyLevelV2(
+            price=100, side="support", strength_tier="S",
+            exchange_count=1,
+            evidence_groups=["macro_technical", "structure_anchor"],
+        )
+        assert classify_s_level(lv) == "S-Macro"
 
 
 # ─────────────────────────────────────────────────────────────────

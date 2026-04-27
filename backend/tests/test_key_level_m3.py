@@ -310,6 +310,28 @@ class TestTrimLifecycleEvents:
         assert out[0].ts == 10  # 最旧的被丢
         assert out[-1].ts == 29
 
+    def test_first_born_preserved_when_trimmed(self):
+        """V3-P2-9：超长事件流时首个 born 必须保留作为时间线起点。"""
+        born = LifecycleEvent(ts=0, event_type="born")
+        tested = [LifecycleEvent(ts=i, event_type="tested") for i in range(1, 30)]
+        evts = [born, *tested]  # 1 个 born + 29 个 tested = 30 条
+        out = _trim_lifecycle_events(evts)
+        assert len(out) == 20
+        assert out[0].event_type == "born"
+        assert out[0].ts == 0  # born 仍是头
+        assert out[-1].ts == 29  # 末尾仍是最新
+
+    def test_recent_born_not_duplicated(self):
+        """如果 born 已在最近 N 条内，不重复保留。"""
+        # 28 条 tested + 1 个 born + 1 条 tested = 30；born 已在尾部 20 内
+        evts = [LifecycleEvent(ts=i, event_type="tested") for i in range(11)]
+        evts.append(LifecycleEvent(ts=11, event_type="born"))
+        evts.extend(LifecycleEvent(ts=i, event_type="tested") for i in range(12, 31))
+        out = _trim_lifecycle_events(evts)
+        assert len(out) == 20  # 不会因为额外保留 born 变成 21
+        # born 仍在结果里
+        assert any(e.event_type == "born" for e in out)
+
 
 # ─────────────────────────────────────────────────────────────────
 # 6. _merge_with_prev：level_id 继承

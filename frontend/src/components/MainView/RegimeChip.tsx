@@ -32,7 +32,7 @@ const REGIME_META: Record<
     emoji: "↔️",
     tone: "bg-sky-500/15 text-sky-300 border-sky-500/40",
   },
-  extreme_volatility: {
+  extreme: {
     label: "极端波动",
     emoji: "⚠️",
     tone: "bg-amber-500/20 text-amber-300 border-amber-500/50",

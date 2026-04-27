@@ -325,8 +325,12 @@ async def get_kl_diff(
 ):
     """对比两个时间点的关键位快照，输出 added/removed/strengthened/weakened/tier_changed/flipped。
 
-    匹配规则：按 level_id 配对（M3 R9 引入的稳定 ID）。
-    旧 snapshot 缺 level_id 字段 → fallback 用 round(price/atr*0.5) 近似匹配。
+    匹配规则：严格按 level_id 配对（M3 R9 引入的稳定 ID）。
+    注意（V3-P1-5 修订）：
+      - 缺 level_id 的旧快照（M3 上线前归档）将不参与 diff，相应 levels 视为不存在；
+        如需对比这类历史快照，请先通过 history API 查看原始数据。
+      - 该选择牺牲了对老快照的可视化能力，换取 diff 结果的精准性（避免 price 近似匹配
+        在跨周期重置后误判 added/removed）。
 
     返回结构：
         {
@@ -452,7 +456,9 @@ async def get_kl_lifecycle(coin: str, level_id: str):
         raise HTTPException(404, f"无历史数据：{coin}")
 
     history_sorted = sorted(history, key=lambda h: h.ts)
-    seen_keys: set[tuple[int, str]] = set()
+    # V3-P1-6：去重 key 加入 layer 维度，避免 scoring 层和 tracker 层
+    # 在同一秒生成相同 event_type（如同时 flipped）时丢失一条
+    seen_keys: set[tuple[int, str, str]] = set()
     merged_events: list[dict] = []
     first_seen_ts: Optional[int] = None
     last_seen_ts: Optional[int] = None
@@ -469,7 +475,7 @@ async def get_kl_lifecycle(coin: str, level_id: str):
             last_seen_ts = snap.ts
             latest_level_summary = _summarize_level(lv)
             for evt in (lv.lifecycle_events or []):
-                key = (evt.ts, evt.event_type)
+                key = (evt.ts, evt.event_type, evt.layer)
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)

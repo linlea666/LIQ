@@ -684,7 +684,7 @@ export interface KeyLevelV2 {
   leverage_intensity?: number;        // 主导杠杆 USD 占比（0-1）
 
   invalidation_price?: number | null; // 算法化失效价
-  invalidation_condition?: string;    // "1h 收盘 < $63,000"
+  invalidation_condition?: string;    // "15m 收盘 < $63,000"（对齐状态机 broken 判定口径）
   invalidation_atr_mult?: number;     // 计算时使用的 ATR 倍数
 
   next_magnet_price?: number | null;  // 破位后的下一个磁铁价位
@@ -824,7 +824,7 @@ export interface KeyLevelSnapshotV2 {
   magnet_levels?: LiqMagnetLevel[];
   data_freshness?: DataFreshness | null;
   // ── M3 新增：snapshot 级 regime 上下文（来自 RegimeSnapshot） ──
-  regime?: string;                  // trend_up / trend_down / range / extreme_volatility / squeeze / high_vol_chop
+  regime?: string;                  // trend_up / trend_down / range / extreme / squeeze / high_vol_chop
   regime_confidence?: number;       // 0-1
   regime_description?: string;      // 中文描述
   regime_weight_version?: string;

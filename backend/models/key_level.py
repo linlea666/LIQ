@@ -116,7 +116,7 @@ class KeyLevelV2(BaseModel):
     # 计算规则：support→price - mult×ATR / resistance→price + mult×ATR
     # mult 由 strength_tier 决定：S=2.0 / A=1.5 / B=1.0 / C=0.5
     invalidation_price: Optional[float] = None
-    invalidation_condition: str = ""     # 中文条件描述（"1h 收盘 < $63,000"）
+    invalidation_condition: str = ""     # 中文条件描述（"15m 收盘 < $63,000"，对齐状态机口径）
     invalidation_atr_mult: float = 0.0   # 计算时使用的 ATR 倍数（透明化）
 
     # 级联破位后的下一个磁铁价位（M1 仅展示用，不参与 tier）
@@ -145,10 +145,12 @@ class KeyLevelV2(BaseModel):
     independent_group_count: int = 0     # 去重后的组数；A/B/C 评级核心因子
 
     # S 级 4 分型（GPT V3 评审采纳）— 仅 strength_tier=='S' 时填充
-    # S-Macro:     长周期独占（200W SMA/CVDD/月线 EMA + 周线 swing 等）
-    # S-Liquidity: 跨所共振强清算簇（≥4 所 + USD ≥ 50M）
-    # S-Micro:     盘口微结构 + flow 动态共振（短期，TTL 短）
-    # S-Composite: ≥3 独立组 + 综合分高
+    # 实际门槛见 confluence_scoring.classify_s_level()，此处为语义说明：
+    # S-Liquidity: 跨所共振强清算簇（exchange_count ≥ 4 且 liquidation_* 组 ≥ 2）
+    # S-Macro:     长周期独占（macro_technical / liquidation_macro，且 evidence_groups ≥ 2，无微结构）
+    # S-Micro:     盘口微结构 + flow 共振（microstructure_local + flow_dynamic，无宏观）
+    # S-Composite: 兜底（≥3 独立组但不属上述任一类）
+    # 优先级：Liquidity > Macro > Micro > Composite
     s_class: str = ""
 
     # 矛盾扣分（contradiction_penalty）— 6 类一票否决式扣分
@@ -219,6 +221,11 @@ class LifecycleEvent(BaseModel):
     tier_after: str = ""
     state_before: str = ""
     state_after: str = ""
+    # V3-P1-6：事件来源层（去重维度的第三个 key）
+    # "scoring"  ← 由 confluence_scoring._detect_lifecycle_events 检测的"分数/分级/翻转"
+    # "tracker"  ← 由 key_level_tracker_v2._set_state 检测的"状态机转移（tested/broken/...)"
+    # 设为 ""（未知/历史）时退化为旧行为（仅按 ts+event_type 去重）
+    layer: str = ""
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
