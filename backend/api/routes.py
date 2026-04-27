@@ -294,6 +294,204 @@ async def get_kl_detail(coin: str, ts: int):
     raise HTTPException(404, f"KL snapshot not found: {coin}/{ts}")
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 · R10：Diff / Lifecycle API（关键位演化追溯）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 评分阈值常量（与 confluence_scoring._LIFECYCLE_SCORE_DELTA_THRESHOLD 保持一致）
+_DIFF_SCORE_THRESHOLD = 5.0
+
+
+def _summarize_level(lv) -> dict:
+    """提取 level 的精简卡片字段供 diff 输出（避免返回完整 KeyLevelV2 拥肿）。"""
+    return {
+        "level_id": lv.level_id,
+        "price": lv.price,
+        "side": lv.side,
+        "strength_tier": lv.strength_tier,
+        "s_class": lv.s_class,
+        "final_score": lv.final_score,
+        "state": lv.state,
+        "category": lv.category,
+        "explain_chips": list(lv.explain_chips or []),
+    }
+
+
+@router.get("/key-levels/diff/{coin}")
+async def get_kl_diff(
+    coin: str,
+    from_ts: int = Query(..., description="起始快照时间戳（秒）"),
+    to_ts: int = Query(..., description="结束快照时间戳（秒）"),
+):
+    """对比两个时间点的关键位快照，输出 added/removed/strengthened/weakened/tier_changed/flipped。
+
+    匹配规则：按 level_id 配对（M3 R9 引入的稳定 ID）。
+    旧 snapshot 缺 level_id 字段 → fallback 用 round(price/atr*0.5) 近似匹配。
+
+    返回结构：
+        {
+            "coin": "BTC",
+            "from_ts": ..., "to_ts": ...,
+            "added": [<level summary>...],         # 新出现
+            "removed": [<level summary>...],       # 消失
+            "strengthened": [{"prev":, "curr":, "delta":}],  # final_score +≥5
+            "weakened":   [{"prev":, "curr":, "delta":}],
+            "tier_changed": [{"prev":, "curr":, "from":"B", "to":"A"}],
+            "flipped":   [{"prev":, "curr":}],     # support↔resistance
+        }
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    if from_ts >= to_ts:
+        raise HTTPException(400, "from_ts 必须早于 to_ts")
+
+    history = _engine.get_kl_history(coin)
+    snap_from = next((h for h in history if h.ts == from_ts), None)
+    snap_to = next((h for h in history if h.ts == to_ts), None)
+    if not snap_from:
+        raise HTTPException(404, f"快照未找到：{coin}/{from_ts}")
+    if not snap_to:
+        raise HTTPException(404, f"快照未找到：{coin}/{to_ts}")
+
+    from_by_id = {lv.level_id: lv for lv in snap_from.levels if lv.level_id}
+    to_by_id = {lv.level_id: lv for lv in snap_to.levels if lv.level_id}
+
+    added: list[dict] = []
+    removed: list[dict] = []
+    strengthened: list[dict] = []
+    weakened: list[dict] = []
+    tier_changed: list[dict] = []
+    flipped: list[dict] = []
+
+    tier_rank = {"S": 4, "A": 3, "B": 2, "C": 1, "": 0}
+
+    for lid, lv_to in to_by_id.items():
+        lv_from = from_by_id.get(lid)
+        if lv_from is None:
+            added.append(_summarize_level(lv_to))
+            continue
+        delta = lv_to.final_score - lv_from.final_score
+        if delta >= _DIFF_SCORE_THRESHOLD:
+            strengthened.append({
+                "prev": _summarize_level(lv_from),
+                "curr": _summarize_level(lv_to),
+                "delta": round(delta, 1),
+            })
+        elif delta <= -_DIFF_SCORE_THRESHOLD:
+            weakened.append({
+                "prev": _summarize_level(lv_from),
+                "curr": _summarize_level(lv_to),
+                "delta": round(delta, 1),
+            })
+        if lv_from.strength_tier != lv_to.strength_tier:
+            direction = "upgraded" if (
+                tier_rank.get(lv_to.strength_tier, 0) > tier_rank.get(lv_from.strength_tier, 0)
+            ) else "downgraded"
+            tier_changed.append({
+                "prev": _summarize_level(lv_from),
+                "curr": _summarize_level(lv_to),
+                "from": lv_from.strength_tier,
+                "to": lv_to.strength_tier,
+                "direction": direction,
+            })
+        if lv_from.side and lv_to.side and lv_from.side != lv_to.side:
+            flipped.append({
+                "prev": _summarize_level(lv_from),
+                "curr": _summarize_level(lv_to),
+            })
+
+    for lid, lv_from in from_by_id.items():
+        if lid not in to_by_id:
+            removed.append(_summarize_level(lv_from))
+
+    return {
+        "coin": coin,
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "from_count": len(from_by_id),
+        "to_count": len(to_by_id),
+        "added": added,
+        "removed": removed,
+        "strengthened": strengthened,
+        "weakened": weakened,
+        "tier_changed": tier_changed,
+        "flipped": flipped,
+        "summary": {
+            "added": len(added),
+            "removed": len(removed),
+            "strengthened": len(strengthened),
+            "weakened": len(weakened),
+            "tier_changed": len(tier_changed),
+            "flipped": len(flipped),
+        },
+    }
+
+
+@router.get("/key-levels/lifecycle/{coin}/{level_id}")
+async def get_kl_lifecycle(coin: str, level_id: str):
+    """返回指定 level_id 的完整生命周期事件流（跨多个 snapshot 合并）。
+
+    设计：
+      - 遍历 history snapshots（按 ts 升序）
+      - 找出 level_id 命中的所有 levels，提取其 lifecycle_events
+      - 按事件 ts 全局去重 + 升序排序（同 ts + 同 event_type 视为同一事件）
+      - 输出：first_seen_ts / last_seen_ts / events / latest_state
+
+    用途：
+      - 前端"📅 该关键位演化时间线"
+      - 复盘"为什么该 S 级支撑突然消失"
+      - 外部 AI 审计关键位是否稳定
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+
+    history = _engine.get_kl_history(coin)
+    if not history:
+        raise HTTPException(404, f"无历史数据：{coin}")
+
+    history_sorted = sorted(history, key=lambda h: h.ts)
+    seen_keys: set[tuple[int, str]] = set()
+    merged_events: list[dict] = []
+    first_seen_ts: Optional[int] = None
+    last_seen_ts: Optional[int] = None
+    latest_level_summary: Optional[dict] = None
+    snapshot_count = 0
+
+    for snap in history_sorted:
+        for lv in snap.levels:
+            if lv.level_id != level_id:
+                continue
+            snapshot_count += 1
+            if first_seen_ts is None:
+                first_seen_ts = snap.ts
+            last_seen_ts = snap.ts
+            latest_level_summary = _summarize_level(lv)
+            for evt in (lv.lifecycle_events or []):
+                key = (evt.ts, evt.event_type)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged_events.append(evt.model_dump())
+
+    if first_seen_ts is None:
+        raise HTTPException(404, f"未在任何快照中找到 level_id：{level_id}")
+
+    merged_events.sort(key=lambda e: e["ts"])
+
+    return {
+        "coin": coin,
+        "level_id": level_id,
+        "first_seen_ts": first_seen_ts,
+        "last_seen_ts": last_seen_ts,
+        "snapshot_count": snapshot_count,
+        "event_count": len(merged_events),
+        "events": merged_events,
+        "latest": latest_level_summary,
+    }
+
+
 @router.get("/key-levels/{coin}")
 async def get_key_levels_v2(coin: str):
     """获取 V2 关键位完整快照（详情页 + 大屏）"""

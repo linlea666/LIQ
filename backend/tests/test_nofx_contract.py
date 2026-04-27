@@ -312,6 +312,7 @@ REQUIRED_SNAPSHOT_KEYS = {
     "recent_sweeps_1h", "orderbook", "large_orders", "whale", "etf",
     "on_chain_cycle", "options", "taker_volume", "volume_profile",
     "atr_14", "net_position_td", "macro", "news",
+    "key_levels_raw", "regime_context",
 }
 
 
@@ -354,9 +355,10 @@ def test_no_processed_signals_leak():
     snap = out["snapshot"]
     forbidden_top = {
         "trend_exhaustion", "market_structure", "market_structure_1d",
-        "market_structure_1w", "direction_vote", "regime_snapshot",
+        "market_structure_1w", "direction_vote",
         "temperature", "market_temperature", "pin_risk_level",
         "range_signal", "key_levels", "key_level_snapshot_v2",
+        "regime_snapshot",
         "rule_supports", "rule_resistances", "sniper_entries",
         "ladder_plans", "execution_plan", "ai_trader_report",
         "final_decision", "waterfall", "candlestick_pattern_1h",
@@ -582,3 +584,176 @@ def test_options_put_call_ratio_autofilled():
     assert opt["expiries"][1]["put_call_ratio"] == pytest.approx(0.75, rel=1e-3)
     # 顶层汇总：(6000+15000)/(10000+20000) = 0.7
     assert opt["put_call_oi_ratio"] == pytest.approx(0.7, rel=1e-3)
+
+
+# ── M3 · 1.2.0：key_levels_raw + regime_context ─────────────
+
+from models.key_level import KeyLevelV2, KeyLevelSnapshotV2, LifecycleEvent
+from models.regime import RegimeSnapshot, RegimeFeatures
+
+
+def _attach_kl_and_regime(state, *, with_kl: bool = True, with_regime: bool = True):
+    """挂上 M3 R11 所需的 key_level_snapshot_v2 / regime_snapshot mock。"""
+    now = int(time.time())
+    if with_kl:
+        events_a = [
+            LifecycleEvent(ts=now - 600, event_type="born", detail="首次出现",
+                           score_after=80.0, tier_after="A"),
+            LifecycleEvent(ts=now - 200, event_type="strengthening", detail="共振增强",
+                           score_before=80.0, score_after=92.0,
+                           tier_before="A", tier_after="S"),
+            LifecycleEvent(ts=now - 100_000, event_type="born",
+                           detail="超过 24h 应被过滤"),
+        ]
+        events_b = [
+            LifecycleEvent(ts=now - 1200, event_type="tested",
+                           detail="idle->testing", state_before="idle", state_after="testing"),
+        ]
+        levels = [
+            KeyLevelV2(
+                price=75800.0, side="support", category="strong_support",
+                sources=["liq_map_7d", "vp", "fib_618"], source_count=3,
+                evidence_groups=["liq_cluster", "vp_hvn", "fib"],
+                independent_group_count=3,
+                explain_chips=["7d清算簇", "VP HVN", "Fib0.618"],
+                confluence_score=88.0, final_score=92.0,
+                strength_tier="S", s_class="P3_high_freshness",
+                distance_pct=-0.57, exchange_count=3, consensus_multiplier=1.30,
+                dominant_leverage="50x", leverage_intensity=0.78,
+                contradiction_penalty=0.0, contradiction_reasons=[],
+                regime_modifier_applied=1.05, regime_at_score="trend_up",
+                level_id="kl_a1b2c3d4e5f6",
+                lifecycle_events=events_a,
+                invalidation_price=75200.0, invalidation_condition="1h close < 75200",
+            ),
+            KeyLevelV2(
+                price=78500.0, side="resistance", category="strong_resistance",
+                sources=["liq_map_24h", "ema200"], source_count=2,
+                evidence_groups=["liq_cluster", "ma_cluster"],
+                independent_group_count=2,
+                explain_chips=["24h 清算簇", "EMA200"],
+                confluence_score=72.0, final_score=70.0,
+                strength_tier="A",
+                distance_pct=2.97, exchange_count=2, consensus_multiplier=1.15,
+                level_id="kl_z9y8x7w6v5u4",
+                lifecycle_events=events_b,
+            ),
+        ]
+        state.key_level_snapshot_v2 = KeyLevelSnapshotV2(
+            ts=now - 30, current_price=76234.5, atr=825.4,
+            levels=levels,
+            regime="trend_up", regime_confidence=0.78,
+            regime_description="趋势上行", regime_weight_version="1.0.0",
+        )
+    if with_regime:
+        state.regime_snapshot = RegimeSnapshot(
+            coin="BTC", ts=now - 30, regime="trend_up", confidence=0.78,
+            description_cn="ADX 27 + atr_pct 1.4% 上行",
+            features=RegimeFeatures(
+                atr_pct=1.42, atr_pct_percentile=65.0, adx=27.5,
+                bbw=0.045, trend_slope_pct=0.32, cvd_persistence=0.68,
+                structure_alignment="bullish_aligned", liq_24h_vs_7d_avg=1.18,
+            ),
+            prev_regime="range", regime_changed_at=now - 20_000,
+            stable_duration_sec=20_000,
+            action_weights={"snipe_long": 1.3, "scalp_long": 1.1},
+        )
+
+
+def test_key_levels_raw_top_n_and_evidence_summary():
+    state = _make_state()
+    _attach_kl_and_regime(state)
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    kl = out["snapshot"]["key_levels_raw"]
+    assert kl is not None
+    assert kl["snapshot_ts"] > 0
+    assert kl["current_price"] == pytest.approx(76234.5)
+    assert kl["atr"] == pytest.approx(825.4)
+
+    cands = kl["raw_candidates"]
+    assert len(cands) == 2
+    # 按 final_score 降序：92 > 70
+    assert cands[0]["final_score"] >= cands[1]["final_score"]
+    head = cands[0]
+    # 关键评分摘要必须存在
+    for k in ("level_id", "price", "side", "tier", "final_score",
+              "evidence_groups", "explain_chips", "independent_group_count",
+              "exchange_count", "consensus_multiplier",
+              "regime_modifier_applied", "regime_at_score"):
+        assert k in head, f"raw_candidate 缺少 {k}"
+    assert head["evidence_groups"] == ["liq_cluster", "vp_hvn", "fib"]
+    assert head["independent_group_count"] == 3
+    assert head["regime_modifier_applied"] == pytest.approx(1.05)
+    # 内部状态机 / cascade 字段不能泄漏到 raw 候选
+    forbidden = {"state", "break_start_ts", "cascade_risk", "cascade_components",
+                 "snipe_signal", "break_impact_projection", "test_history"}
+    assert not (forbidden & set(head.keys()))
+
+
+def test_key_levels_raw_recent_events_within_24h_and_sorted_desc():
+    state = _make_state()
+    _attach_kl_and_regime(state)
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    events = out["snapshot"]["key_levels_raw"]["recent_events_24h"]
+    # 跨 levels 合并：A 内 2 条 24h 内（第3条超 24h 被过滤），B 内 1 条 → 共 3
+    assert len(events) == 3
+    types = [e["event_type"] for e in events]
+    assert "born" in types and "strengthening" in types and "tested" in types
+    # 必须按 ts 倒序
+    ts_list = [e["ts"] for e in events]
+    assert ts_list == sorted(ts_list, reverse=True)
+    # 每条事件需带 level_id / price / side / detail
+    for e in events:
+        assert e["level_id"]
+        assert e["price"] > 0
+        assert e["side"] in ("support", "resistance", "pivot")
+
+
+def test_key_levels_raw_none_when_snapshot_missing():
+    state = _make_state()
+    # 不挂 key_level_snapshot_v2
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    assert out["snapshot"]["key_levels_raw"] is None
+
+
+def test_regime_context_features_exposed_no_action_weights():
+    state = _make_state()
+    _attach_kl_and_regime(state)
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    rc = out["snapshot"]["regime_context"]
+    assert rc is not None
+    assert rc["regime"] == "trend_up"
+    assert rc["confidence"] == pytest.approx(0.78)
+    assert rc["prev_regime"] == "range"
+    assert rc["stable_duration_sec"] == 20_000
+    feats = rc["features"]
+    assert feats["atr_pct"] == pytest.approx(1.42)
+    assert feats["adx"] == pytest.approx(27.5)
+    assert feats["structure_alignment"] == "bullish_aligned"
+    # 严禁暴露 action_weights（属于已下结论的乘数表）
+    assert "action_weights" not in rc
+
+
+def test_regime_context_none_when_missing():
+    state = _make_state()
+    # 仅挂 KL，不挂 regime
+    _attach_kl_and_regime(state, with_kl=True, with_regime=False)
+    out = build_nofx_snapshot(state, "BTCUSDT", {"1h": 100})
+    assert out["snapshot"]["regime_context"] is None
+
+
+def test_schema_version_is_1_2_0():
+    """M3 · R11：版本必须升至 1.2.0。"""
+    assert SCHEMA_VERSION == "1.2.0"
+
+
+def test_payload_with_m3_fields_json_serializable():
+    """key_levels_raw + regime_context 必须 JSON 可序列化。"""
+    state = _make_state()
+    _attach_kl_and_regime(state)
+    out = build_nofx_snapshot(state, "BTCUSDT",
+                              {"15m": 96, "1h": 168, "4h": 120, "1d": 90, "1w": 60})
+    body = json.dumps(out, ensure_ascii=False)
+    obj = json.loads(body)
+    assert obj["snapshot"]["key_levels_raw"]["raw_candidates"]
+    assert obj["snapshot"]["regime_context"]["regime"] == "trend_up"

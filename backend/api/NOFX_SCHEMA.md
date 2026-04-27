@@ -1,4 +1,12 @@
-# NOFX 外部 AI 决策接口契约 (Schema v1.0.1)
+# NOFX 外部 AI 决策接口契约 (Schema v1.2.0)
+
+> **v1.2.0 变更说明（向后兼容 · M3 关键位 V3 · GPT V3 评审采纳）**
+> - 新增 `snapshot.key_levels_raw`：top12 关键位候选（含 evidence_groups / explain_chips / level_id / contradiction 透明化），暴露评分摘要而非内部状态机
+> - 新增 `snapshot.key_levels_raw.recent_events_24h`：最近 24h 关键位生命周期事件（born / strengthening / weakening / tier_upgraded / tier_downgraded / flipped / tested / reacted / broken / fake_break）
+> - 新增 `snapshot.regime_context`：市场状态上下文（regime / confidence / 关键特征 atr_pct/adx/structure_alignment）
+> - 新增 `data_age_sec.key_level_snapshot` / `data_age_sec.regime_snapshot`
+> - 纯增量、无字段删除 / 改名 / 改类型；NOFX 端忽略未知字段即可
+> - 设计原则：暴露「评分摘要 + 演化时间线 + 市场状态」，**不**暴露内部 action_weights / state_machine 等结论性字段；外部 AI 仍自主决策
 
 > **v1.0.1 变更说明（向后兼容）**
 > - `candles / cvd.last_point.ts / whale.hl_alerts_recent[].ts / whale.top_transfers[].ts / oi.history_30pts[].ts` 统一归一化为 **unix 秒**（此前个别源头会混入毫秒）
@@ -121,7 +129,9 @@ NOFX 3 分钟决策前调用。请求哪个币种就返回哪个币种。
     "atr_14":             825.4,
     "net_position_td":    { /* 净持仓 + 合约流 + TD 序列 */ },
     "macro":              { /* DXY / 纳指 / 黄金 / 美债 / 恐贪 ... */ },
-    "news":               { /* 简报结论 + 地缘等级 + 叙事标签 */ }
+    "news":               { /* 简报结论 + 地缘等级 + 叙事标签 */ },
+    "key_levels_raw":     { /* M3 · 1.2.0：top12 关键位候选 + 24h 生命周期事件 */ },
+    "regime_context":     { /* M3 · 1.2.0：市场状态摘要（regime / confidence / 关键特征） */ }
   },
 
   "data_age_sec": {             // 每维度最后更新到现在的秒数（null = 该维度缺失）
@@ -551,6 +561,109 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
 }
 ```
 
+### 3.21 `key_levels_raw` · 关键位候选 + 演化时间线（M3 · 1.2.0）
+
+**给外部 AI 的"评分摘要 + 生命周期"，不是"已下结论"。**
+- 暴露 top12 候选（按 `final_score` 降序）+ 最近 24h 生命周期事件（最多 30 条）
+- 暴露：evidence_groups / explain_chips / contradiction_reasons / level_id / regime_modifier_applied
+- 不暴露：状态机内部状态（state / break_start_ts / cascade_*）/ snipe_signal / break_impact_projection 等加工层结论
+- NOFX 端可独立判断这些候选的强弱，无须采信本系统的 `tier` 决断
+
+```json
+{
+  "key_levels_raw": {
+    "snapshot_ts": 1745300000,
+    "current_price": 76234.5,
+    "atr": 825.4,
+    "raw_candidates": [
+      {
+        "level_id": "a1b2c3d4e5f6",                 // 稳定 ID（基于 price_bucket，跨 snapshot 持久化）
+        "price": 75800.0,
+        "side": "support",                            // support / resistance / pivot
+        "tier": "S",                                  // S / A / B / C（仅作"系统视角"参考，不强制采信）
+        "s_class": "P3_high_freshness",               // M2 引入：S 级 4 模式分类（P0/P1/P2/P3）
+        "final_score": 92.4,                          // 经 contradiction + regime_modifier 后的最终分
+        "confluence_score": 88.0,                     // 各 evidence_group 加权和（未经 modifier）
+        "evidence_groups": ["liq_cluster", "vp_hvn", "fib", "cross_exchange"],
+        "independent_group_count": 4,                 // M2：独立证据组数量（用于 tier 双因子判定）
+        "sources": ["liq_map_7d", "liq_map_30d", "vp", "fib_618"],   // 截断为 8 条
+        "source_count": 7,
+        "explain_chips": ["7d清算簇", "VP HVN", "跨3所共识", "EMA200", "Fib0.618", "近4小时反弹2/2"],
+        "distance_pct": -0.57,                        // 相对当前价的距离百分比（负=下方）
+        "exchange_count": 3,
+        "consensus_multiplier": 1.30,
+        "dominant_leverage": "50x",
+        "leverage_intensity": 0.78,
+        "contradiction_penalty": 0.0,                 // M2：6 类矛盾惩罚（>0 表示有矛盾扣分）
+        "contradiction_reasons": [],                  // 例：["regime_conflict_strong_uptrend"]
+        "is_stale": false,
+        "primary_source_age_hours": 1.2,
+        "regime_modifier_applied": 1.05,              // M3 R8：当前 regime 下该候选的乘数
+        "regime_at_score": "trend_up",
+        "invalidation_price": 75200.0,
+        "invalidation_condition": "1h close < 75200"
+      }
+    ],
+    "recent_events_24h": [
+      {
+        "ts": 1745298400,
+        "level_id": "a1b2c3d4e5f6",
+        "price": 75800.0,
+        "side": "support",
+        "event_type": "tested",                       // born / strengthening / weakening / tier_upgraded / tier_downgraded / flipped / tested / reacted / broken / fake_break
+        "detail": "idle->testing",                    // 状态机或评分变化的简要说明
+        "score_before": 88.0,
+        "score_after": 92.4,
+        "tier_before": "A",
+        "tier_after": "S"
+      }
+    ],
+    "freshness": {
+      "score": 96.0,                                  // 整体新鲜度（0-100）
+      "stale_sources": [],
+      "missing_sources": []
+    }
+  }
+}
+```
+
+**字段使用建议**：
+- 优先看 `evidence_groups` 数量 + `explain_chips` 而不是 `tier`（tier 是系统单方面判断）
+- `recent_events_24h` 时间线非常重要：可看出关键位"最近被测试 / 强化 / 失效 / 翻转"
+- `regime_modifier_applied` 反映该候选在当前市场状态下"是否逆势"，<1.0 表示该结构与 regime 不相容
+- `contradiction_reasons` 非空时建议降权采信
+
+### 3.22 `regime_context` · 市场状态上下文（M3 · 1.2.0）
+
+**给外部 AI 的"市场宏观状态摘要"，不暴露 action_weights 等结论性字段。**
+- 6 类 regime：`trend_up` / `trend_down` / `range` / `extreme_volatility` / `squeeze` / `high_vol_chop`
+- `stable_duration_sec` 反映该 regime 的稳定时长，可用于判断 regime shift 风险
+- `features` 暴露关键技术特征（atr_pct / adx / structure_alignment），让外部 AI 可独立校验
+
+```json
+{
+  "regime_context": {
+    "regime": "trend_up",                             // 当前 regime
+    "confidence": 0.78,                               // 置信度 0-1
+    "description_cn": "趋势上行：ADX 27 + atr_pct 1.4% + 结构对齐 bullish",
+    "ts": 1745300000,
+    "prev_regime": "range",                           // 上一个 regime（首次启动可能为 null）
+    "regime_changed_at": 1745280000,                  // 当前 regime 起始时间（unix 秒）
+    "stable_duration_sec": 20000,                     // regime 稳定持续秒数（短=刚切换，谨慎）
+    "features": {
+      "atr_pct": 1.42,                                // ATR / price 百分比
+      "atr_pct_percentile": 65,                       // 历史百分位（0-100）
+      "adx": 27.5,
+      "bbw": 0.045,                                   // 布林带宽
+      "trend_slope_pct": 0.32,
+      "cvd_persistence": 0.68,
+      "structure_alignment": "bullish_aligned",       // bullish_aligned / bearish_aligned / mixed
+      "liq_24h_vs_7d_avg": 1.18                       // 近 24h 清算量 / 7d 均值
+    }
+  }
+}
+```
+
 ---
 
 ## 4. 已剔除字段清单（**不会出现在响应里**）
@@ -560,13 +673,18 @@ Coinglass `liquidation/max-pain` 计算的"若价格触及该位则会引发最�
 | 类别 | 剔除字段 |
 |---|---|
 | 动能 / 结构信号 | `trend_exhaustion`, `market_structure`, `market_structure_1d`, `market_structure_1w` |
-| 方向共识 | `direction_vote`, `regime_snapshot` |
+| 方向共识 | `direction_vote` |
 | 市场温度 | `temperature`, `market_temperature`, `pin_risk_level` |
 | 箱体信号 | `range_signal` |
-| 关键位推断 | `levels.*`, `key_level_snapshot_v2`, `key_levels`, `rule_supports`, `rule_resistances`, `sniper_entries`, `ladder_plans` |
+| 关键位加工层 | `levels.*`（V1）, `key_levels`, `rule_supports`, `rule_resistances`, `sniper_entries`, `ladder_plans` |
 | 决策引擎 | `execution_plan`, `ai_trader_report`, `final_decision`, `waterfall` |
 | 解读文本 | `cvd_*_trend`, `funding_interpretation`, `taker_dominant`, `oi_trend`, `cvd_divergence`（note 字段），`cps_label`, `price_vs_sth_label` |
 | K 线形态 | `candlestick_pattern_*` |
+
+> **M3 · 1.2.0 调整说明**：原本完全剔除的 `key_level_snapshot_v2` / `regime_snapshot` 现以 **精简的 raw 摘要** 形式提供，对应字段为
+> `snapshot.key_levels_raw`（仅 top12 候选 + 24h 事件，不含 state machine / cascade / signal 等结论）和
+> `snapshot.regime_context`（仅 regime + features，不含 action_weights）。
+> 这两块属于"评分摘要 / 市场状态背景"，不属于"已下结论"——外部 AI 仍可独立判断。
 
 ---
 

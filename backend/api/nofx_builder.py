@@ -4,9 +4,9 @@
   1. 只读内存 state，不触发任何外部请求 / processor 重算
   2. 只返回"原始 + 统计"字段，剔除本项目所有"已下结论"的加工层：
        - trend_exhaustion / market_structure_* / direction_vote
-       - temperature / range_signal / key_level_snapshot_v2
-       - regime_snapshot / execution_plan / ai_trader_report / final_decision
-       - waterfall / levels.sniper_entries / levels.ladder_plans
+       - temperature / range_signal / execution_plan
+       - ai_trader_report / final_decision / waterfall
+       - levels.sniper_entries / levels.ladder_plans
        - cvd_*_trend / funding_interpretation / taker_dominant / oi_trend
        - candlestick_pattern_*
   3. 所有缺失字段返回 None / [] / 0，永远不抛异常
@@ -16,6 +16,13 @@
   - 全部 snake_case
   - 时间戳统一 unix 秒
   - 金额统一 USD
+
+M3 · 1.2.0（v3 评审采纳）—— 新增 3 块给外部 AI 的决策上下文：
+  - `key_levels_raw_candidates`: top12 关键位候选（不含状态机/cascade 等内部加工）
+  - `key_level_recent_events`: 最近 24h 的生命周期事件（按 ts 倒序）
+  - `regime_context`: 市场状态摘要（精简，仅 regime / confidence / 关键特征）
+  这些字段是「评分摘要」+「演化时间线」，不是「已下结论」。
+  外部 AI 仍负责自主判断 action / direction，不会被内部 tier 直接污染。
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 
 
 # ── 工具函数 ────────────────────────────────────────────────
@@ -786,6 +793,140 @@ def _build_news(state: Any) -> dict:
     return out
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3 · R11 · NOFX 1.2.0 新增字段（key levels + regime）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 候选位输出上限（避免 NOFX payload 体积爆炸）
+_NOFX_KL_TOP_N = 12
+_NOFX_KL_EVENT_LOOKBACK_SEC = 86400      # 最近 24h 事件
+_NOFX_KL_EVENTS_MAX = 30                  # 事件总数上限
+
+
+def _build_key_levels_raw(state: Any, now: int) -> Optional[dict]:
+    """组装关键位"候选 + 演化"摘要供外部 AI 独立判断（M3 · R11）。
+
+    设计原则：
+      - 暴露评分摘要 + 证据组 + explain_chips（让外部 AI 知道"为何强"）
+      - 不暴露状态机内部字段（state / break_start_ts / cascade_*）
+      - 不暴露内部 tier 推理过程（contradiction_penalty 仅做透明化提示）
+      - 限定 top12 + 24h 事件 + 30 条上限，控制 payload 体积
+    """
+    snap = getattr(state, "key_level_snapshot_v2", None)
+    if snap is None:
+        return None
+    levels = list(getattr(snap, "levels", None) or [])
+    if not levels:
+        return None
+
+    # top N 按 final_score 降序
+    sorted_levels = sorted(levels, key=lambda l: float(getattr(l, "final_score", 0) or 0), reverse=True)
+    raw_candidates = []
+    for lv in sorted_levels[:_NOFX_KL_TOP_N]:
+        raw_candidates.append({
+            "level_id": getattr(lv, "level_id", "") or "",
+            "price": float(getattr(lv, "price", 0) or 0),
+            "side": getattr(lv, "side", "") or "",
+            "tier": getattr(lv, "strength_tier", "") or "",
+            "s_class": getattr(lv, "s_class", "") or "",
+            "final_score": float(getattr(lv, "final_score", 0) or 0),
+            "confluence_score": float(getattr(lv, "confluence_score", 0) or 0),
+            "evidence_groups": list(getattr(lv, "evidence_groups", None) or []),
+            "independent_group_count": int(getattr(lv, "independent_group_count", 0) or 0),
+            "sources": list(getattr(lv, "sources", None) or [])[:8],
+            "source_count": int(getattr(lv, "source_count", 0) or 0),
+            "explain_chips": list(getattr(lv, "explain_chips", None) or [])[:6],
+            "distance_pct": float(getattr(lv, "distance_pct", 0) or 0),
+            "exchange_count": int(getattr(lv, "exchange_count", 0) or 0),
+            "consensus_multiplier": float(getattr(lv, "consensus_multiplier", 1.0) or 1.0),
+            "dominant_leverage": getattr(lv, "dominant_leverage", "") or "",
+            "leverage_intensity": float(getattr(lv, "leverage_intensity", 0) or 0),
+            "contradiction_penalty": float(getattr(lv, "contradiction_penalty", 0) or 0),
+            "contradiction_reasons": list(getattr(lv, "contradiction_reasons", None) or []),
+            "is_stale": bool(getattr(lv, "is_stale", False)),
+            "primary_source_age_hours": getattr(lv, "primary_source_age_hours", None),
+            "regime_modifier_applied": float(getattr(lv, "regime_modifier_applied", 1.0) or 1.0),
+            "regime_at_score": getattr(lv, "regime_at_score", "") or "",
+            "invalidation_price": getattr(lv, "invalidation_price", None),
+            "invalidation_condition": getattr(lv, "invalidation_condition", "") or "",
+        })
+
+    # 最近 24h lifecycle 事件，跨所有 levels 合并 + 按 ts 倒序
+    cutoff = now - _NOFX_KL_EVENT_LOOKBACK_SEC
+    recent_events: list[dict] = []
+    for lv in levels:
+        for evt in (getattr(lv, "lifecycle_events", None) or []):
+            ts = int(getattr(evt, "ts", 0) or 0)
+            if ts < cutoff:
+                continue
+            recent_events.append({
+                "ts": ts,
+                "level_id": getattr(lv, "level_id", "") or "",
+                "price": float(getattr(lv, "price", 0) or 0),
+                "side": getattr(lv, "side", "") or "",
+                "event_type": getattr(evt, "event_type", "") or "",
+                "detail": getattr(evt, "detail", "") or "",
+                "score_before": float(getattr(evt, "score_before", 0) or 0),
+                "score_after": float(getattr(evt, "score_after", 0) or 0),
+                "tier_before": getattr(evt, "tier_before", "") or "",
+                "tier_after": getattr(evt, "tier_after", "") or "",
+            })
+    recent_events.sort(key=lambda e: e["ts"], reverse=True)
+
+    return {
+        "snapshot_ts": int(getattr(snap, "ts", 0) or 0),
+        "current_price": float(getattr(snap, "current_price", 0) or 0),
+        "atr": float(getattr(snap, "atr", 0) or 0),
+        "raw_candidates": raw_candidates,
+        "recent_events_24h": recent_events[:_NOFX_KL_EVENTS_MAX],
+        "freshness": (
+            {
+                "score": float(getattr(snap.data_freshness, "overall_freshness_score", 100) or 100),
+                "stale_sources": list(getattr(snap.data_freshness, "stale_sources", None) or []),
+                "missing_sources": list(getattr(snap.data_freshness, "missing_sources", None) or []),
+            }
+            if getattr(snap, "data_freshness", None) else None
+        ),
+    }
+
+
+def _build_regime_context(state: Any) -> Optional[dict]:
+    """组装当前市场 regime 上下文（M3 · R11）。
+
+    暴露：
+      - regime / confidence / description_cn（决策上下文）
+      - stable_duration_sec / prev_regime（regime shift 信号）
+      - 关键特征摘要（atr_pct / adx / structure_alignment）
+    不暴露：action_weights（避免污染外部 AI 的 action 选择）
+    """
+    rs = getattr(state, "regime_snapshot", None)
+    if rs is None:
+        return None
+    feats = getattr(rs, "features", None)
+    return {
+        "regime": getattr(rs, "regime", "") or "",
+        "confidence": float(getattr(rs, "confidence", 0) or 0),
+        "description_cn": getattr(rs, "description_cn", "") or "",
+        "ts": int(getattr(rs, "ts", 0) or 0),
+        "prev_regime": getattr(rs, "prev_regime", None),
+        "regime_changed_at": int(getattr(rs, "regime_changed_at", 0) or 0),
+        "stable_duration_sec": int(getattr(rs, "stable_duration_sec", 0) or 0),
+        "features": (
+            {
+                "atr_pct": float(getattr(feats, "atr_pct", 0) or 0),
+                "atr_pct_percentile": float(getattr(feats, "atr_pct_percentile", 0) or 0),
+                "adx": float(getattr(feats, "adx", 0) or 0),
+                "bbw": float(getattr(feats, "bbw", 0) or 0),
+                "trend_slope_pct": float(getattr(feats, "trend_slope_pct", 0) or 0),
+                "cvd_persistence": float(getattr(feats, "cvd_persistence", 0) or 0),
+                "structure_alignment": getattr(feats, "structure_alignment", "") or "",
+                "liq_24h_vs_7d_avg": float(getattr(feats, "liq_24h_vs_7d_avg", 0) or 0),
+            }
+            if feats else None
+        ),
+    }
+
+
 # ── 主入口 ──────────────────────────────────────────────────
 
 def build_nofx_snapshot(
@@ -839,6 +980,9 @@ def build_nofx_snapshot(
         "net_position_td": _build_net_position_and_td(state),
         "macro": _build_macro(state),
         "news": _build_news(state),
+        # M3 · 1.2.0 新增：关键位候选 + 演化 + 市场状态上下文
+        "key_levels_raw": _build_key_levels_raw(state, now),
+        "regime_context": _build_regime_context(state),
     }
 
     # 数据时效自检：每维度最新更新到现在的秒数（None = 该维度缺失）
