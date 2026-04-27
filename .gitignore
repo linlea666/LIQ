@@ -28,3 +28,5 @@ backend/data/roll/
 .cursor/mcp.json
 # P0 · TrendExhaustion 影子日志 / 日报（运行时生成，不进仓）
 backend/logs/
+# 清算地图模块字段调研期 dump（本地保留作 fixture 参考资料，不进仓）
+backend/data/liq_endpoint_dumps/
