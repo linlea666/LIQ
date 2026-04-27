@@ -9,6 +9,8 @@ import type {
   KeyLevelSnapshotV2,
   BullBearLine,
   BreakoutZone,
+  LiqMagnetLevel,
+  DataFreshness,
 } from "@/lib/types";
 import Link from "next/link";
 import { useState, useEffect } from "react";
@@ -80,6 +82,7 @@ export default function KeyLevelView() {
       )}
       {kl.breakout_zone && <BreakoutCard zone={kl.breakout_zone} coin={coin} />}
       <StrongLevelsCard levels={kl.levels} price={price} coin={coin} />
+      <MagnetChannelCard magnets={kl.magnet_levels ?? []} price={price} coin={coin} />
       <PriceRuler levels={kl.levels} price={price} coin={coin} />
       {activeSignals.length > 0 ? (
         <SignalCards signals={activeSignals} coin={coin} />
@@ -102,6 +105,135 @@ export default function KeyLevelView() {
     </div>
   );
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// M1 新增：数据新鲜度状态徽标 + 清算磁铁通道卡片
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function FreshnessIndicator({ df }: { df: DataFreshness | null }) {
+  if (!df) return null;
+  const score = df.overall_freshness_score;
+  // 颜色档位：≥90 绿 / ≥70 黄 / <70 橙
+  const color =
+    score >= 90
+      ? "text-emerald-400 bg-emerald-500/10"
+      : score >= 70
+        ? "text-amber-400 bg-amber-500/10"
+        : "text-orange-400 bg-orange-500/10";
+  const stale = df.stale_sources.length;
+  const missing = df.missing_sources.length;
+  const tooltip =
+    `数据健康度 ${score.toFixed(0)}/100\n` +
+    (stale ? `过期源：${df.stale_sources.join(", ")}\n` : "") +
+    (missing ? `缺失源：${df.missing_sources.join(", ")}` : "");
+  return (
+    <span
+      className={`px-1.5 py-0.5 rounded text-[10px] cursor-help ${color}`}
+      title={tooltip.trim()}
+    >
+      📊 {score.toFixed(0)}/100
+      {(stale > 0 || missing > 0) && (
+        <span className="ml-1 opacity-70">
+          ({stale + missing} 异常)
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MagnetChannelCard({
+  magnets,
+  price,
+  coin,
+}: {
+  magnets: LiqMagnetLevel[];
+  price: number;
+  coin: string;
+}) {
+  if (!magnets || magnets.length === 0) return null;
+
+  const roleConfig: Record<
+    string,
+    { label: string; emoji: string; color: string; bg: string }
+  > = {
+    downside_pain_center: {
+      label: "多头痛点",
+      emoji: "💥",
+      color: "text-rose-300",
+      bg: "bg-rose-500/10 border-rose-500/30",
+    },
+    upside_short_squeeze: {
+      label: "空头痛点",
+      emoji: "🔥",
+      color: "text-orange-300",
+      bg: "bg-orange-500/10 border-orange-500/30",
+    },
+    leverage_magnet: {
+      label: "杠杆磁铁",
+      emoji: "🧲",
+      color: "text-purple-300",
+      bg: "bg-purple-500/10 border-purple-500/30",
+    },
+  };
+
+  return (
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
+          🧲 清算磁铁通道
+        </span>
+        <span className="text-[10px] text-slate-500">
+          独立通道 · 不参与关键位评分
+        </span>
+      </div>
+      <div className="text-[11px] text-slate-500 mb-2">
+        全市场清算痛点位 + 杠杆密度高发带；价格易被磁吸至此，仅作参考。
+      </div>
+      <div className="space-y-1.5">
+        {magnets.slice(0, 6).map((m, i) => {
+          const cfg =
+            roleConfig[m.magnet_role] ?? {
+              label: m.magnet_role,
+              emoji: "🧲",
+              color: "text-slate-300",
+              bg: "bg-slate-500/10 border-slate-500/30",
+            };
+          return (
+            <div
+              key={i}
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded border text-xs ${cfg.bg}`}
+            >
+              <span className="text-base shrink-0">{cfg.emoji}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] ${cfg.color} bg-black/20 shrink-0`}>
+                {cfg.label}
+              </span>
+              <span className="font-mono text-slate-200 shrink-0">
+                {formatPrice(m.price, coin)}
+              </span>
+              <span
+                className={`text-[10px] font-mono shrink-0 ${
+                  m.distance_pct >= 0 ? "text-red-400" : "text-green-400"
+                }`}
+              >
+                {m.distance_pct >= 0 ? "+" : ""}
+                {m.distance_pct.toFixed(2)}%
+              </span>
+              <span className="flex-1 text-[10px] text-slate-400 truncate">
+                {m.note ?? ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {price > 0 && magnets.length > 6 && (
+        <div className="mt-2 text-[10px] text-slate-500 text-center">
+          仅显示距当前价最近的 6 个，共 {magnets.length} 个磁铁
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function StructureSummary({
   kl,
@@ -130,9 +262,12 @@ function StructureSummary({
         <span className="text-xs bg-slate-700/80 text-slate-300 px-2 py-0.5 rounded">
           📍 最近强位
         </span>
-        <span className="text-xs text-slate-500">
-          追踪 {kl.levels.length} 个关键位 · 活跃 {kl.active_count}
-        </span>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <FreshnessIndicator df={kl.data_freshness ?? null} />
+          <span>
+            追踪 {kl.levels.length} 个关键位 · 活跃 {kl.active_count}
+          </span>
+        </div>
       </div>
       <div className="flex gap-6 text-xs text-slate-400">
         {kl.nearest_strong_support && (

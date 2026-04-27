@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from models.key_level import (
     BullBearLine,
     BreakoutZone,
+    DataFreshness,
     FibSnapshot,
     KeyLevelSnapshotV2,
     KeyLevelV2,
@@ -37,6 +38,14 @@ STRENGTH_THRESHOLDS = {
     "A": 45,
     "B": 25,
 }
+
+# M1: 跨所共识 multiplier 上限（避免极端放大）
+# 公式：min(CONSENSUS_MULTIPLIER_CAP, 1.0 + 0.15 × (exchange_count - 1))
+CONSENSUS_MULTIPLIER_CAP = 1.6
+
+# M1: 失效价 ATR 倍数 - 由 strength_tier 决定
+# S 级越强 → 失效阈值越远（市场需更大反向力量才能否定 S 级位）
+INVALIDATION_ATR_MULT = {"S": 2.0, "A": 1.5, "B": 1.0, "C": 0.5}
 
 
 @dataclass
@@ -60,11 +69,19 @@ def score_and_build_snapshot(
     boll_data: dict | None = None,
     boll_4h_data: dict | None = None,
     macd_histogram: float | None = None,
+    freshness: DataFreshness | None = None,
 ) -> KeyLevelSnapshotV2:
-    """主入口：从 DiscoveryResult 生成 KeyLevelSnapshotV2。"""
+    """主入口：从 DiscoveryResult 生成 KeyLevelSnapshotV2。
+
+    M1 新参数：
+      - freshness：DataFreshness（来自 key_level_freshness.compute_freshness(state)）
+        若提供，对每个 level 应用 _apply_freshness_to_level 软衰减（不破坏 tier）。
+    """
     now = int(time.time())
     if current_price <= 0 or atr <= 0:
-        return KeyLevelSnapshotV2(ts=now, current_price=current_price, atr=atr)
+        snap = KeyLevelSnapshotV2(ts=now, current_price=current_price, atr=atr)
+        snap.data_freshness = freshness
+        return snap
 
     candidates = discovery.candidates
 
@@ -93,6 +110,18 @@ def score_and_build_snapshot(
         lv.strength_tier = _calc_tier(lv.final_score)
         lv.category = _classify(lv)
         _update_distance(lv, current_price)
+
+        # M1: 算法化失效价（基于 strength_tier × ATR）
+        inv_price, inv_cond, inv_mult = _calc_invalidation(lv, atr)
+        lv.invalidation_price = inv_price
+        lv.invalidation_condition = inv_cond
+        lv.invalidation_atr_mult = inv_mult
+
+    # M1: 应用数据血统软衰减（不改 tier，只衰减 final_score）
+    if freshness is not None:
+        from processors.key_level_freshness import apply_freshness_to_level
+        for lv in scored_levels:
+            apply_freshness_to_level(lv, freshness)
 
     # 5. 排序：非 idle 优先 → final_score 高 → 距离近
     scored_levels.sort(key=lambda lv: (
@@ -133,7 +162,33 @@ def score_and_build_snapshot(
         daily_strong_resistance=tf_info["daily_res"],
         weekly_strong_support=tf_info["weekly_sup"],
         weekly_strong_resistance=tf_info["weekly_res"],
+        # M1: magnet_levels 由 engine 层在 discover_magnets 之后塞入
+        magnet_levels=[],
+        data_freshness=freshness,
     )
+
+
+def _calc_invalidation(lv: KeyLevelV2, atr: float) -> tuple[float | None, str, float]:
+    """计算算法化失效价 + 条件描述。
+
+    设计：
+      - support: invalidation_price = price - mult × ATR （跌破即失效）
+      - resistance: invalidation_price = price + mult × ATR （突破即失效）
+      - mult 由 strength_tier 决定：S=2.0 / A=1.5 / B=1.0 / C=0.5
+        意义：S 级位需要 2×ATR 的反向力量才被否定（不轻易失效）
+
+    返回：(invalidation_price, condition_label, atr_mult_used)
+    """
+    if atr <= 0 or lv.price <= 0:
+        return None, "", 0.0
+    mult = INVALIDATION_ATR_MULT.get(lv.strength_tier, 1.0)
+    if lv.side == "support":
+        inv = lv.price - mult * atr
+        cond = f"1h 收盘 < ${inv:,.0f}"
+    else:
+        inv = lv.price + mult * atr
+        cond = f"1h 收盘 > ${inv:,.0f}"
+    return round(inv, 2), cond, mult
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -185,6 +240,13 @@ def _score_cluster(
     best_tf = ""
     best_tf_score = 0.0
 
+    # M1: 跨所共识 - 取簇内所有 liq 候选 exchange_count 的最大值
+    # 设计：一根 cluster 只要任一 liq 源（1d/7d/30d）有多所共振，就受益于共识
+    max_exchange_count = 1
+    max_leverage_intensity = 0.0
+    dominant_leverage_label = ""
+    dominant_leverage_usd = 0.0
+
     for cand in cl.candidates:
         dim_weight = DIMENSION_WEIGHTS.get(cand.dimension, 1.0)
         time_decay = _time_decay(cand.data_age_hours)
@@ -200,15 +262,42 @@ def _score_cluster(
             best_tf_score = score
             best_tf = cand.timeframe
 
+        # 提取 cluster 元数据（仅 liq_cluster_* 候选填充）
+        meta = cand.cluster_meta or {}
+        if meta:
+            ec = int(meta.get("exchange_count", 1) or 1)
+            if ec > max_exchange_count:
+                max_exchange_count = ec
+            li = float(meta.get("leverage_intensity", 0.0) or 0.0)
+            usd = float(meta.get("total_usd", 0.0) or 0.0)
+            # 取贡献 USD 最大的簇的 leverage 作主导（按金额加权）
+            if usd > dominant_leverage_usd and meta.get("dominant_leverage"):
+                dominant_leverage_usd = usd
+                dominant_leverage_label = str(meta.get("dominant_leverage") or "")
+                if li > max_leverage_intensity:
+                    max_leverage_intensity = li
+
     # 多维共振奖励：跨 2 个维度 +20%，跨 3 个维度 +40%
     if len(dimensions) >= 3:
         total_score *= 1.4
     elif len(dimensions) >= 2:
         total_score *= 1.2
 
+    # M1: 跨所共识 multiplier（仅当有清算源时生效）
+    consensus_mult = 1.0
+    if max_exchange_count > 1:
+        consensus_mult = min(
+            CONSENSUS_MULTIPLIER_CAP,
+            1.0 + 0.15 * (max_exchange_count - 1),
+        )
+        total_score *= consensus_mult
+
     total_score = min(100, total_score)
 
     note = _generate_note(cl, sources, total_score, price)
+    chips = _build_explain_chips(
+        sources, dimensions, max_exchange_count, dominant_leverage_label,
+    )
 
     return KeyLevelV2(
         price=round(cl.price, 2),
@@ -220,7 +309,82 @@ def _score_cluster(
         first_seen_ts=now,
         last_confirmed_ts=now,
         note=note,
+        # M1 新增字段
+        exchange_count=max_exchange_count,
+        consensus_multiplier=round(consensus_mult, 3),
+        dominant_leverage=dominant_leverage_label,
+        leverage_intensity=round(max_leverage_intensity, 3),
+        explain_chips=chips,
     )
+
+
+def _build_explain_chips(
+    sources: list[str],
+    dimensions: set[str],
+    exchange_count: int,
+    dominant_leverage: str,
+) -> list[str]:
+    """生成"为何重要"白话 chips（前端 chip 渲染）。
+
+    设计：
+      - 每个 chip 是一个独立证据点（≤8 字符）
+      - 顺序：清算 > 微观结构 > 价格结构 > 数学指标 > 共识 > 杠杆主导
+      - 去重 + 截断（最多 6 个，避免 UI 拥挤）
+    """
+    chips: list[str] = []
+
+    # 清算/资金维度的关键信号
+    has_30d = any("30d清算" in s for s in sources)
+    has_7d = any("7d清算" in s for s in sources)
+    has_1d = any("清算" in s and "30d" not in s and "7d" not in s for s in sources)
+    has_max_pain = any("痛点" in s for s in sources)
+    has_footprint_stacked = any("Footprint" in s for s in sources)
+    has_absorption = any("吸收带" in s for s in sources)
+
+    if has_30d:
+        chips.append("30d清算簇")
+    if has_7d:
+        chips.append("7d清算簇")
+    if has_1d:
+        chips.append("1d清算簇")
+    if has_max_pain:
+        chips.append("清算痛点")
+    if has_footprint_stacked:
+        chips.append("Footprint失衡")
+    if has_absorption:
+        chips.append("吸收带")
+
+    # 价格结构
+    if any("VWAP" in s for s in sources):
+        chips.append("VWAP")
+    if any("POC" in s or "HVN" in s for s in sources):
+        chips.append("VP集中区")
+    if any("EMA" in s or "SMA" in s for s in sources):
+        chips.append("均线")
+    if any("Fib" in s or "黄金" in s for s in sources):
+        chips.append("Fib")
+    if any("心理关口" in s or "整数" in s for s in sources):
+        chips.append("心理关口")
+
+    # 共识 / 杠杆
+    if exchange_count >= 3:
+        chips.append(f"{exchange_count}所共振")
+    elif exchange_count == 2:
+        chips.append("2所共振")
+    if dominant_leverage:
+        chips.append(f"{dominant_leverage}x主导")
+
+    # 去重保序，最多 6 个
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in chips:
+        if c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
+        if len(out) >= 6:
+            break
+    return out
 
 
 def _time_decay(age_hours: float) -> float:
@@ -391,6 +555,11 @@ def _merge_with_prev(
                 lv.first_seen_ts = prev.first_seen_ts
                 # Phase 2：bounce_count 从状态机累计，必须从 prev 继承
                 lv.bounce_count = prev.bounce_count
+                lv.fake_break_count = prev.fake_break_count
+                # M1: next_magnet_price / vacuum_gap_pct 由 tracker_v2 在 prev 上计算，
+                # 必须从 prev 继承（每轮 discovery 重新打分会重置这些字段）
+                lv.next_magnet_price = prev.next_magnet_price
+                lv.vacuum_gap_pct = prev.vacuum_gap_pct
                 matched.add(i)
                 break
 

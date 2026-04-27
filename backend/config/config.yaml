@@ -118,6 +118,24 @@ processors:
     cascade_weight_cap_m: 20
     cascade_norm: 600
     snapshot_interval_sec: 7200
+    # ── M1 (V3 准备阶段) 调参说明（仅文档；默认值已在代码 const 中） ──
+    # consensus_multiplier_cap: 1.6
+    #   跨所共识 multiplier 上限（confluence_scoring.CONSENSUS_MULTIPLIER_CAP）
+    #   公式：min(cap, 1.0 + 0.15 × (exchange_count - 1))
+    # invalidation_atr_mult:        # 算法化失效价 ATR 倍数
+    #   S: 2.0
+    #   A: 1.5
+    #   B: 1.0
+    #   C: 0.5
+    # source_ttl_seconds:           # 数据源 TTL（key_level_freshness.SOURCE_TTL）
+    #   liq_map_1d: 600
+    #   liq_map_7d: 3600
+    #   liq_map_30d: 7200
+    #   liq_heatmap_24h: 1200
+    #   liq_max_pain: 600
+    #   footprint_contract: 300
+    #   orderbook_pressure: 90
+    # freshness_decay_factor: 0.85  # 主源 stale 时 final_score × 0.85（不改 tier）
   orderbook:
     whale_threshold_btc: 10
     whale_threshold_eth: 100

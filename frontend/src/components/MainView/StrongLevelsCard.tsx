@@ -425,6 +425,32 @@ function LevelBlock({
         >
           {level.strength_tier}
         </span>
+        {/* M1: 跨所共识徽标（≥2 所共振） */}
+        {typeof level.exchange_count === "number" && level.exchange_count >= 2 && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/15 text-purple-300 shrink-0 cursor-help"
+            title={`${level.exchange_count} 所共振清算簇${
+              level.consensus_multiplier
+                ? `，共识乘子 ×${level.consensus_multiplier.toFixed(2)}`
+                : ""
+            }`}
+          >
+            {level.exchange_count}所
+          </span>
+        )}
+        {/* M1: 数据偏旧灰章 */}
+        {level.is_stale && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-slate-600/30 text-slate-300 shrink-0 cursor-help"
+            title={`主数据源已过期（${
+              typeof level.primary_source_age_hours === "number"
+                ? `${level.primary_source_age_hours.toFixed(1)}h 未更新`
+                : "未知时间未更新"
+            }）·  评分已软衰减`}
+          >
+            ⏳偏旧
+          </span>
+        )}
         {fallbackB && (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-slate-600/30 text-slate-400 shrink-0"
@@ -512,6 +538,29 @@ function LevelBlock({
           </div>
         );
       })()}
+
+      {/* M1: 失效条件 + 真空跨度（合并一行展示） */}
+      {(level.invalidation_condition || level.next_magnet_price) && (
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[10px] text-slate-500">
+          {level.invalidation_condition && (
+            <span
+              className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 cursor-help"
+              title={`若${level.invalidation_condition}则该位失效（基于 ${level.invalidation_atr_mult?.toFixed(1) ?? "?"}× ATR）`}
+            >
+              ⛔ 失效条件：{level.invalidation_condition}
+            </span>
+          )}
+          {level.next_magnet_price && level.vacuum_gap_pct ? (
+            <span
+              className="px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-300 cursor-help"
+              title="破位后价格预计被磁吸到此位；真空跨度越大越危险"
+            >
+              💥 破位磁吸：{formatPrice(level.next_magnet_price, coin)}
+              （真空 {level.vacuum_gap_pct.toFixed(2)}%）
+            </span>
+          ) : null}
+        </div>
+      )}
 
       {/* 价格与当前价关系的迷你刻度（额外视觉锚点） */}
       {price > 0 && (

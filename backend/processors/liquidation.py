@@ -24,6 +24,7 @@ def process_liquidation_map(
     2. 按当前价格分为 above/below
     3. 识别真空区
     4. 计算多空失衡度
+    5. M1：反查 by_exchange 给每个簇标 exchange_count / dominant_exchange / leverage_intensity
     """
     all_short_bands = []
     all_long_bands = []
@@ -40,6 +41,13 @@ def process_liquidation_map(
         c.distance_pct = round((c.price_center - current_price) / current_price * 100, 2)
     for c in clusters_below:
         c.distance_pct = round((current_price - c.price_center) / current_price * 100, 2)
+
+    # ── M1: 跨所共识标记 ────────────────────────────────────
+    # 反查 liq_map.by_exchange，给每个 cluster 标记贡献交易所数 / 主导所
+    if liq_map.by_exchange:
+        bucket_width = _auto_bucket_width(current_price)
+        for c in clusters_above + clusters_below:
+            _annotate_cluster_consensus(c, liq_map.by_exchange, bucket_width)
 
     clusters_above.sort(key=lambda c: c.distance_pct)
     clusters_below.sort(key=lambda c: c.distance_pct)
@@ -119,6 +127,12 @@ def _find_clusters(
         if b["total_usd"] < min_usd:
             continue
         dom_lev = max(b["leverages"], key=b["leverages"].get) if b["leverages"] else ""
+        # M1: 主导杠杆 USD 占比（leverage_intensity 0-1）
+        # 例：bucket 内 50x 占 1.4M / total 2.0M → intensity=0.70（高度集中，破位易加速插针）
+        dom_lev_usd = b["leverages"].get(dom_lev, 0) if dom_lev else 0
+        leverage_intensity = (
+            round(dom_lev_usd / b["total_usd"], 3) if b["total_usd"] > 0 else 0.0
+        )
         clusters.append(LiqCluster(
             price_center=key,
             price_from=b["price_min"],
@@ -126,10 +140,53 @@ def _find_clusters(
             total_usd=round(b["total_usd"], 2),
             side=side,
             dominant_leverage=dom_lev,
+            leverage_intensity=leverage_intensity,
         ))
 
     clusters.sort(key=lambda c: c.total_usd, reverse=True)
     return clusters
+
+
+def _annotate_cluster_consensus(
+    cluster: LiqCluster,
+    by_exchange: dict[str, dict[str, float]],
+    bucket_width: float,
+) -> None:
+    """反查 by_exchange，给 cluster 标记 exchange_count / dominant_exchange。
+
+    by_exchange 结构: {exName: {price_str: usd_total, ...}, ...}
+    复用 _find_clusters 的同一桶宽度，确保对齐。
+
+    实现思路：
+      对每个交易所，统计落在 cluster.price_from~price_to 范围内的 USD 总和；
+      贡献 USD > 0 即视为该所"参与了该簇"。
+    """
+    exchange_usd: dict[str, float] = {}
+    # 半桶容差：避免边界 band 漏归（如 bucket=100、cluster.price_from=64950，
+    # by_exchange 里 64980 这种价格仍能算入），同时不会跨入相邻 bucket（间隔 >= bucket_width）。
+    half = bucket_width / 2
+    lo = cluster.price_from - half
+    hi = cluster.price_to + half
+
+    for ex_name, price_map in by_exchange.items():
+        if not isinstance(price_map, dict):
+            continue
+        ex_total = 0.0
+        for price_str, usd in price_map.items():
+            try:
+                p = float(price_str)
+            except (TypeError, ValueError):
+                continue
+            if lo <= p <= hi:
+                ex_total += float(usd or 0)
+        if ex_total > 0:
+            exchange_usd[ex_name] = ex_total
+
+    if not exchange_usd:
+        # 边界场景：cluster 反查无所贡献（不该发生但留保护）→ 保持默认 1
+        return
+    cluster.exchange_count = len(exchange_usd)
+    cluster.dominant_exchange = max(exchange_usd, key=exchange_usd.get)
 
 
 def _find_vacuum_zones(

@@ -24,7 +24,15 @@ class LiqLeverageGroup(BaseModel):
 
 
 class LiqCluster(BaseModel):
-    """清算密集区（跨杠杆聚合后）"""
+    """清算密集区（跨杠杆聚合后）
+
+    M1 扩展（V3 关键位输入）：
+    - exchange_count：贡献该价位的交易所数量（反查 LiquidationMap.by_exchange 得出）
+      用于「跨所共识 multiplier」：单所偶发簇 vs 多所共振簇的可信度差异巨大。
+    - dominant_exchange：贡献 USD 最大的交易所名称（仅展示用）
+    - leverage_intensity：该簇内主导杠杆 USD 占比（0-1），用于 cascade 级联强度判断
+    所有字段对旧消费者向后兼容（默认值），不会破坏现有 process_liquidation_map 流水线。
+    """
     price_center: float
     price_from: float
     price_to: float
@@ -32,6 +40,10 @@ class LiqCluster(BaseModel):
     side: str  # "long" | "short" — 指会被清算的方向
     dominant_leverage: str = ""
     distance_pct: float = 0
+    # ── M1 新增 ─────────────────────────────────────────────────
+    exchange_count: int = 1           # 1=单所偶发；≥3=多所共振强簇
+    dominant_exchange: str = ""       # 贡献 USD 最大所
+    leverage_intensity: float = 0.0   # 主导杠杆 USD / total_usd（0-1）
 
 
 class VacuumZone(BaseModel):

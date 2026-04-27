@@ -42,7 +42,7 @@ def fmt_usd_cn(usd: float) -> str:
     return "0"
 from models.liquidation import LiquidationMap
 from models.market import CandleData, VolumeProfileData
-from models.market_action import AbsorptionSnapshot
+from models.market_action import AbsorptionSnapshot, FootprintSnapshot
 from processors.ta_core import (
     BMSAResult,
     FibLevel,
@@ -188,6 +188,11 @@ class RawCandidate:
     base_score: float = 0     # 维度内基础评分 (0-50)
     timeframe: str = ""        # "1H"/"4H"/"1D"/"1W"
     data_age_hours: float = 0  # 数据新鲜度（小时）
+    # ── M1 新增：簇元数据透传（仅 capital_flow 清算簇填充） ──
+    # 设计目的：把 LiqCluster.exchange_count / leverage_intensity / dominant_leverage
+    # 透传到 _score_cluster，使共识 multiplier / explain_chips 能正确生成。
+    # 设为 dict 而非独立字段：避免 RawCandidate 持续膨胀，扩展性好。
+    cluster_meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -213,8 +218,10 @@ def discover_levels(
     candles_1w: list[CandleData] | None = None,
     liq_map: LiquidationMap | None = None,
     liq_map_7d: LiquidationMap | None = None,
+    liq_map_30d: LiquidationMap | None = None,
     vp: VolumeProfileData | None = None,
     absorption: AbsorptionSnapshot | None = None,
+    footprint_snapshot: FootprintSnapshot | None = None,
     ema_daily: dict[int, float] | None = None,
     sma200_daily: float | None = None,
     boll_data: dict | None = None,
@@ -250,8 +257,8 @@ def discover_levels(
     # ── 维度 C: 资金与仓位 ──
     _discover_capital_flow(
         cands, current_price, atr,
-        liq_map, liq_map_7d,
-        vp, absorption, vwap,
+        liq_map, liq_map_7d, liq_map_30d,
+        vp, absorption, footprint_snapshot, vwap,
         cycle_position,
         oi_history, candles_1h,
     )
@@ -532,14 +539,31 @@ def _discover_math_indicators(
 # 维度 C: 资金与仓位
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _liq_cluster_meta(c) -> dict:
+    """提取 LiqCluster 的元数据（透传到 _score_cluster 用）。
+
+    M1 关键：把 cluster.exchange_count / leverage_intensity / dominant_leverage
+    挂到 RawCandidate.cluster_meta，使 confluence_scoring 能算共识 multiplier。
+    """
+    return {
+        "exchange_count": int(getattr(c, "exchange_count", 1) or 1),
+        "dominant_exchange": getattr(c, "dominant_exchange", "") or "",
+        "dominant_leverage": getattr(c, "dominant_leverage", "") or "",
+        "leverage_intensity": float(getattr(c, "leverage_intensity", 0.0) or 0.0),
+        "total_usd": float(getattr(c, "total_usd", 0) or 0),
+    }
+
+
 def _discover_capital_flow(
     cands: list[RawCandidate],
     price: float,
     atr: float,
     liq_map: LiquidationMap | None,
     liq_map_7d: LiquidationMap | None,
+    liq_map_30d: LiquidationMap | None,
     vp: VolumeProfileData | None,
     absorption: AbsorptionSnapshot | None,
+    footprint_snapshot: FootprintSnapshot | None,
     vwap: float,
     cycle_position: CyclePositionData | None,
     oi_history: list[dict] | None = None,
@@ -557,6 +581,7 @@ def _discover_capital_flow(
                 source=f"{c.dominant_leverage}x多头清算{fmt_usd_cn(c.total_usd)}",
                 source_tag="liq_cluster_below_1d",
                 base_score=score, timeframe="1D", data_age_hours=0,
+                cluster_meta=_liq_cluster_meta(c),
             ))
         for c in liq_map.clusters_above:
             if c.distance_pct > 15:
@@ -568,6 +593,7 @@ def _discover_capital_flow(
                 source=f"{c.dominant_leverage}x空头清算{fmt_usd_cn(c.total_usd)}",
                 source_tag="liq_cluster_above_1d",
                 base_score=score, timeframe="1D", data_age_hours=0,
+                cluster_meta=_liq_cluster_meta(c),
             ))
 
     # 清算簇（7d — 远距覆盖，较低权重，各方向最多 6 个）
@@ -591,6 +617,7 @@ def _discover_capital_flow(
                 source_tag="liq_cluster_below_7d",
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
+                cluster_meta=_liq_cluster_meta(c),
             ))
             added_below += 1
         above_sorted = sorted(
@@ -610,8 +637,57 @@ def _discover_capital_flow(
                 source_tag="liq_cluster_above_7d",
                 base_score=min(c.total_usd / 1e6, 25) * 0.7,
                 timeframe="1D", data_age_hours=72,
+                cluster_meta=_liq_cluster_meta(c),
             ))
             added_above += 1
+
+    # ── M1 新增：清算簇（30d — 超远距宏观结构位，最低权重） ──────
+    # 距离窗 8-30%（不与 1d 0-15% / 7d 5-20% 冲突），各方向最多 4 个，base × 0.5
+    # 设计依据：30d 数据反映"长期累积清算筹码"，是潜在的强结构位（如周线、月线锚点），
+    # 但因数据老（720h），time_decay 会自然衰减到 0.4×；这里再叠加 base × 0.5 避免污染评分
+    _MAX_30D_LIQ_PER_SIDE = 4
+    if liq_map_30d:
+        existing_prices_2 = {round(c.price, -1) for c in cands}
+        below_30d = sorted(
+            [c for c in liq_map_30d.clusters_below if 8 <= c.distance_pct <= 30],
+            key=lambda c: c.total_usd, reverse=True,
+        )
+        added_below_30d = 0
+        for c in below_30d:
+            if added_below_30d >= _MAX_30D_LIQ_PER_SIDE:
+                break
+            if round(c.price_from, -1) in existing_prices_2:
+                continue
+            cands.append(RawCandidate(
+                price=c.price_from, side="support",
+                dimension="capital_flow",
+                source=f"30d清算簇{fmt_usd_cn(c.total_usd)}",
+                source_tag="liq_cluster_below_30d",
+                base_score=min(c.total_usd / 1e6, 20) * 0.5,
+                timeframe="1W", data_age_hours=720,
+                cluster_meta=_liq_cluster_meta(c),
+            ))
+            added_below_30d += 1
+        above_30d = sorted(
+            [c for c in liq_map_30d.clusters_above if 8 <= c.distance_pct <= 30],
+            key=lambda c: c.total_usd, reverse=True,
+        )
+        added_above_30d = 0
+        for c in above_30d:
+            if added_above_30d >= _MAX_30D_LIQ_PER_SIDE:
+                break
+            if round(c.price_to, -1) in existing_prices_2:
+                continue
+            cands.append(RawCandidate(
+                price=c.price_to, side="resistance",
+                dimension="capital_flow",
+                source=f"30d清算簇{fmt_usd_cn(c.total_usd)}",
+                source_tag="liq_cluster_above_30d",
+                base_score=min(c.total_usd / 1e6, 20) * 0.5,
+                timeframe="1W", data_age_hours=720,
+                cluster_meta=_liq_cluster_meta(c),
+            ))
+            added_above_30d += 1
 
     # Volume Profile POC + VA
     if vp:
@@ -748,3 +824,67 @@ def _discover_capital_flow(
                 base_score=min(abs(change_pct) * 2, 30), timeframe="1H",
                 data_age_hours=0,
             ))
+
+    # ── M1 新增：Footprint Stacked Imbalance 候选 ──────────────────
+    # 数据源：footprint_snapshot.contract_latest.top_imbalance_zones（已是该 bar 内
+    # 强失衡价位 ratio>3）。stacked_buy → support；stacked_sell → resistance。
+    # 设计：
+    #   - 仅取 contract（合约更代表杠杆资金行为；spot 走 absorption 通道）
+    #   - 取 latest + prev 两根 bar，去重合并（防止单 bar 噪声）
+    #   - base_score = min(volume_ratio×8, 22)；ATR 自适应距离过滤（|d| ≤ 5×ATR）
+    #   - data_age_hours：latest=0.25h，prev=0.5h（保守按 15min bar）
+    if footprint_snapshot is not None and price > 0:
+        atr_safe = atr if atr > 0 else price * 0.005
+        max_dist = atr_safe * 5  # 5×ATR：约 1-3% 价格范围
+
+        seen_fp_prices: set[float] = set()
+        for bar_attr, age_hours in (
+            ("contract_latest", 0.25),
+            ("contract_prev", 0.50),
+        ):
+            bar = getattr(footprint_snapshot, bar_attr, None)
+            if not bar or not getattr(bar, "top_imbalance_zones", None):
+                continue
+            for z in bar.top_imbalance_zones[:5]:  # 每 bar 至多 5 个
+                z_price = z.get("price") or 0
+                z_side_raw = (z.get("side") or "").lower()
+                ratio = z.get("ratio") or 0
+                if z_price <= 0 or ratio <= 0:
+                    continue
+                if abs(z_price - price) > max_dist:
+                    continue
+                # 去重：同一价格 ±0.3×ATR 视为同一带
+                bucket = round(z_price / max(atr_safe * 0.3, 1), 2)
+                if bucket in seen_fp_prices:
+                    continue
+                seen_fp_prices.add(bucket)
+
+                if "buy" in z_side_raw:
+                    cand_side = "support"
+                    side_label = "买盘失衡"
+                elif "sell" in z_side_raw:
+                    cand_side = "resistance"
+                    side_label = "卖盘失衡"
+                else:
+                    continue  # 未知 side 跳过
+
+                # 修正：失衡带方向应与价格相对位置一致（防止 stacked_buy 出现在价格
+                # 上方造成"上方支撑"语义错误 — 这种情况通常是大单被吃后撤退迹象，归到
+                # 反方向作 resistance 更合理）
+                if cand_side == "support" and z_price > price:
+                    cand_side = "resistance"
+                    side_label = "买盘被吸收"
+                elif cand_side == "resistance" and z_price < price:
+                    cand_side = "support"
+                    side_label = "卖盘被吸收"
+
+                cands.append(RawCandidate(
+                    price=round(z_price, 2),
+                    side=cand_side,
+                    dimension="capital_flow",
+                    source=f"Footprint{side_label}(×{ratio:.1f})",
+                    source_tag="footprint_stacked",
+                    base_score=min(ratio * 4, 22),
+                    timeframe="1H",
+                    data_age_hours=age_hours,
+                ))

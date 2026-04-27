@@ -673,6 +673,47 @@ export interface KeyLevelV2 {
   // Commit 4: 质量标注（主动吸筹 / 被动触发 · 三步确认）
   bounce_quality?: "proactive" | "passive" | "";
   breakout_stage?: 0 | 1 | 2 | 3;
+  // 假突破反转累计
+  fake_break_count?: number;
+
+  // ── M1（V3 准备阶段）— 多周期清算 + 算法化失效价 + 数据血统 ──
+  // 全部 optional，向后兼容
+  exchange_count?: number;            // 跨所共振数（来自 LiqCluster.exchange_count，max）
+  consensus_multiplier?: number;      // 实际作用于评分的共识乘子（0.85-1.6）
+  dominant_leverage?: string;         // 主导杠杆（如 "50x"）
+  leverage_intensity?: number;        // 主导杠杆 USD 占比（0-1）
+
+  invalidation_price?: number | null; // 算法化失效价
+  invalidation_condition?: string;    // "1h 收盘 < $63,000"
+  invalidation_atr_mult?: number;     // 计算时使用的 ATR 倍数
+
+  next_magnet_price?: number | null;  // 破位后的下一个磁铁价位
+  vacuum_gap_pct?: number;            // 当前位到下一磁铁的真空跨度（%）
+
+  primary_source_age_hours?: number | null; // 主源年龄（小时）
+  is_stale?: boolean;                 // 主源是否过期；UI 据此显示 "⏳ 数据偏旧"
+
+  explain_chips?: string[];           // 白话证据芯片（"7d清算簇"、"3所共振"…）
+}
+
+// M1 新增：清算磁铁通道（独立列表，不参与 levels 评分）
+export interface LiqMagnetLevel {
+  price: number;
+  magnet_role: "downside_pain_center" | "upside_short_squeeze" | "leverage_magnet" | string;
+  source: "max_pain_long" | "max_pain_short" | "heatmap_top_density" | string;
+  usd: number;
+  distance_pct: number;
+  leverage_hint?: string;
+  note?: string;
+}
+
+// M1 新增：数据新鲜度元信息
+export interface DataFreshness {
+  ts: number;
+  sources_age_seconds: Record<string, number>;
+  overall_freshness_score: number;
+  stale_sources: string[];
+  missing_sources: string[];
 }
 
 export interface BullBearLine {
@@ -725,6 +766,9 @@ export interface KeyLevelSnapshotV2 {
   daily_strong_resistance: string | null;
   weekly_strong_support: string | null;
   weekly_strong_resistance: string | null;
+  // ── M1 新增：磁铁通道 + 数据新鲜度 ──
+  magnet_levels?: LiqMagnetLevel[];
+  data_freshness?: DataFreshness | null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -711,6 +711,9 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
         lv.cascade_risk = 0
         lv.cascade_layers = 0
         lv.cascade_total_usd = 0
+        # M1: 无 cascade 也清空 magnet/vacuum
+        lv.next_magnet_price = None
+        lv.vacuum_gap_pct = 0.0
         return
 
     lv.cascade_layers = min(len(clusters), 5)
@@ -731,6 +734,16 @@ def _calc_cascade_risk(lv: KeyLevelV2, liq_map: LiquidationMap, price: float, cf
     dist_from_price = abs(lv.price - price) / max(price, 1) * 100
     dist_decay = 1.0 / (1.0 + dist_from_price / 3.0)
     lv.cascade_risk = round(min(1.0, risk_score / norm * dist_decay), 2)
+
+    # ── M1 新增：破位后的下一个磁铁价位 + 真空跨度 ──────────────────
+    # 设计：破位后价格会被最近的清算簇磁吸；该簇就是 next_magnet_price
+    # vacuum_gap_pct = 当前 level.price → next_magnet_price 之间的价格间距 %
+    # 用途：UI 展示"破位后预计下探/上探到 X，真空跨度 Y%（建议止损放在跨度外）"
+    nearest = clusters[0]
+    lv.next_magnet_price = round(nearest.price_center, 2)
+    lv.vacuum_gap_pct = round(
+        abs(lv.price - nearest.price_center) / max(price, 1) * 100, 2,
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

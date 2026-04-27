@@ -1699,6 +1699,7 @@ class Engine:
         state = self._states[ccy]
         liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
         liq_map_7d = state.liq_maps.get("7d")
+        liq_map_30d = state.liq_maps.get("30d")
         vwap = state.vp.vwap if state.vp else 0
 
         oi_hist = None
@@ -1714,6 +1715,19 @@ class Engine:
             current_price=price,
         )
 
+        # M1: Footprint stacked imbalance 候选（来自 contract latest/prev top_imbalance_zones）
+        # 复用 footprint_analyzer.build_snapshot（已在 facts_collector 中使用，是成熟代码路径）
+        from processors.market_action.footprint_analyzer import build_snapshot as _build_fp_snap
+        footprint_snapshot = _build_fp_snap(
+            contract_bars=list(getattr(state, "footprint_contract", []) or []),
+            spot_bars=list(getattr(state, "footprint_spot", []) or []),
+            coin=ccy,
+        )
+
+        # M1: 数据血统/新鲜度 - 用于 score_and_build_snapshot 末段软衰减
+        from processors.key_level_freshness import compute_freshness
+        freshness = compute_freshness(state)
+
         discovery = discover_levels(
             current_price=price,
             atr=state.atr,
@@ -1722,8 +1736,10 @@ class Engine:
             candles_1w=state.candles_weekly or None,
             liq_map=liq_map,
             liq_map_7d=liq_map_7d,
+            liq_map_30d=liq_map_30d,
             vp=state.vp,
             absorption=absorption,
+            footprint_snapshot=footprint_snapshot,
             ema_daily=state.ema_daily if state.ema_daily else None,
             sma200_daily=state.sma200_daily_cg,
             boll_data=state.boll_data,
@@ -1738,7 +1754,7 @@ class Engine:
         if state.macd_data:
             macd_hist = state.macd_data.get("histogram")
 
-        return score_and_build_snapshot(
+        snapshot = score_and_build_snapshot(
             discovery=discovery,
             current_price=price,
             atr=state.atr,
@@ -1746,7 +1762,23 @@ class Engine:
             boll_data=state.boll_data,
             boll_4h_data=state.boll_4h_data,
             macd_histogram=macd_hist,
+            freshness=freshness,
         )
+
+        # M1: 独立磁铁通道（max_pain + heatmap top density）
+        # 不参与 levels 评分，仅作 UI/AI 参考；与已有 level 距离过近时自动跳过
+        from processors.key_level_magnets import discover_magnets
+        liq_max_pain_24h = (state.liq_max_pain or {}).get("24h")
+        liq_heatmap_24h = (state.liq_heatmaps or {}).get("24h")
+        snapshot.magnet_levels = discover_magnets(
+            liq_max_pain_24h=liq_max_pain_24h,
+            liq_heatmap_24h=liq_heatmap_24h,
+            levels=snapshot.levels,
+            current_price=price,
+            atr=state.atr,
+        )
+
+        return snapshot
 
     # ── 推送循环 ──
 

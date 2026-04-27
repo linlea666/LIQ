@@ -102,6 +102,83 @@ class KeyLevelV2(BaseModel):
     # - fake_break_count：本 level 历史被假突破次数；多次假破 = 防守强度高
     fake_break_count: int = 0
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M1（V3 准备阶段）— 多周期清算 + 算法化失效价 + 数据血统
+    # 全部 Optional/默认值，向后兼容（旧 snapshot 反序列化无破坏）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 跨所共识：从 cluster.exchange_count 派生（1=单所偶发，≥3=多所共振强簇）
+    exchange_count: int = 0
+    consensus_multiplier: float = 1.0    # 实际作用于 confluence_score 的共识乘子（0.85-1.6）
+    dominant_leverage: str = ""          # 主导杠杆（如 "50x"），来自簇内
+    leverage_intensity: float = 0.0      # 主导杠杆 USD 占比（0-1）
+
+    # 算法化失效价（替代用户拍脑袋设止损）
+    # 计算规则：support→price - mult×ATR / resistance→price + mult×ATR
+    # mult 由 strength_tier 决定：S=2.0 / A=1.5 / B=1.0 / C=0.5
+    invalidation_price: Optional[float] = None
+    invalidation_condition: str = ""     # 中文条件描述（"1h 收盘 < $63,000"）
+    invalidation_atr_mult: float = 0.0   # 计算时使用的 ATR 倍数（透明化）
+
+    # 级联破位后的下一个磁铁价位（M1 仅展示用，不参与 tier）
+    next_magnet_price: Optional[float] = None
+    vacuum_gap_pct: float = 0.0          # 当前位到下一磁铁的真空跨度（%），越大越危险
+
+    # 数据血统/新鲜度（DataFreshness 在 KeyLevelSnapshotV2 上整体计算 + 这里挂主源年龄）
+    # 目的：高分关键位若主源已过期，前端可显示"⏳ 数据偏旧"灰章
+    primary_source_age_hours: Optional[float] = None
+    is_stale: bool = False               # 主源 age > TTL 时为 True；UI 据此降权显示
+
+    # 解释芯片（前端 chip 渲染：直接 join 即得"为何重要"白话）
+    # 例: ["7d清算簇", "3所共振", "50x主导", "VWAP叠加", "EMA200"]
+    explain_chips: list[str] = Field(default_factory=list)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M1 新增：清算磁铁通道（与 levels 平行，独立显示）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class LiqMagnetLevel(BaseModel):
+    """清算磁铁/痛点价位 — 独立通道，不参与 strength_tier 评分。
+
+    设计原因（V3 评审采纳）：
+    - max_pain / 高杠杆密度带不应直接进 candidate 池升 S
+      （单源单证据 → 容易制造伪 S 信号、稀释关键位密度）
+    - 但它们对"价格磁铁"判断很有价值：用户应能直观看到"这里有大量被吸引的清算筹码"
+    - 故独立成"磁铁通道"，前端用紫色徽标 💥 显示
+    - 仅当 magnet 价位与某 level 距离 > 0.5×ATR 时显示（避免与 level 重复）
+    """
+    price: float
+    magnet_role: str  # "downside_pain_center" / "upside_short_squeeze" / "leverage_magnet"
+    source: str       # "max_pain_long" / "max_pain_short" / "heatmap_top_density"
+    usd: float = 0    # 该位关联的清算 USD（max_pain.long_pain_usd 或 heatmap intensity）
+    distance_pct: float = 0
+    leverage_hint: str = ""  # "50x主导" 或 "" （来自 heatmap）
+    note: str = ""           # 白话说明（"全市场多头痛点，下破后急跌磁吸点"）
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M1 新增：数据新鲜度元信息（snapshot 级别）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class DataFreshness(BaseModel):
+    """快照级数据血统/新鲜度元信息。
+
+    用途：
+    - 让 AI / 前端 / 风控感知"这次评分基于哪些源、哪些过期了"
+    - 前端可显示"📊 8/9 源新鲜（footprint 已 8 分钟未更新）"
+    - confluence_scoring 对 stale 的 level 软降权 0.6-1.0×
+
+    sources_age_seconds：{源名: 距今秒数}；缺失源不出现在该 dict
+    overall_freshness_score：综合新鲜度（0-100），= 100 × (1 - stale_count / total_count)
+    stale_sources：超过该源 TTL 的列表
+    missing_sources：本应有但实际为空的源
+    """
+    ts: int = 0  # 本次计算时间戳
+    sources_age_seconds: dict[str, float] = Field(default_factory=dict)
+    overall_freshness_score: float = 100.0
+    stale_sources: list[str] = Field(default_factory=list)
+    missing_sources: list[str] = Field(default_factory=list)
+
 
 class BullBearLine(BaseModel):
     """多空分界线（独立展示区域）"""
@@ -165,3 +242,10 @@ class KeyLevelSnapshotV2(BaseModel):
     daily_strong_resistance: Optional[str] = None
     weekly_strong_support: Optional[str] = None
     weekly_strong_resistance: Optional[str] = None
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M1（V3 准备阶段）— 磁铁通道 + 数据血统
+    # 全部 Optional/默认值，向后兼容
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    magnet_levels: list[LiqMagnetLevel] = Field(default_factory=list)
+    data_freshness: Optional[DataFreshness] = None
