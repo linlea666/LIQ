@@ -502,6 +502,25 @@ class CoinglassSource(DataSource):
             params["end_time"] = end_time
         return await self._request("/api/futures/orderbook/large-limit-order-history", params)
 
+    async def fetch_spot_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
+        """现货大单（holding 中）。
+        用途：判定 zone 价区是否有"真买卖家"——区分现货真支撑 vs 合约清算磁铁。
+        probe 验证：BTC 返回 ~190 条 holding，量级与合约大单接近且位置互补。
+        """
+        return await self._request("/api/spot/orderbook/large-limit-order", {
+            "exchange": exchange, "symbol": symbol,
+        }, cache_ttl=60)
+
+    async def fetch_spot_large_orders_history(self, exchange: str, symbol: str,
+                                              start_time: str = "",
+                                              end_time: str = "") -> Optional[list]:
+        params: dict = {"exchange": exchange, "symbol": symbol}
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time
+        return await self._request("/api/spot/orderbook/large-limit-order-history", params)
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Futures > Taker Buy/Sell & CVD
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

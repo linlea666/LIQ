@@ -474,6 +474,104 @@ class TestAugmentTolerance:
 
 
 # ════════════════════════════════════════════════════════════════════
+# M2.5 — 现货 vs 合约（spot augment + trust_score）
+# ════════════════════════════════════════════════════════════════════
+class TestSpotConfluenceAndTrust:
+    """诉求"现货=真支撑、合约=清算磁铁"落地：
+    - has_spot_confluence + spot_large_order_ids
+    - trust_score 阶梯（base 0.50 / +0.25 spot / +0.15 多所 / +0.10 持续）
+    """
+
+    def _make_zone(self, price_low: float, price_high: float, side: str = "ask",
+                   persistence: float = 0.0, exchange_count: int = 1) -> WallZone:
+        return WallZone(
+            side=side, price_low=price_low, price_high=price_high,
+            price_mid=(price_low + price_high) / 2,
+            peak_price=(price_low + price_high) / 2,
+            distance_pct=1.0,
+            current_usd=15_000_000, max_usd_1h=15_000_000, avg_usd_1h=15_000_000,
+            bin_count=2, seen_count=12, visible_minutes=55,
+            persistence_score=persistence, trend="stable",
+            source="depth_only", exchange_count=exchange_count,
+        )
+
+    def _make_lo(self, lid: int, price: float, side: str, exchange: str = "Binance") -> LargeOrderLifecycle:
+        return LargeOrderLifecycle(
+            id=lid, side=side, limit_price=price,
+            start_time_ms=1700_000_000_000,
+            start_quantity=20.0, current_quantity=20.0,
+            start_usd_value=1_500_000, current_usd_value=1_500_000,
+            executed_volume=0, executed_usd_value=0,
+            trade_count=0, state="holding", exchange_name=exchange,
+        )
+
+    def test_spot_augment_marks_confluence(self):
+        """现货大单价位落入 zone → has_spot_confluence=True + spot_large_order_ids 填充。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_large_orders
+        zones = [self._make_zone(75_000, 75_010, "bid")]
+        spot_los = [self._make_lo(101, 75_005, "bid")]
+        _augment_zones_with_spot_large_orders(zones, spot_los, ENGINE_DEFAULTS)
+        assert zones[0].has_spot_confluence is True
+        assert zones[0].spot_large_order_ids == [101]
+
+    def test_spot_augment_uses_tolerance(self):
+        """现货大单 $75,000 vs zone $75,010-50 差 10 USD → 容差匹配应成功。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_large_orders
+        zones = [self._make_zone(75_010, 75_050, "bid")]
+        spot_los = [self._make_lo(102, 75_000, "bid")]   # 差 10 USD
+        _augment_zones_with_spot_large_orders(zones, spot_los, ENGINE_DEFAULTS)
+        # tol = max(75030 × 0.001, 5) = max(75.03, 5) = 75 USD → 10 USD 错位匹配上
+        assert zones[0].has_spot_confluence is True
+
+    def test_spot_augment_wrong_side_not_matched(self):
+        """卖墙不应匹配买方现货大单。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_large_orders
+        zones = [self._make_zone(77_000, 77_050, "ask")]
+        spot_los = [self._make_lo(103, 77_020, "bid")]
+        _augment_zones_with_spot_large_orders(zones, spot_los, ENGINE_DEFAULTS)
+        assert zones[0].has_spot_confluence is False
+        assert zones[0].spot_large_order_ids == []
+
+    def test_trust_score_base_only(self):
+        """无任何加分 → 0.50 base。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.3, exchange_count=1)
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.50)
+
+    def test_trust_score_with_spot_confluence(self):
+        """+ spot 共振 → 0.50 + 0.25 = 0.75。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.3, exchange_count=1)
+        z.has_spot_confluence = True
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.75)
+
+    def test_trust_score_full_quad(self):
+        """spot + 多所 + 持续 → 0.50 + 0.25 + 0.15 + 0.10 = 1.00（满分真支撑）。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=3)
+        z.has_spot_confluence = True
+        score = _compute_trust_score(z, ENGINE_DEFAULTS)
+        assert score == pytest.approx(1.00)
+
+    def test_trust_score_clamped_to_one(self):
+        """即使加分超 1.0，也 clamp 到 1.0（边界保护）。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        cfg = {**ENGINE_DEFAULTS, "trust_bonus_spot_confluence": 0.50,
+               "trust_bonus_multi_exchange": 0.40, "trust_bonus_persistent": 0.30}
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=3)
+        z.has_spot_confluence = True
+        score = _compute_trust_score(z, cfg)
+        assert score == 1.0
+
+    def test_trust_score_only_persistence(self):
+        """持久但无 spot/多所 → base 0.50 + 持续 0.10 = 0.60（仍属"普通"档）。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=1)
+        # has_spot_confluence 默认 False
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.60)
+
+
+# ════════════════════════════════════════════════════════════════════
 # M1 — Warming
 # ════════════════════════════════════════════════════════════════════
 class TestWarming:

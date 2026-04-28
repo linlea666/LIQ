@@ -1205,6 +1205,10 @@ export interface WallZone {
   source: WallZoneSource;
   exchange_count: number;
   large_order_ids: number[];
+  /** M2.5：现货 vs 合约 区分 */
+  has_spot_confluence: boolean;
+  spot_large_order_ids: number[];
+  trust_score: number;            // 0-1：≥0.85 真支撑/真阻力 / ≥0.65 高可信 / ≥0.5 普通
   status: WallZoneStatus;
   wall_consumed_confidence: number;
   wall_removal_risk: number;

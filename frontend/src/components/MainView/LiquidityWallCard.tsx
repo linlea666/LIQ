@@ -449,14 +449,37 @@ function ZoneRow({
         <span className={`text-[10px] cursor-help ${trend.color}`} title={trend.hint}>
           {trend.icon}
         </span>
+        {/* M2.5：trust_score 阶梯（合约 vs 现货 vs 双源） */}
+        {zone.trust_score >= 0.85 ? (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-amber-400/30 text-amber-200 font-semibold"
+            title={`真支撑/阻力（trust ${Math.round(zone.trust_score * 100)}%）：现货+合约双源 + 持续 + 多所`}
+          >
+            💎 {zone.side === "ask" ? "真阻力" : "真支撑"}
+          </span>
+        ) : zone.has_spot_confluence ? (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-200"
+            title={`现货大单共振（trust ${Math.round(zone.trust_score * 100)}%）：背后有真买卖家，不只是合约杠杆挂单`}
+          >
+            💰 现货共振 ×{zone.spot_large_order_ids.length}
+          </span>
+        ) : zone.trust_score < 0.55 && zone.large_order_ids.length > 0 ? (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/15 text-orange-300"
+            title={`仅合约源（trust ${Math.round(zone.trust_score * 100)}%）：可能是清算磁铁、spoof 或短期墙；结合下方"如果打穿"风险解读`}
+          >
+            ⚡ 仅合约
+          </span>
+        ) : null}
         {zone.exchange_count >= 2 && (
           <span className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300" title="多交易所共振">
             🌐 {zone.exchange_count}所共振
           </span>
         )}
         {zone.large_order_ids.length > 0 && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300" title={`覆盖 ${zone.large_order_ids.length} 笔大单`}>
-            🐳 大单 ×{zone.large_order_ids.length}
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300" title={`覆盖 ${zone.large_order_ids.length} 笔合约大单`}>
+            🐳 合约大单 ×{zone.large_order_ids.length}
           </span>
         )}
         {zone.confluence_with_absorption && (

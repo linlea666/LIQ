@@ -317,6 +317,18 @@ class WallZone(BaseModel):
     exchange_count: int = 1                     # 多所共振计数
     large_order_ids: list[int] = Field(default_factory=list)
 
+    # ── 现货 vs 合约 区分（M2.5：诉求"现货=真支撑、合约=清算磁铁"）──
+    # 当前 zone 的底层数据来自 futures 5m 热力图（合约订单簿）。spot 大单作为"真买卖家"
+    # 的硬证据：若同一价位也有 holding 的 spot 大单 → has_spot_confluence=True，意味着
+    # 该墙不只是合约杠杆挂单，背后有真金白银的现货资金 → 真支撑/真阻力可信度↑。
+    has_spot_confluence: bool = False           # 是否与现货大单共振
+    spot_large_order_ids: list[int] = Field(default_factory=list)
+    trust_score: float = 0.5                    # 综合可信度 0-1
+    # ≥ 0.85：真支撑/真阻力（双源 + 持久 + 多所）
+    # ≥ 0.65：高可信
+    # ≥ 0.50：普通（仅合约源，需结合磁铁/被扫风险解读）
+    # < 0.50：短期墙 / 可能被扫
+
     # ── 行为评估（M2）──
     status: WallZoneStatus = "active"
     wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）

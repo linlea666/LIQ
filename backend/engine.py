@@ -165,6 +165,8 @@ class CoinState:
             OrderbookPressureSnapshot as _OrderbookPressureSnapshot,
         )
         self.large_orders_history: list[_LargeOrderLifecycle] = []
+        # M2.5：现货大单（与 large_orders_history 互补——区分真支撑 vs 合约清算磁铁）
+        self.spot_large_orders_history: list[_LargeOrderLifecycle] = []
         # 由 polls/orderbook_pressure.poll_orderbook_pressure 写入（90s 间隔）
         self.orderbook_depth_snapshot: Optional[_OrderbookDepthSnapshot] = None
         # M1 滚动深度历史（1h 窗口，按 ts_sec 去重写入）—— WallZone 持续性评分基础
@@ -832,6 +834,11 @@ class Engine:
                 f"cg_large_orders_{ccy}", self._poll_large_orders, coin,
                 large_orders_interval, s + 15.0,
             )),
+            # M2.5：现货大单（与合约大单互补——区分真支撑 vs 清算磁铁）
+            asyncio.create_task(self._poll_loop(
+                f"cg_spot_large_orders_{ccy}", self._poll_spot_large_orders, coin,
+                large_orders_interval, s + 16.5,
+            )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
                 liq_history_interval, s + 18.0,
@@ -1284,6 +1291,11 @@ class Engine:
     async def _poll_large_orders(self, coin: CoinConfig):
         from polls.orderflow import poll_large_orders
         await poll_large_orders(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_spot_large_orders(self, coin: CoinConfig):
+        """现货大单 lifecycle（M2.5）。区分真支撑 vs 合约清算磁铁。"""
+        from polls.orderflow import poll_spot_large_orders
+        await poll_spot_large_orders(self._cg, coin, self._states[coin.ccy])
 
     async def _poll_orderbook_pressure(self, coin: CoinConfig):
         """挂单压力监测器：拉 /orderbook/history 分价位深度。

@@ -337,3 +337,42 @@ async def poll_large_orders(cg: CoinglassSource, coin: CoinConfig, state: CoinSt
             "大单 lifecycle 接通 | coin=%s total=%d holding=%d ended=%d",
             coin.ccy, len(merged), n_hold, n_ended,
         )
+
+
+async def poll_spot_large_orders(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:
+    """现货大单（M2.5：诉求"现货=真支撑、合约=清算磁铁"）。
+
+    与 poll_large_orders（合约大单）互补：
+      - 合约大单 ≈ 流动性墙 + 潜在清算磁铁（高杠杆挂单，本身可能是扫单目标）
+      - 现货大单 ≈ 真买家/卖家（真金白银），是"真支撑/真阻力"的硬证据
+
+    Liquidity Wall Engine 用 spot 大单匹配 zone 价区，输出 has_spot_confluence
+    标志，用于前端 chip 区分（💎 真支撑 vs 默认合约墙）。
+
+    端点：/api/spot/orderbook/large-limit-order(-history)
+    quota：每币 ~2 calls/poll cycle，30 币 × 24h × 60min ≈ 1700 calls/day（无忧）。
+    现货交易所：默认 Binance（spot 端点是按交易所查的）。
+    """
+    # spot 与 futures 用同一个 symbol（probe 验证：BTCUSDT 通用）
+    snapshot_data = await cg.fetch_spot_large_orders(coin.exchange_primary, coin.symbol_cg_pair)
+    history_data = await cg.fetch_spot_large_orders_history(coin.exchange_primary, coin.symbol_cg_pair)
+
+    snapshot_life = _build_lifecycles(snapshot_data or [], coin.exchange_primary)
+    history_life = _build_lifecycles(history_data or [], coin.exchange_primary)
+
+    seen: set[int] = set()
+    merged: list[LargeOrderLifecycle] = []
+    for lo in snapshot_life + history_life:
+        if lo.id in seen or lo.id == 0:
+            continue
+        seen.add(lo.id)
+        merged.append(lo)
+    state.spot_large_orders_history = merged
+
+    if "spot_large_orders_ready" not in state._log_once_keys and merged:
+        state._log_once_keys.add("spot_large_orders_ready")
+        n_hold = sum(1 for x in merged if x.state == "holding")
+        logger.info(
+            "现货大单接通 | coin=%s total=%d holding=%d",
+            coin.ccy, len(merged), n_hold,
+        )

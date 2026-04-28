@@ -73,6 +73,12 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "history_window_minutes": 60,          # 1h 滚动（5m × 12）
     "augment_match_tol_pct": 0.001,        # 大单 ↔ zone 容差匹配 0.1%
     "augment_match_tol_usd_min": 5.0,      # 容差最低 5 USD（防小币太小不够）
+    # M2.5：现货 vs 合约 区分（trust_score 计算权重）
+    "trust_base": 0.50,                    # 仅合约源（默认）
+    "trust_bonus_spot_confluence": 0.25,   # 现货大单共振（真买卖家硬证据）
+    "trust_bonus_multi_exchange": 0.15,    # 多家交易所共振
+    "trust_bonus_persistent": 0.10,        # 持续 ≥ 0.7
+    "trust_persistent_threshold": 0.70,
 
     # M1：persistence / trend
     "warming_seconds": 1800,               # 30min 暖机期内不出 persistence/magnet
@@ -506,6 +512,76 @@ def _augment_zones_with_large_orders(
             z.source = "depth+large_order"
         # exchange_count：至少 1（当前所），若 large_orders 来自多所则取 max(1, len(set))
         z.exchange_count = max(1, len(exchanges)) if exchanges else 1
+
+
+def _augment_zones_with_spot_large_orders(
+    zones: list[WallZone],
+    spot_large_orders: Sequence[LargeOrderLifecycle],
+    cfg: dict,
+) -> None:
+    """M2.5：现货大单匹配（区分真支撑 vs 合约清算磁铁）。
+
+    现货大单 = 真买家/卖家（真金白银），与合约大单（杠杆挂单/清算磁铁）互补：
+      - 仅合约共振 → 普通合约墙，可能是清算磁铁
+      - 仅现货共振 → 真支撑/真阻力（真金白银资金布局）
+      - **双源共振 → 最强真支撑**（真买卖家 + 合约流动性同位）
+
+    与合约 augment 用同一容差匹配机制：5 USD 或 0.1% 之间取大。
+    """
+    if not zones or not spot_large_orders:
+        return
+    holding = [lo for lo in spot_large_orders if lo.state == "holding" and lo.limit_price > 0]
+    if not holding:
+        return
+
+    tol_pct = cfg.get("augment_match_tol_pct",
+                      ENGINE_DEFAULTS.get("augment_match_tol_pct", 0.001))
+    tol_min = cfg.get("augment_match_tol_usd_min",
+                      ENGINE_DEFAULTS.get("augment_match_tol_usd_min", 5.0))
+
+    for z in zones:
+        tol = max(z.peak_price * tol_pct, tol_min)
+        lo_bound = z.price_low - tol
+        hi_bound = z.price_high + tol
+        ids: list[int] = []
+        for lo in holding:
+            if lo.side != z.side:
+                continue
+            if lo_bound <= lo.limit_price <= hi_bound:
+                ids.append(lo.id)
+        if ids:
+            z.spot_large_order_ids = ids
+            z.has_spot_confluence = True
+
+
+def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
+    """综合 trust_score（0-1）—— 区分真支撑/真阻力 vs 合约清算磁铁。
+
+    阶梯加分（GPT 反馈 + 用户洞察"现货=真支撑、合约=磁铁"落地）：
+      - base 0.50（合约 5m 热力图源，已是真实订单簿但有 spoof/钓鱼可能）
+      - +0.25 现货大单共振（真买家/卖家硬证据，可信度大幅↑）
+      - +0.15 多家交易所共振（≥ 2 家）
+      - +0.10 持续 ≥ 0.7（visible ≥ 75% 历史窗口）
+
+    阈值含义：
+      ≥ 0.85：真支撑/真阻力（双源 + 持久 + 多所，最强）
+      ≥ 0.65：高可信
+      ≥ 0.50：普通合约墙（结合磁铁/被扫风险解读）
+      < 0.50：短期墙（极少出现，因 base = 0.5）
+    """
+    score = cfg.get("trust_base", ENGINE_DEFAULTS["trust_base"])
+    if zone.has_spot_confluence:
+        score += cfg.get("trust_bonus_spot_confluence",
+                         ENGINE_DEFAULTS["trust_bonus_spot_confluence"])
+    if zone.exchange_count >= 2:
+        score += cfg.get("trust_bonus_multi_exchange",
+                         ENGINE_DEFAULTS["trust_bonus_multi_exchange"])
+    persistent_thr = cfg.get("trust_persistent_threshold",
+                             ENGINE_DEFAULTS["trust_persistent_threshold"])
+    if zone.persistence_score >= persistent_thr:
+        score += cfg.get("trust_bonus_persistent",
+                         ENGINE_DEFAULTS["trust_bonus_persistent"])
+    return max(0.0, min(1.0, score))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1150,15 +1226,28 @@ def build_liquidity_wall_outputs(
             history_raw, last_price, "bid", atr, cfg,
         )
 
-    # large_orders augment（只读 state.large_orders_history）
+    # large_orders augment（合约大单 → 流动性墙 / 清算磁铁基础源）
     large_orders = list(getattr(state, "large_orders_history", []) or [])
     if large_orders:
         _augment_zones_with_large_orders(walls_above, large_orders, last_price, cfg)
         _augment_zones_with_large_orders(walls_below, large_orders, last_price, cfg)
 
+    # M2.5：spot_large_orders augment（现货大单 → 真买家/卖家硬证据）
+    spot_large_orders = list(getattr(state, "spot_large_orders_history", []) or [])
+    if spot_large_orders:
+        _augment_zones_with_spot_large_orders(walls_above, spot_large_orders, cfg)
+        _augment_zones_with_spot_large_orders(walls_below, spot_large_orders, cfg)
+
     # 强度等级
     _attach_strength_tier(walls_above, cfg)
     _attach_strength_tier(walls_below, cfg)
+
+    # M2.5：trust_score（必须在 spot augment + tier 之后；用 has_spot_confluence /
+    # exchange_count / persistence_score 综合）
+    for z in walls_above:
+        z.trust_score = _compute_trust_score(z, cfg)
+    for z in walls_below:
+        z.trust_score = _compute_trust_score(z, cfg)
 
     # ── M2：拥挤度（一次性算，全局共享） ──
     crowding = None
