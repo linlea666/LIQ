@@ -812,6 +812,15 @@ export interface BehaviorEval {
 
   // state vs behavior 严重不一致时记入（白话原因，前端 ⚠ 提示）
   contradiction_with_state?: string[];
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // M3.1 新增：评估元信息（"未评估"vs"评估为 0" 的区分）
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  behavior_eval_available?: boolean;  // false = 评估失败 / 未运行
+  behavior_eval_version?: string;     // 评估器版本（"1.1" 起）
+  input_quality?: "ok" | "partial" | "missing" | string;
+  missing_inputs?: string[];          // 例如 ["candles_15m", "cvd"]
+  evaluator_error?: string;           // 评估失败时的错误简述
 }
 
 // M1 新增：清算磁铁通道（独立列表，不参与 levels 评分）
@@ -838,9 +847,22 @@ export interface ConfusionMatrixDict {
   precision: number;
   recall: number;
   f1: number;
+  // M3.1 新增：类别不平衡更稳健的指标
+  specificity?: number;
+  balanced_accuracy?: number;
+  mcc?: number;
 }
 
 export type V1V2Dimension = "bounce_quality" | "breakout_stage" | "fake_break";
+
+// M3.1：分桶校准
+export interface CalibrationBucketDict {
+  range_low: number;
+  range_high: number;
+  sample_size: number;
+  hit_count: number;
+  hit_rate: number;
+}
 
 export interface ComparisonStats {
   dimension: V1V2Dimension | string;
@@ -853,6 +875,21 @@ export interface ComparisonStats {
   chi_square_stat: number;
   chi_square_p_value: number;
   is_v2_significantly_better: boolean;
+
+  // M3.1 新增：配对样本主指标 + Wilson CI + 多条件决策 + 校准
+  delta_precision?: number;
+  delta_recall?: number;
+  delta_balanced_accuracy?: number;
+  delta_mcc?: number;
+  discordant_v1_wrong_v2_right?: number;
+  discordant_v1_right_v2_wrong?: number;
+  mcnemar_stat?: number;
+  mcnemar_p_value?: number;
+  accuracy_ci_v1?: [number, number];
+  accuracy_ci_v2?: [number, number];
+  decision_reasons?: string[];
+  calibration_v2?: CalibrationBucketDict[];
+  calibration_monotonic?: boolean;
 }
 
 export interface V1V2StatsResponse {
@@ -864,9 +901,17 @@ export interface V1V2StatsResponse {
     ambiguous_band: number;
     v2_threshold: number;
     breakout_stage_threshold: number;
+    // M3.1 新增
+    deduplicate_events?: boolean;
+    require_behavior_eval?: boolean;
+    min_samples_trusted?: number;
+    min_samples_observe?: number;
+    recall_floor_ratio?: number;
   };
   total_records: number;
   tier_filter: string[];
+  regime_filter?: string[];
+  state_filter?: string[];
   history_size?: number;
   stats: {
     bounce_quality: ComparisonStats;

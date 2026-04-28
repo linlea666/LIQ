@@ -338,6 +338,21 @@ class BehaviorEval(BaseModel):
     # 例如：state=broken 但 false_break_risk≥0.65 → "形态破位但量价未确认"。
     contradiction_with_state: list[str] = Field(default_factory=list)
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M3.1 新增：评估元信息（GPT 审查采纳 · 区分"未评估"vs"评估为 0"）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 痛点：
+    #   旧版本：所有分数默认 0.0，下游分不清"模块没运行"和"运行了但低分"。
+    #   M3.1 修复：
+    #     - behavior_eval_available=False 表示评估失败 / 缺数据 / 未运行
+    #     - 回测引擎默认跳过这类样本（require_behavior_eval=True）
+    #     - 前端可显示"未评估"灰色态而非误导性的"低分红色"
+    behavior_eval_available: bool = True            # False = 该 lv 的 behavior 评估未成功
+    behavior_eval_version: str = "1.0"              # 评估器版本（M3.1 起）
+    input_quality: str = "ok"                        # ok / partial / missing
+    missing_inputs: list[str] = Field(default_factory=list)  # 例如 ["candles", "atr"]
+    evaluator_error: str = ""                        # 评估失败时的错误简述（最多 120 字符）
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）

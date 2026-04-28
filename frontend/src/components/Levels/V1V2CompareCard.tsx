@@ -17,7 +17,8 @@
  */
 
 import { useState } from "react";
-import type { ComparisonStats } from "@/lib/types";
+import type { CalibrationBucketDict, ComparisonStats } from "@/lib/types";
+import V1V2CalibrationChart from "./V1V2CalibrationChart";
 
 const DIMENSION_TITLE: Record<string, string> = {
   bounce_quality: "反弹质量",
@@ -34,7 +35,9 @@ const DIMENSION_DESC: Record<string, string> = {
     "V1：state==fake_break 布尔事件  ·  V2：长影线 + 双根确认 0-1 连续",
 };
 
-const MIN_SAMPLES_TRUSTED = 30;
+// M3.1：阈值与后端 MIN_SAMPLES_TRUSTED 对齐（30→100）
+const MIN_SAMPLES_OBSERVE = 30;
+const MIN_SAMPLES_TRUSTED = 100;
 
 function MetricBar({
   label,
@@ -100,6 +103,54 @@ function MetricBar({
   );
 }
 
+function CIBar({
+  label,
+  value,
+  ci,
+  color = "sky",
+}: {
+  label: string;
+  value: number;
+  ci?: [number, number];
+  color?: "sky" | "emerald" | "rose" | "slate";
+}) {
+  const colorMap = {
+    sky: { bg: "bg-sky-500", text: "text-sky-300" },
+    emerald: { bg: "bg-emerald-500", text: "text-emerald-300" },
+    rose: { bg: "bg-rose-500", text: "text-rose-300" },
+    slate: { bg: "bg-slate-500", text: "text-slate-300" },
+  }[color];
+  const lo = ci ? Math.round(ci[0] * 100) : null;
+  const hi = ci ? Math.round(ci[1] * 100) : null;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-slate-500">{label}</span>
+        <span className={`font-mono ${colorMap.text}`}>
+          {Math.round(value * 100)}%
+          {lo !== null && hi !== null && (
+            <span className="text-slate-600 ml-1">
+              [{lo}-{hi}%]
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="relative h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        {ci && (
+          <div
+            className="absolute inset-y-0 bg-slate-700/60"
+            style={{ left: `${lo}%`, width: `${(hi ?? 0) - (lo ?? 0)}%` }}
+          />
+        )}
+        <div
+          className={`absolute inset-y-0 ${colorMap.bg} rounded-full`}
+          style={{ width: `${Math.round(value * 100)}%`, opacity: 0.85 }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ConfusionGrid({ cm }: { cm: ComparisonStats["v1"] }) {
   return (
     <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-400">
@@ -120,22 +171,32 @@ function ConfusionGrid({ cm }: { cm: ComparisonStats["v1"] }) {
 }
 
 export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
-  const [showCM, setShowCM] = useState(false);
+  const [showExpert, setShowExpert] = useState(false);
 
   const dim = stats.dimension as string;
   const title = DIMENSION_TITLE[dim] ?? dim;
   const desc = DIMENSION_DESC[dim] ?? "";
-  const trusted = stats.sample_size >= MIN_SAMPLES_TRUSTED;
   const sigBetter = stats.is_v2_significantly_better;
+  const n = stats.sample_size;
+  const observePhase = n >= MIN_SAMPLES_OBSERVE && n < MIN_SAMPLES_TRUSTED;
+  const trusted = n >= MIN_SAMPLES_TRUSTED;
 
-  // 判定卡片状态色
+  // M3.1：决策状态色
   let borderCls = "border-slate-700/40";
   let badge: { text: string; cls: string } = {
     text: "观察中",
     cls: "bg-slate-700/40 text-slate-400",
   };
-  if (!trusted) {
-    badge = { text: `样本不足 (n=${stats.sample_size}<${MIN_SAMPLES_TRUSTED})`, cls: "bg-slate-700/40 text-slate-500" };
+  if (!trusted && !observePhase) {
+    badge = {
+      text: `样本不足 (n=${n}<${MIN_SAMPLES_OBSERVE})`,
+      cls: "bg-slate-700/40 text-slate-500",
+    };
+  } else if (observePhase) {
+    badge = {
+      text: `📊 观察期 (n=${n}<${MIN_SAMPLES_TRUSTED})`,
+      cls: "bg-amber-500/15 text-amber-300",
+    };
   } else if (sigBetter) {
     borderCls = "border-emerald-600/40";
     badge = { text: "✅ V2 显著优于 V1", cls: "bg-emerald-500/20 text-emerald-300" };
@@ -145,6 +206,11 @@ export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
   } else {
     badge = { text: "➖ 无显著差异", cls: "bg-amber-500/15 text-amber-300" };
   }
+
+  const mcnemarP = stats.mcnemar_p_value ?? 1.0;
+  const reasons = stats.decision_reasons ?? [];
+  const calibration: CalibrationBucketDict[] = stats.calibration_v2 ?? [];
+  const showCalibration = calibration.length > 0;
 
   return (
     <div className={`rounded-lg border ${borderCls} bg-slate-900/40 p-4`}>
@@ -167,9 +233,28 @@ export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
         <MetricBar label="Recall" v1={stats.v1.recall} v2={stats.v2.recall} />
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-700/30">
+      {/* M3.1：Wilson 95% CI 双柱 */}
+      {(stats.accuracy_ci_v1 || stats.accuracy_ci_v2) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mb-3">
+          <CIBar
+            label="V1 Accuracy 95% CI"
+            value={stats.v1.accuracy}
+            ci={stats.accuracy_ci_v1}
+            color="slate"
+          />
+          <CIBar
+            label="V2 Accuracy 95% CI"
+            value={stats.v2.accuracy}
+            ci={stats.accuracy_ci_v2}
+            color={sigBetter ? "emerald" : "sky"}
+          />
+        </div>
+      )}
+
+      {/* M3.1：McNemar + 卡方 + 配对差异 */}
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 pt-2 border-t border-slate-700/30">
         <span>
-          样本 <span className="text-slate-300 font-mono">{stats.sample_size}</span>
+          样本 <span className="text-slate-300 font-mono">{n}</span>
           {stats.ambiguous_count > 0 && (
             <span className="ml-1 text-slate-600">
               · 剔除模糊 {stats.ambiguous_count}
@@ -177,37 +262,108 @@ export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
           )}
         </span>
         <span>
-          χ² ={" "}
-          <span className="text-slate-300 font-mono">
-            {stats.chi_square_stat.toFixed(2)}
-          </span>{" "}
-          · p ={" "}
+          McNemar p =
           <span
-            className={`font-mono ${
-              stats.chi_square_p_value < 0.05 ? "text-emerald-300" : "text-slate-400"
+            className={`font-mono ml-1 ${
+              mcnemarP < 0.05 ? "text-emerald-300" : "text-slate-400"
             }`}
           >
-            {stats.chi_square_p_value.toFixed(4)}
+            {mcnemarP < 1e-4 ? "<0.0001" : mcnemarP.toFixed(4)}
           </span>
         </span>
-        <button
-          type="button"
-          onClick={() => setShowCM((s) => !s)}
-          className="text-slate-500 hover:text-slate-300 transition"
-        >
-          {showCM ? "收起" : "混淆矩阵"}
-        </button>
+        {(stats.discordant_v1_wrong_v2_right !== undefined ||
+          stats.discordant_v1_right_v2_wrong !== undefined) && (
+          <span className="text-slate-600">
+            （V2→V1 翻盘 {stats.discordant_v1_wrong_v2_right ?? 0}
+            {" / "}V1→V2 翻盘 {stats.discordant_v1_right_v2_wrong ?? 0}）
+          </span>
+        )}
+        <span className="ml-auto">
+          <button
+            type="button"
+            onClick={() => setShowExpert((s) => !s)}
+            className="text-slate-500 hover:text-slate-300 transition"
+          >
+            {showExpert ? "收起专家详情" : "专家详情"}
+          </button>
+        </span>
       </div>
 
-      {showCM && (
-        <div className="mt-2 pt-2 border-t border-slate-700/30 space-y-2">
-          <div>
-            <div className="text-[10px] text-slate-500 mb-1">V1 混淆矩阵</div>
-            <ConfusionGrid cm={stats.v1} />
+      {/* 专家详情区：决策原因 + 校准图 + 混淆矩阵 */}
+      {showExpert && (
+        <div className="mt-3 pt-3 border-t border-slate-700/30 space-y-3">
+          {/* 决策原因清单 */}
+          {reasons.length > 0 && (
+            <div>
+              <div className="text-[10px] text-slate-500 mb-1">
+                决策条件（M3.1 多条件联合判定）
+              </div>
+              <ul className="space-y-0.5 text-[10px]">
+                {reasons.map((r, i) => {
+                  const pass = r.startsWith("✓");
+                  const warn = r.startsWith("⚠");
+                  return (
+                    <li
+                      key={i}
+                      className={`font-mono ${
+                        pass ? "text-emerald-400" : warn ? "text-amber-400" : "text-rose-400"
+                      }`}
+                    >
+                      {r}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {/* 平衡指标 */}
+          {(stats.delta_balanced_accuracy !== undefined ||
+            stats.delta_mcc !== undefined) && (
+            <div className="grid grid-cols-2 gap-3 text-[10px]">
+              {stats.v1.balanced_accuracy !== undefined &&
+                stats.v2.balanced_accuracy !== undefined && (
+                  <MetricBar
+                    label="Balanced Accuracy"
+                    v1={stats.v1.balanced_accuracy}
+                    v2={stats.v2.balanced_accuracy}
+                  />
+                )}
+              {stats.v1.mcc !== undefined && stats.v2.mcc !== undefined && (
+                <MetricBar
+                  label="MCC（-1~1）"
+                  v1={(stats.v1.mcc + 1) / 2}
+                  v2={(stats.v2.mcc + 1) / 2}
+                  format="raw"
+                />
+              )}
+            </div>
+          )}
+
+          {/* 分桶校准小图 */}
+          {showCalibration && (
+            <V1V2CalibrationChart
+              buckets={calibration}
+              monotonic={!!stats.calibration_monotonic}
+            />
+          )}
+
+          {/* 混淆矩阵 */}
+          <div className="space-y-2">
+            <div>
+              <div className="text-[10px] text-slate-500 mb-1">V1 混淆矩阵</div>
+              <ConfusionGrid cm={stats.v1} />
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 mb-1">V2 混淆矩阵</div>
+              <ConfusionGrid cm={stats.v2} />
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] text-slate-500 mb-1">V2 混淆矩阵</div>
-            <ConfusionGrid cm={stats.v2} />
+
+          {/* 卡方（参考） */}
+          <div className="text-[9px] text-slate-600">
+            参考：χ²(非配对) = {stats.chi_square_stat.toFixed(2)} · p ={" "}
+            {stats.chi_square_p_value.toFixed(4)}（McNemar 才是配对样本主指标）
           </div>
         </div>
       )}

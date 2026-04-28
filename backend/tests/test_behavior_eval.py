@@ -804,7 +804,145 @@ class TestIntegrationWithTracker:
         res = KeyLevelV2(price=102_000, side="resistance")
         snap = _snapshot([lv, res], price=100_500, atr=500)
         snap = run_tracker_v2(snap, liq_map=None, sweep_events_1h=[])
-        # 旧信号应能产出
         assert isinstance(snap.signals, list)
-        # active_count 不变
         assert snap.active_count >= 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3.1 新增：互斥校准 + 元信息字段 + 健康监控
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from processors.key_level_behavior_eval import (  # noqa: E402
+    BEHAVIOR_EVAL_VERSION,
+    _calibrate_mutual_exclusion,
+    evaluate_behavior,
+    get_health_stats,
+    reset_health_stats,
+)
+
+
+class TestMutualExclusionCalibration:
+    """selloff_continuation_risk vs capitulation_bottom_score 互斥校准。"""
+
+    def test_no_conflict_no_change(self):
+        """两个分都低于阈值 → 不介入。"""
+        beh = BehaviorEval(
+            selloff_continuation_risk=0.30,
+            capitulation_bottom_score=0.20,
+        )
+        _calibrate_mutual_exclusion(beh)
+        assert beh.selloff_continuation_risk == 0.30
+        assert beh.capitulation_bottom_score == 0.20
+        assert beh.explain_chips == []
+
+    def test_selloff_wins_over_capitulation(self):
+        """selloff 0.80 > capitulation 0.60 → capitulation 衰减、加 chip。"""
+        beh = BehaviorEval(
+            selloff_continuation_risk=0.80,
+            capitulation_bottom_score=0.60,
+        )
+        _calibrate_mutual_exclusion(beh)
+        assert beh.selloff_continuation_risk == 0.80  # 强者不动
+        # 弱者按 1 - 0.80*0.4 = 0.68 → 0.60*0.68 = 0.408
+        assert abs(beh.capitulation_bottom_score - 0.408) < 1e-3
+        assert any("卖压延续主导" in c for c in beh.explain_chips)
+
+    def test_capitulation_wins_over_selloff(self):
+        beh = BehaviorEval(
+            selloff_continuation_risk=0.55,
+            capitulation_bottom_score=0.85,
+        )
+        _calibrate_mutual_exclusion(beh)
+        assert beh.capitulation_bottom_score == 0.85
+        # selloff *= 1 - 0.85*0.4 = 0.66 → 0.55*0.66 = 0.363
+        assert abs(beh.selloff_continuation_risk - 0.363) < 1e-3
+        assert any("恐慌见底主导" in c for c in beh.explain_chips)
+
+    def test_one_below_threshold_no_change(self):
+        """一个低于 0.50 → 不视为冲突，不校准。"""
+        beh = BehaviorEval(
+            selloff_continuation_risk=0.85,
+            capitulation_bottom_score=0.40,
+        )
+        _calibrate_mutual_exclusion(beh)
+        assert beh.capitulation_bottom_score == 0.40
+        assert beh.explain_chips == []
+
+
+class TestBehaviorEvalMetaFields:
+    """M3.1：BehaviorEval 元信息字段（available / version / quality / missing / error）。"""
+
+    def test_default_values_for_new_eval(self):
+        """新建空 BehaviorEval → 默认值符合预期。"""
+        beh = BehaviorEval()
+        assert beh.behavior_eval_available is True
+        assert beh.behavior_eval_version == "1.0"
+        assert beh.input_quality == "ok"
+        assert beh.missing_inputs == []
+        assert beh.evaluator_error == ""
+
+    def test_unavailable_when_atr_missing(self):
+        """atr<=0 → behavior_eval_available=False，missing 列出 'atr'。"""
+        reset_health_stats()
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        snap = KeyLevelSnapshotV2(ts=int(time.time()), current_price=100_500,
+                                   atr=0.0, levels=[lv])
+        evaluate_behavior(snap, candles_15m=_candles(), candles_1h=_candles(),
+                          cvd=None)
+        b = lv.behavior
+        assert b is not None
+        assert b.behavior_eval_available is False
+        assert "atr" in b.missing_inputs
+        assert b.input_quality == "missing"
+        assert b.behavior_eval_version == BEHAVIOR_EVAL_VERSION
+
+    def test_partial_quality_when_cvd_missing(self):
+        """candles_15m 充足但缺 cvd → input_quality=partial，仍可评估成功。"""
+        reset_health_stats()
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced",
+                        state_ts=int(time.time()) - 60)
+        snap = _snapshot([lv], price=100_500, atr=500)
+        evaluate_behavior(snap, candles_15m=_candles(), candles_1h=_candles(),
+                          cvd=None)
+        b = lv.behavior
+        assert b is not None
+        assert b.behavior_eval_available is True  # 仍成功
+        assert b.input_quality == "partial"
+        assert "cvd" in b.missing_inputs
+
+
+class TestBehaviorHealthStats:
+    """M3.1：模块级健康监控。"""
+
+    def test_reset_clears_counters(self):
+        reset_health_stats()
+        s = get_health_stats()
+        assert s["total_calls"] == 0
+        assert s["level_eval_total"] == 0
+        assert s["error_rate"] == 0.0
+        assert s["module_version"] == BEHAVIOR_EVAL_VERSION
+
+    def test_success_increments_counters(self):
+        reset_health_stats()
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced",
+                        state_ts=int(time.time()) - 60)
+        snap = _snapshot([lv], price=100_500, atr=500)
+        evaluate_behavior(snap, candles_15m=_candles(), candles_1h=_candles())
+        s = get_health_stats()
+        assert s["total_calls"] == 1
+        assert s["success_calls"] == 1
+        assert s["level_eval_total"] == 1
+        assert s["level_eval_success"] == 1
+        assert s["level_eval_error"] == 0
+        assert s["avg_latency_ms"] >= 0.0  # 可能极小但非负
+
+    def test_input_skip_counts_separately(self):
+        reset_health_stats()
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        snap = KeyLevelSnapshotV2(ts=int(time.time()), current_price=100_500,
+                                   atr=0.0, levels=[lv])
+        evaluate_behavior(snap, candles_15m=_candles())
+        s = get_health_stats()
+        assert s["input_skip_calls"] == 1
+        # input_skip 阶段不进入 level_eval_total（atr<=0 直接跳过 level 循环）
+        assert s["level_eval_total"] == 0

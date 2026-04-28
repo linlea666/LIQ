@@ -304,12 +304,16 @@ async def get_v1v2_stats(
     window_hours: float = Query(4.0, ge=0.5, le=72.0, description="事后真相窗口（小时）"),
     tolerance_sec: int = Query(600, ge=60, le=3600, description="配对容差（秒）"),
     tier: str = Query("", description="逗号分隔的 tier 过滤，例如 S,A；留空=全部"),
+    regime: str = Query("", description="逗号分隔的 regime 过滤，例如 trend_up,range；留空=全部"),
+    state: str = Query("", description="逗号分隔的 state 过滤，例如 broken,bounced；留空=全部"),
     truth_atr_mult: float = Query(1.0, ge=0.3, le=3.0, description="真相阈值 ×ATR"),
     ambiguous_band: float = Query(0.3, ge=0.0, le=1.0, description="模糊带 ×ATR"),
     v2_threshold: float = Query(0.5, ge=0.0, le=1.0, description="V2 0-1 二分类阈值"),
     stage_threshold: int = Query(3, ge=1, le=3, description="突破阶段二分类阈值"),
+    deduplicate: bool = Query(True, description="按 (level_id,state,state_ts) 去重"),
+    require_behavior_eval: bool = Query(True, description="过滤 behavior_eval_available=False 的样本"),
 ):
-    """V1 vs V2 关键位行为对比统计（M2.5 双轨 → M3 决策支持）。
+    """V1 vs V2 关键位行为对比统计（M3.1 升级：McNemar / Wilson CI / 校准 / 多过滤）。
 
     数据来源：内存中的 kl_history（由 _auto_kl_snapshot_loop 持续追加）。
     若历史样本不足，返回 sample_size=0 但结构稳定（便于前端容错渲染）。
@@ -331,9 +335,13 @@ async def get_v1v2_stats(
                 "ambiguous_band": ambiguous_band,
                 "v2_threshold": v2_threshold,
                 "breakout_stage_threshold": stage_threshold,
+                "deduplicate_events": deduplicate,
+                "require_behavior_eval": require_behavior_eval,
             },
             "total_records": 0,
             "tier_filter": [],
+            "regime_filter": [],
+            "state_filter": [],
             "history_size": 0,
             "stats": {
                 "bounce_quality": _empty_stats_dict("bounce_quality"),
@@ -342,11 +350,17 @@ async def get_v1v2_stats(
             },
         }
 
-    tier_filter: list[str] | None = None
-    if tier.strip():
-        tier_filter = [t.strip().upper() for t in tier.split(",") if t.strip()]
+    def _split(s: str) -> list[str] | None:
+        if not s.strip():
+            return None
+        return [t.strip() for t in s.split(",") if t.strip()]
 
-    # 引擎是纯函数库 → 直接调用
+    tier_filter = _split(tier)
+    if tier_filter:
+        tier_filter = [t.upper() for t in tier_filter]
+    regime_filter = _split(regime)
+    state_filter = _split(state)
+
     from processors.behavior_backtest_engine import run_full_comparison
     result = run_full_comparison(
         history,
@@ -358,16 +372,37 @@ async def get_v1v2_stats(
         v2_threshold=v2_threshold,
         breakout_stage_threshold=stage_threshold,
         tier_filter=tier_filter,
+        regime_filter=regime_filter,
+        state_filter=state_filter,
+        deduplicate_events=deduplicate,
+        require_behavior_eval=require_behavior_eval,
     )
     result["history_size"] = len(history)
     return result
 
 
+@router.get("/key-levels/behavior-eval-health")
+async def get_behavior_eval_health():
+    """V3-M3.1：行为评估模块健康度（运行时观测）。
+
+    暴露 in-memory 计数器（重启即清零，正常）：
+      - total_calls / success_calls / input_skip_calls
+      - level_eval_total / level_eval_success / level_eval_error
+      - error_rate（level 维度）
+      - avg_latency_ms（evaluate_behavior 平均耗时）
+      - last_error_msg / last_error_ts
+      - module_version
+    """
+    from processors.key_level_behavior_eval import get_health_stats
+    return get_health_stats()
+
+
 def _empty_stats_dict(dimension: str) -> dict:
-    """无数据时的占位结构，与 ComparisonStats.to_dict() 字段一致。"""
+    """无数据时的占位结构，与 ComparisonStats.to_dict() 字段一致（M3.1 升级）。"""
     empty_cm = {
         "tp": 0, "fp": 0, "tn": 0, "fn": 0,
         "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
+        "specificity": 0.0, "balanced_accuracy": 0.0, "mcc": 0.0,
     }
     return {
         "dimension": dimension,
@@ -376,10 +411,23 @@ def _empty_stats_dict(dimension: str) -> dict:
         "v1": empty_cm,
         "v2": empty_cm,
         "delta_accuracy": 0.0,
+        "delta_precision": 0.0,
+        "delta_recall": 0.0,
         "delta_f1": 0.0,
+        "delta_balanced_accuracy": 0.0,
+        "delta_mcc": 0.0,
         "chi_square_stat": 0.0,
         "chi_square_p_value": 1.0,
+        "discordant_v1_wrong_v2_right": 0,
+        "discordant_v1_right_v2_wrong": 0,
+        "mcnemar_stat": 0.0,
+        "mcnemar_p_value": 1.0,
+        "accuracy_ci_v1": [0.0, 0.0],
+        "accuracy_ci_v2": [0.0, 0.0],
         "is_v2_significantly_better": False,
+        "decision_reasons": [],
+        "calibration_v2": [],
+        "calibration_monotonic": False,
     }
 
 

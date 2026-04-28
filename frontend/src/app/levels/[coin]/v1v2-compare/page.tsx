@@ -25,12 +25,17 @@ import V1V2CompareCard from "@/components/Levels/V1V2CompareCard";
 import type { V1V2StatsResponse } from "@/lib/types";
 
 const TIER_OPTIONS = ["S", "A", "B", "C"] as const;
+const STATE_OPTIONS = ["broken", "flipped", "bounced", "fake_break", "testing"] as const;
 const WINDOW_OPTIONS = [
   { label: "1h", hours: 1 },
   { label: "4h", hours: 4 },
   { label: "12h", hours: 12 },
   { label: "24h", hours: 24 },
 ];
+
+// M3.1：与后端 MIN_SAMPLES_TRUSTED 保持一致
+const MIN_SAMPLES_OBSERVE = 30;
+const MIN_SAMPLES_TRUSTED = 100;
 
 export default function V1V2ComparePage() {
   const params = useParams();
@@ -39,6 +44,7 @@ export default function V1V2ComparePage() {
   // ── 控制参数 ──
   const [windowHours, setWindowHours] = useState(4);
   const [tierFilter, setTierFilter] = useState<string[]>([]);  // 空 = 全部
+  const [stateFilter, setStateFilter] = useState<string[]>([]);  // M3.1：state 过滤
   const [v2Threshold, setV2Threshold] = useState(0.5);
 
   const [data, setData] = useState<V1V2StatsResponse | null>(null);
@@ -50,8 +56,9 @@ export default function V1V2ComparePage() {
     sp.set("window_hours", String(windowHours));
     sp.set("v2_threshold", String(v2Threshold));
     if (tierFilter.length > 0) sp.set("tier", tierFilter.join(","));
+    if (stateFilter.length > 0) sp.set("state", stateFilter.join(","));
     return sp.toString();
-  }, [windowHours, v2Threshold, tierFilter]);
+  }, [windowHours, v2Threshold, tierFilter, stateFilter]);
 
   // 手动刷新通过 nonce 触发 effect 重跑（避免在 effect 内调用单独的 load 函数，
   // 这是 react-hooks/set-state-in-effect 推荐的写法）。
@@ -93,6 +100,12 @@ export default function V1V2ComparePage() {
   const toggleTier = (t: string) => {
     setTierFilter((prev) =>
       prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  };
+
+  const toggleState = (s: string) => {
+    setStateFilter((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
     );
   };
 
@@ -138,7 +151,7 @@ export default function V1V2ComparePage() {
         {/* 参数控制区 */}
         <section className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4">
           <h2 className="text-sm font-semibold text-white mb-3">回测参数</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <div className="text-[11px] text-slate-500 mb-1">事后窗口（事件 N 小时后判真相）</div>
               <div className="flex gap-1">
@@ -172,6 +185,25 @@ export default function V1V2ComparePage() {
                     }`}
                   >
                     {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">state 过滤（多选；留空=全部）</div>
+              <div className="flex gap-1 flex-wrap">
+                {STATE_OPTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => toggleState(s)}
+                    className={`px-1.5 py-1 text-[10px] rounded border transition ${
+                      stateFilter.includes(s)
+                        ? "border-purple-500 bg-purple-500/20 text-purple-200"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
+                    }`}
+                  >
+                    {s}
                   </button>
                 ))}
               </div>
@@ -225,9 +257,15 @@ export default function V1V2ComparePage() {
                   ⚠ 暂无历史快照。请等待 _auto_kl_snapshot_loop 持续追加，或在线运行系统至少 1 小时。
                 </div>
               )}
-              {(data.history_size ?? 0) > 0 && data.total_records < 30 && (
+              {(data.history_size ?? 0) > 0 && data.total_records < MIN_SAMPLES_OBSERVE && (
                 <div className="mt-3 p-2 rounded bg-amber-900/15 text-amber-300 text-[11px]">
-                  ⏳ 配对样本不足 30 条，所有维度结论均不可信；需更长的历史积累。
+                  ⏳ 配对样本不足 {MIN_SAMPLES_OBSERVE} 条，所有维度结论均不可信；需更长的历史积累。
+                </div>
+              )}
+              {data.total_records >= MIN_SAMPLES_OBSERVE && data.total_records < MIN_SAMPLES_TRUSTED && (
+                <div className="mt-3 p-2 rounded bg-amber-900/10 text-amber-200/80 text-[11px]">
+                  📊 配对样本 {data.total_records} 条进入<b>观察期</b>（{MIN_SAMPLES_OBSERVE}-{MIN_SAMPLES_TRUSTED}）：
+                  指标可观察但暂未达到 M4 切换门槛 (n ≥ {MIN_SAMPLES_TRUSTED})。
                 </div>
               )}
             </section>
@@ -239,12 +277,16 @@ export default function V1V2ComparePage() {
             </div>
 
             <section className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4 text-[11px] text-slate-500 leading-relaxed">
-              <h3 className="text-sm font-semibold text-slate-300 mb-2">📖 怎么解读这个页面</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">📖 怎么解读这个页面（M3.1 升级）</h3>
               <ul className="space-y-1 list-disc list-inside">
-                <li><b>样本不足 (n &lt; 30)</b>：结论不可信；需更长时间积累或扩大 tier 过滤</li>
-                <li><b>V2 显著优于 V1</b>：Δaccuracy ≥ 0.05 且 χ² 检验 p &lt; 0.05；可考虑 M4 切换</li>
-                <li><b>χ² / p-value</b>：检验 V1 vs V2 准确率差异是否显著（p &lt; 0.05 = 显著）</li>
+                <li><b>样本量门槛</b>：n &lt; {MIN_SAMPLES_OBSERVE} 完全不可信；{MIN_SAMPLES_OBSERVE}-{MIN_SAMPLES_TRUSTED} 观察期；≥ {MIN_SAMPLES_TRUSTED} 才可作为 M4 切换依据</li>
+                <li><b>V2 显著优于 V1</b>（多条件联合判定）：McNemar p &lt; 0.05 + Δprecision ≥ 0.05 + V2 recall ≥ V1×0.85 + 校准弱单调</li>
+                <li><b>McNemar 检验</b>：V1/V2 是配对样本（同一事件两个判定），McNemar 比 χ² 更严谨</li>
+                <li><b>Wilson 95% CI</b>：accuracy 区间估计；CI 不重叠时差异更可信，重叠时谨慎</li>
+                <li><b>分桶校准</b>：V2 高分桶 hit_rate 应 ≥ 低分桶（弱单调）；不单调说明 V2 分数判别力不足</li>
+                <li><b>balanced_accuracy / MCC</b>：类别不平衡时比 accuracy/F1 更稳健</li>
                 <li><b>剔除模糊样本</b>：未来价格仅小幅偏移（&lt; 0.3×ATR）的样本不计入分母，避免噪声</li>
+                <li><b>事件去重</b>：同一 (level_id, state, state_ts) 在多个快照中只算一条，防膨胀</li>
                 <li>本页**不影响**实盘信号；切换决策由 M4 阶段在统计稳定后人工拍板</li>
               </ul>
             </section>

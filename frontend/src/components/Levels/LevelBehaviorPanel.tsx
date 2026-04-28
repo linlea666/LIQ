@@ -28,6 +28,7 @@
  *   └─────────────────────────────────────────────┘
  */
 
+import { useState } from "react";
 import type { BehaviorEval } from "@/lib/types";
 
 const STATE_LABELS: Record<string, string> = {
@@ -180,7 +181,17 @@ export default function LevelBehaviorPanel({
     breakout_stage?: number;
   };
 }) {
+  // M3.1：普通/专家模式分层（默认普通）
+  const [expert, setExpert] = useState(false);
+
   if (!behavior) return null;
+
+  // M3.1：未评估 / 评估失败的特殊态
+  const evalAvailable = behavior.behavior_eval_available ?? true;
+  const inputQuality = behavior.input_quality ?? "ok";
+  const missingInputs = behavior.missing_inputs ?? [];
+  const evaluatorError = behavior.evaluator_error ?? "";
+
   const scores = pickRelevantScores(behavior, state);
   const hasAnyScore = scores.some(([, v]) => v > 0);
   const contradictions = behavior.contradiction_with_state ?? [];
@@ -198,9 +209,10 @@ export default function LevelBehaviorPanel({
   const showDynDepth = dynBreakDepth > 0 && state === "broken";
   const hasDualTrack = showBounceCompare || showStageCompare || showFakeBreak || showDynDepth;
 
-  // pending 且无分数 + 无双轨 + 无冲突 + 无 chips → 整体不显示
+  // pending 且无分数 + 无双轨 + 无冲突 + 无 chips + 已评估 → 整体不显示
   if (
-    behavior.behavior_state === "pending"
+    evalAvailable
+    && behavior.behavior_state === "pending"
     && !hasAnyScore
     && !hasDualTrack
     && contradictions.length === 0
@@ -214,6 +226,31 @@ export default function LevelBehaviorPanel({
   const confidence = Math.max(0, Math.min(1, behavior.state_confidence ?? 0));
   const confidencePct = Math.round(confidence * 100);
 
+  // M3.1：未评估时只显示一个低调"未评估"卡片，不渲染分数
+  if (!evalAvailable) {
+    return (
+      <div className="rounded-md border border-slate-700/30 bg-slate-900/30 p-2 text-[10px] text-slate-500">
+        <div className="flex items-center gap-2">
+          <span>🧠 行为评估</span>
+          <span className="px-1.5 py-0.5 bg-slate-700/40 rounded text-slate-400">
+            未评估
+          </span>
+          {missingInputs.length > 0 && (
+            <span className="text-slate-600">缺：{missingInputs.join("/")}</span>
+          )}
+          {evaluatorError && (
+            <span
+              className="text-rose-400 truncate max-w-[180px]"
+              title={evaluatorError}
+            >
+              ⚠ {evaluatorError}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-md border border-slate-700/40 bg-slate-900/40 p-3 text-xs">
       <div className="flex items-center justify-between mb-2">
@@ -221,13 +258,32 @@ export default function LevelBehaviorPanel({
           <span>🧠</span>
           <span>行为评估</span>
           <span className="text-[9px] text-slate-600">观测期 · 不影响信号</span>
+          {inputQuality !== "ok" && (
+            <span
+              className="text-[9px] text-amber-400"
+              title={`input_quality=${inputQuality}; missing=${missingInputs.join(",")}`}
+            >
+              · 数据{inputQuality === "partial" ? "部分缺失" : "缺失"}
+            </span>
+          )}
         </div>
-        <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${badgeCls}`}
-          title={`behavior_state=${behavior.behavior_state}`}
-        >
-          {stateLabel}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${badgeCls}`}
+            title={`behavior_state=${behavior.behavior_state}`}
+          >
+            {stateLabel}
+          </span>
+          {(hasDualTrack || hasAnyScore) && (
+            <button
+              type="button"
+              onClick={() => setExpert((s) => !s)}
+              className="text-[9px] text-slate-500 hover:text-slate-300 transition"
+            >
+              {expert ? "收起" : "详情"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 信心度 */}
@@ -246,8 +302,8 @@ export default function LevelBehaviorPanel({
         </div>
       )}
 
-      {/* M2.5 V1/V2 双轨对照（独立成块） */}
-      {hasDualTrack && (
+      {/* M2.5 V1/V2 双轨对照（专家模式才展开） */}
+      {expert && hasDualTrack && (
         <div className="mb-2 pb-2 border-b border-slate-700/30">
           <div className="text-[10px] text-slate-500 mb-1 flex items-center gap-1">
             <span>⚖</span>
@@ -337,16 +393,21 @@ export default function LevelBehaviorPanel({
         </div>
       )}
 
-      {/* 相关分数 mini bars */}
+      {/* 相关分数 mini bars（专家模式 / 普通模式只展示前 1 项） */}
       {hasAnyScore && (
         <div className="space-y-1.5 mb-2">
-          {scores.map(([label, value]) => (
+          {(expert ? scores : scores.slice(0, 1)).map(([label, value]) => (
             <ScoreBar key={label} label={label} value={value} />
           ))}
+          {!expert && scores.length > 1 && (
+            <div className="text-[9px] text-slate-600">
+              点「详情」查看 {scores.length - 1} 个其它分数
+            </div>
+          )}
         </div>
       )}
 
-      {/* M2.5 冲突预警（state vs behavior 不一致） */}
+      {/* M2.5 冲突预警（state vs behavior 不一致；普通+专家都显示，关键预警不能藏） */}
       {contradictions.length > 0 && (
         <div className="mb-2 pt-1 border-t border-rose-700/30">
           <div className="text-[10px] text-rose-400 mb-1">⚠ state vs behavior 冲突</div>

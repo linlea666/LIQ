@@ -69,6 +69,53 @@ from models.market import CandleData
 
 logger = logging.getLogger(__name__)
 
+# 模块版本（M3.1 引入 · 用于 BehaviorEval.behavior_eval_version）
+BEHAVIOR_EVAL_VERSION = "1.1"  # 1.0 = M2.5 / 1.1 = M3.1（互斥校准 + 元信息）
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M3.1 健康监控（模块级 in-memory，向 /api/key-levels/behavior-eval-health 暴露）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 设计纪律：
+#   - 仅记录运行健康度（成功/失败/平均耗时），不缓存业务数据
+#   - 进程内单例（重启即清零，正常）；如需跨进程聚合，由上层 Prometheus 抓
+#   - reset_health_stats() 仅供测试 / 健康自检调用
+_HEALTH_STATS: dict = {
+    "total_calls": 0,            # evaluate_behavior 调用总次数
+    "success_calls": 0,          # 主入口正常返回（含 lv 级失败）
+    "input_skip_calls": 0,       # 因 atr<=0 / price<=0 跳过的调用
+    "level_eval_total": 0,       # 单 level 评估总数
+    "level_eval_success": 0,     # 单 level 评估成功数
+    "level_eval_error": 0,       # 单 level 评估失败数（异常被吞）
+    "last_error_msg": "",
+    "last_error_ts": 0,
+    "total_latency_ms": 0.0,     # evaluate_behavior 累计耗时
+    "module_version": BEHAVIOR_EVAL_VERSION,
+}
+
+
+def get_health_stats() -> dict:
+    """对外只读快照（GET /api/key-levels/behavior-eval-health 用）。"""
+    s = dict(_HEALTH_STATS)
+    if s["total_calls"] > 0:
+        s["avg_latency_ms"] = round(s["total_latency_ms"] / s["total_calls"], 3)
+    else:
+        s["avg_latency_ms"] = 0.0
+    if s["level_eval_total"] > 0:
+        s["error_rate"] = round(s["level_eval_error"] / s["level_eval_total"], 4)
+    else:
+        s["error_rate"] = 0.0
+    return s
+
+
+def reset_health_stats() -> None:
+    """重置健康统计（测试场景使用，生产场景不触发）。"""
+    _HEALTH_STATS.update({
+        "total_calls": 0, "success_calls": 0, "input_skip_calls": 0,
+        "level_eval_total": 0, "level_eval_success": 0, "level_eval_error": 0,
+        "last_error_msg": "", "last_error_ts": 0, "total_latency_ms": 0.0,
+    })
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 默认配置（与 _DEFAULT_CFG 风格一致；可由调用方覆盖）
@@ -148,10 +195,27 @@ def evaluate_behavior(
     if now == 0:
         now = int(time.time())
 
+    t_start = time.perf_counter()
+    _HEALTH_STATS["total_calls"] += 1
+
     if snapshot.atr <= 0 or snapshot.current_price <= 0:
-        # 数据不足，给所有 level 安插 pending 占位（前端可见状态）
+        # 数据不足：给所有 level 标记"未评估"，便于回测 / 前端区分（M3.1）
+        _HEALTH_STATS["input_skip_calls"] += 1
+        missing = []
+        if snapshot.atr <= 0:
+            missing.append("atr")
+        if snapshot.current_price <= 0:
+            missing.append("current_price")
         for lv in snapshot.levels:
-            lv.behavior = BehaviorEval(behavior_state="pending", evaluated_at=now)
+            lv.behavior = BehaviorEval(
+                behavior_state="pending",
+                evaluated_at=now,
+                behavior_eval_available=False,
+                behavior_eval_version=BEHAVIOR_EVAL_VERSION,
+                input_quality="missing",
+                missing_inputs=list(missing),
+            )
+        _HEALTH_STATS["total_latency_ms"] += (time.perf_counter() - t_start) * 1000.0
         return
 
     # 预计算（snapshot 级共享）
@@ -166,15 +230,114 @@ def evaluate_behavior(
         cfg=cfg,
     )
 
+    # 标记关键输入缺失情况（部分维度可降级，但完整性要透明）
+    snap_input_quality, snap_missing = _assess_input_quality(
+        candles_15m=candles_15m, candles_1h=candles_1h, cvd=cvd,
+    )
+
     for lv in snapshot.levels:
+        _HEALTH_STATS["level_eval_total"] += 1
         try:
-            lv.behavior = _evaluate_one_level(lv, snapshot, ctx, cfg, now)
-        except Exception:
+            beh = _evaluate_one_level(lv, snapshot, ctx, cfg, now)
+            # M3.1 元信息（成功路径）
+            beh.behavior_eval_available = True
+            beh.behavior_eval_version = BEHAVIOR_EVAL_VERSION
+            beh.input_quality = snap_input_quality
+            beh.missing_inputs = list(snap_missing)
+            # M3.1 互斥校准（selloff vs capitulation）
+            _calibrate_mutual_exclusion(beh)
+            lv.behavior = beh
+            _HEALTH_STATS["level_eval_success"] += 1
+        except Exception as exc:
             logger.exception(
                 "behavior_eval failed for level price=%.4f side=%s state=%s",
                 lv.price, lv.side, lv.state,
             )
-            lv.behavior = BehaviorEval(behavior_state="pending", evaluated_at=now)
+            _HEALTH_STATS["level_eval_error"] += 1
+            err_msg = repr(exc)[:120]
+            _HEALTH_STATS["last_error_msg"] = err_msg
+            _HEALTH_STATS["last_error_ts"] = now
+            lv.behavior = BehaviorEval(
+                behavior_state="pending",
+                evaluated_at=now,
+                behavior_eval_available=False,
+                behavior_eval_version=BEHAVIOR_EVAL_VERSION,
+                input_quality=snap_input_quality,
+                missing_inputs=list(snap_missing),
+                evaluator_error=err_msg,
+            )
+
+    _HEALTH_STATS["success_calls"] += 1
+    _HEALTH_STATS["total_latency_ms"] += (time.perf_counter() - t_start) * 1000.0
+
+
+def _assess_input_quality(
+    *,
+    candles_15m: list[CandleData] | None,
+    candles_1h: list[CandleData] | None,
+    cvd: CVDData | None,
+) -> tuple[str, list[str]]:
+    """评估输入数据完整度（M3.1）。
+
+    返回 ("ok"|"partial"|"missing", missing_inputs 列表)
+      - ok：candles_15m 充足 + cvd 存在
+      - partial：candles_15m 充足但缺 cvd / 或 candles_15m 不足但有兜底
+      - missing：candles_15m 完全缺失（评估几乎不可信）
+
+    注意：本函数仅做"输入侧元信息"标注，不影响实际评估流程。
+    """
+    missing: list[str] = []
+    if not candles_15m or len(candles_15m) < 5:
+        missing.append("candles_15m")
+    if not candles_1h or len(candles_1h) < 3:
+        missing.append("candles_1h")
+    if cvd is None:
+        missing.append("cvd")
+
+    if "candles_15m" in missing:
+        return "missing", missing
+    if missing:
+        return "partial", missing
+    return "ok", missing
+
+
+def _calibrate_mutual_exclusion(beh: BehaviorEval) -> None:
+    """selloff_continuation_risk 与 capitulation_bottom_score 互斥校准（M3.1）。
+
+    痛点（GPT 审查指出）：
+      二者都在 broken & support 状态下计算，但语义对立：
+        - selloff_continuation_risk 高 = "继续下行风险大"（看跌延续）
+        - capitulation_bottom_score 高 = "可能恐慌见底"（看多反转候选）
+      若两者同时 ≥ 0.65，下游 AI / 前端会读到矛盾信号。
+
+    校准规则：
+      - 仅当两个分数都很高（≥ 0.50）时介入
+      - 让"较弱方"按差值衰减（弱者 *= 1 - 强者 × 0.4），保持总体可读性
+      - 触发时在 explain_chips 增加白话备注（仅当 chips 还有空位）
+
+    保守设计：
+      - 不直接归零（保留两者各自数值供专家观察）
+      - 互斥不影响 behavior_state（state 已经在 _evaluate_one_level 决定）
+    """
+    a = beh.selloff_continuation_risk
+    b = beh.capitulation_bottom_score
+    threshold = 0.50
+
+    if a < threshold or b < threshold:
+        return  # 至少一个低于阈值，不冲突
+
+    if a >= b:
+        beh.capitulation_bottom_score = round(b * (1.0 - a * 0.4), 4)
+        winner = "selloff"
+    else:
+        beh.selloff_continuation_risk = round(a * (1.0 - b * 0.4), 4)
+        winner = "capitulation"
+
+    if len(beh.explain_chips) < _MAX_CHIPS:
+        if winner == "selloff":
+            beh.explain_chips.append("⚠ 卖压延续主导，弱化恐慌见底分")
+        else:
+            beh.explain_chips.append("⚠ 恐慌见底主导，弱化卖压延续分")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

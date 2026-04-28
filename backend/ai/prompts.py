@@ -1607,6 +1607,13 @@ def build_user_prompt(snapshot: dict) -> str:
                 "若 9g 状态与本块 behavior_state 严重不一致（含 ⚠ 标记），"
                 "说明该 level 可信度需打折，但**不要**用本块单独反驳 9g 决策。"
             )
+            # M3.1 GPT 审查采纳：明确 capitulation_flush 不是直接做多信号
+            lines.append(
+                "[重要安全约束] behavior_state=capitulation_flush 仅是「可能恐慌见底」的"
+                "**候选观察**，需后续 K 线放量收回 + 二次回踩不破才算见底确认；"
+                "**严禁**直接据此判定为做多入场信号。同样地，selloff_continuation_risk "
+                "高分仅提示**继续下行风险**，不构成做空入场依据。"
+            )
             lines.extend(behavior_lines)
 
     # ── §9g2 K 线形态检测 ──
