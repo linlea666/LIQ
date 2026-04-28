@@ -295,6 +295,95 @@ async def get_kl_detail(coin: str, ts: int):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M3：V1 vs V2 行为评估对比统计 API
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.get("/key-levels/v1v2-stats/{coin}")
+async def get_v1v2_stats(
+    coin: str,
+    window_hours: float = Query(4.0, ge=0.5, le=72.0, description="事后真相窗口（小时）"),
+    tolerance_sec: int = Query(600, ge=60, le=3600, description="配对容差（秒）"),
+    tier: str = Query("", description="逗号分隔的 tier 过滤，例如 S,A；留空=全部"),
+    truth_atr_mult: float = Query(1.0, ge=0.3, le=3.0, description="真相阈值 ×ATR"),
+    ambiguous_band: float = Query(0.3, ge=0.0, le=1.0, description="模糊带 ×ATR"),
+    v2_threshold: float = Query(0.5, ge=0.0, le=1.0, description="V2 0-1 二分类阈值"),
+    stage_threshold: int = Query(3, ge=1, le=3, description="突破阶段二分类阈值"),
+):
+    """V1 vs V2 关键位行为对比统计（M2.5 双轨 → M3 决策支持）。
+
+    数据来源：内存中的 kl_history（由 _auto_kl_snapshot_loop 持续追加）。
+    若历史样本不足，返回 sample_size=0 但结构稳定（便于前端容错渲染）。
+
+    Query 参数与 CLI（scripts/behavior_backtest.py）完全对齐，便于前后端复现实验。
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    history = _engine.get_kl_history(coin)
+    if not history:
+        # 仍返回稳定结构，前端可显示"暂无数据"而非崩溃
+        return {
+            "coin": coin,
+            "params": {
+                "future_window_sec": int(window_hours * 3600),
+                "tolerance_sec": tolerance_sec,
+                "truth_atr_mult": truth_atr_mult,
+                "ambiguous_band": ambiguous_band,
+                "v2_threshold": v2_threshold,
+                "breakout_stage_threshold": stage_threshold,
+            },
+            "total_records": 0,
+            "tier_filter": [],
+            "history_size": 0,
+            "stats": {
+                "bounce_quality": _empty_stats_dict("bounce_quality"),
+                "breakout_stage": _empty_stats_dict("breakout_stage"),
+                "fake_break": _empty_stats_dict("fake_break"),
+            },
+        }
+
+    tier_filter: list[str] | None = None
+    if tier.strip():
+        tier_filter = [t.strip().upper() for t in tier.split(",") if t.strip()]
+
+    # 引擎是纯函数库 → 直接调用
+    from processors.behavior_backtest_engine import run_full_comparison
+    result = run_full_comparison(
+        history,
+        coin=coin,
+        future_window_sec=int(window_hours * 3600),
+        tolerance_sec=tolerance_sec,
+        truth_atr_mult=truth_atr_mult,
+        ambiguous_band=ambiguous_band,
+        v2_threshold=v2_threshold,
+        breakout_stage_threshold=stage_threshold,
+        tier_filter=tier_filter,
+    )
+    result["history_size"] = len(history)
+    return result
+
+
+def _empty_stats_dict(dimension: str) -> dict:
+    """无数据时的占位结构，与 ComparisonStats.to_dict() 字段一致。"""
+    empty_cm = {
+        "tp": 0, "fp": 0, "tn": 0, "fn": 0,
+        "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
+    }
+    return {
+        "dimension": dimension,
+        "sample_size": 0,
+        "ambiguous_count": 0,
+        "v1": empty_cm,
+        "v2": empty_cm,
+        "delta_accuracy": 0.0,
+        "delta_f1": 0.0,
+        "chi_square_stat": 0.0,
+        "chi_square_p_value": 1.0,
+        "is_v2_significantly_better": False,
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M3 · R10：Diff / Lifecycle API（关键位演化追溯）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

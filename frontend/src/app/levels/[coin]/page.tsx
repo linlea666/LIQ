@@ -175,6 +175,13 @@ export default function KeyLevelDetailPage() {
             <span className="text-xs text-slate-500">
               {totalLevels} 个关键位 · {data.active_count} 活跃
             </span>
+            <Link
+              href={`/levels/${coin}/v1v2-compare`}
+              className="px-3 py-1 text-xs rounded border border-purple-700/50 text-purple-300 hover:border-purple-500 hover:text-purple-200 transition"
+              title="M2.5 双轨观测 → 对比 V1 旧逻辑 vs V2 增强算法谁更准（M3 决策支持）"
+            >
+              ⚖ V1/V2 对比
+            </Link>
             <button
               onClick={load}
               disabled={refreshing}

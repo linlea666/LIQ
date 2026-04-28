@@ -825,6 +825,56 @@ export interface LiqMagnetLevel {
   note?: string;
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V3-M3：V1 vs V2 关键位行为对比统计（来自 /api/key-levels/v1v2-stats/{coin}）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface ConfusionMatrixDict {
+  tp: number;
+  fp: number;
+  tn: number;
+  fn: number;
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1: number;
+}
+
+export type V1V2Dimension = "bounce_quality" | "breakout_stage" | "fake_break";
+
+export interface ComparisonStats {
+  dimension: V1V2Dimension | string;
+  sample_size: number;
+  ambiguous_count: number;
+  v1: ConfusionMatrixDict;
+  v2: ConfusionMatrixDict;
+  delta_accuracy: number;
+  delta_f1: number;
+  chi_square_stat: number;
+  chi_square_p_value: number;
+  is_v2_significantly_better: boolean;
+}
+
+export interface V1V2StatsResponse {
+  coin: string;
+  params: {
+    future_window_sec: number;
+    tolerance_sec: number;
+    truth_atr_mult: number;
+    ambiguous_band: number;
+    v2_threshold: number;
+    breakout_stage_threshold: number;
+  };
+  total_records: number;
+  tier_filter: string[];
+  history_size?: number;
+  stats: {
+    bounce_quality: ComparisonStats;
+    breakout_stage: ComparisonStats;
+    fake_break: ComparisonStats;
+  };
+}
+
 // M1 新增：数据新鲜度元信息
 export interface DataFreshness {
   ts: number;
