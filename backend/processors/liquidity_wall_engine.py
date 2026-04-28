@@ -1535,19 +1535,17 @@ def build_liquidity_wall_outputs(
 
         # zone-level explain_chips（最多 3 条；Phase A 优先输出双源/现货标签）
         chips: list[str] = []
-        # 1) 来源标签（dual_source > spot_only，互斥）
-        if z.dual_source:
-            chips.append("💎 现货+合约双源")
-        elif z.source == "spot_only":
-            chips.append("💰 仅现货墙")
-        # 2) 持续性
+        # 注：来源标签（dual_source / spot_only / has_spot_confluence）由前端独立渲染
+        # 此处只补"前端徽章未覆盖"的辅助 chip，避免与前端徽章重复展示
+        # 1) 持续性（带"中"档区分高 / 中持续）
         if z.persistence_score >= 0.7:
             chips.append(f"持续 {int(z.visible_minutes)}min")
         elif z.persistence_score >= 0.4:
             chips.append(f"持续 {int(z.visible_minutes)}min(中)")
-        # 3) 多所 / 状态变化
+        # 2) 多所共振
         if z.exchange_count >= 2:
             chips.append(f"{z.exchange_count}所共振")
+        # 3) 行为状态变化（前端已有但简短，这里补全语义）
         if z.status in ("consumed", "removed", "reloaded"):
             chips.append({"consumed": "已被吃",
                            "removed": "已撤",
