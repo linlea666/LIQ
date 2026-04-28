@@ -88,6 +88,28 @@ class LargeOrderLifecycle(BaseModel):
         return (end_ms - self.start_time_ms) // 1000
 
 
+# ── ±range 流动性时序快照（Phase B 新增）────────────────────────────────
+class AskBidsRangeSnapshot(BaseModel):
+    """合约 ±range 内 ask/bid USD 总量（来自 /orderbook/aggregated-ask-bids-history）。
+
+    数据形态：每帧 4 标量 + ts_ms。无价格分布——不能定位单个墙位置，
+    但可用于"宏观流动性侧翻"分析：
+      - 30min 内 same-side USD 大幅下跌 → 卖方提前抽流动性 → break_through_risk +
+      - 30min 内 same-side USD 显著增厚 → 该侧供给加大 → 攻防加强
+
+    数据源选 multi-exchange aggregated（Binance + OKX + Bybit）：
+      - 单一接口廉价补充"合约多家"维度（lifecycle 大单仍是单家）
+      - aggregated 趋势比单家更稳健（避免单家偶发抽挂误导）
+    """
+    ts_ms: int                              # API 原始 ms 时间戳
+    ts_sec: int                             # 同 ts_ms // 1000，便于其他模块对齐
+    range_pct: float                        # 拉取参数：±X% 内（默认 1）
+    aggregated_bids_usd: float              # 多家聚合 bid 总 USD
+    aggregated_asks_usd: float              # 多家聚合 ask 总 USD
+    aggregated_bids_qty: float = 0.0
+    aggregated_asks_qty: float = 0.0
+
+
 # ── 订单簿深度 snapshot ────────────────────────────────────────────────────
 class DepthBin(BaseModel):
     """单个价位 bin（来自 /orderbook/history 解析）。"""

@@ -114,6 +114,20 @@ interface Props {
   coin: string;
 }
 
+// Phase B：来源筛选 4 档（与 WallZoneSource 对齐）
+type SourceFilter = "all" | "dual" | "spot" | "futures";
+
+function classifyZoneSource(z: WallZone): Exclude<SourceFilter, "all"> {
+  if (z.dual_source) return "dual";
+  if (z.source === "spot_only") return "spot";
+  return "futures";
+}
+
+function filterZonesBySource(zones: WallZone[], filter: SourceFilter): WallZone[] {
+  if (filter === "all") return zones;
+  return zones.filter((z) => classifyZoneSource(z) === filter);
+}
+
 export default function LiquidityWallCard({
   walls_above,
   walls_below,
@@ -125,35 +139,127 @@ export default function LiquidityWallCard({
   lastPrice,
   coin,
 }: Props) {
+  const [filter, setFilter] = useState<SourceFilter>("all");
+
+  // 各档计数（用于 tab 数字徽标）
+  const allZones = [...walls_above, ...walls_below];
+  const counts = {
+    all: allZones.length,
+    dual: allZones.filter((z) => z.dual_source).length,
+    spot: allZones.filter((z) => z.source === "spot_only").length,
+    futures: allZones.filter((z) => !z.dual_source && z.source !== "spot_only").length,
+  };
+
+  const filteredAbove = filterZonesBySource(walls_above, filter);
+  const filteredBelow = filterZonesBySource(walls_below, filter);
+
   return (
     <div className="space-y-3">
       {isWarming && <WarmingBanner historySize={historySize} historyWindowMinutes={historyWindowMinutes} />}
       {crowding && <CrowdingChips crowding={crowding} />}
+      <SourceFilterTabs filter={filter} setFilter={setFilter} counts={counts} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <WallSideCard
           title="上方卖墙"
           icon="🟥"
           sideColor="text-red-400"
           accent="red"
-          zones={walls_above}
+          zones={filteredAbove}
           isWarming={isWarming}
           lastPrice={lastPrice}
           coin={coin}
-          emptyText="上方 ±12% 内暂无满足条件的卖墙"
+          emptyText={
+            filter === "all"
+              ? "上方 ±12% 内暂无满足条件的卖墙"
+              : `上方 ±12% 内暂无符合「${filterLabel(filter)}」的卖墙`
+          }
         />
         <WallSideCard
           title="下方买墙"
           icon="🟩"
           sideColor="text-emerald-400"
           accent="emerald"
-          zones={walls_below}
+          zones={filteredBelow}
           isWarming={isWarming}
           lastPrice={lastPrice}
           coin={coin}
-          emptyText="下方 ±12% 内暂无满足条件的买墙"
+          emptyText={
+            filter === "all"
+              ? "下方 ±12% 内暂无满足条件的买墙"
+              : `下方 ±12% 内暂无符合「${filterLabel(filter)}」的买墙`
+          }
         />
       </div>
       {!isWarming && <WallEventsTimeline events={wall_events} coin={coin} />}
+    </div>
+  );
+}
+
+function filterLabel(f: SourceFilter): string {
+  return ({ all: "全部", dual: "双源", spot: "仅现货", futures: "仅合约" } as const)[f];
+}
+
+// ── Phase B：来源筛选 tabs（合约 / 现货 / 双源 三视角） ──────────────────
+function SourceFilterTabs({
+  filter,
+  setFilter,
+  counts,
+}: {
+  filter: SourceFilter;
+  setFilter: (f: SourceFilter) => void;
+  counts: Record<SourceFilter, number>;
+}) {
+  const TABS: Array<{ id: SourceFilter; label: string; emoji: string; hint: string; activeCls: string }> = [
+    {
+      id: "all",
+      label: "全部",
+      emoji: "📊",
+      hint: "全部 zone（合约 + 现货 + 双源）",
+      activeCls: "bg-slate-600/40 text-slate-100 border-slate-400/40",
+    },
+    {
+      id: "dual",
+      label: "双源高可信",
+      emoji: "💎",
+      hint: "现货 + 合约 5m 同价区共振 → 真买卖家与杠杆资金共同布局",
+      activeCls: "bg-amber-500/30 text-amber-100 border-amber-400/40",
+    },
+    {
+      id: "spot",
+      label: "仅现货",
+      emoji: "💰",
+      hint: "现货独立墙：合约同价位无显著厚度，可能是真长线买卖家",
+      activeCls: "bg-cyan-500/30 text-cyan-100 border-cyan-400/40",
+    },
+    {
+      id: "futures",
+      label: "仅合约",
+      emoji: "⚡",
+      hint: "合约源墙（无现货共振）：可能是清算磁铁 / spoof / 短期挂单",
+      activeCls: "bg-orange-500/25 text-orange-100 border-orange-400/40",
+    },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span className="text-[10px] text-slate-500 mr-1">来源筛选</span>
+      {TABS.map((t) => {
+        const active = filter === t.id;
+        const cls = active
+          ? t.activeCls
+          : "bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-700/40";
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setFilter(t.id)}
+            title={t.hint}
+            className={`px-2 py-1 rounded border transition-colors ${cls}`}
+          >
+            <span>{t.emoji} {t.label}</span>
+            <span className="ml-1.5 font-mono text-[10px] opacity-70">{counts[t.id]}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

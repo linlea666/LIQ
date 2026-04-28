@@ -176,6 +176,11 @@ class CoinState:
         # 由 polls/orderbook_pressure.poll_spot_orderbook_pressure 写入
         # 用于 liquidity_wall_engine 双源 zone 检测（spot+depth = 💎 双源高可信墙）
         self.spot_orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
+        # Phase B：合约多家聚合 ±range 流动性时序（与 heatmap 互补）
+        # 由 polls/orderbook_pressure.poll_aggregated_ask_bids_history 写入
+        # 用于 _compute_active_attack_score 的"宏观流动性衰竭"因子
+        from models.orderbook_pressure import AskBidsRangeSnapshot as _AskBidsRangeSnapshot
+        self.aggregated_ask_bids_history: deque[_AskBidsRangeSnapshot] = deque(maxlen=12)
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -781,141 +786,164 @@ class Engine:
         """
         ccy = coin.ccy
         s = stagger
-        liq_map_interval = self._poll_cfg.get("liquidation_map", 60)
-        oi_interval = self._poll_cfg.get("oi", 60)
-        cvd_interval = self._poll_cfg.get("cvd", 60)
-        ls_interval = self._poll_cfg.get("long_short", 120)
-        taker_interval = self._poll_cfg.get("taker_volume", 120)
-        orderbook_interval = self._poll_cfg.get("orderbook", 60)
-        liq_history_interval = max(liq_map_interval * 5, 300)
-        large_orders_interval = max(self._poll_cfg.get("large_orders", 120), 180)
-        spot_large_orders_interval = max(
-            self._poll_cfg.get("spot_large_orders", large_orders_interval),
+
+        # ── Phase B：按币优先级缩放 interval（节流非主力币种） ──
+        # priority=1.0 不变；priority=0.5 → interval ×2（节省 50% 配额）
+        coin_prio = getattr(self._settings.engine, "coin_priority", None) or {}
+        prio = max(0.05, float(coin_prio.get(ccy, 1.0)))
+        def _scaled(base: int) -> int:
+            return max(1, int(round(base / prio)))
+
+        liq_map_interval = _scaled(self._poll_cfg.get("liquidation_map", 60))
+        oi_interval = _scaled(self._poll_cfg.get("oi", 60))
+        cvd_interval = _scaled(self._poll_cfg.get("cvd", 60))
+        ls_interval = _scaled(self._poll_cfg.get("long_short", 120))
+        taker_interval = _scaled(self._poll_cfg.get("taker_volume", 120))
+        orderbook_interval = _scaled(self._poll_cfg.get("orderbook", 60))
+        liq_history_interval = _scaled(max(self._poll_cfg.get("liquidation_map", 60) * 5, 300))
+        large_orders_interval = _scaled(max(self._poll_cfg.get("large_orders", 120), 180))
+        spot_large_orders_interval = _scaled(max(
+            self._poll_cfg.get("spot_large_orders", self._poll_cfg.get("large_orders", 120)),
             180,
-        )
-        heatmap_interval = self._poll_cfg.get("liquidation_heatmap", 600)
-        heatmap_7d_interval = self._poll_cfg.get("liquidation_heatmap_7d", 1800)
-        indicators_interval = 120
-        candles_1d_interval = 600
-        candles_1w_interval = 3600
-        candles_4h_interval = 900
-        candles_15m_interval = 60
-        oi_rank_interval = 300
-        net_pos_interval = 900
-        netflow_interval = 900
-        td_seq_interval = 3600
-        footprint_interval = self._poll_cfg.get("footprint", 180)
-        ob_pressure_interval = self._poll_cfg.get("orderbook_pressure", 90)
-        spot_ob_pressure_interval = self._poll_cfg.get("spot_orderbook_pressure", 120)
+        ))
+        heatmap_interval = _scaled(self._poll_cfg.get("liquidation_heatmap", 600))
+        heatmap_7d_interval = _scaled(self._poll_cfg.get("liquidation_heatmap_7d", 1800))
+        indicators_interval = _scaled(120)
+        candles_1d_interval = _scaled(600)
+        candles_1w_interval = _scaled(3600)
+        candles_4h_interval = _scaled(900)
+        candles_15m_interval = _scaled(60)
+        oi_rank_interval = _scaled(300)
+        net_pos_interval = _scaled(900)
+        netflow_interval = _scaled(900)
+        td_seq_interval = _scaled(3600)
+        footprint_interval = _scaled(self._poll_cfg.get("footprint", 180))
+        ob_pressure_interval = _scaled(self._poll_cfg.get("orderbook_pressure", 90))
+        spot_ob_pressure_interval = _scaled(self._poll_cfg.get("spot_orderbook_pressure", 120))
+        # Phase B：±range 流动性时序（标量时序，不替代 heatmap，180s/coin 足够）
+        agg_ask_bids_interval = _scaled(self._poll_cfg.get("aggregated_ask_bids", 180))
+        # push_loop 不走 cg API（走内部 _recompute），不应被 priority 节流
+        # candles_1h（hard-coded 60s）需要 priority 节流
+        candles_1h_interval = _scaled(60)
+        basis_interval = _scaled(60)
+        # ── Phase B：启动 stagger 跨度从 38s 扩到 ~51s ──
+        # cg.FixedIntervalLimiter 是 7s 间隔（rate_limit_per_min: 10）
+        # 原 stagger 0.4s 步进会瞬间塞满限速器队列 → 启动 30s 后才"消化完"
+        # 现按高/中/低频分组，相邻 stagger ≥ 1.5s，限速器有喘息时间
         return [
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, s,
             )),
+            # ── 高频组（< 15s）：核心实时数据 ──
             asyncio.create_task(self._poll_loop(
                 f"cg_oi_{ccy}", self._poll_oi, coin,
-                oi_interval, s + 0.4,
+                oi_interval, s + 1.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_{ccy}", self._poll_liquidation_map, coin,
-                liq_map_interval, s + 0.8,
+                liq_map_interval, s + 3.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_cvd_{ccy}", self._poll_cvd, coin,
-                cvd_interval, s + 1.2,
+                cvd_interval, s + 4.5,
             )),
             asyncio.create_task(self._poll_loop(
-                f"cg_ls_{ccy}", self._poll_ls_ratio, coin,
-                ls_interval, s + 1.6,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
-                60, s + 2.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_basis_{ccy}", self._poll_basis, coin,
-                60, s + 2.4,
+                f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
+                orderbook_interval, s + 6.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_taker_{ccy}", self._poll_taker_volume, coin,
-                taker_interval, s + 2.8,
+                taker_interval, s + 7.5,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_ls_{ccy}", self._poll_ls_ratio, coin,
+                ls_interval, s + 9.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_basis_{ccy}", self._poll_basis, coin,
+                basis_interval, s + 10.5,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_1h_{ccy}", self._poll_candles_1h, coin,
+                candles_1h_interval, s + 12.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_candles_15m_{ccy}", self._poll_candles_15m, coin,
+                candles_15m_interval, s + 13.5,
+            )),
+            # ── 中频组（15-30s）：墙观测核心 ──
+            asyncio.create_task(self._poll_loop(
+                f"cg_orderbook_pressure_{ccy}", self._poll_orderbook_pressure, coin,
+                ob_pressure_interval, s + 15.0,
+            )),
+            # Phase A：现货 5m 深度热力图（双源真支撑/真阻力关键源）
+            asyncio.create_task(self._poll_loop(
+                f"cg_spot_orderbook_pressure_{ccy}", self._poll_spot_orderbook_pressure, coin,
+                spot_ob_pressure_interval, s + 16.5,
+            )),
+            # Phase B：合约多家聚合 ±range 流动性时序（active_attack 流动性衰竭因子）
+            asyncio.create_task(self._poll_loop(
+                f"cg_agg_ask_bids_{ccy}", self._poll_aggregated_ask_bids_history, coin,
+                agg_ask_bids_interval, s + 17.5,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_indicators_{ccy}", self._poll_indicators, coin,
+                indicators_interval, s + 18.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_large_orders_{ccy}", self._poll_large_orders, coin,
-                large_orders_interval, s + 15.0,
+                large_orders_interval, s + 19.5,
             )),
             # M2.5：现货大单（与合约大单互补——区分真支撑 vs 清算磁铁）
             asyncio.create_task(self._poll_loop(
                 f"cg_spot_large_orders_{ccy}", self._poll_spot_large_orders, coin,
-                spot_large_orders_interval, s + 16.5,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
-                liq_history_interval, s + 18.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_indicators_{ccy}", self._poll_indicators, coin,
-                indicators_interval, s + 3.2,
+                spot_large_orders_interval, s + 21.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_heatmap_24h_{ccy}", self._poll_liq_heatmap_24h, coin,
-                heatmap_interval, s + 3.6,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_heatmap_7d_{ccy}", self._poll_liq_heatmap_7d, coin,
-                heatmap_7d_interval, s + 4.4,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_orderbook_{ccy}", self._poll_orderbook_depth, coin,
-                orderbook_interval, s + 4.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_oi_rank_{ccy}", self._poll_oi_exchange_rank, coin,
-                oi_rank_interval, s + 21.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
-                candles_1d_interval, s + 4.4,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
-                candles_1w_interval, s + 4.8,
+                heatmap_interval, s + 22.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_candles_4h_{ccy}", self._poll_candles_4h, coin,
-                candles_4h_interval, s + 5.2,
+                candles_4h_interval, s + 24.0,
             )),
             asyncio.create_task(self._poll_loop(
-                f"cg_candles_15m_{ccy}", self._poll_candles_15m, coin,
-                candles_15m_interval, s + 5.6,
+                f"cg_oi_rank_{ccy}", self._poll_oi_exchange_rank, coin,
+                oi_rank_interval, s + 25.5,
             )),
             asyncio.create_task(self._poll_loop(
-                f"cg_net_pos_{ccy}", self._poll_net_position, coin,
-                net_pos_interval, s + 24.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_coin_netflow_{ccy}", self._poll_futures_coin_netflow, coin,
-                netflow_interval, s + 27.0,
-            )),
-            asyncio.create_task(self._poll_loop(
-                f"cg_td_seq_{ccy}", self._poll_td_sequential, coin,
-                td_seq_interval, s + 30.0,
+                f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
+                liq_history_interval, s + 27.0,
             )),
             # ── MAA · Footprint（合约+现货足迹图）──
             asyncio.create_task(self._poll_loop(
                 f"cg_footprint_{ccy}", self._poll_footprint, coin,
-                footprint_interval, s + 33.0,
+                footprint_interval, s + 28.5,
             )),
-            # ── Orderbook Pressure Monitor (独立 snipe 信号源) ──
-            # 仅新增 1 个 cg 请求/cycle (深度热力图)；大单 lifecycle 走 _poll_large_orders 复用
+            # ── 低频组（30-51s）：日级 / 周级 / 历史 ──
             asyncio.create_task(self._poll_loop(
-                f"cg_orderbook_pressure_{ccy}", self._poll_orderbook_pressure, coin,
-                ob_pressure_interval, s + 36.0,
+                f"cg_candles_1d_{ccy}", self._poll_candles_daily, coin,
+                candles_1d_interval, s + 30.0,
             )),
-            # ── Phase A：现货 5m 深度热力图（双源真支撑/真阻力关键源）──
-            # 与合约 ob_pressure 错开 stagger（37.5s），同样 1 个 cg 请求/cycle
             asyncio.create_task(self._poll_loop(
-                f"cg_spot_orderbook_pressure_{ccy}", self._poll_spot_orderbook_pressure, coin,
-                spot_ob_pressure_interval, s + 37.5,
+                f"cg_candles_1w_{ccy}", self._poll_candles_weekly, coin,
+                candles_1w_interval, s + 33.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_heatmap_7d_{ccy}", self._poll_liq_heatmap_7d, coin,
+                heatmap_7d_interval, s + 36.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_net_pos_{ccy}", self._poll_net_position, coin,
+                net_pos_interval, s + 39.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_coin_netflow_{ccy}", self._poll_futures_coin_netflow, coin,
+                netflow_interval, s + 42.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"cg_td_seq_{ccy}", self._poll_td_sequential, coin,
+                td_seq_interval, s + 45.0,
             )),
         ]
 
@@ -1329,6 +1357,16 @@ class Engine:
         """
         from polls.orderbook_pressure import poll_spot_orderbook_pressure
         await poll_spot_orderbook_pressure(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_aggregated_ask_bids_history(self, coin: CoinConfig):
+        """Phase B：合约多家聚合 ±range 流动性时序。
+
+        ``/api/futures/orderbook/aggregated-ask-bids-history`` 一个端点拿到
+        Binance + OKX + Bybit 三家合并 ±2% 内 ask/bid 总 USD 时序。
+        与 5m heatmap 互补——后者定位精确价位，本接口反映宏观流动性变化。
+        """
+        from polls.orderbook_pressure import poll_aggregated_ask_bids_history
+        await poll_aggregated_ask_bids_history(self._cg, coin, self._states[coin.ccy])
 
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data

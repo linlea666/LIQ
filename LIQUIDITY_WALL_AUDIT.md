@@ -1,10 +1,10 @@
 # 流动性墙 + 大单行为 + 持仓拥挤度监测引擎 — 审核快照
 
 > **用途**：外部 AI / 审计方的当前状态快照（非过程文档，过程见 `LIQUIDITY_WALL_REVIEW.md`）  
-> **最后更新**：2026-04-28（Phase A：双源融合 + 主动攻击因子 + 按币分层）  
-> **当前阶段**：M1 + M2 + M2.5 + **Phase A**（基于 spot probe 实测发现升级）  
-> **回归基线**：后端 **1881 passed** · 前端 tsc 0 错 · 本次改动 ESLint 0 错 0 警  
-> **代码量**：引擎 ~1530 行 / 测试 1130 行（**70 用例**）/ 前端卡片 ~620 行 / 模型 ~410 行
+> **最后更新**：2026-04-28（Phase B：配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs）  
+> **当前阶段**：M1 + M2 + M2.5 + Phase A + **Phase B**  
+> **回归基线**：后端 **1888 passed** · 前端 tsc 0 错 · 本次改动 ESLint 0 错 0 警  
+> **代码量**：引擎 ~1560 行 / 测试 1290 行（**77 用例**）/ 前端卡片 ~750 行 / 模型 ~430 行
 
 ---
 
@@ -50,13 +50,20 @@
 | 端点 | 用途 | 频率 | cache_ttl | 函数 |
 |---|---|---|---|---|
 | `/api/futures/orderbook/history` | 合约 5m 深度热力图（**12 帧滚动** = 1h history）| 90s | 60s | `fetch_orderbook_heatmap(exchange, symbol, interval, limit=12)` |
-| `/api/spot/orderbook/history` ⭐ **Phase A 新增** | 现货 5m 深度热力图（双源融合 zone 关键源）| 120s | 60s | `fetch_spot_orderbook_heatmap` |
+| `/api/spot/orderbook/history` ⭐ Phase A 新增 | 现货 5m 深度热力图（双源融合 zone 关键源）| 120s | 60s | `fetch_spot_orderbook_heatmap` |
+| `/api/futures/orderbook/aggregated-ask-bids-history` ⭐ **Phase B 新增** | 合约多家聚合 ±2% 流动性时序（衰竭因子）| 180s | 30s | `fetch_orderbook_aggregated_ask_bids` |
 | `/api/futures/orderbook/large-limit-order` | 合约大单 holding 快照 | 180s | 60s | `fetch_large_orders` |
 | `/api/futures/orderbook/large-limit-order-history` | 合约大单 ended lifecycle | 180s | 默认 | `fetch_large_orders_history` |
 | `/api/spot/orderbook/large-limit-order` (M2.5) | 现货大单 holding（区分真买家/卖家）| 240s | 60s | `fetch_spot_large_orders` |
 | `/api/spot/orderbook/large-limit-order-history` (M2.5) | 现货大单 ended lifecycle | 240s | 默认 | `fetch_spot_large_orders_history` |
 | `/api/futures/openInterest/exchange-list` | OI 多周期 delta + 币本位/U本位拆分（已强化解析）| 120s | 默认 | `fetch_oi_exchange_list` |
 | `/api/futures/liquidation/aggregated/max-pain` | 清算磁铁价（每 zone 的 sweep_target 源）| 300s | 默认 | `fetch_liquidation_max_pain` |
+
+**合约 orderbook 端点 5/5 评估**：
+- ✅ `/api/futures/orderbook/history`（已用，主路径，分价位定位精确墙位置）
+- ✅ `/api/futures/orderbook/aggregated-ask-bids-history`（**Phase B 新接入**，标量时序，反映宏观流动性变化）
+- ✅ `/api/futures/orderbook/large-limit-order` + `large-limit-order-history`（已用，lifecycle）
+- ⚠ `/api/futures/orderbook/ask-bids-history`（单家版，与 aggregated 同结构 → 选 aggregated 更稳健，单家版**不接入**避免重复）
 
 ### 2.2 复用的现有数据（零新增 poll）
 
@@ -70,31 +77,38 @@
 | Liquidation Heatmap | `liq_summary` | sweep_target 备选 |
 | Candles 4h | `candles_4h` | ATR(14) → merge_pct 自适应 |
 
-### 2.3 Quota 评估（Phase A 修正后）
+### 2.3 Quota 评估（Phase B 修正后）
 
 | 维度 | 实际值 | 来源 |
 |---|---|---|
-| **真正瓶颈** | `rate_limit_per_min: 10`（FixedIntervalLimiter 7s 间隔）→ **实际峰值 ~8.6/min** | `backend/sources/coinglass.py:24-32` |
+| **真正瓶颈** | `rate_limit_per_min: 10`（FixedIntervalLimiter 7s 间隔）→ **实际峰值 ~8.6/min** | `backend/sources/coinglass.py` |
 | 日上限 | 50,000/day（实测 daily_usage 12-381，0-0.8%）| Coinglass 协议 |
-| 活跃币 | **3（BTC / ETH / SOL）**——`allow_coins` 决定 | `backend/config/config.yaml: allow_coins` |
-| 全引擎需求估算 | **~35 次/min**（Phase A 调优后较优化前 -1.5/min）| `backend/engine.py:802-920` |
+| 活跃币 | **3（BTC / ETH / SOL）**——`allow_coins` 决定（Phase B：SOL 走 priority=0.5 半频）| `backend/config/config.yaml: allow_coins` |
+| 全引擎需求估算 | **~30-32 次/min**（Phase B 调优后较 Phase A -3 ~ -5/min）| `backend/engine.py: _create_full_poll_tasks` |
 | 实际表现 | 限速器排队抹平 → 实际等效 8-10/min | `coinglass_daily_usage` |
 
-**Phase A 配额调整账（净 -0.5 calls/min，反向释放预算）**：
+**Phase B 配额账（持续优化，净再 -3 ~ -5 calls/min）**：
 
 | 项 | 调整 | 净配额变化 |
 |---|---|---|
-| `large_orders` 120 → 180s | 3 币 × (60/180 - 60/120) | -0.5 calls/min |
-| `spot_large_orders` 120 → 240s | 3 币 × (60/240 - 60/120) | -1.5 calls/min |
-| ⭐ **新增 `spot_orderbook_pressure` 120s** | 3 币 × 60/120 | +1.5 calls/min |
-| **合计** | | **-0.5 calls/min** |
+| ⭐ **B1：启动 stagger 跨度 38s → 51s** | 启动期 burst 削平（限速器有喘息时间）| 启动延迟 ↓ 但稳态不变 |
+| ⭐ **B2：新增 aggregated ask-bids 180s** | 3 币 × 60/180 = +1.0/min | +1.0 calls/min |
+| ⭐ **B4：SOL coin_priority=0.5（半频）** | SOL 所有 poll interval ×2 | -4 ~ -6 calls/min |
+| **合计** | | **-3 ~ -5 calls/min** |
 
-**关键判断**：Phase A 通过"配额优化释放 ≥ 新接入消耗"——既接入了现货 5m 热力图（双源融合关键源），又**反而释放**了 0.5 calls/min。
+**Phase A → Phase B 累计**：
 
-**结论**：
+| 阶段 | 计算需求 | 净变化 | 备注 |
+|---|---|---|---|
+| Phase 0 基线 | ~36 calls/min | — | M1 前 |
+| Phase A | ~35 calls/min | -0.5 | 新增 spot_ob + 慢化 large_orders |
+| **Phase B** | **~30-32 calls/min** | **-3 ~ -5** | SOL 半频 + 启动错峰 |
+
+**关键判断**：
 1. ❌ **不是 daily quota 触底**（远未达 50K/day）
 2. ✅ **是 10/min 限速器排队挤压**（真实瓶颈）
-3. ✅ **Phase A 净 -0.5 calls/min**，对系统压力**降低**
+3. ✅ **Phase B 累计 -4 ~ -5.5 calls/min**，给后续扩展留足余量
+4. ✅ **SOL 半频可配置**（用户可调 `engine.coin_priority.SOL` 在 0.0-1.0 间灵活节流）
 
 ---
 
@@ -184,19 +198,27 @@ risk = clamp(
   + 0.20 × (1 if magnet_distance_pct < 0.5)            # 磁铁很近
   + 0.15 × (1 if vacuum_gap_pct >= 0.5)                # 真空跨度大
   + 0.10 × (1 if crowding_risk >= 0.6)                 # 同向拥挤（Phase A 0.15→0.10）
-  + 0.20 × active_attack_score                         # Phase A 新增
+  + 0.20 × active_attack_score                         # Phase A+B
 , 0, 1)
 ```
 
-`active_attack_score` 公式（line 920）：
+`active_attack_score` 公式（Phase B 拓展为三因子）：
 ```python
 score = 0
-# 1. taker 同向占比（线性映射 0.5→0, 0.6→1.0）
+# 1. taker 同向占比（线性映射 0.5→0, 0.6→1.0）·权重 0.40
 if same_side_ratio > 0.5:
-    score += 0.50 × clamp((same_side_ratio - 0.5) / 0.10, 0, 1)
-# 2. cvd_spot 同向 trend
+    score += 0.40 × clamp((same_side_ratio - 0.5) / 0.10, 0, 1)
+# 2. cvd_spot 同向 trend ·权重 0.30
 if cvd_spot.trend_1h in same_direction_trends:
-    score += 0.50
+    score += 0.30
+# 3. Phase B：流动性衰竭因子 ·权重 0.30
+#    aggregated_ask_bids_history 30min 内 same-side USD 衰减 ≥ 5% → 满分
+if ask_bids_history and len ≥ 2:
+    base = first.aggregated_(side)_usd
+    cur = last.aggregated_(side)_usd
+    if cur < base:
+        decline_pct = (base - cur) / base
+        score += 0.30 × clamp(decline_pct / 0.05, 0, 1)
 return clamp(score, 0, 1)
 ```
 
@@ -282,6 +304,38 @@ return clamp(score, 0, 1)
 | 其他 | 1,000,000 | ENGINE_DEFAULTS 默认 |
 
 存储位置：`config.processors.orderbook_pressure.seed_min_usd_by_coin`，在 `build_liquidity_wall_outputs` 入口按 `state.coin` 动态覆盖 cfg。
+
+### 3.5 Phase B — 配额优化 + 流动性衰竭因子 + 来源筛选 UI
+
+**B1 启动 stagger 跨度 38s → 51s**（`engine.py: _create_full_poll_tasks`）
+
+原 stagger 0.4s 步进会瞬间塞满 cg `FixedIntervalLimiter`（7s 间隔）队列，启动后前 30s 数据全部排队。Phase B 重排成"高频组（< 15s）/ 中频组（15-30s）/ 低频组（30-51s）"三段，相邻 stagger ≥ 1.5s，限速器有喘息时间消化。
+
+**B2 接入 aggregated-ask-bids-history**（流动性衰竭因子）
+
+新模型 `AskBidsRangeSnapshot`（4 标量 + ts_ms）→ `state.aggregated_ask_bids_history` deque(12) → 喂给 `_compute_active_attack_score` 第 3 因子。
+
+数据形态：
+```python
+# 每帧（5min interval × 12 = 1h history）
+{aggregated_bids_usd, aggregated_asks_usd, aggregated_bids_qty, aggregated_asks_qty, time}
+```
+
+**B4 SOL coin_priority 半频**（`config.engine.coin_priority`）
+
+```yaml
+engine:
+  coin_priority:
+    BTC: 1.0  # 满频
+    ETH: 1.0
+    SOL: 0.5  # 间隔翻倍 → 节省 50% 配额
+```
+
+实现：`engine._create_full_poll_tasks` 内部 `_scaled(base) = max(1, round(base / prio))`，所有 cg API 类 poll 都走 `_scaled` 包装。`push_loop`（无 cg 调用）不受影响。
+
+**B3 前端来源筛选 tabs**（`LiquidityWallCard.tsx`）
+
+主入口加 4 档 SourceFilter：`全部 / 💎 双源 / 💰 仅现货 / ⚡ 仅合约`，按 `WallZone.dual_source` + `WallZone.source` 分类计数与过滤。无需新增数据，纯前端展示层。
 
 ---
 
@@ -370,7 +424,7 @@ def test_kl_isolation_with_engine_enabled():
 ## 七、测试覆盖
 
 ```
-backend/tests/test_liquidity_wall_engine.py: 70 用例
+backend/tests/test_liquidity_wall_engine.py: 77 用例
 ├── TestModels                 (4)  4 模型序列化往返 + 18 字段
 ├── TestMergePct                (3)  ATR clamp 上下界 + 默认
 ├── TestMergeBins               (5)  相邻合并 + 远距分离 + min_usd 过滤 + 跨距过滤
@@ -387,9 +441,13 @@ backend/tests/test_liquidity_wall_engine.py: 70 用例
 │                                          + active_attack（同向/逆向）
 │                                          + break_through_risk 含 attack 因子
 │                                          + seed_min_usd_by_coin 动态覆盖
+├── TestPhaseB                  (5)  ⭐ Phase B：coin_priority 默认值/非法值过滤
+│                                          + AskBidsRangeSnapshot 序列化
+│                                          + 流动性衰竭因子（短历史 0 / 5% 满分 / 2% 线性）
+│                                          + active_attack 三因子合成 0.70/1.00
 └── TestKLIsolation             (1)  KL 关键字段哈希不变 (铁律)
 
-后端全量：1881 passed
+后端全量：1888 passed
 前端 tsc：0 错
 本次改动 ESLint：0 错 0 警
 ```
@@ -405,7 +463,8 @@ backend/tests/test_liquidity_wall_engine.py: 70 用例
 | `334ed90` | 修复"zone 全 bin 灌水"算法 bug（种子机制 + top-N 双闸）| 1856 |
 | `ea512fd` | 4 项诉求覆盖完善：visible_minutes bug + 大单容差 + 事件流 + 打穿预览 | 1863 |
 | `9706153` | M2.5 现货 vs 合约（spot poll + trust_score + 三档互斥标签）| 1871 |
-| **Phase A** | **现货 5m 热力图双源融合 + active_attack + seed_by_coin + 配额优化** | **1881** |
+| `9c058d9` | Phase A 现货 5m 热力图双源融合 + active_attack + seed_by_coin | 1881 |
+| **Phase B** | **配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs + SOL 半频** | **1888** |
 
 ---
 

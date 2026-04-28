@@ -994,20 +994,22 @@ def _compute_active_attack_score(
     taker_flow: Any,
     cvd_spot: Any,
     cfg: dict,
+    ask_bids_history: Optional[Sequence] = None,
 ) -> float:
-    """Phase A：实时主动攻击强度（0-1，作为 break_through_risk 加项）。
+    """Phase A+B：实时主动攻击强度（0-1，作为 break_through_risk 加项）。
 
     回应 GPT P1-3："break_through_risk 缺乏'主动攻击'因子，纯静态指标无法
     反映正在发生的吃单/挤兑。"
 
-    构成（同向攻击才计分；逆向攻击 = 0）：
-      - 0.50 × taker 同向占比（bid wall 看 sell_ratio；ask wall 看 buy_ratio）
-              taker_dom = (same_side - other_side) / max(total, 1)
-              clamp(0, 1)：≥ 60% 同向 → 1.0
-      - 0.50 × cvd_spot 同向 trend 信号
-              bid wall：cvd_spot.trend in {"down","strong_down"} → 1.0
-              ask wall：cvd_spot.trend in {"up","strong_up"}     → 1.0
-              其余 → 0
+    构成（同向攻击才计分；逆向攻击 = 0；三因子加权）：
+      - 0.40 × taker 同向占比（bid wall 看 sell_ratio；ask wall 看 buy_ratio）
+              ≥ 60% 同向 → 1.0（线性映射 0.5→0, 0.6→1.0）
+      - 0.30 × cvd_spot 同向 trend
+              bid wall：trend ∈ {down, strong_down} / ask wall：trend ∈ {up, strong_up}
+      - 0.30 × **流动性衰竭因子**（Phase B 新增）
+              来自 ``aggregated_ask_bids_history``：30min 内 same-side USD
+              下跌 ≥ 5% → 1.0（线性映射 0% → 0, 5%+ → 1.0）
+              语义："攻击侧抽流动性"——是 GPT P1-3 提到的"宏观流动性侧翻"信号
 
     现货 CVD 优先于合约 CVD：现货是真买卖家，更能反映真攻击。
     """
@@ -1025,7 +1027,7 @@ def _compute_active_attack_score(
                     same_ratio = buy / total
                 if same_ratio > 0.5:
                     # 0.5→0, 0.6→1.0（线性映射，clamp 上限 1.0）
-                    score += 0.50 * min(1.0, max(0.0, (same_ratio - 0.5) / 0.10))
+                    score += 0.40 * min(1.0, max(0.0, (same_ratio - 0.5) / 0.10))
         except (TypeError, ValueError):
             pass
 
@@ -1037,7 +1039,25 @@ def _compute_active_attack_score(
         else:
             same_trend = trend in ("up", "strong_up")
         if same_trend:
-            score += 0.50
+            score += 0.30
+
+    # 3) Phase B：流动性衰竭因子（aggregated ±range USD 时序）
+    if ask_bids_history and len(ask_bids_history) >= 2:
+        # 取最近 ~30min（≈ 6 帧 × 5min）做对比，不足 6 帧用全部
+        recent = list(ask_bids_history)
+        baseline = recent[0]
+        latest = recent[-1]
+        # bid wall 看 bids_usd 衰减；ask wall 看 asks_usd 衰减
+        if zone.side == "bid":
+            base = float(getattr(baseline, "aggregated_bids_usd", 0) or 0)
+            cur = float(getattr(latest, "aggregated_bids_usd", 0) or 0)
+        else:
+            base = float(getattr(baseline, "aggregated_asks_usd", 0) or 0)
+            cur = float(getattr(latest, "aggregated_asks_usd", 0) or 0)
+        if base > 0 and cur < base:
+            decline_pct = (base - cur) / base
+            # 0% 衰减 → 0；≥ 5% 衰减 → 1.0（线性）
+            score += 0.30 * min(1.0, max(0.0, decline_pct / 0.05))
 
     return round(min(1.0, score), 3)
 
@@ -1049,6 +1069,7 @@ def _compute_break_through_risk(
     cfg: dict,
     taker_flow: Any = None,
     cvd_spot: Any = None,
+    ask_bids_history: Optional[Sequence] = None,
 ) -> float:
     """0-1 软分：墙是否容易被打穿。
 
@@ -1081,8 +1102,10 @@ def _compute_break_through_risk(
         risk = crowding.long_crowding_risk if zone.side == "bid" else crowding.short_crowding_risk
         if risk >= 0.6:
             score += 0.10
-    # Phase A：主动攻击因子（taker 同向 + cvd_spot 同向 trend）
-    aa = _compute_active_attack_score(zone, taker_flow, cvd_spot, cfg)
+    # Phase A+B：主动攻击因子（taker 同向 + cvd_spot 同向 trend + 流动性衰竭）
+    aa = _compute_active_attack_score(
+        zone, taker_flow, cvd_spot, cfg, ask_bids_history=ask_bids_history,
+    )
     score += 0.20 * aa
     return round(min(1.0, score), 3)
 
@@ -1479,11 +1502,14 @@ def build_liquidity_wall_outputs(
                      if e.side == z.side and abs(e.price_mid - z.price_mid) < 1e-6]
         z.status = _classify_zone_status(z, z_events)
 
-        # break_through_risk（Phase A：传入 taker_flow + cvd_spot 作为主动攻击因子）
+        # break_through_risk（Phase A+B：主动攻击 + 流动性衰竭因子）
         z.break_through_risk = _compute_break_through_risk(
             z, crowding, z.sweep_target, cfg,
             taker_flow=getattr(state, "taker_flow", None),
             cvd_spot=getattr(state, "cvd_spot", None),
+            ask_bids_history=list(
+                getattr(state, "aggregated_ask_bids_history", []) or []
+            ),
         )
 
         # zone-level explain_chips（最多 3 条；Phase A 优先输出双源/现货标签）

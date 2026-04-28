@@ -49,6 +49,7 @@ sources:
       footprint: 180            # MAA · 合约+现货足迹图（1h 粒度，180s 轮询）
       orderbook_pressure: 90    # 合约 5m 深度热力图（前后帧对比）
       spot_orderbook_pressure: 120  # 现货 5m 深度热力图（A 期接入：双源真支撑/真阻力）
+      aggregated_ask_bids: 180  # B 期：合约多家聚合 ±range 流动性时序（active_attack 流动性衰竭因子）
       options: 600
       etf: 1800
       onchain: 3600
@@ -186,6 +187,14 @@ processors:
 engine:
   inactive_poll_sec: 120
   grace_period_sec: 60
+  # ── Phase B：按币 poll 频率乘子（节流非主力币种）──
+  # interval_actual = base_interval / coin_priority[ccy]
+  # 1.0 = 满频；0.5 = 间隔翻倍（节省 50% 配额）；缺失 = 走 1.0
+  # 当前 SOL 设 0.5：每币原本 ~12 calls/min，SOL 减半 = 节省 6 calls/min
+  coin_priority:
+    BTC: 1.0
+    ETH: 1.0
+    SOL: 0.5
 
 ai:
   active: "deepseek"

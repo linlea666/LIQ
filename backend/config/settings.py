@@ -130,6 +130,13 @@ class AIConfig:
 class EngineConfig:
     inactive_poll_sec: int = 120
     grace_period_sec: int = 60
+    # ── Phase B：按币 poll 频率乘子（节流非主力币种，省 rate_limit/min 配额）──
+    # interval_actual = base_interval / coin_priority[ccy]
+    # 取值约定：1.0 = 满频；0.5 = 间隔翻倍；0.0 / 缺失 = 完全不 poll（对应 allow_coins 移除）
+    # 缺省：BTC/ETH 1.0，SOL 0.5（实测主要节流目标）
+    coin_priority: dict[str, float] = field(default_factory=lambda: {
+        "BTC": 1.0, "ETH": 1.0, "SOL": 0.5,
+    })
 
 
 @dataclass(frozen=True)
@@ -356,9 +363,21 @@ def _build_settings(raw: dict) -> Settings:
     server = ServerConfig(**raw["server"])
 
     eng_raw = raw.get("engine", {})
+    coin_prio_raw = eng_raw.get("coin_priority") or {}
+    coin_prio: dict[str, float] = {}
+    for ccy, val in coin_prio_raw.items() if isinstance(coin_prio_raw, dict) else []:
+        try:
+            v = float(val)
+            if v > 0:
+                coin_prio[str(ccy).upper()] = v
+        except (TypeError, ValueError):
+            continue
+    if not coin_prio:
+        coin_prio = {"BTC": 1.0, "ETH": 1.0, "SOL": 0.5}
     engine_cfg = EngineConfig(
         inactive_poll_sec=eng_raw.get("inactive_poll_sec", 120),
         grace_period_sec=eng_raw.get("grace_period_sec", 60),
+        coin_priority=coin_prio,
     )
 
     notif_raw = raw.get("notifications", {})

@@ -21,7 +21,11 @@ import time
 from typing import TYPE_CHECKING
 
 from config.settings import CoinConfig
-from models.orderbook_pressure import DepthBin, OrderbookDepthSnapshot
+from models.orderbook_pressure import (
+    AskBidsRangeSnapshot,
+    DepthBin,
+    OrderbookDepthSnapshot,
+)
 from sources.coinglass import CoinglassSource
 
 if TYPE_CHECKING:
@@ -217,4 +221,76 @@ async def poll_spot_orderbook_pressure(
             coin.ccy, coin.exchange_primary,
             len(latest_bids), len(latest_asks),
             len(state.spot_orderbook_depth_history), new_frames_count,
+        )
+
+
+async def poll_aggregated_ask_bids_history(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+    range_pct: str = "2",
+    exchange_list: str = "Binance,OKX,Bybit",
+) -> None:
+    """Phase B：合约多家聚合 ±range 流动性时序（``/api/futures/orderbook/aggregated-ask-bids-history``）。
+
+    与 spot/futures heatmap 互补：
+      - heatmap：分价位（1245 bins）→ 定位**精确墙位置**
+      - aggregated-ask-bids：标量时序 → 反映**整体流动性变化趋势**
+
+    数据形态：每帧 {bids_usd, asks_usd, qty, time}，无分价位——不替代 heatmap，
+    而是作为 _compute_active_attack_score 的"流动性衰竭因子"补充。
+
+    range_pct 选 2%（覆盖 ±2% 范围内的"近距墙"流动性变化）；
+    exchange_list 多家聚合，比单家 endpoint 更稳健。
+    """
+    data = await cg.fetch_orderbook_aggregated_ask_bids(
+        symbol=coin.symbol_cg,
+        interval="5m",
+        limit=12,                      # 1h history（与 heatmap 同窗口）
+        range_pct=range_pct,
+        exchange_list=exchange_list,
+    )
+    if not data or not isinstance(data, list):
+        return
+
+    parsed: list[AskBidsRangeSnapshot] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ts_ms = int(item.get("time") or 0)
+            if ts_ms <= 0:
+                continue
+            parsed.append(AskBidsRangeSnapshot(
+                ts_ms=ts_ms,
+                ts_sec=ts_ms // 1000,
+                range_pct=float(range_pct),
+                aggregated_bids_usd=float(item.get("aggregated_bids_usd", 0) or 0),
+                aggregated_asks_usd=float(item.get("aggregated_asks_usd", 0) or 0),
+                aggregated_bids_qty=float(item.get("aggregated_bids_quantity", 0) or 0),
+                aggregated_asks_qty=float(item.get("aggregated_asks_quantity", 0) or 0),
+            ))
+        except (TypeError, ValueError):
+            continue
+    if not parsed:
+        return
+    parsed.sort(key=lambda x: x.ts_ms)
+
+    # 去重写入 deque（按 ts_ms）
+    existing = {snap.ts_ms for snap in state.aggregated_ask_bids_history}
+    new_count = 0
+    for snap in parsed:
+        if snap.ts_ms in existing:
+            continue
+        state.aggregated_ask_bids_history.append(snap)
+        existing.add(snap.ts_ms)
+        new_count += 1
+
+    if "aggregated_ask_bids_ready" not in state._log_once_keys and new_count > 0:
+        state._log_once_keys.add("aggregated_ask_bids_ready")
+        latest = parsed[-1]
+        logger.info(
+            "合约多家聚合 ±%s%% 流动性时序接通 | coin=%s bids=%.0fM asks=%.0fM "
+            "history_size=%d new=%d",
+            range_pct, coin.ccy,
+            latest.aggregated_bids_usd / 1e6, latest.aggregated_asks_usd / 1e6,
+            len(state.aggregated_ask_bids_history), new_count,
         )

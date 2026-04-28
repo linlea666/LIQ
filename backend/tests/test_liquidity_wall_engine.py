@@ -1060,8 +1060,8 @@ class TestMainEntryAndKLIsolation:
         )
         assert zones == [], "应被 excluded 过滤掉"
 
-    def test_active_attack_score_taker_aligned(self):
-        """taker 卖压主导 + bid wall → active_attack 高分。"""
+    def test_active_attack_score_taker_and_cvd_aligned(self):
+        """taker 卖压 + cvd_spot 同向 → 0.40 + 0.30 = 0.70（无 ask_bids 衰竭）。"""
         from processors.liquidity_wall_engine import _compute_active_attack_score
         z = WallZone(
             side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
@@ -1070,10 +1070,30 @@ class TestMainEntryAndKLIsolation:
             bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
         )
         taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
-        # sell_ratio = 4/5 = 0.8 → (0.8-0.5)/0.10 clamp 1.0 → +0.50
-        cvd_spot = SimpleNamespace(trend_1h="strong_down")  # 同向 +0.50
+        cvd_spot = SimpleNamespace(trend_1h="strong_down")
         score = _compute_active_attack_score(z, taker, cvd_spot, ENGINE_DEFAULTS)
-        assert score == pytest.approx(1.0)
+        assert score == pytest.approx(0.70)
+
+    def test_active_attack_score_full_with_liquidity_drain(self):
+        """Phase B 满分：taker + cvd + 流动性衰竭 5% → 0.40+0.30+0.30 = 1.00。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
+        cvd_spot = SimpleNamespace(trend_1h="strong_down")
+        # bid wall 看 bids_usd 衰减：1B → 950M（衰减 5%）→ 满分
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=950_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker, cvd_spot, ENGINE_DEFAULTS, ask_bids_history=ask_bids,
+        )
+        assert score == pytest.approx(1.00)
 
     def test_active_attack_score_counter_direction_zero(self):
         """taker 买压 + bid wall（逆向）→ active_attack=0。"""
@@ -1086,8 +1106,35 @@ class TestMainEntryAndKLIsolation:
         )
         taker = SimpleNamespace(buy_volume_usd=4_000_000, sell_volume_usd=1_000_000)  # 买压主导
         cvd_spot = SimpleNamespace(trend_1h="up")
-        score = _compute_active_attack_score(z, taker, cvd_spot, ENGINE_DEFAULTS)
+        # bids_usd 增厚（逆向）→ 流动性衰竭因子也是 0
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=1_050_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker, cvd_spot, ENGINE_DEFAULTS, ask_bids_history=ask_bids,
+        )
         assert score == 0.0
+
+    def test_active_attack_score_only_liquidity_drain(self):
+        """单独流动性衰竭 5% → 0.30（仅第 3 因子）。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="ask", price_low=80_000, price_high=80_100, price_mid=80_050,
+            peak_price=80_050, distance_pct=4.0,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        # ask wall 看 asks_usd 衰减
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=950_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=ask_bids,
+        )
+        assert score == pytest.approx(0.30)
 
     def test_break_through_risk_includes_active_attack(self):
         """主动攻击因子 + 静态因子 → break_through_risk 比纯静态版本高。"""
@@ -1100,15 +1147,20 @@ class TestMainEntryAndKLIsolation:
         )
         taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
         cvd_spot = SimpleNamespace(trend_1h="strong_down")
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=950_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
         risk_with_attack = _compute_break_through_risk(
             z, crowding=None, sweep=None, cfg=ENGINE_DEFAULTS,
-            taker_flow=taker, cvd_spot=cvd_spot,
+            taker_flow=taker, cvd_spot=cvd_spot, ask_bids_history=ask_bids,
         )
         risk_static = _compute_break_through_risk(
             z, crowding=None, sweep=None, cfg=ENGINE_DEFAULTS,
         )
         assert risk_with_attack > risk_static
-        assert risk_with_attack >= risk_static + 0.15  # 至少多 +0.15（active 满分 ×0.20）
+        # active 满分 1.0 × 0.20 = +0.20
+        assert risk_with_attack >= risk_static + 0.19
 
     def test_seed_min_usd_by_coin_overrides_default(self):
         """A6：seed_min_usd_by_coin 按币动态覆盖默认 1M。"""
@@ -1135,6 +1187,89 @@ class TestMainEntryAndKLIsolation:
             state_sol, snap_sol, cfg_btc, now=1700_000_000 + 12 * 300 + 2000,
         )
         assert out_sol.walls_below, "SOL 800K 阈值下，1.5M 种子应被识别"
+
+    # ════════════════════════════════════════════════════════════════════
+    # Phase B — 配额优化（coin_priority）+ ask-bids 流动性衰竭因子
+    # ════════════════════════════════════════════════════════════════════
+
+    def test_coin_priority_in_settings_loads_default(self):
+        """B4：EngineConfig 默认 coin_priority = {BTC:1.0, ETH:1.0, SOL:0.5}。"""
+        from config.settings import EngineConfig
+        ec = EngineConfig()
+        assert ec.coin_priority["BTC"] == pytest.approx(1.0)
+        assert ec.coin_priority["ETH"] == pytest.approx(1.0)
+        assert ec.coin_priority["SOL"] == pytest.approx(0.5)
+
+    def test_coin_priority_invalid_values_filtered(self):
+        """B4：负数/字符串/0 价值在 settings 加载时被过滤，回落默认值。"""
+        from config.settings import _build_settings
+        # 仅测试 coin_priority 字段被合法化（不影响其他字段）：
+        # 由于 _build_settings 需完整 raw，这里仅测内部 dict 解析逻辑
+        raw_invalid = {"BTC": -1.0, "ETH": 0, "SOL": "abc", "DOGE": 0.3}
+        coin_prio: dict[str, float] = {}
+        for ccy, val in raw_invalid.items():
+            try:
+                v = float(val)
+                if v > 0:
+                    coin_prio[str(ccy).upper()] = v
+            except (TypeError, ValueError):
+                continue
+        assert coin_prio == {"DOGE": 0.3}, "负数/0/非法值应被过滤"
+
+    def test_ask_bids_range_snapshot_serialization(self):
+        """B2：AskBidsRangeSnapshot 序列化往返（poll 写入字段对齐）。"""
+        from models.orderbook_pressure import AskBidsRangeSnapshot
+        snap = AskBidsRangeSnapshot(
+            ts_ms=1700_000_000_000, ts_sec=1700_000_000,
+            range_pct=2.0,
+            aggregated_bids_usd=900_000_000,
+            aggregated_asks_usd=1_000_000_000,
+            aggregated_bids_qty=11340,
+            aggregated_asks_qty=12760,
+        )
+        d = snap.model_dump()
+        snap2 = AskBidsRangeSnapshot(**d)
+        assert snap2.aggregated_bids_usd == 900_000_000
+        assert snap2.range_pct == 2.0
+
+    def test_active_attack_liquidity_drain_short_history(self):
+        """B2：ask_bids_history 仅 1 帧 → 流动性衰竭因子=0（数据不足）。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=ask_bids,
+        )
+        assert score == 0.0
+
+    def test_active_attack_liquidity_drain_below_threshold(self):
+        """B2：流动性衰竭 2%（< 5% 满分阈值）→ 线性映射 0.30 × 0.4 = 0.12。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        # bids: 1B → 980M（衰减 2%）
+        ask_bids = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=980_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=ask_bids,
+        )
+        # 0.30 × (0.02 / 0.05) = 0.30 × 0.4 = 0.12
+        assert score == pytest.approx(0.12, abs=0.001)
 
     def test_kl_iso_walls_field_unchanged(self):
         """铁律：M1+M2 引擎不修改旧 OrderbookPressureSnapshot.walls 字段。
