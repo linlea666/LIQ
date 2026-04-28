@@ -514,7 +514,9 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 | `9706153` | M2.5 现货 vs 合约（spot poll + trust_score + 三档互斥标签）| 1871 |
 | `9c058d9` | Phase A 现货 5m 热力图双源融合 + active_attack + seed_by_coin | 1881 |
 | `f9dbf5b` | Phase B 配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs + SOL 半频 | 1888 |
-| **待 commit** | **Phase B+ 现货 aggregated 接入 + active_attack 现货优先 fallback 合约** | **1891** |
+| `cca0432` | Phase B+ 现货 aggregated 接入 + active_attack 现货优先 fallback 合约 | 1891 |
+| `fe89051` | 修复前端来源徽章重复（移除 explain_chips 中重复源标签） | 1891 |
+| **待 commit** | **M3 KL 桥接：wall_zones 多档 chip + wall_events 衔接 + break_through/sweep/vacuum 风险 warning** | **1919** |
 
 ---
 
@@ -526,7 +528,7 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 | L2 | 合约 5m 订单簿热力图来源单一（仅 Binance）| 多源指 large_orders + 现货热力图，不指合约 orderbook 多所 | 与 L1 同根 |
 | ~~L3~~ | ~~spot 5m 订单簿热力图未启用~~ | ✅ **Phase A 已落地**：`spot_only` zone + `dual_source=True` 已支持 | — |
 | L4 | wall_events 暖机期内不渲染 | 重启后 1h 内事件流为空 | 设计取舍：避免冷启动误导 |
-| L5 | break_through_risk 模型权重未做参数搜索 | 0.30/0.20/0.20/0.15/0.10/0.20×attack 是经验值，未对历史数据回测调优 | 待 M3 桥接 KL 后用历史回测调参 |
+| L5 | break_through_risk 模型权重未做参数搜索 | 0.30/0.20/0.20/0.15/0.10/0.20×attack 是经验值，未对历史数据回测调优 | M3 已桥接 KL，下一步用观察期数据回测调参 |
 | L6 | trust_score 阈值（0.85/0.65/0.55）未历史校准 | 高可信档可能过高/过低 | 落地 1-2 周后视实际频率调整 |
 | L7 | wall_consumed_confidence 0.5/0.25/0.25 权重 | GPT 提议而非历史拟合 | 同 L5 |
 | L8 | 信任标签互斥 vs 并存 | 当前 5 档互斥，但理论上多重证据可同时存在 | 设计取舍：避免标签泛滥；后续可加细节面板展开 |
@@ -543,12 +545,12 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 
 ### 10.1 短期（1-2 周内）
 
-| 项 | 内容 | 预期改动 |
-|---|---|---|
-| **M3** KL 桥接 | zone 与最近 KL 关联（read-only），输出"墙在 KL ±0.5% 内"标志，前端 KL 卡片显示 chip | KL Tracker 加一层非破坏性观察；测试增强 |
-| **观察期** | 让 trust_score / break_through_risk 在生产跑 1-2 周收集数据 | 不改代码 |
-| **阈值校准** | 基于观察数据调 trust_score 阈值（0.85/0.55）+ break_through 权重 | 调 ENGINE_DEFAULTS |
-| **M4-AI 集成** | AI Snapshot 注入 wall_zones / wall_events / crowding_global，让 AI Analyzer 用 | `ai/snapshot.py` 扩展 |
+| 项 | 状态 | 内容 | 实际改动 |
+|---|---|---|---|
+| ~~**M3** KL 桥接~~ | ✅ **已落地** | wall_zones 多档 chip（💎双源/💰仅现货/💰共振/⚡可信）+ wall_events 衔接（被吃/撤单/增厚）+ break_through/sweep/vacuum 风险 warning | `key_level_tracker_v2._apply_pressure_alignment` 增强（+150 行）；前端 `CONFIRMATION_LABELS` 映射（+11 项）；`test_key_level_op_bridge.py` 新增 28 测例 |
+| **观察期** | ⏳ | 让 trust_score / break_through_risk / 新 chip 在生产跑 1-2 周收集数据 | 不改代码 |
+| **阈值校准** | ⏳ | 基于观察数据调 trust_score 阈值（0.85/0.55）+ break_through 权重 | 调 ENGINE_DEFAULTS |
+| **M4-AI 集成** | ⏳ | AI Snapshot 注入 wall_zones / wall_events / crowding_global，让 AI Analyzer 用 | `ai/snapshot.py` 扩展 |
 
 ### 10.2 中期（1 个月）
 

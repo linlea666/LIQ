@@ -539,9 +539,13 @@ backend/scripts/coinglass_probe_samples/
 | 里程碑 | 状态 | 用户诉求覆盖 |
 |---|---|---|
 | **Phase 0** 调研 + 3 bug 修复 | ✅ commit 3731d24 | 数据前置 |
-| **M1** 墙观测层（聚合 + 持续性 + 趋势） | ✅ 本次 | 1/2/3 |
-| **M2** 行为事件 + 拥挤度 + 磁铁 | ✅ 本次 | 4/5/6 |
-| **M3** KL 桥接（只读 chip + contradiction，铁律守护） | ⏳ 待启动 | 关键位详情页墙提示 |
+| **M1** 墙观测层（聚合 + 持续性 + 趋势） | ✅ a4b24dc / 334ed90 | 1/2/3 |
+| **M2** 行为事件 + 拥挤度 + 磁铁 | ✅ a4b24dc / ea512fd | 4/5/6 |
+| **M2.5** 现货 vs 合约（trust_score 三档互斥）| ✅ 9706153 | 真支撑 vs 清算磁铁 区分 |
+| **Phase A** 现货热力图双源融合 + active_attack | ✅ 9c058d9 | 单一最强证据 |
+| **Phase B** 配额错峰 + ask-bids 流动性衰竭 + 来源 tabs | ✅ f9dbf5b | quota 健康 + 前端筛选 |
+| **Phase B+** 现货 aggregated + spot 优先 fallback | ✅ cca0432 / fe89051 | 真买卖家撤离信号 |
+| **M3** KL 桥接（多档 chip + wall_events + 风险 warning，铁律守护） | ✅ 本次 | 关键位详情页墙提示 |
 
 ## 三、本次 M1+M2 改动文件清单
 
@@ -592,15 +596,39 @@ backend/scripts/coinglass_probe_samples/
 
 测试 `test_kl_iso_walls_field_unchanged` 自动验证：M1+M2 引擎调用后，旧 `walls` 字段 / `top_resistance` / `top_support` 仍由旧 `PressureWall` 路径填充，**不被新引擎污染**。这是 KL tracker 实际消费路径，铁律自动守护。
 
-## 七、下一步（M3 桥接 · 待批准启动）
+## 七、M3 KL 桥接 · ✅ 已落地
 
-1. `KeyLevelV2.behavior` 加 `wall_context_ref`（只读引用 nearby zone 的 strength/status/persistence）
-2. `_apply_pressure_alignment` chip 升级：`ob_strong_bid → 稳定买墙 31m / 卖墙撤单风险 / 上方清算磁铁`
-3. `behavior_eval._detect_contradictions` 加 3 条规则：
-   - 强支撑 + 买墙 removed → contradiction(medium)
-   - 突破阻力 + 卖墙 reloaded → contradiction(high)
-   - 支撑 + 买墙 consumed + next_magnet 在下方 → contradiction(high)
-4. AI prompt：只追加 wall 摘要 chip 到 MAA facts，不给原始 zones/events
-5. KL `final_score / strength_tier / cascade_risk` 自动测试守护不变（铁律）
+### 实施范围
 
-预估 1-2 天，等用户拍板。
+1. **`_apply_pressure_alignment` 升级**（保留旧路径向后兼容）：
+   - 旧路径不变：S/A 级 PressureWall 同价位 → `ob_strong_bid` / `ob_strong_ask`
+   - 新路径：读 `walls_above` / `walls_below` / `wall_events`，按互斥优先级产 chip：
+     - `ob_dual_source_{bid,ask}`：💎 双源高可信支撑/阻力
+     - `ob_spot_only_{bid,ask}`：💰 仅现货支撑/阻力
+     - `ob_spot_confluence_{bid,ask}`：💰 现货大单共振
+     - `ob_trusted_{bid,ask}`：⚡ 较可信合约墙（trust_score ≥ 0.65）
+     - `ob_wall_strengthened`：📈 该位墙最近 30min 增厚
+
+2. **风险 warnings**（中文短句 + 数值）：
+   - `"该位墙刚被吃 Nmin 前"`（wall_consumed @ 30min 内同价位同侧）
+   - `"该位墙刚撤单 Nmin 前"`（wall_removed）
+   - `"打穿风险 X%；下/上方磁铁 $Y"`（break_through_risk ≥ 0.6 + sweep_target / next_magnet）
+   - `"真空跨度 X%（无缓冲）"`（sweep_target.vacuum_gap_pct ≥ 0.5）
+   - `"仅合约挂单+撤单风险 X%"`（trust_score < 0.55 且 wall_removal_risk ≥ 0.6）
+
+3. **铁律守护**：仅追加 `confirmations` / `warnings`，不动 `final_score` /
+   `strength_tier` / `cascade_risk` / `entry_price` / `stop_loss` / `tp1` / `tp2`。
+   `test_key_level_op_bridge.py::TestIronLawGuard` 自动验证。
+
+4. **前端**：`CONFIRMATION_LABELS` 加 11 项中文 emoji 映射；warnings 原样渲染。
+
+5. **测试**：新增 `tests/test_key_level_op_bridge.py` 28 测例（旧路径 4 + 多档 chip 6 +
+   wall_events 7 + 风险 warnings 5 + 铁律守护 2 + 侧向匹配 4），后端全量 1919 通过。
+
+### 不采纳项（待 M4 / 长期评估）
+
+| GPT 原案 | 不采纳理由 |
+|---|---|
+| `KeyLevelV2.behavior` 加 `wall_context_ref` 字段 | 现有 OP snapshot 已是 KL 只读引用源；新增字段反而增加耦合 |
+| `behavior_eval._detect_contradictions` 加 3 条规则 | M3 chip + warnings 已表达"墙被吃/撤单/打穿"等 contradiction 语义；继续动 V3 评分体系会触碰铁律 |
+| AI prompt 注入 wall 摘要 | 留 M4 落地（独立模块边界更清晰） |

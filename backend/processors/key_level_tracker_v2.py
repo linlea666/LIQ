@@ -35,7 +35,7 @@ from models.key_level import (
 )
 from models.liquidation import LiquidationMap
 from models.market import CandleData
-from models.orderbook_pressure import OrderbookPressureSnapshot
+from models.orderbook_pressure import OrderbookPressureSnapshot, WallZone
 from processors.candlestick_patterns import PatternResult, detect_reversal_pattern
 from processors.level_discovery import fmt_usd_cn
 
@@ -1199,32 +1199,56 @@ def _apply_pressure_alignment(
     pressure_snapshot: OrderbookPressureSnapshot,
     atr: float,
 ) -> None:
-    """挂单压力监测器对 KL 信号的 confirmation 叠加（仅强 wall 共振）。
+    """挂单压力监测器对 KL 信号的 confirmation/warning 叠加（M3 桥接）。
 
-    重构（2026-04）后使用 **tier-based** 匹配 —— OP 模块不再判定真假阻力/支撑，
-    KL tracker 也对应改为按强度等级判断"是否值得叠加确认"：
+    设计演进：
+      - 旧路径（2026-04 重构）：仅 S/A 级 PressureWall 共振 → ob_strong_bid/ask
+      - 新路径（M3 桥接）：读 wall_zones / wall_events / break_through_risk /
+        sweep_target / vacuum_gap_pct，产出更精细的多档 chip + 风险 warning
 
-      - 仅 S/A 级 wall（强度评分 ≥ $10M、含时间/whale 加成）参与叠加
-      - 同侧匹配：做多信号 ↔ bid wall，做空信号 ↔ ask wall
-      - 同价位（≤ 0.5×ATR）→ 加 confirmation（不再产生 warning，避免误导）
+    旧路径仍然保留向后兼容（不替换，仅追加），新路径追加额外的 confirmation key
+    与 warning 字符串。所有改动**仅追加** confirmations / warnings，不动
+    final_score / strength_tier / cascade_risk（V3 铁律）。
 
-    去掉的旧逻辑：
-      - fake_S/fake_R 警告 → 已不再判真假，无 fake_* 标签
-      - 上方真阻力/下方真支撑警告 → 改由用户在前端"挂单压力"卡片自行查阅
+    新路径输出（按优先级互斥）：
+      A. confirmations（key 化，前端 CONFIRMATION_LABELS 映射）：
+         - ob_dual_source_bid/ask     双源高可信墙（dual_source=True）
+         - ob_spot_only_bid/ask       仅现货墙（source="spot_only"）
+         - ob_spot_confluence_bid/ask 现货大单共振（has_spot_confluence=True）
+         - ob_trusted_bid/ask         较可信合约墙（trust_score >= 0.65）
+         - ob_wall_strengthened       最近 30min 该价位墙增厚事件
 
-    设计原则：OP 仅作辅助参考，不做带方向性的降级；KL 信号置信度只受
-    自身规则（sweep/pattern/MTF/CVD）控制，避免单一辅助模块过度拉扯。
+      B. warnings（中文短句，前端原样渲染）：
+         - "该位墙刚被吃 Nmin 前"      (wall_consumed @ 同价位 30min 内)
+         - "该位墙刚撤单 Nmin 前"      (wall_removed @ 同价位 30min 内)
+         - "打穿风险 X%；下/上方磁铁 $Y" (break_through_risk >= 0.6 + sweep_target)
+         - "真空跨度 X%（无缓冲）"     (sweep_target.vacuum_gap_pct >= 0.5)
+         - "仅合约挂单 + 撤单风险 X%" (trust_score < 0.55 且 wall_removal_risk >= 0.6)
+
+    匹配规则：
+      - 同价位 ≤ 0.5 × ATR（atr 缺失时 fallback 0.3% 价格）
+      - 做多信号 ↔ bid 墙；做空信号 ↔ ask 墙
+      - 多 zone 命中取 trust_score 最高一个产 chip，避免 chip 泛滥
     """
-    if not pressure_snapshot.walls:
-        return
-
-    # 仅 S/A 级 wall 参与叠加，过滤掉 B/C 级避免噪声
-    strong_asks = [w for w in pressure_snapshot.walls
-                   if w.side == "ask" and w.strength_tier in ("S", "A")]
-    strong_bids = [w for w in pressure_snapshot.walls
-                   if w.side == "bid" and w.strength_tier in ("S", "A")]
-
     same_tol = max(atr * 0.5, 1e-9) if atr > 0 else 0.0
+
+    # ── 旧路径数据预备：S/A 级 PressureWall ──
+    if pressure_snapshot.walls:
+        strong_asks = [w for w in pressure_snapshot.walls
+                       if w.side == "ask" and w.strength_tier in ("S", "A")]
+        strong_bids = [w for w in pressure_snapshot.walls
+                       if w.side == "bid" and w.strength_tier in ("S", "A")]
+    else:
+        strong_asks, strong_bids = [], []
+
+    # ── 新路径数据预备：wall_zones + wall_events ──
+    zones_above = pressure_snapshot.walls_above or []
+    zones_below = pressure_snapshot.walls_below or []
+    events = pressure_snapshot.wall_events or []
+    snap_ts = pressure_snapshot.ts_sec or 0
+
+    if not (strong_asks or strong_bids or zones_above or zones_below or events):
+        return
 
     for sig in signals:
         long_side = sig.action in _LONG_ACTIONS_OP
@@ -1235,16 +1259,107 @@ def _apply_pressure_alignment(
         lvl_price = sig.level_price
         local_same = same_tol if same_tol > 0 else lvl_price * 0.003
 
+        # ── 旧路径：S/A 级 PressureWall 同价位 → ob_strong_bid/ask ──
+        if long_side and any(abs(w.price_mid - lvl_price) <= local_same for w in strong_bids):
+            sig.confirmations.append("ob_strong_bid")
+        elif short_side and any(abs(w.price_mid - lvl_price) <= local_same for w in strong_asks):
+            sig.confirmations.append("ob_strong_ask")
+
+        # ── 新路径：wall_zones 同价位 → 多档 chip + 风险 warning ──
         if long_side:
-            # 做多信号同价位有 S/A 级 bid wall → confirmation
-            if any(abs(w.price_mid - lvl_price) <= local_same for w in strong_bids):
-                sig.confirmations.append("ob_strong_bid")
-        elif short_side:
-            # 做空信号同价位有 S/A 级 ask wall → confirmation
-            if any(abs(w.price_mid - lvl_price) <= local_same for w in strong_asks):
-                sig.confirmations.append("ob_strong_ask")
+            matched_zones = [z for z in zones_below
+                             if abs(z.price_mid - lvl_price) <= local_same]
+            side_label = "bid"
+        else:
+            matched_zones = [z for z in zones_above
+                             if abs(z.price_mid - lvl_price) <= local_same]
+            side_label = "ask"
+
+        if matched_zones:
+            best_zone = max(matched_zones, key=lambda z: z.trust_score)
+            _append_zone_trust_chip(sig, best_zone, side_label)
+            _append_zone_risk_warnings(sig, best_zone, long_side)
+
+        # ── wall_events：最近 30min 同价位 + 同侧 ──
+        ev_strengthened_added = False
+        for ev in events:
+            if abs(ev.price_mid - lvl_price) > local_same:
+                continue
+            ev_age_sec = max(0, snap_ts - ev.ts_sec) if snap_ts else 0
+            if ev_age_sec > 1800:
+                continue
+            ev_side_match = (long_side and ev.side == "bid") or \
+                            (short_side and ev.side == "ask")
+            if not ev_side_match:
+                continue
+            ev_min = max(1, ev_age_sec // 60)
+            if ev.event_type == "wall_consumed":
+                sig.warnings.append(f"该位墙刚被吃 {ev_min}min 前")
+            elif ev.event_type == "wall_removed":
+                sig.warnings.append(f"该位墙刚撤单 {ev_min}min 前")
+            elif ev.event_type == "wall_strengthened" and not ev_strengthened_added:
+                sig.confirmations.append("ob_wall_strengthened")
+                ev_strengthened_added = True
 
         sig.score = _compute_score(sig)
+
+
+def _append_zone_trust_chip(
+    sig: KeyLevelSignal, zone: WallZone, side_label: str
+) -> None:
+    """根据 zone 信任档位在 sig.confirmations 加单一互斥 chip key。
+
+    优先级（从高到低，互斥）：
+      双源 > 仅现货 > 现货共振 > 可信合约 > （普通合约不加 chip，已由旧 ob_strong_* 路径覆盖）
+    """
+    if zone.dual_source:
+        sig.confirmations.append(f"ob_dual_source_{side_label}")
+    elif zone.source == "spot_only":
+        sig.confirmations.append(f"ob_spot_only_{side_label}")
+    elif zone.has_spot_confluence:
+        sig.confirmations.append(f"ob_spot_confluence_{side_label}")
+    elif zone.trust_score >= 0.65:
+        sig.confirmations.append(f"ob_trusted_{side_label}")
+
+
+def _append_zone_risk_warnings(
+    sig: KeyLevelSignal, zone: WallZone, long_side: bool
+) -> None:
+    """根据 zone 风险因子追加中文 warning 字符串。
+
+    规则（独立判定，可同时多条）：
+      - 仅合约 + 高撤单：trust_score < 0.55 且 wall_removal_risk >= 0.6
+      - 打穿高风险：break_through_risk >= 0.6（带磁铁价位）
+      - 真空跨度大：sweep_target.vacuum_gap_pct >= 0.5
+    """
+    if zone.trust_score < 0.55 and zone.wall_removal_risk >= 0.6:
+        risk_pct = int(round(zone.wall_removal_risk * 100))
+        sig.warnings.append(f"仅合约挂单+撤单风险{risk_pct}%")
+
+    if zone.break_through_risk >= 0.6:
+        risk_pct = int(round(zone.break_through_risk * 100))
+        magnet = zone.next_magnet_price
+        if magnet is None and zone.sweep_target:
+            magnet = zone.sweep_target.magnet_price
+        if magnet:
+            direction = "下方" if long_side else "上方"
+            magnet_str = _format_magnet_price(magnet)
+            sig.warnings.append(f"打穿风险{risk_pct}%；{direction}磁铁{magnet_str}")
+        else:
+            sig.warnings.append(f"打穿风险{risk_pct}%")
+
+    sweep = zone.sweep_target
+    if sweep and sweep.vacuum_gap_pct >= 0.5:
+        sig.warnings.append(f"真空跨度{sweep.vacuum_gap_pct:.1f}%（无缓冲）")
+
+
+def _format_magnet_price(price: float) -> str:
+    """磁铁价位中文友好格式化。"""
+    if price >= 1000:
+        return f"${price:,.0f}"
+    if price >= 10:
+        return f"${price:.2f}"
+    return f"${price:.4f}"
 
 
 def _apply_mtf_cvd(

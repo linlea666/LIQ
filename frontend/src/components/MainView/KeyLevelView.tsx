@@ -621,6 +621,18 @@ const CONFIRMATION_LABELS: Record<string, string> = {
   pattern_pin_bar: "针形线",
   pattern_engulfing: "吞没形态",
   pattern_doji: "十字星",
+  // M3 桥接：挂单压力多档信任 chip（互斥，最强优先）
+  ob_strong_bid: "强买墙共振",
+  ob_strong_ask: "强卖墙共振",
+  ob_dual_source_bid: "💎 双源高可信支撑",
+  ob_dual_source_ask: "💎 双源高可信阻力",
+  ob_spot_only_bid: "💰 仅现货支撑",
+  ob_spot_only_ask: "💰 仅现货阻力",
+  ob_spot_confluence_bid: "💰 现货大单共振",
+  ob_spot_confluence_ask: "💰 现货大单共振",
+  ob_trusted_bid: "⚡ 较可信买墙",
+  ob_trusted_ask: "⚡ 较可信卖墙",
+  ob_wall_strengthened: "📈 该位墙增厚",
 };
 
 function labelConfirmation(key: string): string {
