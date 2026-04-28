@@ -294,3 +294,68 @@ async def poll_aggregated_ask_bids_history(
             latest.aggregated_bids_usd / 1e6, latest.aggregated_asks_usd / 1e6,
             len(state.aggregated_ask_bids_history), new_count,
         )
+
+
+async def poll_spot_aggregated_ask_bids_history(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+    range_pct: str = "2",
+    exchange_list: str = "Binance,OKX,Coinbase",
+) -> None:
+    """Phase B+：现货多家聚合 ±range 流动性时序（``/api/spot/orderbook/aggregated-ask-bids-history``）。
+
+    与合约同名 poll 完全对称，但语义更强——现货抽流动性 = **真买卖家撤**。
+    用于 ``_compute_active_attack_score`` 流动性衰竭因子的"现货优先"策略：
+    现货有数据时优先取现货衰减%，无数据时 fallback 到合约。
+    """
+    data = await cg.fetch_spot_orderbook_aggregated_ask_bids(
+        symbol=coin.symbol_cg,
+        interval="5m",
+        limit=12,
+        range_pct=range_pct,
+        exchange_list=exchange_list,
+    )
+    if not data or not isinstance(data, list):
+        return
+
+    parsed: list[AskBidsRangeSnapshot] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ts_ms = int(item.get("time") or 0)
+            if ts_ms <= 0:
+                continue
+            parsed.append(AskBidsRangeSnapshot(
+                ts_ms=ts_ms,
+                ts_sec=ts_ms // 1000,
+                range_pct=float(range_pct),
+                aggregated_bids_usd=float(item.get("aggregated_bids_usd", 0) or 0),
+                aggregated_asks_usd=float(item.get("aggregated_asks_usd", 0) or 0),
+                aggregated_bids_qty=float(item.get("aggregated_bids_quantity", 0) or 0),
+                aggregated_asks_qty=float(item.get("aggregated_asks_quantity", 0) or 0),
+            ))
+        except (TypeError, ValueError):
+            continue
+    if not parsed:
+        return
+    parsed.sort(key=lambda x: x.ts_ms)
+
+    existing = {snap.ts_ms for snap in state.spot_aggregated_ask_bids_history}
+    new_count = 0
+    for snap in parsed:
+        if snap.ts_ms in existing:
+            continue
+        state.spot_aggregated_ask_bids_history.append(snap)
+        existing.add(snap.ts_ms)
+        new_count += 1
+
+    if "spot_aggregated_ask_bids_ready" not in state._log_once_keys and new_count > 0:
+        state._log_once_keys.add("spot_aggregated_ask_bids_ready")
+        latest = parsed[-1]
+        logger.info(
+            "现货多家聚合 ±%s%% 流动性时序接通 | coin=%s bids=%.0fM asks=%.0fM "
+            "history_size=%d new=%d",
+            range_pct, coin.ccy,
+            latest.aggregated_bids_usd / 1e6, latest.aggregated_asks_usd / 1e6,
+            len(state.spot_aggregated_ask_bids_history), new_count,
+        )

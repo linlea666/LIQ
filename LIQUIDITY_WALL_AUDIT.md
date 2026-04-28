@@ -1,10 +1,10 @@
 # 流动性墙 + 大单行为 + 持仓拥挤度监测引擎 — 审核快照
 
 > **用途**：外部 AI / 审计方的当前状态快照（非过程文档，过程见 `LIQUIDITY_WALL_REVIEW.md`）  
-> **最后更新**：2026-04-28（Phase B：配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs）  
-> **当前阶段**：M1 + M2 + M2.5 + Phase A + **Phase B**  
-> **回归基线**：后端 **1888 passed** · 前端 tsc 0 错 · 本次改动 ESLint 0 错 0 警  
-> **代码量**：引擎 ~1560 行 / 测试 1290 行（**77 用例**）/ 前端卡片 ~750 行 / 模型 ~430 行
+> **最后更新**：2026-04-28（Phase B+：现货 aggregated 接入 + 现货优先 fallback 合约衰竭因子）  
+> **当前阶段**：M1 + M2 + M2.5 + Phase A + Phase B + **Phase B+**  
+> **回归基线**：后端 **1891 passed** · 前端 tsc 0 错 · 本次改动 ESLint 0 错 0 警  
+> **代码量**：引擎 ~1580 行 / 测试 1370 行（**80 用例**）/ 前端卡片 ~750 行 / 模型 ~430 行
 
 ---
 
@@ -51,7 +51,8 @@
 |---|---|---|---|---|
 | `/api/futures/orderbook/history` | 合约 5m 深度热力图（**12 帧滚动** = 1h history）| 90s | 60s | `fetch_orderbook_heatmap(exchange, symbol, interval, limit=12)` |
 | `/api/spot/orderbook/history` ⭐ Phase A 新增 | 现货 5m 深度热力图（双源融合 zone 关键源）| 120s | 60s | `fetch_spot_orderbook_heatmap` |
-| `/api/futures/orderbook/aggregated-ask-bids-history` ⭐ **Phase B 新增** | 合约多家聚合 ±2% 流动性时序（衰竭因子）| 180s | 30s | `fetch_orderbook_aggregated_ask_bids` |
+| `/api/futures/orderbook/aggregated-ask-bids-history` ⭐ Phase B 新增 | 合约多家聚合 ±2% 流动性时序（Binance+OKX+Bybit）| 180s | 30s | `fetch_orderbook_aggregated_ask_bids` |
+| `/api/spot/orderbook/aggregated-ask-bids-history` ⭐ **Phase B+ 新增** | 现货多家聚合 ±2% 流动性时序（Binance+OKX+Coinbase；现货优先衰竭信号）| 180s | 30s | `fetch_spot_orderbook_aggregated_ask_bids` |
 | `/api/futures/orderbook/large-limit-order` | 合约大单 holding 快照 | 180s | 60s | `fetch_large_orders` |
 | `/api/futures/orderbook/large-limit-order-history` | 合约大单 ended lifecycle | 180s | 默认 | `fetch_large_orders_history` |
 | `/api/spot/orderbook/large-limit-order` (M2.5) | 现货大单 holding（区分真买家/卖家）| 240s | 60s | `fetch_spot_large_orders` |
@@ -64,6 +65,22 @@
 - ✅ `/api/futures/orderbook/aggregated-ask-bids-history`（**Phase B 新接入**，标量时序，反映宏观流动性变化）
 - ✅ `/api/futures/orderbook/large-limit-order` + `large-limit-order-history`（已用，lifecycle）
 - ⚠ `/api/futures/orderbook/ask-bids-history`（单家版，与 aggregated 同结构 → 选 aggregated 更稳健，单家版**不接入**避免重复）
+
+**Coinglass 官方支持交易所清单**（实测拉取自 `/api/{futures,spot}/supported-exchange-pairs`）：
+- 合约 30 家：`ApeX Omni / Aster / Binance / BingX / Bitfinex / Bitget / Bitmex / Bitunix / Bybit / CME / CoinEx / Coinbase / Crypto.com / Deribit / Drift / EdgeX / Extended / Gate / HTX / Hyperliquid / Kraken / KuCoin / LBank / Lighter / MEXC / OKX / Paradex / WhiteBIT / dYdX / tradeXYZ`
+- 现货 10 家（明显比合约少）：`Binance / Bitfinex / Bitget / Bybit / Coinbase / Crypto.com / Gate / Kraken / OKX / Upbit`
+
+**aggregated-ask-bids 默认 exchange_list 选择依据**（实测 BTC ±2% USD）：
+
+| 配置 | bids USD | 占比 | 决策 |
+|---|---|---|---|
+| 仅 Binance（合约）| 452M | ~64% | 单家占主导 |
+| 仅 Bybit（合约）| 80M | ~11% | 显著但不够 |
+| **3 家 Binance+OKX+Bybit（合约默认）** | **706M** | ~94% | ✅ 当前默认 |
+| 8 家（加 Bitget/Gate/MEXC/HTX/KuCoin）| 754M | ~100% | 边际 +7%，调用风险递增 |
+| **3 家 Binance+OKX+Coinbase（现货默认）** | **89M** | ✅ 当前默认 | Coinbase 替 Bybit（现货 Coinbase 量更大）|
+
+> **OKX 单家测试在合约接口失败** — 但**聚合层正常贡献数据**（706M ≠ 452M+80M=532M，差额 174M 即 OKX 贡献）。这是 coinglass API 的特性，"单家不可单独输出"不影响聚合可用性。
 
 ### 2.2 复用的现有数据（零新增 poll）
 
@@ -94,15 +111,18 @@
 | ⭐ **B1：启动 stagger 跨度 38s → 51s** | 启动期 burst 削平（限速器有喘息时间）| 启动延迟 ↓ 但稳态不变 |
 | ⭐ **B2：新增 aggregated ask-bids 180s** | 3 币 × 60/180 = +1.0/min | +1.0 calls/min |
 | ⭐ **B4：SOL coin_priority=0.5（半频）** | SOL 所有 poll interval ×2 | -4 ~ -6 calls/min |
-| **合计** | | **-3 ~ -5 calls/min** |
+| **B 合计** | | **-3 ~ -5 calls/min** |
+| ⭐ **B+：新增 spot_aggregated_ask_bids 180s** | 3 币 × 60/180 = +1.0/min | +1.0 calls/min |
+| **B+ 合计（含 B）** | | **-2 ~ -4 calls/min** |
 
-**Phase A → Phase B 累计**：
+**Phase 演进累计**：
 
 | 阶段 | 计算需求 | 净变化 | 备注 |
 |---|---|---|---|
 | Phase 0 基线 | ~36 calls/min | — | M1 前 |
 | Phase A | ~35 calls/min | -0.5 | 新增 spot_ob + 慢化 large_orders |
-| **Phase B** | **~30-32 calls/min** | **-3 ~ -5** | SOL 半频 + 启动错峰 |
+| Phase B | ~30-32 calls/min | -3 ~ -5 | SOL 半频 + 启动错峰 |
+| **Phase B+** | **~31-33 calls/min** | **-2 ~ -4** | 加现货 aggregated（仍净降）|
 
 **关键判断**：
 1. ❌ **不是 daily quota 触底**（远未达 50K/day）
@@ -202,7 +222,7 @@ risk = clamp(
 , 0, 1)
 ```
 
-`active_attack_score` 公式（Phase B 拓展为三因子）：
+`active_attack_score` 公式（Phase B 三因子；B+ 升级第 3 因子为现货优先 fallback 合约）：
 ```python
 score = 0
 # 1. taker 同向占比（线性映射 0.5→0, 0.6→1.0）·权重 0.40
@@ -211,16 +231,18 @@ if same_side_ratio > 0.5:
 # 2. cvd_spot 同向 trend ·权重 0.30
 if cvd_spot.trend_1h in same_direction_trends:
     score += 0.30
-# 3. Phase B：流动性衰竭因子 ·权重 0.30
-#    aggregated_ask_bids_history 30min 内 same-side USD 衰减 ≥ 5% → 满分
-if ask_bids_history and len ≥ 2:
-    base = first.aggregated_(side)_usd
-    cur = last.aggregated_(side)_usd
-    if cur < base:
-        decline_pct = (base - cur) / base
-        score += 0.30 × clamp(decline_pct / 0.05, 0, 1)
+# 3. Phase B+：流动性衰竭因子（现货优先 → 合约 fallback）·权重 0.30
+#    优先取 spot_ask_bids_history 衰减%，无数据时才 fallback 合约
+#    现货抽流动性 = 真买卖家撤单 > 合约（杠杆移仓）的语义可信度
+drain_pct = _liquidity_drain_pct(spot_ask_bids_history, side)
+if drain_pct is None:                    # 现货数据不足
+    drain_pct = _liquidity_drain_pct(ask_bids_history, side)
+if drain_pct is not None and drain_pct > 0:
+    score += 0.30 × clamp(drain_pct / 0.05, 0, 1)
 return clamp(score, 0, 1)
 ```
+
+**关键设计**：当现货有数据但 drain=0（未衰减）→ **不 fallback 合约**——这是"真买卖家未撤"的强信号，不应被合约的杠杆资金移仓掩盖。
 
 ### 3.3 M2.5 — 现货 vs 合约 区分
 
@@ -337,6 +359,30 @@ engine:
 
 主入口加 4 档 SourceFilter：`全部 / 💎 双源 / 💰 仅现货 / ⚡ 仅合约`，按 `WallZone.dual_source` + `WallZone.source` 分类计数与过滤。无需新增数据，纯前端展示层。
 
+### 3.6 Phase B+ — 现货 aggregated 接入 + 现货优先 fallback 合约
+
+**触发**：用户实测 Phase B 后追问"合约 aggregated 聚合的是哪几家 / coinglass 总共支持多少家 / 现货有没有对应聚合"，probe 实测发现 `/api/spot/orderbook/aggregated-ask-bids-history` **完全可用**（之前误判失败是限速器 429 排队）。
+
+**接入逻辑**：
+
+```python
+# polls/orderbook_pressure.poll_spot_aggregated_ask_bids_history
+# default exchange_list="Binance,OKX,Coinbase"（现货流动性最稳的三家）
+# state.spot_aggregated_ask_bids_history: deque(maxlen=12)
+
+# liquidity_wall_engine._compute_active_attack_score 现货优先策略
+drain_pct = _liquidity_drain_pct(spot_ask_bids_history, side)  # 优先现货
+if drain_pct is None:                                          # 仅当现货 None
+    drain_pct = _liquidity_drain_pct(ask_bids_history, side)   # fallback 合约
+```
+
+**为何现货优先**：
+- 现货抽流动性 = **真买卖家撤单**（永久性意图）
+- 合约抽流动性 = **杠杆资金移仓**（可能仅是仓位调整，方向中性）
+- 现货 drain=0（增厚）时**不 fallback 合约**：避免合约杠杆噪音掩盖真买卖家未撤的强信号
+
+**配额成本**：+1.0 calls/min（3 币 × 60/180）→ Phase B+ 累计净 -2 ~ -4 calls/min（仍负值）。
+
 ---
 
 ## 四、关键代码索引
@@ -424,7 +470,7 @@ def test_kl_isolation_with_engine_enabled():
 ## 七、测试覆盖
 
 ```
-backend/tests/test_liquidity_wall_engine.py: 77 用例
+backend/tests/test_liquidity_wall_engine.py: 80 用例
 ├── TestModels                 (4)  4 模型序列化往返 + 18 字段
 ├── TestMergePct                (3)  ATR clamp 上下界 + 默认
 ├── TestMergeBins               (5)  相邻合并 + 远距分离 + min_usd 过滤 + 跨距过滤
@@ -445,9 +491,12 @@ backend/tests/test_liquidity_wall_engine.py: 77 用例
 │                                          + AskBidsRangeSnapshot 序列化
 │                                          + 流动性衰竭因子（短历史 0 / 5% 满分 / 2% 线性）
 │                                          + active_attack 三因子合成 0.70/1.00
+├── TestPhaseBPlus              (3)  ⭐ Phase B+：现货优先（spot 5% > futures 1%）
+│                                          + fallback（spot empty → futures）
+│                                          + spot drain=0 不 fallback（真买卖家未撤强信号）
 └── TestKLIsolation             (1)  KL 关键字段哈希不变 (铁律)
 
-后端全量：1888 passed
+后端全量：1891 passed
 前端 tsc：0 错
 本次改动 ESLint：0 错 0 警
 ```
@@ -464,7 +513,8 @@ backend/tests/test_liquidity_wall_engine.py: 77 用例
 | `ea512fd` | 4 项诉求覆盖完善：visible_minutes bug + 大单容差 + 事件流 + 打穿预览 | 1863 |
 | `9706153` | M2.5 现货 vs 合约（spot poll + trust_score + 三档互斥标签）| 1871 |
 | `9c058d9` | Phase A 现货 5m 热力图双源融合 + active_attack + seed_by_coin | 1881 |
-| **Phase B** | **配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs + SOL 半频** | **1888** |
+| `f9dbf5b` | Phase B 配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs + SOL 半频 | 1888 |
+| **待 commit** | **Phase B+ 现货 aggregated 接入 + active_attack 现货优先 fallback 合约** | **1891** |
 
 ---
 

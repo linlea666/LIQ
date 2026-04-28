@@ -50,6 +50,7 @@ sources:
       orderbook_pressure: 90    # 合约 5m 深度热力图（前后帧对比）
       spot_orderbook_pressure: 120  # 现货 5m 深度热力图（A 期接入：双源真支撑/真阻力）
       aggregated_ask_bids: 180  # B 期：合约多家聚合 ±range 流动性时序（active_attack 流动性衰竭因子）
+      spot_aggregated_ask_bids: 180  # B+ 期：现货多家聚合 ±range 流动性时序（现货优先衰竭信号）
       options: 600
       etf: 1800
       onchain: 3600

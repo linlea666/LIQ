@@ -471,6 +471,27 @@ class CoinglassSource(DataSource):
             "exchange_list": exchange_list,
         }, cache_ttl=30)
 
+    async def fetch_spot_orderbook_aggregated_ask_bids(self, symbol: str,
+                                                       interval: str = "5m",
+                                                       limit: int = 200,
+                                                       range_pct: str = "2",
+                                                       exchange_list: str = "Binance,OKX,Coinbase") -> Optional[list]:
+        """Phase B+：现货多家聚合 ±range 流动性时序。
+
+        与合约 ``fetch_orderbook_aggregated_ask_bids`` 同结构（标量时序），
+        但语义更强——现货抽流动性 = **真买卖家撤单**，比合约（杠杆资金移仓）更可信。
+
+        默认聚合 Binance + OKX + Coinbase（现货流动性最稳的三家，覆盖东西方）。
+        现货端 ``exchange_list`` 必传（无默认会 400），与合约接口要求一致。
+
+        probe 实测 BTC ±2%：Binance,OKX,Coinbase 聚合 bids ~89M / asks ~62M。
+        """
+        return await self._request("/api/spot/orderbook/aggregated-ask-bids-history", {
+            "symbol": symbol, "interval": interval,
+            "limit": str(limit), "range": range_pct,
+            "exchange_list": exchange_list,
+        }, cache_ttl=30)
+
     async def fetch_orderbook_heatmap(self, exchange: str, symbol: str,
                                       interval: str = "5m",
                                       limit: int = 2) -> Optional[list]:

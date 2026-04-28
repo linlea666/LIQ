@@ -181,6 +181,9 @@ class CoinState:
         # 用于 _compute_active_attack_score 的"宏观流动性衰竭"因子
         from models.orderbook_pressure import AskBidsRangeSnapshot as _AskBidsRangeSnapshot
         self.aggregated_ask_bids_history: deque[_AskBidsRangeSnapshot] = deque(maxlen=12)
+        # Phase B+：现货多家聚合 ±range 流动性时序（语义更强：真买卖家撤单）
+        # 现货抽流动性 → active_attack_score 衰竭因子优先取此源；为空时 fallback 合约
+        self.spot_aggregated_ask_bids_history: deque[_AskBidsRangeSnapshot] = deque(maxlen=12)
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -822,6 +825,10 @@ class Engine:
         spot_ob_pressure_interval = _scaled(self._poll_cfg.get("spot_orderbook_pressure", 120))
         # Phase B：±range 流动性时序（标量时序，不替代 heatmap，180s/coin 足够）
         agg_ask_bids_interval = _scaled(self._poll_cfg.get("aggregated_ask_bids", 180))
+        # Phase B+：现货 ±range 流动性时序（与合约对称，180s 同节奏）
+        spot_agg_ask_bids_interval = _scaled(
+            self._poll_cfg.get("spot_aggregated_ask_bids", 180)
+        )
         # push_loop 不走 cg API（走内部 _recompute），不应被 priority 节流
         # candles_1h（hard-coded 60s）需要 priority 节流
         candles_1h_interval = _scaled(60)
@@ -885,6 +892,11 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_agg_ask_bids_{ccy}", self._poll_aggregated_ask_bids_history, coin,
                 agg_ask_bids_interval, s + 17.5,
+            )),
+            # Phase B+：现货多家聚合 ±range 流动性时序（active_attack 现货优先因子）
+            asyncio.create_task(self._poll_loop(
+                f"cg_spot_agg_ask_bids_{ccy}", self._poll_spot_aggregated_ask_bids_history, coin,
+                spot_agg_ask_bids_interval, s + 19.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_indicators_{ccy}", self._poll_indicators, coin,
@@ -1367,6 +1379,16 @@ class Engine:
         """
         from polls.orderbook_pressure import poll_aggregated_ask_bids_history
         await poll_aggregated_ask_bids_history(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_spot_aggregated_ask_bids_history(self, coin: CoinConfig):
+        """Phase B+：现货多家聚合 ±range 流动性时序。
+
+        ``/api/spot/orderbook/aggregated-ask-bids-history`` 默认聚合
+        Binance + OKX + Coinbase（现货流动性最稳的三家）。
+        active_attack_score 衰竭因子优先取此源——现货抽流动性是真买卖家撤单。
+        """
+        from polls.orderbook_pressure import poll_spot_aggregated_ask_bids_history
+        await poll_spot_aggregated_ask_bids_history(self._cg, coin, self._states[coin.ccy])
 
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data

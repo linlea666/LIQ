@@ -1250,6 +1250,80 @@ class TestMainEntryAndKLIsolation:
         )
         assert score == 0.0
 
+    def test_active_attack_spot_priority_over_futures(self):
+        """B+：现货 + 合约同时有数据 → 优先取现货衰减%（合约值被忽略）。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        # 现货衰减 5%（满分）；合约衰减 1%（仅 0.06 分）
+        spot_history = [
+            SimpleNamespace(aggregated_bids_usd=100_000_000, aggregated_asks_usd=100_000_000),
+            SimpleNamespace(aggregated_bids_usd=95_000_000, aggregated_asks_usd=100_000_000),
+        ]
+        futures_history = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=990_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=futures_history,
+            spot_ask_bids_history=spot_history,
+        )
+        # 现货优先 → 0.30 × 1.0 = 0.30（不是合约的 0.06）
+        assert score == pytest.approx(0.30)
+
+    def test_active_attack_fallback_to_futures_when_spot_empty(self):
+        """B+：现货数据缺失 → fallback 合约衰减%。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        # 现货 empty，合约衰减 5% 满分
+        futures_history = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=950_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=futures_history,
+            spot_ask_bids_history=[],   # 空
+        )
+        # fallback 合约 → 0.30 满分
+        assert score == pytest.approx(0.30)
+
+    def test_active_attack_spot_no_decline_does_not_fallback(self):
+        """B+：现货有数据但未衰减（drain=0）→ 不 fallback 合约（避免反向干扰）。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        # 现货增厚（drain=0），合约衰减 5%
+        spot_history = [
+            SimpleNamespace(aggregated_bids_usd=100_000_000, aggregated_asks_usd=100_000_000),
+            SimpleNamespace(aggregated_bids_usd=110_000_000, aggregated_asks_usd=100_000_000),  # 增厚
+        ]
+        futures_history = [
+            SimpleNamespace(aggregated_bids_usd=1_000_000_000, aggregated_asks_usd=1_000_000_000),
+            SimpleNamespace(aggregated_bids_usd=950_000_000, aggregated_asks_usd=1_000_000_000),
+        ]
+        score = _compute_active_attack_score(
+            z, taker_flow=None, cvd_spot=None, cfg=ENGINE_DEFAULTS,
+            ask_bids_history=futures_history,
+            spot_ask_bids_history=spot_history,
+        )
+        # 现货 drain=0 已表态（真买卖家未撤）→ 不 fallback 合约 → 0
+        assert score == 0.0
+
     def test_active_attack_liquidity_drain_below_threshold(self):
         """B2：流动性衰竭 2%（< 5% 满分阈值）→ 线性映射 0.30 × 0.4 = 0.12。"""
         from processors.liquidity_wall_engine import _compute_active_attack_score
