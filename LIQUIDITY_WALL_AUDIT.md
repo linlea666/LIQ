@@ -516,7 +516,8 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 | `f9dbf5b` | Phase B 配额错峰 + ask-bids 流动性衰竭因子 + 前端来源筛选 tabs + SOL 半频 | 1888 |
 | `cca0432` | Phase B+ 现货 aggregated 接入 + active_attack 现货优先 fallback 合约 | 1891 |
 | `fe89051` | 修复前端来源徽章重复（移除 explain_chips 中重复源标签） | 1891 |
-| **待 commit** | **M3 KL 桥接：wall_zones 多档 chip + wall_events 衔接 + break_through/sweep/vacuum 风险 warning** | **1919** |
+| `13abb7f` | M3 KL 桥接：wall_zones 多档 chip + wall_events 衔接 + break_through/sweep/vacuum 风险 warning | 1919 |
+| **待 commit** | **M4 AI Snapshot 集成：高可信墙摘要 + wall_events + crowding_global → AI prompt §8d** | **1942** |
 
 ---
 
@@ -535,7 +536,7 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 | L9 | Hyperliquid whale positions 未接入 | GPT 提及但未实现 | M4 候选项 |
 | ~~L10~~ | ~~spot CVD 未联动 break_through_risk~~ | ✅ **Phase A 已落地**：`active_attack_score` 同向加分 | — |
 | L11 | OI 分流 (`coin_dominant` vs `stable_dominant`) 未参与 trust_score | 当前仅展示 chip，未参与 zone 评分 | 后续可加 |
-| L12 | AI Snapshot 未集成 wall 数据 | AI Analyzer 看不到墙 / 事件 / 拥挤度的结构化输入 | M3 后跟进 |
+| ~~L12~~ | ~~AI Snapshot 未集成 wall 数据~~ | ✅ **M4 已落地**：高可信墙 Top5 + 30min 事件 + 拥挤度全部喂 AI prompt §8d | — |
 | L13 | spot 热力图 bin 间距 100 USD（合约 5-10）| 现货 zone 边界比合约粗，目前用合约 zone 作主路径锚点已规避 | Phase A 设计取舍 |
 | L14 | `dual_source` 判定阈值（≥ wall_min 500K 单帧 + max）| BTC 用 5M seed 触发更难，可能某些价位"现货厚但单帧不达标"被漏 | 落地观察后视情况降低 wall_min 或加滚动窗口 |
 
@@ -548,9 +549,9 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 | 项 | 状态 | 内容 | 实际改动 |
 |---|---|---|---|
 | ~~**M3** KL 桥接~~ | ✅ **已落地** | wall_zones 多档 chip（💎双源/💰仅现货/💰共振/⚡可信）+ wall_events 衔接（被吃/撤单/增厚）+ break_through/sweep/vacuum 风险 warning | `key_level_tracker_v2._apply_pressure_alignment` 增强（+150 行）；前端 `CONFIRMATION_LABELS` 映射（+11 项）；`test_key_level_op_bridge.py` 新增 28 测例 |
-| **观察期** | ⏳ | 让 trust_score / break_through_risk / 新 chip 在生产跑 1-2 周收集数据 | 不改代码 |
+| ~~**M4** AI 集成~~ | ✅ **已落地** | AI Snapshot 注入"高可信墙 Top5 + wall_events 30min + crowding_global"；prompt §8d 新增渲染并强调"挂单为意图层" | `ai/snapshot.py::_build_liquidity_wall_block`（+~140 行）；`ai/prompts.py` §8d 段落（+~95 行）；`models/snapshot.py` AISnapshot +4 字段；`engine.py` 传参；`test_ai_snapshot_liquidity_walls.py` 新增 23 测例 |
+| **观察期** | ⏳ | 让 trust_score / break_through_risk / 新 chip / AI §8d 输出在生产跑 1-2 周收集数据 | 不改代码 |
 | **阈值校准** | ⏳ | 基于观察数据调 trust_score 阈值（0.85/0.55）+ break_through 权重 | 调 ENGINE_DEFAULTS |
-| **M4-AI 集成** | ⏳ | AI Snapshot 注入 wall_zones / wall_events / crowding_global，让 AI Analyzer 用 | `ai/snapshot.py` 扩展 |
 
 ### 10.2 中期（1 个月）
 

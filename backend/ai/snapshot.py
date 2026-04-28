@@ -15,6 +15,7 @@ from models.levels import LevelAnalysis
 from models.liquidation import HeatmapData, LiqMaxPainItem, LiquidationMap, LiquidationStats
 from models.market import OrderBookAnalysis, VolumeProfileData
 from models.market_structure import MarketStructure
+from models.orderbook_pressure import OrderbookPressureSnapshot
 from models.snapshot import AISnapshot
 
 
@@ -120,6 +121,7 @@ def build_ai_snapshot(
     market_structure_1w: Optional[MarketStructure] = None,
     trend_exhaustion: Optional[dict] = None,
     direction_vote: Optional[dict] = None,
+    pressure_snapshot: Optional[OrderbookPressureSnapshot] = None,
 ) -> AISnapshot:
     """组装所有维度数据为 AI 可消费的快照"""
 
@@ -155,6 +157,11 @@ def build_ai_snapshot(
     # 订单墙（bid_walls/ask_walls）已不再喂给 AI：挂单是"意图"软信号，
     # 可撤可假；其支撑/阻力角色由 MAA 的 absorption 维度（已成交硬证据）承担。
     # orderbook 的聚合深度总额仍保留给 AI 作参考（bid_total / ask_total / spread）。
+    #
+    # M4 例外（2026-04）：流动性墙引擎产出的"高可信墙"重新喂 AI，但走严格筛选路径
+    # （见 _build_liquidity_wall_block）。挂单原始 Top10 仍不喂；只喂经过
+    # dual_source / trust_score >= 0.65 过滤后的硬证据层 + 行为事件 + 拥挤度。
+    liquidity_block = _build_liquidity_wall_block(pressure_snapshot, price)
 
     funding_exchanges = []
     funding_avg_7d = None
@@ -398,8 +405,152 @@ def build_ai_snapshot(
         rule_stop_loss=rule_stop_loss,
         sniper_entries=sniper_entries,
         ladder_plans=ladder_plans,
+        liquidity_walls=liquidity_block.get("walls", []),
+        liquidity_wall_events=liquidity_block.get("events", []),
+        liquidity_crowding=liquidity_block.get("crowding"),
+        liquidity_wall_quality=liquidity_block.get("quality", ""),
         **_collect_news_context(),
     )
+
+
+# ─────────────────────────────────────────────────────────────────
+# M4 · 流动性墙引擎 → AI 摘要构建器
+# ─────────────────────────────────────────────────────────────────
+# 设计原则（与历史"orderbook walls 不喂 AI"决策的差异）：
+#   旧路径（已废弃）直接喂"原始挂单 Top10"，AI 容易把可被 spoof 的意图当硬证据。
+#   M4 升级后只喂"高可信筛选层"——必须满足以下任一硬条件才进入 AI：
+#     (a) dual_source=True：合约+现货 5m 热力图同价区双重确认
+#     (b) trust_score >= 0.65：综合可信度（含持续性 + 多所 + 行为 + 现货大单）
+#   且配合：
+#     - 仅取顶 5 条，限制 prompt 体积
+#     - 仅取最近 30min 三类事件（被吃/增厚/撤单），其他事件不喂
+#     - 暖机期 (warming) 不报"已确认"，仅传 quality 标识让 AI 自行降级
+#     - prompt 模板配套必须强调"挂单为意图层信号，需结合 absorption / cvd 综合"
+#
+# 兜底：pressure_snapshot 缺失或空时，所有字段降级为空 list / None / ""，AI prompt
+# §8d 段落自动跳过，不阻断主快照构建。
+# ─────────────────────────────────────────────────────────────────
+
+
+def _build_liquidity_wall_block(
+    pressure_snapshot: Optional[OrderbookPressureSnapshot],
+    last_price: float,
+) -> dict:
+    """从 OrderbookPressureSnapshot 提炼"高可信墙 + 行为事件 + 拥挤度"摘要给 AI。
+
+    返回 dict 含 4 个键：
+      walls / events / crowding / quality
+
+    若 pressure_snapshot 为 None 或所有字段都空 → 返回空 dict（前端 prompt 自动跳过）。
+    """
+    out = {
+        "walls": [],
+        "events": [],
+        "crowding": None,
+        "quality": "",
+    }
+    if pressure_snapshot is None:
+        return out
+
+    out["quality"] = pressure_snapshot.data_quality or ""
+
+    # 1) 高可信墙摘要：dual_source 或 trust_score >= 0.65，顶 5
+    walls_above = pressure_snapshot.walls_above or []
+    walls_below = pressure_snapshot.walls_below or []
+    candidates = []
+    for z in walls_above + walls_below:
+        if not (z.dual_source or z.trust_score >= 0.65):
+            continue
+        candidates.append(z)
+    candidates.sort(key=lambda z: z.trust_score, reverse=True)
+    candidates = candidates[:5]
+
+    for z in candidates:
+        # 信任档位标签（与 KL chip 同源，AI 看到的与 KL 卡片一致）
+        if z.dual_source:
+            tier = "双源高可信"
+        elif z.source == "spot_only":
+            tier = "仅现货"
+        elif z.has_spot_confluence:
+            tier = "现货大单共振"
+        else:
+            tier = "较可信合约"
+
+        wall_dict = {
+            "side": "卖墙" if z.side == "ask" else "买墙",
+            "price_mid": round(z.price_mid, 4),
+            "distance_pct": round(z.distance_pct, 3),
+            "current_usd": round(z.current_usd, 0),
+            "max_usd_1h": round(z.max_usd_1h, 0),
+            "trust_tier": tier,
+            "trust_score": round(z.trust_score, 3),
+            "persistence_min": round(z.visible_minutes, 1),
+            "exchange_count": z.exchange_count,
+            "break_through_risk": round(z.break_through_risk, 3),
+        }
+        if z.next_magnet_price is not None:
+            wall_dict["next_magnet_price"] = round(z.next_magnet_price, 4)
+        if z.sweep_target and z.sweep_target.vacuum_gap_pct >= 0.5:
+            wall_dict["vacuum_gap_pct"] = round(z.sweep_target.vacuum_gap_pct, 2)
+        out["walls"].append(wall_dict)
+
+    # 2) wall_events 最近 30min：仅 wall_consumed / wall_strengthened / wall_removed
+    events = pressure_snapshot.wall_events or []
+    snap_ts = pressure_snapshot.ts_sec or 0
+    if snap_ts:
+        EVENT_KIND_LABEL = {
+            "wall_consumed": "被吃",
+            "wall_strengthened": "增厚",
+            "wall_removed": "撤单",
+        }
+        # 远价位过滤：相对当前价 5% 以外的事件不喂（信噪比低）
+        for ev in events:
+            if ev.event_type not in EVENT_KIND_LABEL:
+                continue
+            ev_age_sec = max(0, snap_ts - ev.ts_sec)
+            if ev_age_sec > 1800:
+                continue
+            if last_price > 0:
+                dist_pct = abs(ev.price_mid - last_price) / last_price * 100
+                if dist_pct > 5.0:
+                    continue
+            ev_min = max(1, int(ev_age_sec // 60))
+            ev_dict = {
+                "kind": EVENT_KIND_LABEL[ev.event_type],
+                "side": "卖墙" if ev.side == "ask" else "买墙",
+                "price_mid": round(ev.price_mid, 4),
+                "min_ago": ev_min,
+                "confidence": round(ev.confidence, 3),
+            }
+            if ev.size_before_usd is not None:
+                ev_dict["size_before_usd"] = round(ev.size_before_usd, 0)
+            if ev.size_after_usd is not None:
+                ev_dict["size_after_usd"] = round(ev.size_after_usd, 0)
+            if ev.executed_usd_value is not None:
+                ev_dict["executed_usd_value"] = round(ev.executed_usd_value, 0)
+            out["events"].append(ev_dict)
+        # 最近事件优先（按 min_ago 升序）
+        out["events"].sort(key=lambda e: e["min_ago"])
+        out["events"] = out["events"][:8]  # 限制最多 8 条
+
+    # 3) crowding_global：OI delta + Funding + 多空 + 推断仓位状态
+    cg = pressure_snapshot.crowding_global
+    if cg:
+        crowding = {
+            "oi_delta_1h_pct": cg.oi_delta_1h_pct,
+            "oi_delta_24h_pct": cg.oi_delta_24h_pct,
+            "oi_margin_split": cg.oi_margin_split,
+            "funding_now_pct": cg.funding_now_pct,
+            "funding_percentile_30d": cg.funding_percentile_30d,
+            "top_position_ls_ratio": cg.top_position_ls_ratio,
+            "global_account_ls_ratio": cg.global_account_ls_ratio,
+            "inferred_position_state": cg.inferred_position_state,
+            "long_crowding_risk": round(cg.long_crowding_risk, 3),
+            "short_crowding_risk": round(cg.short_crowding_risk, 3),
+        }
+        out["crowding"] = {k: v for k, v in crowding.items() if v is not None}
+
+    return out
 
 
 def _collect_news_context() -> dict:

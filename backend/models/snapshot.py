@@ -303,6 +303,18 @@ class AISnapshot(BaseModel):
     td_sequential_direction: str = ""
     poll_failures: dict[str, str] = {}
 
+    # ── M4 · 流动性墙引擎注入（仅高可信摘要，详情见 ai/snapshot.py:_build_liquidity_wall_block） ──
+    # 设计：
+    # 1. liquidity_walls 仅取 trust_score >= 0.65 或 dual_source 的"高可信墙"，顶 5 条
+    # 2. liquidity_wall_events 仅取最近 30min 三类（被吃 / 增厚 / 撤单），过滤价位远离当前价 5% 以上
+    # 3. liquidity_crowding 是全局拥挤度（OI delta / Funding / 大户多空 / 推断仓位状态）
+    # 4. data_quality 直传，让 AI 知道是 ok / warming / partial / stale / missing
+    # AI prompt §8d 引用本字段；prompt 必须强调"挂单为意图层信号，需结合 absorption / cvd 综合"
+    liquidity_walls: list[dict] = []
+    liquidity_wall_events: list[dict] = []
+    liquidity_crowding: Optional[dict] = None
+    liquidity_wall_quality: str = ""  # ok / warming / partial / stale / missing / ""
+
     # ── P1.2b · 新闻与地缘注入（optional；AI prompt 在有值时追加板块） ──
     news_brief_text: str = ""                  # Rolling 简报文本（≤3000 chars）
     news_brief_version: int = 0

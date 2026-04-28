@@ -1021,6 +1021,126 @@ def build_user_prompt(snapshot: dict) -> str:
     # 1) MAA 新增 absorption 维度 —— 从 Footprint 派生"价位级被动吸收带"（已成交事实，硬证据）
     # 2) 关键位系统（§9g）用 absorption zones 替代原 orderbook walls 作为 capital_flow 候选
     # 3) state.large_orders 原始数据仍保留，由前端 payload 展示供人工观察
+    #
+    # M4 例外（2026-04）：流动性墙引擎产出的「高可信墙」重新喂 AI（仅经过严格筛选层）：
+    # 严格筛选标准 = dual_source（合约+现货热力图双源） 或 trust_score>=0.65
+    # 只取顶 5 条 / 仅最近 30min 三类事件（被吃/增厚/撤单）/ 含全局拥挤度上下文
+    _liq_walls = snapshot.get("liquidity_walls", []) or []
+    _liq_events = snapshot.get("liquidity_wall_events", []) or []
+    _liq_crowding = snapshot.get("liquidity_crowding") or {}
+    _liq_quality = snapshot.get("liquidity_wall_quality", "")
+    if _liq_walls or _liq_events or _liq_crowding:
+        lines.extend([
+            "",
+            "### 8d. 流动性墙引擎 [Coinglass · 5m 订单簿热力图 + 现货大单 + OI/Funding/LS 拥挤度]",
+            (
+                "⚠ 性质提示：墙=「挂单意图」，可被 spoof / 撤单；本块仅展示通过双源或"
+                "trust_score≥0.65 严格筛选后的「高可信墙」。"
+                "需结合 §9g absorption zones（已成交硬证据）+ §1 CVD 综合判断；"
+                "禁止仅凭墙位作为决策唯一依据。"
+            ),
+        ])
+        if _liq_quality and _liq_quality != "ok":
+            _quality_label = {
+                "warming": "暖机期（数据 < 30min）",
+                "partial": "部分缺失",
+                "stale": "数据偏旧",
+                "missing": "数据缺失",
+            }.get(_liq_quality, _liq_quality)
+            lines.append(f"  数据质量: {_quality_label}（请降权使用本块）")
+
+        if _liq_walls:
+            lines.append("")
+            lines.append("**高可信墙 Top5**（按 trust_score 降序）：")
+            for w in _liq_walls:
+                _side = w.get("side", "")
+                _price = w.get("price_mid", 0)
+                _dist = w.get("distance_pct", 0)
+                _usd = w.get("current_usd", 0)
+                _tier = w.get("trust_tier", "")
+                _trust = w.get("trust_score", 0)
+                _persist = w.get("persistence_min", 0)
+                _exch = w.get("exchange_count", 0)
+                _btr = w.get("break_through_risk", 0)
+                _wall_line = (
+                    f"- {_side} ${_price:,.4f} ({_dist:+.2f}%) | "
+                    f"{_fmt_usd_for_prompt(_usd)} | {_tier}(信任{_trust:.2f}) | "
+                    f"持续{_persist:.0f}min · {_exch}所"
+                )
+                if _btr >= 0.6:
+                    _magnet = w.get("next_magnet_price")
+                    _vac = w.get("vacuum_gap_pct")
+                    _risk_part = f" | ⚠打穿风险{_btr*100:.0f}%"
+                    if _magnet is not None:
+                        _risk_part += f"，磁铁${_magnet:,.4f}"
+                    if _vac is not None:
+                        _risk_part += f"，真空跨度{_vac:.1f}%"
+                    _wall_line += _risk_part
+                lines.append(_wall_line)
+
+        if _liq_events:
+            lines.append("")
+            lines.append("**最近 30min 墙行为事件**：")
+            for ev in _liq_events:
+                _kind = ev.get("kind", "")
+                _ev_side = ev.get("side", "")
+                _ev_price = ev.get("price_mid", 0)
+                _min_ago = ev.get("min_ago", 0)
+                _ev_conf = ev.get("confidence", 0)
+                _ev_line = f"- {_kind} {_ev_side} @ ${_ev_price:,.4f} · {_min_ago}min 前 (置信{_ev_conf:.2f})"
+                if "executed_usd_value" in ev and ev["executed_usd_value"]:
+                    _ev_line += f" · 成交{_fmt_usd_for_prompt(ev['executed_usd_value'])}"
+                elif "size_after_usd" in ev and "size_before_usd" in ev:
+                    _delta = (ev.get("size_after_usd") or 0) - (ev.get("size_before_usd") or 0)
+                    if abs(_delta) > 0:
+                        _ev_line += f" · 厚度变化{_fmt_usd_for_prompt(_delta)}"
+                lines.append(_ev_line)
+
+        if _liq_crowding:
+            lines.append("")
+            _oi_1h = _liq_crowding.get("oi_delta_1h_pct")
+            _oi_24h = _liq_crowding.get("oi_delta_24h_pct")
+            _oi_split = _liq_crowding.get("oi_margin_split", "unknown")
+            _f_now = _liq_crowding.get("funding_now_pct")
+            _f_pct = _liq_crowding.get("funding_percentile_30d")
+            _ls_top = _liq_crowding.get("top_position_ls_ratio")
+            _state = _liq_crowding.get("inferred_position_state", "unknown")
+            _long_risk = _liq_crowding.get("long_crowding_risk", 0)
+            _short_risk = _liq_crowding.get("short_crowding_risk", 0)
+
+            _crowding_parts = []
+            if _oi_1h is not None:
+                _crowding_parts.append(f"OI 1h {_oi_1h:+.2f}%")
+            if _oi_24h is not None:
+                _crowding_parts.append(f"24h {_oi_24h:+.2f}%")
+            _split_label = {
+                "coin_dominant": "币本位主导(老用户加杠杆)",
+                "stable_dominant": "U 本位主导(新资金入场)",
+                "balanced": "保证金均衡",
+            }.get(_oi_split, "")
+            if _split_label:
+                _crowding_parts.append(_split_label)
+            if _f_now is not None:
+                _crowding_parts.append(f"Funding {_f_now*100:+.4f}%")
+            if _f_pct is not None:
+                _crowding_parts.append(f"30d 分位{_f_pct*100:.0f}%")
+            if _ls_top is not None:
+                _crowding_parts.append(f"大户 LS {_ls_top:.2f}")
+            _state_label = {
+                "long_opening": "多头主动开仓",
+                "short_opening": "空头主动开仓",
+                "long_closing_or_liquidation": "多头平仓/被清算",
+                "short_covering_or_liquidation": "空头回补/被清算",
+                "liquidation_flush": "双向清算潮",
+                "mixed": "信号矛盾",
+            }.get(_state, "")
+            lines.append(
+                "**全局拥挤度**: "
+                + (" | ".join(_crowding_parts) if _crowding_parts else "数据不足")
+                + (f" → {_state_label}" if _state_label else "")
+                + (f" (多头风险{_long_risk*100:.0f}% / 空头{_short_risk*100:.0f}%)"
+                   if (_long_risk + _short_risk) > 0 else "")
+            )
 
     w_alerts = snapshot.get("whale_hl_alerts_count", 0)
     w_transfers = snapshot.get("whale_transfers_count", 0)

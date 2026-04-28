@@ -2838,6 +2838,7 @@ class Engine:
             direction_vote=(
                 state.direction_vote.model_dump() if state.direction_vote else None
             ),
+            pressure_snapshot=state.orderbook_pressure_snapshot,
         )
 
         result = await self._analyzer.analyze(snapshot)

@@ -545,7 +545,8 @@ backend/scripts/coinglass_probe_samples/
 | **Phase A** 现货热力图双源融合 + active_attack | ✅ 9c058d9 | 单一最强证据 |
 | **Phase B** 配额错峰 + ask-bids 流动性衰竭 + 来源 tabs | ✅ f9dbf5b | quota 健康 + 前端筛选 |
 | **Phase B+** 现货 aggregated + spot 优先 fallback | ✅ cca0432 / fe89051 | 真买卖家撤离信号 |
-| **M3** KL 桥接（多档 chip + wall_events + 风险 warning，铁律守护） | ✅ 本次 | 关键位详情页墙提示 |
+| **M3** KL 桥接（多档 chip + wall_events + 风险 warning，铁律守护） | ✅ 13abb7f | 关键位详情页墙提示 |
+| **M4** AI Snapshot 集成（高可信墙摘要 + 事件 + 拥挤度 → §8d）| ✅ 本次 | AI 终审分析含墙数据 |
 
 ## 三、本次 M1+M2 改动文件清单
 
