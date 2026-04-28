@@ -58,6 +58,38 @@ function ageLabel(hours?: number | null): string {
   return `${(hours / 24).toFixed(1)}d`;
 }
 
+/** 折叠区子分块（M3.1 后增多 → 次要块默认收起以减少视觉噪声）。
+ *  点击 summary 切换；title 含 emoji；count 用括号显示总数（可选）。 */
+function CollapsibleSection({
+  title,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open={defaultOpen} className="group">
+      <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-300 select-none flex items-center gap-1">
+        <span className="text-slate-600 group-open:rotate-90 transition-transform inline-block w-2.5">
+          ▶
+        </span>
+        <span>{title}</span>
+        {count != null && count > 0 && (
+          <span className="text-slate-600">（{count}）</span>
+        )}
+      </summary>
+      <div className="mt-1.5">{children}</div>
+    </details>
+  );
+}
+
+/** explain_chips 超过此数量时折叠余下（"... +N 更多"按钮）。 */
+const CHIP_COLLAPSE_THRESHOLD = 8;
+
 export default function LevelDetailRow({
   lv,
   coin,
@@ -71,6 +103,8 @@ export default function LevelDetailRow({
   colCount: number;
 }) {
   const [open, setOpen] = useState(false);
+  // M3.1：explain_chips 超过 CHIP_COLLAPSE_THRESHOLD 时折叠余下；点击按钮展开
+  const [chipsExpanded, setChipsExpanded] = useState(false);
 
   const stateInfo = STATE_LABELS[lv.state] || { text: lv.state, color: "text-slate-400" };
   const tier = TIER_STYLES[lv.strength_tier] || TIER_STYLES.C;
@@ -254,14 +288,17 @@ export default function LevelDetailRow({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               {/* 左列：完整证据 + 历史 + 杠杆 */}
               <div className="space-y-3">
-                {/* 完整 explain_chips */}
+                {/* 完整 explain_chips（M3.1：超过 8 个时默认折叠余下） */}
                 {chipsRaw.length > 0 && (
                   <div>
                     <div className="text-[10px] text-slate-500 mb-1">
                       📍 为什么强（共 {chipsRaw.length} 项）
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {chipsRaw.map((c, i) => (
+                      {(chipsExpanded
+                        ? chipsRaw
+                        : chipsRaw.slice(0, CHIP_COLLAPSE_THRESHOLD)
+                      ).map((c, i) => (
                         <span
                           key={i}
                           title={c.hint}
@@ -270,16 +307,31 @@ export default function LevelDetailRow({
                           {c.label}
                         </span>
                       ))}
+                      {chipsRaw.length > CHIP_COLLAPSE_THRESHOLD && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChipsExpanded((s) => !s);
+                          }}
+                          className="px-2 py-0.5 rounded bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 text-[10px] transition"
+                        >
+                          {chipsExpanded
+                            ? "收起"
+                            : `+${chipsRaw.length - CHIP_COLLAPSE_THRESHOLD} 更多`}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* 证据组 */}
+                {/* 证据组（默认收起） */}
                 {lv.evidence_groups && lv.evidence_groups.length > 0 && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">
-                      🧬 独立证据组（去重 {lv.independent_group_count ?? lv.evidence_groups.length} 组）
-                    </div>
+                  <CollapsibleSection
+                    title={`🧬 独立证据组（去重 ${
+                      lv.independent_group_count ?? lv.evidence_groups.length
+                    } 组）`}
+                  >
                     <div className="flex flex-wrap gap-1.5">
                       {lv.evidence_groups.map((g, i) => (
                         <span
@@ -290,19 +342,17 @@ export default function LevelDetailRow({
                         </span>
                       ))}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* 历史验证 */}
-                <div>
-                  <div className="text-[10px] text-slate-500 mb-1">📊 历史验证</div>
+                {/* 历史验证（默认收起） */}
+                <CollapsibleSection title="📊 历史验证">
                   <div className="text-slate-300">{historyBrief(lv)}</div>
-                </div>
+                </CollapsibleSection>
 
-                {/* 主导杠杆 + 跨所共振（详） */}
+                {/* 主导杠杆 + 跨所共振（默认收起） */}
                 {(lv.dominant_leverage || lv.exchange_count) && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">⚙️ 杠杆与共识</div>
+                  <CollapsibleSection title="⚙️ 杠杆与共识">
                     <div className="flex flex-wrap gap-2 text-slate-300">
                       {lv.dominant_leverage && (
                         <span>
@@ -331,7 +381,7 @@ export default function LevelDetailRow({
                         </span>
                       )}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
                 {/* M2.5：旧"⚡ 当前状态附加"已下沉到 LevelBehaviorPanel 的 V1/V2 双轨块，
@@ -371,12 +421,9 @@ export default function LevelDetailRow({
                   </div>
                 )}
 
-                {/* cascade 4 子分 */}
+                {/* cascade 4 子分（默认收起；主行已显示 cascade_risk 主值） */}
                 {cc && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">
-                      🌊 级联风险拆解（cascade_components）
-                    </div>
+                  <CollapsibleSection title="🌊 级联风险拆解（cascade_components）">
                     <div className="space-y-1">
                       <CascadeBar label="层数" value={cc.count_score} />
                       <CascadeBar label="累计 USD" value={cc.usd_score} />
@@ -391,7 +438,7 @@ export default function LevelDetailRow({
                         </span>
                       </div>
                     )}
-                  </div>
+                  </CollapsibleSection>
                 )}
 
                 {/* 矛盾扣分 */}
@@ -413,9 +460,11 @@ export default function LevelDetailRow({
                   </div>
                 )}
 
-                {/* 数据新鲜度 */}
-                <div>
-                  <div className="text-[10px] text-slate-500 mb-1">🕒 数据新鲜度</div>
+                {/* 数据新鲜度（stale 时默认展开，正常时默认收起） */}
+                <CollapsibleSection
+                  title={lv.is_stale ? "🕒 数据新鲜度（已过期）" : "🕒 数据新鲜度"}
+                  defaultOpen={!!lv.is_stale}
+                >
                   {lv.is_stale ? (
                     <div className="text-rose-300">
                       主源已过期 · 主源年龄 {ageLabel(lv.primary_source_age_hours)}
@@ -441,16 +490,15 @@ export default function LevelDetailRow({
                       )}
                     </div>
                   )}
-                </div>
+                </CollapsibleSection>
 
-                {/* sweep 详情兜底 */}
+                {/* sweep 详情兜底（默认收起） */}
                 {(lv.sweep_usd ?? 0) > 0 && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">🩸 资金撞击</div>
+                  <CollapsibleSection title="🩸 资金撞击">
                     <div className="text-slate-300 font-mono">
                       累计 {fmtUsdShort(lv.sweep_usd ?? 0)}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
                 {/* M4 · 行为评估面板（V3 行为验证层 · 2026-04 · 纯观测） */}
@@ -465,17 +513,17 @@ export default function LevelDetailRow({
                   />
                 )}
 
-                {/* 生命周期 */}
+                {/* 生命周期（默认收起） */}
                 {lv.lifecycle_events && lv.lifecycle_events.length > 0 && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">
-                      📜 生命周期事件
-                    </div>
+                  <CollapsibleSection
+                    title="📜 生命周期事件"
+                    count={lv.lifecycle_events.length}
+                  >
                     <LifecyclePanel
                       events={lv.lifecycle_events}
                       level_id={lv.level_id}
                     />
-                  </div>
+                  </CollapsibleSection>
                 )}
 
                 {/* 原始 sources（开发参考） */}
