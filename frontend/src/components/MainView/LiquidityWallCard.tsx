@@ -449,25 +449,53 @@ function ZoneRow({
         <span className={`text-[10px] cursor-help ${trend.color}`} title={trend.hint}>
           {trend.icon}
         </span>
-        {/* M2.5：trust_score 阶梯（合约 vs 现货 vs 双源） */}
-        {zone.trust_score >= 0.85 ? (
+        {/* Phase A：来源徽章（dual_source 优先 > spot_only > spot_lo > 仅合约 + 高 trust） */}
+        {zone.dual_source ? (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-amber-400/30 text-amber-200 font-semibold"
-            title={`真支撑/阻力（trust ${Math.round(zone.trust_score * 100)}%）：现货+合约双源 + 持续 + 多所`}
+            title={
+              `💎 现货+合约双源高可信墙（trust ${Math.round(zone.trust_score * 100)}%）：` +
+              `两个独立订单簿都在该价位有 ≥ 阈值的厚度——真买卖家与杠杆资金共同布局，` +
+              `是当前最强单一证据。现货侧厚度 ${formatCnUsd(zone.spot_current_usd)}（峰值 ${formatCnUsd(zone.spot_max_usd_1h)}）。`
+            }
           >
-            💎 {zone.side === "ask" ? "真阻力" : "真支撑"}
+            💎 双源{zone.side === "ask" ? "卖墙" : "买墙"}
+          </span>
+        ) : zone.source === "spot_only" ? (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-200"
+            title={
+              `仅现货墙（trust ${Math.round(zone.trust_score * 100)}%）：` +
+              `合约 5m 热力图同价位无显著厚度，仅现货订单簿堆叠——多为真买卖家长线挂单，` +
+              `但可能出现"合约杠杆资金未跟进"的风险。`
+            }
+          >
+            💰 仅现货墙
           </span>
         ) : zone.has_spot_confluence ? (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-200"
-            title={`现货大单共振（trust ${Math.round(zone.trust_score * 100)}%）：背后有真买卖家，不只是合约杠杆挂单`}
+            title={
+              `现货大单共振（trust ${Math.round(zone.trust_score * 100)}%）：` +
+              `合约墙背后有现货大单 lifecycle 加持，可信度高于纯合约挂单。`
+            }
           >
             💰 现货共振 ×{zone.spot_large_order_ids.length}
+          </span>
+        ) : zone.trust_score >= 0.65 ? (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-200"
+            title={`较可信合约墙（trust ${Math.round(zone.trust_score * 100)}%）：多所共振 + 持续`}
+          >
+            ⚡ 较可信
           </span>
         ) : zone.trust_score < 0.55 && zone.large_order_ids.length > 0 ? (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/15 text-orange-300"
-            title={`仅合约源（trust ${Math.round(zone.trust_score * 100)}%）：可能是清算磁铁、spoof 或短期墙；结合下方"如果打穿"风险解读`}
+            title={
+              `仅合约源（trust ${Math.round(zone.trust_score * 100)}%）：` +
+              `可能是清算磁铁、spoof 或短期墙；结合下方"如果打穿"风险解读。`
+            }
           >
             ⚡ 仅合约
           </span>

@@ -173,11 +173,19 @@ WallZoneStatus = Literal[
     "unknown",         # 数据不足
 ]
 
-# 数据来源融合（M1）
+# 数据来源融合（M1 + Phase A 现货扩展）
+# 命名遵循"基础源_扩展源"语义：
+#   - depth_only       ：仅来自合约 5m 深度热力图
+#   - depth+large_order：合约深度 + 合约大单确认
+#   - spot_only        ：仅来自现货 5m 深度热力图（无合约源覆盖此价位）
+#   - spot+depth       ：合约深度 + 现货深度同价位共振（💎 双源高可信墙的硬证据）
+#   - large_order_only ：保留兼容旧消费者，引擎当前不输出此值
 WallZoneSource = Literal[
-    "depth_only",          # 仅来自 5m 深度热力图
-    "large_order_only",    # 仅来自大单
-    "depth+large_order",   # 双源共振（最高可信）
+    "depth_only",
+    "large_order_only",
+    "depth+large_order",
+    "spot_only",
+    "spot+depth",
 ]
 
 # 趋势（M1）
@@ -324,10 +332,17 @@ class WallZone(BaseModel):
     has_spot_confluence: bool = False           # 是否与现货大单共振
     spot_large_order_ids: list[int] = Field(default_factory=list)
     trust_score: float = 0.5                    # 综合可信度 0-1
-    # ≥ 0.85：真支撑/真阻力（双源 + 持久 + 多所）
-    # ≥ 0.65：高可信
+    # ≥ 0.85：高可信墙（双源 + 持久 + 多所，叠加多重硬证据）
+    # ≥ 0.65：较可信
     # ≥ 0.50：普通（仅合约源，需结合磁铁/被扫风险解读）
     # < 0.50：短期墙 / 可能被扫
+    # ── Phase A：现货 5m 深度热力图双源共振 ──
+    # dual_source = True 当且仅当此 zone 的价区在合约+现货 5m 热力图同时存在
+    # ≥ wall_min_usd 的厚度 → 该价位"真买卖家与杠杆资金共同布局"，是 trust_score
+    # 阶梯加分的最强单一证据（>spot 大单单笔/多所共振）。
+    dual_source: bool = False
+    spot_current_usd: float = 0.0               # 现货侧同价区 USD 厚度（dual_source=True 时填）
+    spot_max_usd_1h: float = 0.0                # 现货侧 1h 峰值（用于现货侧 trend 派生）
 
     # ── 行为评估（M2）──
     status: WallZoneStatus = "active"

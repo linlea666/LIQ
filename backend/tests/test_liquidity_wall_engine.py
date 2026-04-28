@@ -62,29 +62,36 @@ def _make_frame(ts: int, bids: list[tuple[float, float]],
 def _make_state(
     last_price: float = 100_000.0,
     history: list[OrderbookDepthSnapshot] | None = None,
+    spot_history: list[OrderbookDepthSnapshot] | None = None,
     large_orders: list[LargeOrderLifecycle] | None = None,
+    spot_large_orders: list[LargeOrderLifecycle] | None = None,
     oi_exchange_rank: dict | None = None,
     multi_funding=None,
     funding_history_8h=None,
     ls_ratio=None,
     top_position_ratio=None,
     taker_flow=None,
+    cvd_spot=None,
     liq_max_pain: dict | None = None,
     liq_summary=None,
     candles_4h: list | None = None,
+    coin: str = "BTC",
 ):
     state = SimpleNamespace(
-        coin="BTC",
+        coin=coin,
         ticker=SimpleNamespace(last=last_price),
         atr=200.0,
         orderbook_depth_history=deque(history or [], maxlen=12),
+        spot_orderbook_depth_history=deque(spot_history or [], maxlen=12),
         large_orders_history=large_orders or [],
+        spot_large_orders_history=spot_large_orders or [],
         oi_exchange_rank=oi_exchange_rank,
         multi_funding=multi_funding,
         funding_history_8h=funding_history_8h,
         ls_ratio=ls_ratio,
         top_position_ratio=top_position_ratio,
         taker_flow=taker_flow,
+        cvd_spot=cvd_spot,
         liq_max_pain=liq_max_pain or {},
         liq_summary=liq_summary,
         candles_4h=candles_4h or [],
@@ -477,9 +484,11 @@ class TestAugmentTolerance:
 # M2.5 — 现货 vs 合约（spot augment + trust_score）
 # ════════════════════════════════════════════════════════════════════
 class TestSpotConfluenceAndTrust:
-    """诉求"现货=真支撑、合约=清算磁铁"落地：
-    - has_spot_confluence + spot_large_order_ids
-    - trust_score 阶梯（base 0.50 / +0.25 spot / +0.15 多所 / +0.10 持续）
+    """诉求"现货=真买卖家、合约=清算磁铁"落地（M2.5 + Phase A）：
+    - has_spot_confluence + spot_large_order_ids（现货大单 lifecycle）
+    - dual_source（Phase A：现货 5m 热力图 + 合约 5m 热力图同价区共振）
+    - trust_score 阶梯（base 0.50 / +0.30 dual_source / +0.15 spot_lo /
+                       +0.10 多所 / +0.10 持续）
     """
 
     def _make_zone(self, price_low: float, price_high: float, side: str = "ask",
@@ -539,16 +548,31 @@ class TestSpotConfluenceAndTrust:
         assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.50)
 
     def test_trust_score_with_spot_confluence(self):
-        """+ spot 共振 → 0.50 + 0.25 = 0.75。"""
+        """+ spot 大单共振 → 0.50 + 0.15 = 0.65（Phase A 调权重后）。"""
         from processors.liquidity_wall_engine import _compute_trust_score
         z = self._make_zone(76_000, 76_010, "bid", persistence=0.3, exchange_count=1)
         z.has_spot_confluence = True
-        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.75)
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.65)
 
-    def test_trust_score_full_quad(self):
-        """spot + 多所 + 持续 → 0.50 + 0.25 + 0.15 + 0.10 = 1.00（满分真支撑）。"""
+    def test_trust_score_with_dual_source(self):
+        """Phase A：dual_source（现货+合约 5m 热力图共振）→ 0.50 + 0.30 = 0.80。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.3, exchange_count=1)
+        z.dual_source = True
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.80)
+
+    def test_trust_score_dual_source_plus_persist(self):
+        """Phase A：dual_source + 持续 ≥ 0.7 → 0.50 + 0.30 + 0.10 = 0.90 → 💎 高可信。"""
+        from processors.liquidity_wall_engine import _compute_trust_score
+        z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=1)
+        z.dual_source = True
+        assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.90)
+
+    def test_trust_score_full_quintet(self):
+        """Phase A 满级：dual + spot_lo + 多所 + 持续 → 0.50+0.30+0.15+0.10+0.10 = 1.15 → clamp 1.00。"""
         from processors.liquidity_wall_engine import _compute_trust_score
         z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=3)
+        z.dual_source = True
         z.has_spot_confluence = True
         score = _compute_trust_score(z, ENGINE_DEFAULTS)
         assert score == pytest.approx(1.00)
@@ -556,9 +580,13 @@ class TestSpotConfluenceAndTrust:
     def test_trust_score_clamped_to_one(self):
         """即使加分超 1.0，也 clamp 到 1.0（边界保护）。"""
         from processors.liquidity_wall_engine import _compute_trust_score
-        cfg = {**ENGINE_DEFAULTS, "trust_bonus_spot_confluence": 0.50,
-               "trust_bonus_multi_exchange": 0.40, "trust_bonus_persistent": 0.30}
+        cfg = {**ENGINE_DEFAULTS,
+               "trust_bonus_dual_source": 0.40,
+               "trust_bonus_spot_confluence": 0.50,
+               "trust_bonus_multi_exchange": 0.40,
+               "trust_bonus_persistent": 0.30}
         z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=3)
+        z.dual_source = True
         z.has_spot_confluence = True
         score = _compute_trust_score(z, cfg)
         assert score == 1.0
@@ -567,7 +595,7 @@ class TestSpotConfluenceAndTrust:
         """持久但无 spot/多所 → base 0.50 + 持续 0.10 = 0.60（仍属"普通"档）。"""
         from processors.liquidity_wall_engine import _compute_trust_score
         z = self._make_zone(76_000, 76_010, "bid", persistence=0.85, exchange_count=1)
-        # has_spot_confluence 默认 False
+        # has_spot_confluence / dual_source 默认 False
         assert _compute_trust_score(z, ENGINE_DEFAULTS) == pytest.approx(0.60)
 
 
@@ -871,7 +899,8 @@ class TestSweepAndBreakThrough:
         assert sweep is None
 
     def test_break_through_risk_thinning(self):
-        # current 25%、persistence 0.05、附近清算磁铁 + vacuum 大 + 同向 crowding
+        # 静态因素满 = 0.30+0.20+0.20+0.15+0.10 = 0.95（Phase A 调整 crowding 0.15 → 0.10）
+        # 加 active_attack 满分 ×0.20 = +0.20 → clamp 1.0
         z = self._make_zone()
         z.current_usd = 500_000
         z.max_usd_1h = 2_000_000   # 比例 0.25 < 0.5 → +0.30
@@ -880,9 +909,18 @@ class TestSweepAndBreakThrough:
                              magnet_amount_usd=4_000_000,
                              distance_pct=-0.1,    # < 0.5% → +0.20
                              vacuum_gap_pct=0.6)   # ≥ 0.5 → +0.15
-        crowding = PositionCrowdingSnapshot(long_crowding_risk=0.7)  # +0.15
-        risk = _compute_break_through_risk(z, crowding, sweep, ENGINE_DEFAULTS)
-        assert risk == pytest.approx(1.0, abs=0.01)
+        crowding = PositionCrowdingSnapshot(long_crowding_risk=0.7)  # +0.10
+        # 不传 taker_flow / cvd_spot → active_attack=0 → 仅 0.95
+        risk_static = _compute_break_through_risk(z, crowding, sweep, ENGINE_DEFAULTS)
+        assert risk_static == pytest.approx(0.95, abs=0.01)
+        # 传入对齐的 taker + cvd → +0.20 → clamp 1.0
+        taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
+        cvd_spot = SimpleNamespace(trend_1h="strong_down")
+        risk_full = _compute_break_through_risk(
+            z, crowding, sweep, ENGINE_DEFAULTS,
+            taker_flow=taker, cvd_spot=cvd_spot,
+        )
+        assert risk_full == pytest.approx(1.0, abs=0.01)
 
     def test_break_through_risk_low_when_zone_solid(self):
         z = self._make_zone()
@@ -937,6 +975,166 @@ class TestMainEntryAndKLIsolation:
         z = below[0]
         assert z.sweep_target is not None
         assert z.sweep_target.magnet_price == 98_500
+
+    # ════════════════════════════════════════════════════════════════════
+    # Phase A — 双源 zone（dual_source）+ spot_only + active_attack + seed_by_coin
+    # ════════════════════════════════════════════════════════════════════
+
+    def test_dual_source_marked_when_spot_overlaps(self):
+        """合约 zone 价区上叠加现货厚度 → dual_source=True + source='spot+depth'。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_depth
+
+        # 合约 zone：[75000, 75100]
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=2_000_000, max_usd_1h=2_000_000, avg_usd_1h=2_000_000,
+            bin_count=2, seen_count=12, visible_minutes=55,
+            persistence_score=0.9, source="depth_only",
+        )
+        # 现货 history 12 帧，每帧在 75050 价位有 1.2M USD
+        spot_history = [
+            _make_frame(1700_000_000 + i * 300,
+                         bids=[(75_050, 16.0)],  # 75050 × 16 = 1.2M USD ≥ wall_min
+                         asks=[])
+            for i in range(12)
+        ]
+        _augment_zones_with_spot_depth([z], spot_history, ENGINE_DEFAULTS)
+        assert z.dual_source is True
+        assert z.source == "spot+depth"
+        assert z.spot_current_usd > 1_000_000
+
+    def test_dual_source_not_marked_when_spot_thin(self):
+        """合约 zone 价区无对应现货厚度 → dual_source 保持 False。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_depth
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=2_000_000, max_usd_1h=2_000_000, avg_usd_1h=2_000_000,
+            bin_count=2, seen_count=12, visible_minutes=55,
+            persistence_score=0.9, source="depth_only",
+        )
+        # 现货 history：仅有 100K USD（< wall_min 500K）
+        spot_history = [
+            _make_frame(1700_000_000 + i * 300,
+                         bids=[(75_050, 1.3)], asks=[])  # 75050 × 1.3 ≈ 97K
+            for i in range(12)
+        ]
+        _augment_zones_with_spot_depth([z], spot_history, ENGINE_DEFAULTS)
+        assert z.dual_source is False
+        assert z.source == "depth_only"
+        assert z.spot_current_usd < 200_000
+
+    def test_spot_only_zone_built_when_futures_misses(self):
+        """现货独立 zone（合约 zone 没覆盖该价位）→ source='spot_only'。"""
+        from processors.liquidity_wall_engine import _build_spot_only_zones
+        # 现货 history 在 73000 有大墙；excluded_price_ranges 是 75000-75100（合约 zone）
+        spot_history = [
+            _make_frame(1700_000_000 + i * 300,
+                         bids=[(73_000, 30.0)],  # 73000 × 30 = 2.19M
+                         asks=[])
+            for i in range(12)
+        ]
+        excluded = [(75_000.0, 75_100.0)]
+        cfg = {**ENGINE_DEFAULTS, "seed_min_usd": 1_000_000.0, "wall_min_usd": 500_000.0}
+        zones = _build_spot_only_zones(
+            spot_history, last_price=76_000, side="bid", atr=200.0,
+            cfg=cfg, excluded_price_ranges=excluded,
+        )
+        assert zones, "现货 73000 大墙应被识别"
+        assert all(z.source == "spot_only" for z in zones)
+
+    def test_spot_only_zone_filtered_when_in_excluded_range(self):
+        """现货 zone 价位落入合约 zone 区间 → 视为 dual_source 已处理，不输出 spot_only。"""
+        from processors.liquidity_wall_engine import _build_spot_only_zones
+        spot_history = [
+            _make_frame(1700_000_000 + i * 300,
+                         bids=[(75_050, 30.0)],  # 与 excluded 重合
+                         asks=[])
+            for i in range(12)
+        ]
+        excluded = [(75_000.0, 75_100.0)]
+        zones = _build_spot_only_zones(
+            spot_history, last_price=76_000, side="bid", atr=200.0,
+            cfg=ENGINE_DEFAULTS, excluded_price_ranges=excluded,
+        )
+        assert zones == [], "应被 excluded 过滤掉"
+
+    def test_active_attack_score_taker_aligned(self):
+        """taker 卖压主导 + bid wall → active_attack 高分。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
+        # sell_ratio = 4/5 = 0.8 → (0.8-0.5)/0.10 clamp 1.0 → +0.50
+        cvd_spot = SimpleNamespace(trend_1h="strong_down")  # 同向 +0.50
+        score = _compute_active_attack_score(z, taker, cvd_spot, ENGINE_DEFAULTS)
+        assert score == pytest.approx(1.0)
+
+    def test_active_attack_score_counter_direction_zero(self):
+        """taker 买压 + bid wall（逆向）→ active_attack=0。"""
+        from processors.liquidity_wall_engine import _compute_active_attack_score
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=1_500_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=10, visible_minutes=45, persistence_score=0.7,
+        )
+        taker = SimpleNamespace(buy_volume_usd=4_000_000, sell_volume_usd=1_000_000)  # 买压主导
+        cvd_spot = SimpleNamespace(trend_1h="up")
+        score = _compute_active_attack_score(z, taker, cvd_spot, ENGINE_DEFAULTS)
+        assert score == 0.0
+
+    def test_break_through_risk_includes_active_attack(self):
+        """主动攻击因子 + 静态因子 → break_through_risk 比纯静态版本高。"""
+        from processors.liquidity_wall_engine import _compute_break_through_risk
+        z = WallZone(
+            side="bid", price_low=75_000, price_high=75_100, price_mid=75_050,
+            peak_price=75_050, distance_pct=-2.5,
+            current_usd=900_000, max_usd_1h=2_000_000, avg_usd_1h=1_500_000,  # thinning
+            bin_count=2, seen_count=2, visible_minutes=10, persistence_score=0.15,  # 不持久
+        )
+        taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
+        cvd_spot = SimpleNamespace(trend_1h="strong_down")
+        risk_with_attack = _compute_break_through_risk(
+            z, crowding=None, sweep=None, cfg=ENGINE_DEFAULTS,
+            taker_flow=taker, cvd_spot=cvd_spot,
+        )
+        risk_static = _compute_break_through_risk(
+            z, crowding=None, sweep=None, cfg=ENGINE_DEFAULTS,
+        )
+        assert risk_with_attack > risk_static
+        assert risk_with_attack >= risk_static + 0.15  # 至少多 +0.15（active 满分 ×0.20）
+
+    def test_seed_min_usd_by_coin_overrides_default(self):
+        """A6：seed_min_usd_by_coin 按币动态覆盖默认 1M。"""
+        # 构造一个 5m 帧：种子 bin 1.5M USD（< BTC 5M 阈值，应被过滤）
+        history = [
+            _make_frame(1700_000_000 + i * 300,
+                         bids=[(99_500, 15.08)],  # 99500 × 15.08 = ~1.5M
+                         asks=[])
+            for i in range(12)
+        ]
+        cfg_btc = {**ENGINE_DEFAULTS,
+                    "seed_min_usd_by_coin": {"BTC": 5_000_000, "ETH": 2_000_000, "SOL": 800_000}}
+        state_btc = _make_state(coin="BTC", history=history, last_price=100_000)
+        snap = _make_base_snap(last_price=100_000)
+        out_btc = build_liquidity_wall_outputs(
+            state_btc, snap, cfg_btc, now=1700_000_000 + 12 * 300 + 2000,
+        )
+        assert out_btc.walls_below == [], "BTC 5M 阈值下，1.5M 种子被过滤"
+
+        # 同样数据，coin=SOL → 阈值 800K，1.5M 应被识别
+        snap_sol = _make_base_snap(last_price=100_000)
+        state_sol = _make_state(coin="SOL", history=history, last_price=100_000)
+        out_sol = build_liquidity_wall_outputs(
+            state_sol, snap_sol, cfg_btc, now=1700_000_000 + 12 * 300 + 2000,
+        )
+        assert out_sol.walls_below, "SOL 800K 阈值下，1.5M 种子应被识别"
 
     def test_kl_iso_walls_field_unchanged(self):
         """铁律：M1+M2 引擎不修改旧 OrderbookPressureSnapshot.walls 字段。

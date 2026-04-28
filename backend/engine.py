@@ -172,6 +172,10 @@ class CoinState:
         # M1 滚动深度历史（1h 窗口，按 ts_sec 去重写入）—— WallZone 持续性评分基础
         # maxlen=12 = 1h（5m 颗粒）；后续可扩 72/288 但第一版 12 够用
         self.orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
+        # Phase A：现货 5m 深度热力图独立 deque（与合约 history 同结构、同窗口）
+        # 由 polls/orderbook_pressure.poll_spot_orderbook_pressure 写入
+        # 用于 liquidity_wall_engine 双源 zone 检测（spot+depth = 💎 双源高可信墙）
+        self.spot_orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -785,6 +789,10 @@ class Engine:
         orderbook_interval = self._poll_cfg.get("orderbook", 60)
         liq_history_interval = max(liq_map_interval * 5, 300)
         large_orders_interval = max(self._poll_cfg.get("large_orders", 120), 180)
+        spot_large_orders_interval = max(
+            self._poll_cfg.get("spot_large_orders", large_orders_interval),
+            180,
+        )
         heatmap_interval = self._poll_cfg.get("liquidation_heatmap", 600)
         heatmap_7d_interval = self._poll_cfg.get("liquidation_heatmap_7d", 1800)
         indicators_interval = 120
@@ -798,6 +806,7 @@ class Engine:
         td_seq_interval = 3600
         footprint_interval = self._poll_cfg.get("footprint", 180)
         ob_pressure_interval = self._poll_cfg.get("orderbook_pressure", 90)
+        spot_ob_pressure_interval = self._poll_cfg.get("spot_orderbook_pressure", 120)
         return [
             asyncio.create_task(self._poll_loop(
                 f"cg_push_{ccy}", self._push_loop, coin, 5, s,
@@ -837,7 +846,7 @@ class Engine:
             # M2.5：现货大单（与合约大单互补——区分真支撑 vs 清算磁铁）
             asyncio.create_task(self._poll_loop(
                 f"cg_spot_large_orders_{ccy}", self._poll_spot_large_orders, coin,
-                large_orders_interval, s + 16.5,
+                spot_large_orders_interval, s + 16.5,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_liq_history_{ccy}", self._poll_liq_history, coin,
@@ -901,6 +910,12 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_orderbook_pressure_{ccy}", self._poll_orderbook_pressure, coin,
                 ob_pressure_interval, s + 36.0,
+            )),
+            # ── Phase A：现货 5m 深度热力图（双源真支撑/真阻力关键源）──
+            # 与合约 ob_pressure 错开 stagger（37.5s），同样 1 个 cg 请求/cycle
+            asyncio.create_task(self._poll_loop(
+                f"cg_spot_orderbook_pressure_{ccy}", self._poll_spot_orderbook_pressure, coin,
+                spot_ob_pressure_interval, s + 37.5,
             )),
         ]
 
@@ -1304,6 +1319,16 @@ class Engine:
         """
         from polls.orderbook_pressure import poll_orderbook_pressure
         await poll_orderbook_pressure(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_spot_orderbook_pressure(self, coin: CoinConfig):
+        """Phase A：现货 5m 深度热力图（/api/spot/orderbook/history）。
+
+        与合约 ``_poll_orderbook_pressure`` 互补：合约源体现杠杆资金，现货源体现真买卖家。
+        两者价区共振 → liquidity_wall_engine 标 ``dual_source=True``，
+        前端显示"💎 双源高可信墙"（trust_score 阶梯加分最强单一证据）。
+        """
+        from polls.orderbook_pressure import poll_spot_orderbook_pressure
+        await poll_spot_orderbook_pressure(self._cg, coin, self._states[coin.ccy])
 
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data

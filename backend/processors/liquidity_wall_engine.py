@@ -73,10 +73,11 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "history_window_minutes": 60,          # 1h 滚动（5m × 12）
     "augment_match_tol_pct": 0.001,        # 大单 ↔ zone 容差匹配 0.1%
     "augment_match_tol_usd_min": 5.0,      # 容差最低 5 USD（防小币太小不够）
-    # M2.5：现货 vs 合约 区分（trust_score 计算权重）
+    # M2.5 + Phase A：现货 vs 合约 区分（trust_score 计算权重）
     "trust_base": 0.50,                    # 仅合约源（默认）
-    "trust_bonus_spot_confluence": 0.25,   # 现货大单共振（真买卖家硬证据）
-    "trust_bonus_multi_exchange": 0.15,    # 多家交易所共振
+    "trust_bonus_dual_source": 0.30,       # Phase A：现货+合约 5m 双源共振（最强单一证据）
+    "trust_bonus_spot_confluence": 0.15,   # 现货大单 lifecycle 共振
+    "trust_bonus_multi_exchange": 0.10,    # 多家交易所共振
     "trust_bonus_persistent": 0.10,        # 持续 ≥ 0.7
     "trust_persistent_threshold": 0.70,
 
@@ -514,6 +515,90 @@ def _augment_zones_with_large_orders(
         z.exchange_count = max(1, len(exchanges)) if exchanges else 1
 
 
+def _augment_zones_with_spot_depth(
+    zones: list[WallZone],
+    spot_history: Sequence[OrderbookDepthSnapshot],
+    cfg: dict,
+) -> None:
+    """Phase A 核心：现货 5m 热力图 → 在已有 zone 价区上叠加现货厚度。
+
+    设计原则（dev-constraints #3 复用决策）：
+      不重新对现货独立跑 _build_zones_for_side，因为：
+        1. 合约 zone 已用合约 ATR-aware merge_pct 决定了"墙"边界（更高粒度，bin 5-10 USD）
+        2. 现货 bin 间距 100 USD，价区分辨率粗，不适合主导 zone 边界
+        3. 主路径"合约锚点 + 现货验证"语义更清晰
+      仅在合约 zone 价区 [price_low, price_high] 内累加现货 USD：
+        - spot_current_usd = 现货最新帧该价区 USD
+        - spot_max_usd_1h  = 现货 history 各帧该价区 USD 的 max
+      当 spot_current_usd ≥ wall_min_usd 且 spot_max_usd_1h ≥ wall_min_usd
+        → 标 dual_source=True + source="spot+depth"
+
+    "仅现货独立 zone"（不在任何合约 zone 价区里）由 _build_spot_only_zones 单独承担。
+    """
+    if not zones or not spot_history:
+        return
+    wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
+    latest_spot = spot_history[-1]
+
+    for z in zones:
+        bins_latest = latest_spot.bids if z.side == "bid" else latest_spot.asks
+        cur_usd = sum(b.usd_value for b in bins_latest
+                       if z.price_low <= b.price <= z.price_high) if bins_latest else 0.0
+        frame_totals: list[float] = []
+        for frame in spot_history:
+            bins = frame.bids if z.side == "bid" else frame.asks
+            if not bins:
+                continue
+            frame_totals.append(
+                sum(b.usd_value for b in bins
+                    if z.price_low <= b.price <= z.price_high)
+            )
+        max_usd = max(frame_totals) if frame_totals else cur_usd
+
+        z.spot_current_usd = round(cur_usd, 2)
+        z.spot_max_usd_1h = round(max_usd, 2)
+
+        if cur_usd >= wall_min and max_usd >= wall_min:
+            z.dual_source = True
+            z.source = "spot+depth"
+
+
+def _build_spot_only_zones(
+    spot_history: Sequence[OrderbookDepthSnapshot],
+    last_price: float,
+    side: WallSide,
+    atr: Optional[float],
+    cfg: dict,
+    excluded_price_ranges: list[tuple[float, float]],
+) -> list[WallZone]:
+    """Phase A：在现货 history 上独立跑 zone 检测，仅保留**未被合约 zone 覆盖**的价区。
+
+    excluded_price_ranges：合约 zone 的 [price_low, price_high] 列表。
+    现货独立 zone 的 peak_price 落入任一区间 → 视为 dual_source 已处理，不重复输出。
+
+    输出 source="spot_only"，trust_score 计算时会因缺少合约源而拿不到 dual_source 加分，
+    但仍保留 spot_confluence/multi_exchange/persistence 加分，正常进入排序。
+    """
+    if not spot_history:
+        return []
+    zones = _build_zones_for_side(spot_history, last_price, side, atr, cfg)
+    if not zones:
+        return []
+
+    out: list[WallZone] = []
+    for z in zones:
+        in_excluded = any(
+            lo <= z.peak_price <= hi for (lo, hi) in excluded_price_ranges
+        )
+        if in_excluded:
+            continue
+        z.source = "spot_only"
+        z.spot_current_usd = z.current_usd
+        z.spot_max_usd_1h = z.max_usd_1h
+        out.append(z)
+    return out
+
+
 def _augment_zones_with_spot_large_orders(
     zones: list[WallZone],
     spot_large_orders: Sequence[LargeOrderLifecycle],
@@ -555,21 +640,28 @@ def _augment_zones_with_spot_large_orders(
 
 
 def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
-    """综合 trust_score（0-1）—— 区分真支撑/真阻力 vs 合约清算磁铁。
+    """综合 trust_score（0-1）—— 区分高可信墙 vs 合约清算磁铁。
 
-    阶梯加分（GPT 反馈 + 用户洞察"现货=真支撑、合约=磁铁"落地）：
+    阶梯加分（GPT 反馈 + 用户洞察"现货=真买卖家、合约=磁铁"+ Phase A 双源源融合）：
       - base 0.50（合约 5m 热力图源，已是真实订单簿但有 spoof/钓鱼可能）
-      - +0.25 现货大单共振（真买家/卖家硬证据，可信度大幅↑）
-      - +0.15 多家交易所共振（≥ 2 家）
+      - +0.30 双源共振 dual_source=True（现货 + 合约 5m 同价区都有 ≥ wall_min 厚度，
+              单一硬证据中最强：真买卖家与杠杆资金共同布局）
+      - +0.15 现货大单共振（额外 spot 大单 lifecycle 证据，与 dual_source 可叠加）
+      - +0.10 多家交易所共振（exchange_count ≥ 2）
       - +0.10 持续 ≥ 0.7（visible ≥ 75% 历史窗口）
+      - 单源现货 zone：spot_only 与合约 spot+depth 共用同一加分体系，但缺少 base 之外
+        的合约源验证，需要更长持久或更多大单证据才能升到高分位。
 
     阈值含义：
-      ≥ 0.85：真支撑/真阻力（双源 + 持久 + 多所，最强）
-      ≥ 0.65：高可信
-      ≥ 0.50：普通合约墙（结合磁铁/被扫风险解读）
-      < 0.50：短期墙（极少出现，因 base = 0.5）
+      ≥ 0.85：💎 双源 + 多重硬证据（最强）
+      ≥ 0.65：较可信
+      ≥ 0.50：普通（仅单源，需结合磁铁/被扫风险解读）
+      < 0.50：短期墙
     """
     score = cfg.get("trust_base", ENGINE_DEFAULTS["trust_base"])
+    if zone.dual_source:
+        score += cfg.get("trust_bonus_dual_source",
+                         ENGINE_DEFAULTS.get("trust_bonus_dual_source", 0.30))
     if zone.has_spot_confluence:
         score += cfg.get("trust_bonus_spot_confluence",
                          ENGINE_DEFAULTS["trust_bonus_spot_confluence"])
@@ -897,11 +989,66 @@ def _build_sweep_target(
     )
 
 
+def _compute_active_attack_score(
+    zone: WallZone,
+    taker_flow: Any,
+    cvd_spot: Any,
+    cfg: dict,
+) -> float:
+    """Phase A：实时主动攻击强度（0-1，作为 break_through_risk 加项）。
+
+    回应 GPT P1-3："break_through_risk 缺乏'主动攻击'因子，纯静态指标无法
+    反映正在发生的吃单/挤兑。"
+
+    构成（同向攻击才计分；逆向攻击 = 0）：
+      - 0.50 × taker 同向占比（bid wall 看 sell_ratio；ask wall 看 buy_ratio）
+              taker_dom = (same_side - other_side) / max(total, 1)
+              clamp(0, 1)：≥ 60% 同向 → 1.0
+      - 0.50 × cvd_spot 同向 trend 信号
+              bid wall：cvd_spot.trend in {"down","strong_down"} → 1.0
+              ask wall：cvd_spot.trend in {"up","strong_up"}     → 1.0
+              其余 → 0
+
+    现货 CVD 优先于合约 CVD：现货是真买卖家，更能反映真攻击。
+    """
+    score = 0.0
+    # 1) taker 同向占比
+    if taker_flow is not None:
+        try:
+            buy = float(getattr(taker_flow, "buy_volume_usd", 0) or 0)
+            sell = float(getattr(taker_flow, "sell_volume_usd", 0) or 0)
+            total = buy + sell
+            if total > 0:
+                if zone.side == "bid":
+                    same_ratio = sell / total
+                else:
+                    same_ratio = buy / total
+                if same_ratio > 0.5:
+                    # 0.5→0, 0.6→1.0（线性映射，clamp 上限 1.0）
+                    score += 0.50 * min(1.0, max(0.0, (same_ratio - 0.5) / 0.10))
+        except (TypeError, ValueError):
+            pass
+
+    # 2) cvd_spot 同向趋势
+    if cvd_spot is not None:
+        trend = getattr(cvd_spot, "trend_1h", None)
+        if zone.side == "bid":
+            same_trend = trend in ("down", "strong_down")
+        else:
+            same_trend = trend in ("up", "strong_up")
+        if same_trend:
+            score += 0.50
+
+    return round(min(1.0, score), 3)
+
+
 def _compute_break_through_risk(
     zone: WallZone,
     crowding: Optional[PositionCrowdingSnapshot],
     sweep: Optional[SweepTarget],
     cfg: dict,
+    taker_flow: Any = None,
+    cvd_spot: Any = None,
 ) -> float:
     """0-1 软分：墙是否容易被打穿。
 
@@ -910,7 +1057,12 @@ def _compute_break_through_risk(
       - persistence < 0.3：               +0.20
       - 同向清算磁铁距离 < 0.5%：         +0.20
       - 真空跨度 ≥ 0.5%：                +0.15
-      - 同向 crowding_risk ≥ 0.6：       +0.15
+      - 同向 crowding_risk ≥ 0.6：       +0.10
+      - active_attack_score（Phase A）： × 0.20（最多 +0.20）
+
+    设计思路（Phase A 升级回应 GPT P1-3）：
+      静态因素（前 5 项 ≤ 0.95）+ 动态主动攻击（最多 +0.20）→ cap 1.0
+      注意原 crowding 权重 0.15 → 0.10，留出 0.05 给 active_attack 维持总和不变
     """
     score = 0.0
     if zone.max_usd_1h > 0:
@@ -928,7 +1080,10 @@ def _compute_break_through_risk(
         # bid wall 怕多头拥挤（多头集中爆仓推动下跌）
         risk = crowding.long_crowding_risk if zone.side == "bid" else crowding.short_crowding_risk
         if risk >= 0.6:
-            score += 0.15
+            score += 0.10
+    # Phase A：主动攻击因子（taker 同向 + cvd_spot 同向 trend）
+    aa = _compute_active_attack_score(zone, taker_flow, cvd_spot, cfg)
+    score += 0.20 * aa
     return round(min(1.0, score), 3)
 
 
@@ -1201,6 +1356,15 @@ def build_liquidity_wall_outputs(
 
     history_raw = list(getattr(state, "orderbook_depth_history", []) or [])
     history_size = len(history_raw)
+    spot_history_raw = list(getattr(state, "spot_orderbook_depth_history", []) or [])
+
+    # ── A6：seed_min_usd 按币动态覆盖（cfg 已合并 by_coin 表）──
+    # coin 是 str（CoinState.coin），by_coin 表来自 config.liquidity_wall_engine
+    seed_by_coin = cfg.get("seed_min_usd_by_coin")
+    if isinstance(seed_by_coin, dict) and coin:
+        coin_seed = seed_by_coin.get(str(coin).upper())
+        if coin_seed and coin_seed > 0:
+            cfg = {**cfg, "seed_min_usd": float(coin_seed)}
 
     # 暖机判定（仅当存在但不满时才标 warming；完全缺失走旧路径不打扰）：
     #   - history_size == 0：未启用滚动历史（旧测试夹具/兼容路径），不动 data_quality
@@ -1215,7 +1379,7 @@ def build_liquidity_wall_outputs(
         if elapsed < warming_seconds:
             warming = True
 
-    # ── M1：墙区聚合 ──
+    # ── M1：墙区聚合（合约 5m 热力图为主路径）──
     walls_above: list[WallZone] = []
     walls_below: list[WallZone] = []
     if history_raw and last_price > 0:
@@ -1226,13 +1390,30 @@ def build_liquidity_wall_outputs(
             history_raw, last_price, "bid", atr, cfg,
         )
 
+    # ── Phase A：现货 5m 热力图叠加 → dual_source 标记 + spot_only 增量 ──
+    if spot_history_raw and last_price > 0:
+        # 叠加：在合约 zone 价区上累加现货厚度
+        _augment_zones_with_spot_depth(walls_above, spot_history_raw, cfg)
+        _augment_zones_with_spot_depth(walls_below, spot_history_raw, cfg)
+        # 增量：现货独立 zone（仅保留未被合约 zone 覆盖的价区）
+        excl_above = [(z.price_low, z.price_high) for z in walls_above]
+        excl_below = [(z.price_low, z.price_high) for z in walls_below]
+        spot_only_above = _build_spot_only_zones(
+            spot_history_raw, last_price, "ask", atr, cfg, excl_above,
+        )
+        spot_only_below = _build_spot_only_zones(
+            spot_history_raw, last_price, "bid", atr, cfg, excl_below,
+        )
+        walls_above.extend(spot_only_above)
+        walls_below.extend(spot_only_below)
+
     # large_orders augment（合约大单 → 流动性墙 / 清算磁铁基础源）
     large_orders = list(getattr(state, "large_orders_history", []) or [])
     if large_orders:
         _augment_zones_with_large_orders(walls_above, large_orders, last_price, cfg)
         _augment_zones_with_large_orders(walls_below, large_orders, last_price, cfg)
 
-    # M2.5：spot_large_orders augment（现货大单 → 真买家/卖家硬证据）
+    # M2.5：spot_large_orders augment（现货大单 lifecycle → 真买家/卖家硬证据）
     spot_large_orders = list(getattr(state, "spot_large_orders_history", []) or [])
     if spot_large_orders:
         _augment_zones_with_spot_large_orders(walls_above, spot_large_orders, cfg)
@@ -1298,17 +1479,26 @@ def build_liquidity_wall_outputs(
                      if e.side == z.side and abs(e.price_mid - z.price_mid) < 1e-6]
         z.status = _classify_zone_status(z, z_events)
 
-        # break_through_risk
+        # break_through_risk（Phase A：传入 taker_flow + cvd_spot 作为主动攻击因子）
         z.break_through_risk = _compute_break_through_risk(
             z, crowding, z.sweep_target, cfg,
+            taker_flow=getattr(state, "taker_flow", None),
+            cvd_spot=getattr(state, "cvd_spot", None),
         )
 
-        # zone-level explain_chips（最多 3 条）
+        # zone-level explain_chips（最多 3 条；Phase A 优先输出双源/现货标签）
         chips: list[str] = []
+        # 1) 来源标签（dual_source > spot_only，互斥）
+        if z.dual_source:
+            chips.append("💎 现货+合约双源")
+        elif z.source == "spot_only":
+            chips.append("💰 仅现货墙")
+        # 2) 持续性
         if z.persistence_score >= 0.7:
             chips.append(f"持续 {int(z.visible_minutes)}min")
         elif z.persistence_score >= 0.4:
             chips.append(f"持续 {int(z.visible_minutes)}min(中)")
+        # 3) 多所 / 状态变化
         if z.exchange_count >= 2:
             chips.append(f"{z.exchange_count}所共振")
         if z.status in ("consumed", "removed", "reloaded"):

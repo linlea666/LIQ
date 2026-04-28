@@ -155,3 +155,66 @@ async def poll_orderbook_pressure(
             len(latest_bids), len(latest_asks),
             len(state.orderbook_depth_history), new_frames_count,
         )
+
+
+async def poll_spot_orderbook_pressure(
+    cg: CoinglassSource, coin: CoinConfig, state: "CoinState",
+) -> None:
+    """Phase A：现货 5m 深度热力图（``/api/spot/orderbook/history``）。
+
+    与合约 ``poll_orderbook_pressure`` 用同一解析逻辑（_parse_snapshot_row）。
+    数据写入 ``state.spot_orderbook_depth_history``（独立 deque），由
+    ``processors/liquidity_wall_engine.build_liquidity_wall_outputs`` 拼接成
+    "spot_only" / "spot+depth" 双源 WallZone。
+
+    bin 间距实测 100 USD（合约 5-10 USD），但单 bin USD 量级与合约相近，
+    阈值经 ``orderbook_pressure.config`` 同源（共用 wall_min_usd / seed_min_usd）。
+    """
+    data = await cg.fetch_spot_orderbook_heatmap(
+        exchange=coin.exchange_primary,
+        symbol=coin.symbol_cg_pair,
+        interval="5m",
+        limit=12,
+    )
+    if not data or not isinstance(data, list):
+        return
+
+    parsed = []
+    for row in data:
+        p = _parse_snapshot_row(row, coin.exchange_primary, coin.symbol_cg_pair, coin.ccy)
+        if p:
+            parsed.append(p)
+    if not parsed:
+        return
+    parsed.sort(key=lambda x: x[0])
+
+    existing_ts = {snap.ts_sec for snap in state.spot_orderbook_depth_history}
+    new_frames_count = 0
+    for ts, bids, asks in parsed:
+        if ts in existing_ts:
+            continue
+        frame = OrderbookDepthSnapshot(
+            coin=coin.ccy,
+            exchange=coin.exchange_primary,
+            symbol=coin.symbol_cg_pair,
+            ts_sec=ts or int(time.time()),
+            bids=bids,
+            asks=asks,
+            prev_ts_sec=None,
+            prev_bids=[],
+            prev_asks=[],
+        )
+        state.spot_orderbook_depth_history.append(frame)
+        existing_ts.add(ts)
+        new_frames_count += 1
+
+    if "spot_orderbook_depth_ready" not in state._log_once_keys and new_frames_count > 0:
+        state._log_once_keys.add("spot_orderbook_depth_ready")
+        latest_ts, latest_bids, latest_asks = parsed[-1]
+        logger.info(
+            "现货订单簿深度热力图接通 | coin=%s exchange=%s bids_bins=%d asks_bins=%d "
+            "history_size=%d new_frames=%d",
+            coin.ccy, coin.exchange_primary,
+            len(latest_bids), len(latest_asks),
+            len(state.spot_orderbook_depth_history), new_frames_count,
+        )

@@ -1115,7 +1115,9 @@ export type WallZoneStatus =
 export type WallZoneSource =
   | "depth_only"
   | "large_order_only"
-  | "depth+large_order";
+  | "depth+large_order"
+  | "spot_only"          // Phase A：现货 5m 热力图独立 zone
+  | "spot+depth";        // Phase A：现货+合约双源共振（💎 双源高可信墙）
 
 export type WallZoneTrend = "new" | "strengthening" | "weakening" | "stable";
 
@@ -1205,10 +1207,14 @@ export interface WallZone {
   source: WallZoneSource;
   exchange_count: number;
   large_order_ids: number[];
-  /** M2.5：现货 vs 合约 区分 */
+  /** M2.5 + Phase A：现货 vs 合约 区分 */
   has_spot_confluence: boolean;
   spot_large_order_ids: number[];
-  trust_score: number;            // 0-1：≥0.85 真支撑/真阻力 / ≥0.65 高可信 / ≥0.5 普通
+  trust_score: number;            // 0-1：≥0.85 双源+多重硬证据 / ≥0.65 较可信 / ≥0.5 普通
+  /** Phase A：现货+合约 5m 双源共振 → 💎 双源高可信墙 */
+  dual_source: boolean;
+  spot_current_usd: number;       // 现货侧同价区当前帧 USD（dual_source=True 时填）
+  spot_max_usd_1h: number;        // 现货侧 1h 峰值
   status: WallZoneStatus;
   wall_consumed_confidence: number;
   wall_removal_risk: number;

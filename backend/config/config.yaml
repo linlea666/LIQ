@@ -41,12 +41,14 @@ sources:
       liquidation_heatmap_7d: 1800   # 7d 热力图（数据冷，30 分钟一次足够）
       liquidation_max_pain: 300      # 全币种共享一次拉取，与缓存 TTL=300s 对齐
       orderbook: 60
-      large_orders: 120         # snapshot active + history ended 双轨合并（poll_large_orders 内部）
+      large_orders: 180         # 合约大单（snapshot active + history ended 合并）；与 engine 强制下限对齐
+      spot_large_orders: 240    # 现货大单（M2.5 真买卖家硬证据）；变化更慢，可独立放慢
       long_short: 120
       taker_volume: 120
       cvd: 90                   # CVD 序列足够稳定，60→90s（释放配额）
       footprint: 180            # MAA · 合约+现货足迹图（1h 粒度，180s 轮询）
-      orderbook_pressure: 90    # 挂单压力监测器：/orderbook/history 深度热力图（前后帧对比）
+      orderbook_pressure: 90    # 合约 5m 深度热力图（前后帧对比）
+      spot_orderbook_pressure: 120  # 现货 5m 深度热力图（A 期接入：双源真支撑/真阻力）
       options: 600
       etf: 1800
       onchain: 3600
@@ -172,6 +174,14 @@ processors:
     tier_s_min_usd: 30000000      # S ≥ $30M
     tier_a_min_usd: 10000000      # A ≥ $10M
     tier_b_min_usd: 3000000       # B ≥ $3M（其余 ≥ $500K 为 C）
+    # ── Phase A：流动性墙引擎按币动态 seed_min_usd ────────────────────
+    # 币种深度差异巨大：BTC 单 bin 1-15M USD，SOL 单 bin 50-500K USD。
+    # 全局固定 seed=1M 会出现 BTC 假厚度（小钱凑数）/ SOL 一个墙都没有。
+    # 未列出的币种走 seed_min_usd 默认（1M）
+    seed_min_usd_by_coin:
+      BTC: 5000000      # 5M（高市值，避免小钱凑数）
+      ETH: 2000000      # 2M
+      SOL: 800000       # 800K（低市值，阈值过高会一个墙都没有）
 
 engine:
   inactive_poll_sec: 120
