@@ -1,0 +1,3024 @@
+{
+  "type": "dict",
+  "key_count": 2,
+  "fields": {
+    "code": {
+      "type": "str",
+      "len": 1,
+      "sample": "0"
+    },
+    "data": {
+      "type": "dict",
+      "key_count": 2,
+      "fields": {
+        "data": {
+          "type": "list",
+          "len": 3,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "dict",
+              "key_count": 2,
+              "fields": {
+                "liqMapV2": {
+                  "type": "dict",
+                  "key_count": 120,
+                  "fields": {
+                    "73821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "68941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84692": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    }
+                  }
+                },
+                "instrument": {
+                  "type": "dict",
+                  "key_count": 16,
+                  "fields": {
+                    "name": {
+                      "type": "str",
+                      "len": 12,
+                      "sample": "6:BTC:USDT:1"
+                    },
+                    "instrumentId": {
+                      "type": "str",
+                      "len": 7,
+                      "sample": "BTCUSDT"
+                    },
+                    "exName": {
+                      "type": "str",
+                      "len": 7,
+                      "sample": "Binance"
+                    },
+                    "baseAsset": {
+                      "type": "str",
+                      "len": 3,
+                      "sample": "BTC"
+                    },
+                    "quoteAsset": {
+                      "type": "str",
+                      "len": 4,
+                      "sample": "USDT"
+                    },
+                    "contractType": {
+                      "type": "str",
+                      "len": 9,
+                      "sample": "PERPETUAL"
+                    },
+                    "contractValCurrency": {
+                      "type": "str",
+                      "len": 4,
+                      "sample": "USDT"
+                    },
+                    "settlementCurrency": {
+                      "type": "str",
+                      "len": 4,
+                      "sample": "USDT"
+                    },
+                    "priceTick": {
+                      "type": "float",
+                      "sample": 1.0
+                    },
+                    "fundingInterval": {
+                      "type": "int",
+                      "sample": 8
+                    },
+                    "orderFootprintStep": {
+                      "type": "float",
+                      "sample": 1.0
+                    },
+                    "pricePrecision": {
+                      "type": "int",
+                      "sample": 0
+                    },
+                    "maxLeverage": {
+                      "type": "int",
+                      "sample": 150
+                    },
+                    "type": {
+                      "type": "int",
+                      "sample": 1
+                    },
+                    "onboardDate": {
+                      "type": "int",
+                      "sample": 1569398400000
+                    },
+                    "createTime": {
+                      "type": "int",
+                      "sample": 1684294198048
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "dict",
+              "key_count": 2,
+              "fields": {
+                "liqMapV2": {
+                  "type": "dict",
+                  "key_count": 115,
+                  "fields": {
+                    "73821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "68941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84692": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "73581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "76221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "77821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69821": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75421": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78781": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "75261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78941": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "78701": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84541": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "80461": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69661": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84381": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "69021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "84141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70301": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74621": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "70141": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79181": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74861": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74221": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79581": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79341": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79981": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "74061": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79101": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79741": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79501": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81261": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "79901": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    },
+                    "81021": {
+                      "type": "list",
+                      "len": 1,
+                      "items_sampled": 1,
+                      "items_schema": [
+                        {
+                          "type": "list",
+                          "len": 4,
+                          "items": "...truncated..."
+                        }
+                      ]
+                    }
+                  }
+                },
+                "instrument": {
+                  "type": "dict",
+                  "key_count": 15,
+                  "fields": {
+                    "name": {
+                      "type": "str",
+                      "len": 14,
+                      "sample": "138:BTC:USDT:1"
+                    },
+                    "instrumentId": {
+                      "type": "str",
+                      "len": 13,
+                      "sample": "BTC-USDT-SWAP"
+                    },
+                    "exName": {
+                      "type": "str",
+                      "len": 3,
+                      "sample": "OKX"
+                    },
+                    "baseAsset": {
+                      "type": "str",
+                      "len": 3,
+                      "sample": "BTC"
+                    },
+                    "quoteAsset": {
+                      "type": "str",
+                      "len": 4,
+                      "sample": "USDT"
+                    },
+                    "contractType": {
+                      "type": "str",
+                      "len": 0,
+                      "sample": ""
+                    },
+                    "contractValCurrency": {
+                      "type": "str",
+                      "len": 3,
+                      "sample": "BTC"
+                    },
+                    "settlementCurrency": {
+                      "type": "str",
+                      "len": 4,
+                      "sample": "USDT"
+                    },
+                    "contractSize": {
+                      "type": "float",
+                      "sample": 0.01
+                    },
+                    "priceTick": {
+                      "type": "float",
+                      "sample": 1.0
+                    },
+                    "fundingInterval": {
+                      "type": "int",
+                      "sample": 8
+                    },
+                    "pricePrecision": {
+                      "type": "int",
+                      "sample": 0
+                    },
+                    "maxLeverage": {
+                      "type": "int",
+                      "sample": 100
+                    },
+                    "type": {
+                      "type": "int",
+                      "sample": 1
+                    },
+                    "createTime": {
+                      "type": "int",
+                      "sample": 1684294199721
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "last_price": {
+          "type": "int",
+          "sample": 76720
+        }
+      }
+    }
+  }
+}

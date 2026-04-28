@@ -471,6 +471,70 @@ def test_compute_pressure_snapshot_returns_empty_when_no_walls():
     assert snap.data_quality == "missing"
 
 
+def test_data_quality_marked_stale_when_depth_age_exceeds_threshold():
+    """depth.ts_sec 超过 stale_age_sec（默认 180s）→ data_quality=stale 且 notes 含 age 详情。"""
+    last = 100.0
+    now = int(time.time())
+    asks = [_bin(101.0, 60_000)]   # +1%
+    bids = [_bin(99.0, 60_000)]
+    # depth 时间戳设为 now-300s（超过默认 180s stale 阈值）
+    depth = _depth(last, bids, asks, ts_sec=now - 300)
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=depth,
+        large_orders_history=[],
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state, now_sec=now)
+    assert snap is not None
+    assert snap.data_quality == "stale"
+    assert any(n.startswith("depth_age_") for n in snap.notes)
+
+
+def test_data_quality_remains_ok_when_depth_age_fresh():
+    """depth.ts_sec 在 stale_age_sec 内 → 不会变 stale。"""
+    last = 100.0
+    now = int(time.time())
+    asks = [_bin(101.0, 60_000)]
+    bids = [_bin(99.0, 60_000)]
+    depth = _depth(last, bids, asks, ts_sec=now - 30)
+    los = [
+        _make_lo(id=1, side="ask", limit_price=110.0, current_qty=200_000,
+                 start_ms=now * 1000 - 86400 * 1000),
+    ]
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=depth,
+        large_orders_history=los,
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state, now_sec=now)
+    assert snap is not None
+    assert snap.data_quality == "ok"
+    assert not any(n.startswith("depth_age_") for n in snap.notes)
+
+
+def test_data_quality_stale_overrides_partial():
+    """depth 陈旧 + large_orders 缺失 → stale 优先（比 partial 更重要的提示）。"""
+    last = 100.0
+    now = int(time.time())
+    asks = [_bin(101.0, 60_000)]
+    bids = [_bin(99.0, 60_000)]
+    depth = _depth(last, bids, asks, ts_sec=now - 500)
+    state = SimpleNamespace(
+        coin="BTC", ticker=SimpleNamespace(last=last),
+        orderbook_depth_snapshot=depth,
+        large_orders_history=[],
+        footprint_contract=[], footprint_spot=[],
+        atr=1.0,
+    )
+    snap = compute_pressure_snapshot(state, now_sec=now)
+    assert snap is not None
+    assert snap.data_quality == "stale"
+
+
 def test_compute_pressure_snapshot_combines_both_sources():
     """近+中距走 depth_5m，远距走 large_orders，输出合并后 source 字段正确。"""
     last = 100.0

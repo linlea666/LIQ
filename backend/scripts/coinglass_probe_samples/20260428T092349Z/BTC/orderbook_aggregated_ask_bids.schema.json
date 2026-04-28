@@ -1,0 +1,59 @@
+{
+  "type": "list",
+  "len": 12,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 5,
+      "fields": {
+        "aggregated_bids_usd": {
+          "type": "float",
+          "sample": 857669715.6265
+        },
+        "aggregated_bids_quantity": {
+          "type": "float",
+          "sample": 11347.6463
+        },
+        "aggregated_asks_usd": {
+          "type": "float",
+          "sample": 1034412723.5812
+        },
+        "aggregated_asks_quantity": {
+          "type": "float",
+          "sample": 13224.4677
+        },
+        "time": {
+          "type": "int",
+          "sample": 1777364700000
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 5,
+      "fields": {
+        "aggregated_bids_usd": {
+          "type": "float",
+          "sample": 888893830.5122
+        },
+        "aggregated_bids_quantity": {
+          "type": "float",
+          "sample": 11743.9693
+        },
+        "aggregated_asks_usd": {
+          "type": "float",
+          "sample": 1074973879.9167
+        },
+        "aggregated_asks_quantity": {
+          "type": "float",
+          "sample": 13722.0125
+        },
+        "time": {
+          "type": "int",
+          "sample": 1777365000000
+        }
+      }
+    }
+  ]
+}

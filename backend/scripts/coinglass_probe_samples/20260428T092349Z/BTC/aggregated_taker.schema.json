@@ -1,0 +1,43 @@
+{
+  "type": "list",
+  "len": 24,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 3,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777361100000
+        },
+        "aggregated_buy_volume_usd": {
+          "type": "float",
+          "sample": 34024085.0671
+        },
+        "aggregated_sell_volume_usd": {
+          "type": "float",
+          "sample": 30751188.6752
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 3,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777361400000
+        },
+        "aggregated_buy_volume_usd": {
+          "type": "float",
+          "sample": 43194473.4356
+        },
+        "aggregated_sell_volume_usd": {
+          "type": "float",
+          "sample": 27677288.347
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "type": "list",
+  "len": 24,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777284000000
+        },
+        "global_account_long_percent": {
+          "type": "float",
+          "sample": 45.74
+        },
+        "global_account_short_percent": {
+          "type": "float",
+          "sample": 54.26
+        },
+        "global_account_long_short_ratio": {
+          "type": "float",
+          "sample": 0.84
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777287600000
+        },
+        "global_account_long_percent": {
+          "type": "float",
+          "sample": 45.74
+        },
+        "global_account_short_percent": {
+          "type": "float",
+          "sample": 54.26
+        },
+        "global_account_long_short_ratio": {
+          "type": "float",
+          "sample": 0.84
+        }
+      }
+    }
+  ]
+}

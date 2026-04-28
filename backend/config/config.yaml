@@ -141,7 +141,9 @@ processors:
     whale_threshold_eth: 100
     whale_threshold_sol: 1000
     whale_threshold_usd: 500000
-    spoofing_ttl_sec: 3
+    # 注：旧 spoofing_ttl_sec 配置已移除（2026-04-28）。
+    # 5min 订单簿粒度无法做秒级撤单 vs 被吃判定，
+    # 改用 LiquidityWall 引擎的 wall_removal_risk 软分（基于 large_orders.executed_usd_value）。
 
   # 挂单压力监测器（盘口订单流仪表盘，辅助参考工具）
   # 数据源分层：

@@ -95,23 +95,35 @@ SOURCE_TAG_TO_KEY: dict[str, str] = {
 
 
 def _safe_age(state: Any, attr: str, now: float) -> Optional[float]:
-    """读 state.{attr} 的 ts 字段计算 age；缺失返回 None。
+    """读 state.{attr} 的时间戳字段计算 age；缺失返回 None。
 
-    支持：state.{attr} 为 BaseModel 含 .ts；或为 dict 含 'ts'；或本身就是 ts int/float。
+    时间戳字段名兼容（按优先级）：
+      1) BaseModel / 普通对象的 .ts（多数 LIQ 模型）
+      2) BaseModel / 普通对象的 .ts_sec（OrderbookPressureSnapshot 等）
+      3) BaseModel / 普通对象的 .timestamp
+      4) dict 的 'ts' / 'ts_sec' / 'timestamp'
+      5) state.{attr} 本身就是 int/float 时间戳
     """
     obj = getattr(state, attr, None)
     if obj is None:
         return None
     ts: Optional[float] = None
-    if hasattr(obj, "ts"):
-        ts = getattr(obj, "ts", None)
-    elif isinstance(obj, dict):
-        ts = obj.get("ts")
-    elif isinstance(obj, (int, float)):
+    for key in ("ts", "ts_sec", "timestamp"):
+        if hasattr(obj, key):
+            v = getattr(obj, key, None)
+            if v is not None:
+                ts = v
+                break
+    if ts is None and isinstance(obj, dict):
+        for key in ("ts", "ts_sec", "timestamp"):
+            v = obj.get(key)
+            if v is not None:
+                ts = v
+                break
+    if ts is None and isinstance(obj, (int, float)):
         ts = obj
     if ts is None or ts <= 0:
         return None
-    # ts 通常是秒（int(time.time())）；偶尔毫秒（13 位）
     if ts > 1e12:
         ts = ts / 1000.0
     return max(0.0, now - float(ts))

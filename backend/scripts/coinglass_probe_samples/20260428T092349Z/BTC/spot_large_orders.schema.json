@@ -1,0 +1,163 @@
+{
+  "type": "list",
+  "len": 193,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 17,
+      "fields": {
+        "id": {
+          "type": "int",
+          "sample": 7390777998
+        },
+        "exchange_name": {
+          "type": "str",
+          "len": 7,
+          "sample": "Binance"
+        },
+        "symbol": {
+          "type": "str",
+          "len": 7,
+          "sample": "BTCUSDT"
+        },
+        "base_asset": {
+          "type": "str",
+          "len": 3,
+          "sample": "BTC"
+        },
+        "quote_asset": {
+          "type": "str",
+          "len": 4,
+          "sample": "USDT"
+        },
+        "limit_price": {
+          "type": "float",
+          "sample": 30000.0
+        },
+        "start_time": {
+          "type": "int",
+          "sample": 1770304780000
+        },
+        "start_quantity": {
+          "type": "float",
+          "sample": 245.96992
+        },
+        "start_usd_value": {
+          "type": "float",
+          "sample": 7379097.6
+        },
+        "current_quantity": {
+          "type": "float",
+          "sample": 47.48264
+        },
+        "current_usd_value": {
+          "type": "float",
+          "sample": 1424479.2
+        },
+        "current_time": {
+          "type": "int",
+          "sample": 1776690076961
+        },
+        "executed_volume": {
+          "type": "float",
+          "sample": 0.0
+        },
+        "executed_usd_value": {
+          "type": "float",
+          "sample": 0.0
+        },
+        "trade_count": {
+          "type": "int",
+          "sample": 0
+        },
+        "order_side": {
+          "type": "int",
+          "sample": 2
+        },
+        "order_state": {
+          "type": "int",
+          "sample": 1
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 17,
+      "fields": {
+        "id": {
+          "type": "int",
+          "sample": 7395199517
+        },
+        "exchange_name": {
+          "type": "str",
+          "len": 7,
+          "sample": "Binance"
+        },
+        "symbol": {
+          "type": "str",
+          "len": 7,
+          "sample": "BTCUSDT"
+        },
+        "base_asset": {
+          "type": "str",
+          "len": 3,
+          "sample": "BTC"
+        },
+        "quote_asset": {
+          "type": "str",
+          "len": 4,
+          "sample": "USDT"
+        },
+        "limit_price": {
+          "type": "float",
+          "sample": 33100.0
+        },
+        "start_time": {
+          "type": "int",
+          "sample": 1770320576000
+        },
+        "start_quantity": {
+          "type": "float",
+          "sample": 95.36135
+        },
+        "start_usd_value": {
+          "type": "float",
+          "sample": 3156460.685
+        },
+        "current_quantity": {
+          "type": "float",
+          "sample": 90.95294
+        },
+        "current_usd_value": {
+          "type": "float",
+          "sample": 3010542.31
+        },
+        "current_time": {
+          "type": "int",
+          "sample": 1776866053344
+        },
+        "executed_volume": {
+          "type": "float",
+          "sample": 0.0
+        },
+        "executed_usd_value": {
+          "type": "float",
+          "sample": 0.0
+        },
+        "trade_count": {
+          "type": "int",
+          "sample": 0
+        },
+        "order_side": {
+          "type": "int",
+          "sample": 2
+        },
+        "order_state": {
+          "type": "int",
+          "sample": 1
+        }
+      }
+    }
+  ]
+}

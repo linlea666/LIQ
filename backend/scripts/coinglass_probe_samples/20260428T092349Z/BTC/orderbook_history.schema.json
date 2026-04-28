@@ -1,0 +1,103 @@
+{
+  "type": "list",
+  "len": 12,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "list",
+      "len": 3,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "int",
+          "sample": 1777364700
+        },
+        {
+          "type": "list",
+          "len": 1247,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "list",
+              "len": 2,
+              "items_sampled": 2,
+              "items_schema": [
+                {
+                  "type": "int",
+                  "sample": 38480
+                },
+                {
+                  "type": "float",
+                  "sample": 1.19
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "len": 2,
+              "items_sampled": 2,
+              "items_schema": [
+                {
+                  "type": "int",
+                  "sample": 38500
+                },
+                {
+                  "type": "float",
+                  "sample": 2.554
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "len": 3,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "int",
+          "sample": 1777365000
+        },
+        {
+          "type": "list",
+          "len": 1261,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "list",
+              "len": 2,
+              "items_sampled": 2,
+              "items_schema": [
+                {
+                  "type": "int",
+                  "sample": 38480
+                },
+                {
+                  "type": "float",
+                  "sample": 1.19
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "len": 2,
+              "items_sampled": 2,
+              "items_schema": [
+                {
+                  "type": "int",
+                  "sample": 38500
+                },
+                {
+                  "type": "float",
+                  "sample": 2.554
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

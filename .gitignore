@@ -32,3 +32,7 @@ backend/logs/
 backend/data/liq_endpoint_dumps/
 backend/scripts/check_liquidation_endpoints.py
 backend/scripts/check_liquidation_endpoints_2.py
+# 流动性墙引擎调研期 raw 样本（单个文件最大 2.6MB，本地保留供回归参考）
+# 仅入库 .schema.json（字段结构，几 KB）+ summary.md
+backend/scripts/coinglass_probe_samples/**/*.json
+!backend/scripts/coinglass_probe_samples/**/*.schema.json

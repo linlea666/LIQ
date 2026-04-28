@@ -1,0 +1,51 @@
+{
+  "type": "list",
+  "len": 24,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777284000000
+        },
+        "top_position_long_percent": {
+          "type": "float",
+          "sample": 42.72
+        },
+        "top_position_short_percent": {
+          "type": "float",
+          "sample": 57.28
+        },
+        "top_position_long_short_ratio": {
+          "type": "float",
+          "sample": 0.75
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777287600000
+        },
+        "top_position_long_percent": {
+          "type": "float",
+          "sample": 43.34
+        },
+        "top_position_short_percent": {
+          "type": "float",
+          "sample": 56.66
+        },
+        "top_position_long_short_ratio": {
+          "type": "float",
+          "sample": 0.77
+        }
+      }
+    }
+  ]
+}

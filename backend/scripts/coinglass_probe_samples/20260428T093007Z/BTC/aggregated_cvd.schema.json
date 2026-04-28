@@ -1,0 +1,51 @@
+{
+  "type": "list",
+  "len": 100,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777338900000
+        },
+        "agg_taker_buy_vol": {
+          "type": "float",
+          "sample": 9671089.8186
+        },
+        "agg_taker_sell_vol": {
+          "type": "float",
+          "sample": 31651041.5299
+        },
+        "cum_vol_delta": {
+          "type": "float",
+          "sample": -21979951.7113
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 4,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777339200000
+        },
+        "agg_taker_buy_vol": {
+          "type": "float",
+          "sample": 22475008.1813
+        },
+        "agg_taker_sell_vol": {
+          "type": "float",
+          "sample": 24093117.3196
+        },
+        "cum_vol_delta": {
+          "type": "float",
+          "sample": -23598060.8496
+        }
+      }
+    }
+  ]
+}

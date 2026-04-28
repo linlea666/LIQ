@@ -132,6 +132,35 @@ def test_compute_freshness_detects_stale_footprint():
     assert "footprint_contract" in f.stale_sources
 
 
+def test_safe_age_supports_ts_sec_field():
+    """OrderbookPressureSnapshot 字段名为 ts_sec，_safe_age 必须兼容（修复前永远 missing）。"""
+    now = time.time()
+    s = _fake_state(pressure_age=None)  # 先把 .ts 版去掉
+    s.orderbook_pressure_snapshot = types.SimpleNamespace(ts_sec=int(now - 30))
+    f = compute_freshness(s)
+    assert "orderbook_pressure" not in f.missing_sources
+    assert "orderbook_pressure" in f.sources_age_seconds
+    assert 25 <= f.sources_age_seconds["orderbook_pressure"] <= 35
+
+
+def test_safe_age_supports_timestamp_field():
+    """通用兜底：obj.timestamp 也支持。"""
+    now = time.time()
+    s = _fake_state(pressure_age=None)
+    s.orderbook_pressure_snapshot = types.SimpleNamespace(timestamp=int(now - 45))
+    f = compute_freshness(s)
+    assert 40 <= f.sources_age_seconds["orderbook_pressure"] <= 50
+
+
+def test_safe_age_dict_with_ts_sec():
+    """dict 形态也兼容 ts_sec。"""
+    now = time.time()
+    s = _fake_state(pressure_age=None)
+    s.orderbook_pressure_snapshot = {"ts_sec": int(now - 20)}
+    f = compute_freshness(s)
+    assert "orderbook_pressure" not in f.missing_sources
+
+
 def test_compute_freshness_score_decreases_with_stale_count():
     """每多一个 stale/missing core → score 降一档（共 9 个核心源）"""
     s_stale_2 = _fake_state(

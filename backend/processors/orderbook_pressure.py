@@ -77,6 +77,9 @@ DEFAULTS = {
     "tier_s_min_usd": 30_000_000.0,
     "tier_a_min_usd": 10_000_000.0,
     "tier_b_min_usd": 3_000_000.0,
+
+    # 数据陈旧判定（depth 主源 ts_sec 离现在的秒数；OP 轮询 90s，缺省取 180s = 2 轮）
+    "stale_age_sec": 180,
 }
 
 
@@ -605,6 +608,14 @@ def compute_pressure_snapshot(
     if depth is None or not (depth.bids or depth.asks):
         snap.notes.append("no_depth_snapshot")
         snap.data_quality = "partial"
+
+    # depth 主源陈旧判定：覆盖 partial（stale 比 partial 更严重，需提示前端注意）
+    stale_age = float(cfg.get("stale_age_sec", DEFAULTS["stale_age_sec"]))
+    if depth is not None and depth.ts_sec > 0:
+        depth_age = max(0, now - int(depth.ts_sec))
+        if depth_age > stale_age:
+            snap.data_quality = "stale"
+            snap.notes.append(f"depth_age_{depth_age}s_gt_{int(stale_age)}s")
 
     _build_summary(walls, snap)
     return snap

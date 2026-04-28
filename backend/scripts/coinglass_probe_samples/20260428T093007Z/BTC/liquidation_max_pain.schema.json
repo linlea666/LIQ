@@ -1,0 +1,69 @@
+{
+  "type": "list",
+  "len": 563,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 6,
+      "fields": {
+        "symbol": {
+          "type": "str",
+          "len": 3,
+          "sample": "BTC"
+        },
+        "price": {
+          "type": "float",
+          "sample": 76729.6
+        },
+        "long_max_pain_liq_level": {
+          "type": "float",
+          "sample": 40574087.23
+        },
+        "long_max_pain_liq_price": {
+          "type": "float",
+          "sample": 76311.34
+        },
+        "short_max_pain_liq_level": {
+          "type": "float",
+          "sample": 64345225.77
+        },
+        "short_max_pain_liq_price": {
+          "type": "float",
+          "sample": 78618.97
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 6,
+      "fields": {
+        "symbol": {
+          "type": "str",
+          "len": 3,
+          "sample": "ETH"
+        },
+        "price": {
+          "type": "float",
+          "sample": 2284.65
+        },
+        "long_max_pain_liq_level": {
+          "type": "float",
+          "sample": 27675296.1
+        },
+        "long_max_pain_liq_price": {
+          "type": "float",
+          "sample": 2262.049
+        },
+        "short_max_pain_liq_level": {
+          "type": "float",
+          "sample": 21288421.57
+        },
+        "short_max_pain_liq_price": {
+          "type": "float",
+          "sample": 2319.361
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "type": "dict",
+  "key_count": 3,
+  "fields": {
+    "total_pages": {
+      "type": "int",
+      "sample": 8
+    },
+    "list": {
+      "type": "list",
+      "len": 1000,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "dict",
+          "key_count": 14,
+          "fields": {
+            "user": {
+              "type": "str",
+              "len": 42,
+              "sample": "0x0ddf9bae2af4b874b96d287a5ad42eb47138a902"
+            },
+            "symbol": {
+              "type": "str",
+              "len": 3,
+              "sample": "BTC"
+            },
+            "position_size": {
+              "type": "float",
+              "sample": -1000.0
+            },
+            "entry_price": {
+              "type": "float",
+              "sample": 67992.1
+            },
+            "mark_price": {
+              "type": "float",
+              "sample": 76670.0
+            },
+            "liq_price": {
+              "type": "float",
+              "sample": 101009.6987147733
+            },
+            "leverage": {
+              "type": "int",
+              "sample": 3
+            },
+            "margin_balance": {
+              "type": "float",
+              "sample": 25571666.666666
+            },
+            "position_value_usd": {
+              "type": "float",
+              "sample": 76715000.0
+            },
+            "unrealized_pnl": {
+              "type": "float",
+              "sample": -8722868.75495
+            },
+            "funding_fee": {
+              "type": "float",
+              "sample": 32085.876024
+            },
+            "margin_mode": {
+              "type": "str",
+              "len": 5,
+              "sample": "cross"
+            },
+            "create_time": {
+              "type": "int",
+              "sample": 1774977450686
+            },
+            "update_time": {
+              "type": "int",
+              "sample": 1777368331330
+            }
+          }
+        },
+        {
+          "type": "dict",
+          "key_count": 14,
+          "fields": {
+            "user": {
+              "type": "str",
+              "len": 42,
+              "sample": "0x020ca66c30bec2c4fe3861a94e4db4a498a35872"
+            },
+            "symbol": {
+              "type": "str",
+              "len": 3,
+              "sample": "BTC"
+            },
+            "position_size": {
+              "type": "float",
+              "sample": 550.0
+            },
+            "entry_price": {
+              "type": "float",
+              "sample": 76229.6
+            },
+            "mark_price": {
+              "type": "float",
+              "sample": 76670.0
+            },
+            "liq_price": {
+              "type": "float",
+              "sample": 74836.1403362983
+            },
+            "leverage": {
+              "type": "int",
+              "sample": 40
+            },
+            "margin_balance": {
+              "type": "float",
+              "sample": 1054803.75
+            },
+            "position_value_usd": {
+              "type": "float",
+              "sample": 42192150.0
+            },
+            "unrealized_pnl": {
+              "type": "float",
+              "sample": 265827.052686
+            },
+            "funding_fee": {
+              "type": "float",
+              "sample": 5399.753605
+            },
+            "margin_mode": {
+              "type": "str",
+              "len": 5,
+              "sample": "cross"
+            },
+            "create_time": {
+              "type": "int",
+              "sample": 1776107654450
+            },
+            "update_time": {
+              "type": "int",
+              "sample": 1777368342801
+            }
+          }
+        }
+      ]
+    },
+    "current_page": {
+      "type": "int",
+      "sample": 1
+    }
+  }
+}

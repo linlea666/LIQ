@@ -1,0 +1,67 @@
+{
+  "type": "list",
+  "len": 24,
+  "items_sampled": 2,
+  "items_schema": [
+    {
+      "type": "dict",
+      "key_count": 5,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777284000000
+        },
+        "open": {
+          "type": "str",
+          "len": 11,
+          "sample": "57186761567"
+        },
+        "high": {
+          "type": "str",
+          "len": 11,
+          "sample": "57382124779"
+        },
+        "low": {
+          "type": "str",
+          "len": 11,
+          "sample": "57163253303"
+        },
+        "close": {
+          "type": "str",
+          "len": 11,
+          "sample": "57313487805"
+        }
+      }
+    },
+    {
+      "type": "dict",
+      "key_count": 5,
+      "fields": {
+        "time": {
+          "type": "int",
+          "sample": 1777287600000
+        },
+        "open": {
+          "type": "str",
+          "len": 11,
+          "sample": "57313487805"
+        },
+        "high": {
+          "type": "str",
+          "len": 11,
+          "sample": "57413445214"
+        },
+        "low": {
+          "type": "str",
+          "len": 11,
+          "sample": "57289743335"
+        },
+        "close": {
+          "type": "str",
+          "len": 11,
+          "sample": "57385804007"
+        }
+      }
+    }
+  ]
+}

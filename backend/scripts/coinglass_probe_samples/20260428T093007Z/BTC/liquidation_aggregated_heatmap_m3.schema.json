@@ -1,0 +1,101 @@
+{
+  "type": "dict",
+  "key_count": 4,
+  "fields": {
+    "y_axis": {
+      "type": "list",
+      "len": 390,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "float",
+          "sample": 61181.58
+        },
+        {
+          "type": "float",
+          "sample": 61265.56
+        }
+      ]
+    },
+    "liquidation_leverage_data": {
+      "type": "list",
+      "len": 54859,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "list",
+          "len": 3,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "int",
+              "sample": 260
+            },
+            {
+              "type": "int",
+              "sample": 0
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "len": 3,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "int",
+              "sample": 261
+            },
+            {
+              "type": "int",
+              "sample": 0
+            }
+          ]
+        }
+      ]
+    },
+    "price_candlesticks": {
+      "type": "list",
+      "len": 288,
+      "items_sampled": 2,
+      "items_schema": [
+        {
+          "type": "list",
+          "len": 6,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "int",
+              "sample": 1777282500
+            },
+            {
+              "type": "str",
+              "len": 7,
+              "sample": "77882.6"
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "len": 6,
+          "items_sampled": 2,
+          "items_schema": [
+            {
+              "type": "int",
+              "sample": 1777282800
+            },
+            {
+              "type": "str",
+              "len": 7,
+              "sample": "77864.4"
+            }
+          ]
+        }
+      ]
+    },
+    "update_time": {
+      "type": "int",
+      "sample": 1777368676200
+    }
+  }
+}
