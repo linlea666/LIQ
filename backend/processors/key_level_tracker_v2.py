@@ -207,6 +207,26 @@ def run_tracker_v2(
     # ── D05 · cascade_risk 修复落实追踪 ──
     _report_cascade_health(snapshot, cfg)
 
+    # ── M4 · 行为评估层（V3 行为验证引擎，纯观测，零信号影响）──
+    # 严格只读 lv，仅写入 lv.behavior。失败被内部捕获不会影响主流程。
+    # 详见 key_level_behavior_eval 模块顶部"设计纪律"。
+    try:
+        from processors.key_level_behavior_eval import evaluate_behavior
+        evaluate_behavior(
+            snapshot,
+            candles_15m=candles_15m,
+            candles_1h=candles_1h,
+            cvd=cvd,
+            oi_change_pct_1h=oi_change_pct_1h,
+            taker_buy_vol=taker_buy_vol,
+            taker_sell_vol=taker_sell_vol,
+            cfg=cfg,
+            now=now,
+        )
+    except Exception:  # noqa: BLE001 — 行为层完全独立，绝不影响信号产出
+        import logging
+        logging.getLogger(__name__).exception("evaluate_behavior failed (non-fatal)")
+
     return snapshot
 
 

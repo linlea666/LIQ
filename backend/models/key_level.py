@@ -186,6 +186,17 @@ class KeyLevelV2(BaseModel):
     regime_at_score: str = ""  # "" / "trend_up" / "trend_down" / "range" / "squeeze" / "high_vol_chop" / "extreme"
     regime_weight_version: str = ""  # "3.0" 表示 M3 权重版本
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M4-行为评估层（V3 行为验证引擎 · 2026-04 新增）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 设计纪律（与 BehaviorEval docstring 同步）：
+    #   1. 由独立模块 key_level_behavior_eval.evaluate_behavior 写入
+    #   2. 不抢 state machine 决定权（lv.state 仍由 _transition 唯一负责）
+    #   3. 不修改 final_score / strength_tier / cascade_risk
+    #   4. M1 阶段为纯观测：不参与 signal 生成、不进 AI prompt
+    #   5. 旧 snapshot 反序列化无破坏（默认 None）
+    behavior: Optional["BehaviorEval"] = None
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M3 新增：生命周期事件（关键位演化追踪）
@@ -226,6 +237,76 @@ class LifecycleEvent(BaseModel):
     # "tracker"  ← 由 key_level_tracker_v2._set_state 检测的"状态机转移（tested/broken/...)"
     # 设为 ""（未知/历史）时退化为旧行为（仅按 ts+event_type 去重）
     layer: str = ""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M4 新增：关键位行为评估（V3 行为验证引擎）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class BehaviorEval(BaseModel):
+    """关键位行为评估（V3-M1 行为验证层 · 2026-04）。
+
+    设计目标：
+        旧 state machine 回答"事件是否发生"（broken / bounced / flipped 几何门）；
+        本模块回答"这次事件多可信"（连续 0-1 分数 + 多因子）。
+        两者职责互补，不竞争 state 决定权。
+
+    设计纪律（违反即视为 bug）：
+        1. 不写入 lv.state / lv.final_score / lv.strength_tier / lv.cascade_risk
+        2. 由 key_level_behavior_eval.evaluate_behavior 在 state machine 后调用
+        3. 输入仅读 KeyLevelV2 + 行情数据（candles/cvd/oi），不依赖 footprint/funding
+           （M1 最小依赖；footprint/funding 留给 M2）
+        4. M1 阶段不参与 signal 生成、不进 AI prompt（仅前端观测）
+        5. 旧 snapshot 反序列化无破坏（KeyLevelV2.behavior 默认 None）
+
+    四象限分数（每项 0-1，仅在合适的 state 下被填充，其它情况保持 0.0）：
+        breakout_validity         真突破质量（state ∈ {broken, flipped}）
+        retest_quality            回踩质量（state ∈ {bounced, flipped}）
+        selloff_continuation_risk 放量破位延续风险（state == broken & side == support）
+        capitulation_bottom_score 恐慌出清候选分（state == broken & side == support，且伴随极端放量+长下影）
+        flip_confirmation         翻转确认度（state == flipped）
+        false_break_risk          假突破风险（state ∈ {testing, broken}；与事件级 fake_break 互补）
+
+    behavior_state（综合状态标签，9 选 1）：
+        pending                独立计算无意义 / 数据不足
+        pending_breakout       放量逼近，等收盘确认
+        true_breakout          真突破
+        healthy_retest         健康回踩
+        failed_breakout        假突破 / 失败突破
+        heavy_volume_breakdown 放量破位（继续下行风险高）
+        capitulation_flush     恐慌出清候选（等二次确认，禁止直接做多）
+        confirmed_flip         翻转确认
+        wait_for_second_test   等二次测试
+
+    state_confidence（0-1）：
+        旧 state 的可信度。由当前 state 对应的核心分数派生：
+          broken    → breakout_validity
+          bounced   → retest_quality
+          flipped   → flip_confirmation
+          fake_break → 1 - false_break_risk（事件已成立时 false_break_risk = 1.0）
+          其它     → 0.0（无意义）
+
+    explain_chips：
+        简短中文 chip，前端可叠加到 lv.explain_chips 之后单独成区展示。
+        不污染原 explain_chips（避免覆盖 V3 已有解释）。
+    """
+    breakout_validity: float = 0.0
+    retest_quality: float = 0.0
+    selloff_continuation_risk: float = 0.0
+    capitulation_bottom_score: float = 0.0
+    flip_confirmation: float = 0.0
+    false_break_risk: float = 0.0
+
+    behavior_state: str = "pending"
+    state_confidence: float = 0.0
+
+    explain_chips: list[str] = Field(default_factory=list)
+
+    # 数据完整性（哪些子因子参与了计算）
+    components_used: list[str] = Field(default_factory=list)
+
+    # 评估时间戳（用于前端"评估于 X 秒前"显示与回测对齐）
+    evaluated_at: int = 0
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

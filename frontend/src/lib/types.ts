@@ -715,6 +715,13 @@ export interface KeyLevelV2 {
   regime_at_score?: string;           // 评分时的 regime 标签
   regime_weight_version?: string;     // regime 权重表版本号
   lifecycle_events?: LifecycleEvent[]; // 该位最近的生命周期事件（最多 20 条）
+
+  // ── M4（V3 行为评估层 · 2026-04）— 关键位行为验证引擎 ──
+  // 设计纪律（与后端 BehaviorEval docstring 同步）：
+  //   1. 不影响 final_score / strength_tier / cascade_risk / state（state 仍由 state machine 决定）
+  //   2. M1 阶段为纯观测：前端独立成区展示，不污染原 explain_chips
+  //   3. 字段全部 optional，旧 snapshot 反序列化无破坏
+  behavior?: BehaviorEval | null;
 }
 
 // M3 新增：关键位生命周期单条事件
@@ -748,6 +755,49 @@ export interface CascadeComponents {
   usd_score: number;         // 0-1: 累计 USD
   velocity_score: number;    // 0-1: 真空跨度紧凑度
   leverage_score: number;    // 0-1: 主导杠杆密度
+}
+
+// M4 新增（V3 行为评估层 · 2026-04）：关键位行为验证引擎
+//
+// 设计原则：
+//   - 旧 state machine 决定"事件是否发生"（broken/bounced/flipped 几何门）；
+//     本接口决定"事件多可信"（连续 0-1 分数 + 多因子）
+//   - 所有分数仅在合适的 state 下被填充，其它情况保持 0.0
+//   - M1 阶段为纯观测：前端独立成区展示，不污染原 explain_chips、不进 AI prompt
+//
+// 6 个分数：
+//   breakout_validity         真突破质量（state ∈ {broken, flipped, testing}）
+//   retest_quality            回踩质量（state ∈ {bounced, flipped}）
+//   selloff_continuation_risk 放量破位延续风险（state == broken & support）
+//   capitulation_bottom_score 恐慌出清候选（state == broken & support）
+//   flip_confirmation         翻转确认度（state == flipped）
+//   false_break_risk          假突破风险（state ∈ {testing, broken, fake_break}）
+export type BehaviorState =
+  | "pending"                // 数据不足或独立计算无意义
+  | "pending_breakout"       // 放量逼近，等收盘确认
+  | "true_breakout"          // 真突破
+  | "healthy_retest"         // 健康回踩
+  | "failed_breakout"        // 假突破 / 失败突破
+  | "heavy_volume_breakdown" // 放量破位（继续下行风险高）
+  | "capitulation_flush"     // 恐慌出清候选（等二次确认）
+  | "confirmed_flip"         // 翻转确认
+  | "wait_for_second_test"   // 等二次测试
+  | string;                  // 容错：后端可能扩展
+
+export interface BehaviorEval {
+  breakout_validity: number;          // 0-1
+  retest_quality: number;             // 0-1
+  selloff_continuation_risk: number;  // 0-1
+  capitulation_bottom_score: number;  // 0-1
+  flip_confirmation: number;          // 0-1
+  false_break_risk: number;           // 0-1
+
+  behavior_state: BehaviorState;
+  state_confidence: number;           // 0-1：旧 state 的可信度
+
+  explain_chips: string[];            // 行为侧 chip（独立显示，不污染原 explain_chips）
+  components_used: string[];          // 数据完整性：哪些子因子参与了计算
+  evaluated_at: number;               // 评估时间戳（秒）
 }
 
 // M1 新增：清算磁铁通道（独立列表，不参与 levels 评分）

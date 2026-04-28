@@ -34,6 +34,7 @@ import {
   sClassHint,
 } from "@/lib/levelBrief";
 import LifecyclePanel from "@/components/MainView/LifecyclePanel";
+import LevelBehaviorPanel from "@/components/Levels/LevelBehaviorPanel";
 import type { KeyLevelV2 } from "@/lib/types";
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
@@ -471,6 +472,11 @@ export default function LevelDetailRow({
                       累计 {fmtUsdShort(lv.sweep_usd ?? 0)}
                     </div>
                   </div>
+                )}
+
+                {/* M4 · 行为评估面板（V3 行为验证层 · 2026-04 · 纯观测） */}
+                {lv.behavior && (
+                  <LevelBehaviorPanel behavior={lv.behavior} state={lv.state} />
                 )}
 
                 {/* 生命周期 */}
