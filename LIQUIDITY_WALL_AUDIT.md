@@ -550,14 +550,15 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 |---|---|---|---|
 | ~~**M3** KL 桥接~~ | ✅ **已落地** | wall_zones 多档 chip（💎双源/💰仅现货/💰共振/⚡可信）+ wall_events 衔接（被吃/撤单/增厚）+ break_through/sweep/vacuum 风险 warning | `key_level_tracker_v2._apply_pressure_alignment` 增强（+150 行）；前端 `CONFIRMATION_LABELS` 映射（+11 项）；`test_key_level_op_bridge.py` 新增 28 测例 |
 | ~~**M4** AI 集成~~ | ✅ **已落地** | AI Snapshot 注入"高可信墙 Top5 + wall_events 30min + crowding_global"；prompt §8d 新增渲染并强调"挂单为意图层" | `ai/snapshot.py::_build_liquidity_wall_block`（+~140 行）；`ai/prompts.py` §8d 段落（+~95 行）；`models/snapshot.py` AISnapshot +4 字段；`engine.py` 传参；`test_ai_snapshot_liquidity_walls.py` 新增 23 测例 |
-| **观察期** | ⏳ | 让 trust_score / break_through_risk / 新 chip / AI §8d 输出在生产跑 1-2 周收集数据 | 不改代码 |
-| **阈值校准** | ⏳ | 基于观察数据调 trust_score 阈值（0.85/0.55）+ break_through 权重 | 调 ENGINE_DEFAULTS |
+| ~~**Phase C** Coinbase 现货原生 API~~ | ✅ **已落地** | 接入 Coinbase Exchange 公开 REST orderbook（免 auth、不消耗 Coinglass 配额），叠加机构资金独立验证维度 → `coinbase_spot_confluence` + trust_score +0.10 独立加分 | `sources/coinbase_native.py`（+200 行）、`models/coinbase_orderbook.py`、`polls/coinbase_orderbook.py`、`liquidity_wall_engine._augment_zones_with_coinbase`、`WallZone` +3 字段、`engine.py` 接线、`config.yaml` `sources.coinbase` + `coins.*.symbol_coinbase`、`ai/snapshot.py` + `ai/prompts.py` §8d 渲染、`test_coinbase_native_source.py`（15 测例）+ `test_liquidity_wall_coinbase.py`（18 测例） |
+| **观察期** | ⏳ | 让 trust_score / break_through_risk / 新 chip / AI §8d / Coinbase 共振 输出在生产跑 1-2 周收集数据 | 不改代码 |
+| **阈值校准** | ⏳ | 基于观察数据调 trust_score 阈值（0.85/0.55）+ break_through 权重 + coinbase_min_usd_ratio | 调 ENGINE_DEFAULTS |
 
 ### 10.2 中期（1 个月）
 
 | 项 | 内容 | 风险 |
 |---|---|---|
-| 多家交易所大单 poll | OKX / Bybit / Bitget 单独拉 large_orders（区分真多家共振）| Quota：+~3K/day（仍远低于 5w/day limit）|
+| ~~多家交易所大单 poll（Coinglass）~~ | ❌ **已判 dead-end**（probe 验证 Coinglass 对 OKX/Coinbase 全部 OP 类 endpoint 400/500；Bybit 大单数据时间窗口完全错位）| 详见第十二节 |
 | spot CVD 联动 | spot 净买卖压力 vs 现货墙位置，输出"现货资金行为标签" | 复用 spot_aggregated_cvd 已有 endpoint |
 | Hyperliquid whale | 接入 hyperliquid_whale_position，做 Hyperliquid 大资金区位识别 | 已 probe 验证可用 |
 
@@ -586,3 +587,87 @@ backend/tests/test_liquidity_wall_engine.py: 80 用例
 ---
 
 **审计联系点**：所有问题可对照 commit 时间线（第 8 节）+ 关键代码索引（第 4 节）追溯具体决策点。
+
+---
+
+## 十二、多家交易所接入决策（2026-04-29）
+
+### 12.1 Probe 结果（BTC × 6 endpoint × 4 交易所，10 calls/min 严格限速）
+
+| Endpoint | Binance | OKX | Bybit | Coinbase |
+|---|---|---|---|---|
+| 合约 5m 热力图 | ✅ 1219+1008 bins | ❌ 400 "failure" | ❌ **400 "Exchange not supported"** | — |
+| 合约大单 holding | ✅ 436 条 | ❌ **500 Server Error** | ⚠️ 仅 8 条 | — |
+| 合约大单历史 | ✅ 1000 条 | ❌ **500 Server Error** | ✅ 1000 条 | — |
+| 现货 5m 热力图 | ✅ 1128+472 bins | ❌ 400 "failure" | — | ❌ 400 "failure" |
+| 现货大单 holding | ✅ 195 条 | ❌ **500 Server Error** | — | ❌ **500 Server Error** |
+| 现货大单历史 | ✅ 197 条 | ❌ **500 Server Error** | — | ❌ **500 Server Error** |
+
+**核心发现**：除 Binance 外，**Coinglass 的 OP 类 endpoint 在 OKX/Coinbase 几乎完全没接通**，Bybit 仅合约大单历史可用。
+
+### 12.2 Bybit 大单数据二次验证（看似可用实际无效）
+
+直接拉 Bybit 合约大单历史 1000 条，原始字段分析：
+```
+价格分布: $75,650 ~ $79,450 （中位数 $77,732）
+当前价 ~$110k 附近 5% 内: 0 条
+1 小时内 ended: 7 条
+24 小时内 ended: 90 条
+所有 active (end_time=0): 0 条
+```
+
+**根因**：Coinglass 给 Bybit 的 large-orders-history 默认按 ID 倒序 + state filter=ended → 永远拿不到当前活跃区数据。
+
+### 12.3 决策矩阵
+
+| 出路 | 验证结果 | 决策 |
+|---|---|---|
+| OKX 通过 Coinglass 接入 | OP 类 endpoint 全 500 持续 | ❌ **不可行** |
+| Bybit 通过 Coinglass 接入大单 | 数据时间窗口完全错位 | ❌ **不可行** |
+| 4 家通过 Coinglass 接入 5m 热力图 | 仅 Binance 一家有数据 | ❌ **不可行** |
+| OKX/Bybit 原生 API（绕过 Coinglass）| 合约工作量 4-5 天，主场流动性与 Binance 重叠 | 🔶 **暂缓** |
+| **Coinbase 原生 API（现货）** | probe 验证完全可用：22k+/24k+ 档 + num_orders 字段 + ±0.5% 内 $14-17M | ✅ **已实施 = Phase C** |
+| Hyperliquid whale positions | 已 probe 验证可用 | ⏳ **待评估**（独立维度，与墙正交）|
+
+### 12.4 Phase C：Coinbase 接入设计（已落地）
+
+**为何选 Coinbase 而非其他**：
+1. **OKX/Bybit 现货 ≈ Binance 重复**：流动性结构同源，多接=同质化数据
+2. **Coinbase 是真正的不同源**：USA 机构资金（BTC ETF 链路 IBIT/FBTC 主战场） vs 全球/亚太散户
+3. **数据质量超出预期**：22,959 bids + 24,931 asks 全档位深度（比 Binance/OKX/Bybit 任何一家都多 5-10 倍）
+4. **`num_orders` 字段独有优势**：能区分"1 笔大单 vs 100 笔小单聚集" → 真假墙判别
+5. **免 auth + 速率宽松**：10/s = 600/min，4 币 × 1/90s ≈ 0.04 req/s 远低于上限
+
+**关键设计**：
+- 独立 `CoinbaseNativeSource`（不污染 Coinglass 体系，不消耗其配额）
+- 90s 一拉，仅存 latest 帧（不存历史 deque，定位是即时验证）
+- 容差 10bp（吸收 USD/USDT spread）+ num_orders ≥ 3（过滤 spoof 嫌疑）
+- USD 门槛 = wall_min × 30%（兼顾 Coinbase 量级与 Binance 主源）
+- 配置位：`config.yaml` `sources.coinbase` + `coins.*.symbol_coinbase`（None→自动派生 `{ccy}-USD`，""→显式禁用）
+
+### 12.5 trust_score 演进
+
+| 维度 | 现状 | 加分 |
+|---|---|---|
+| base | 合约 5m 热力图源 | 0.50 |
+| dual_source | Phase A：合约+Binance 现货 5m 双源 | +0.30 |
+| has_spot_confluence | M2.5：Binance 现货大单 lifecycle | +0.15 |
+| coinbase_spot_confluence | **Phase C：Coinbase 现货机构验证（独立于 Binance）** | **+0.10** |
+| exchange_count >= 2 | dead-code（保留兼容，预留未来原生 API）| +0.10（不触发）|
+| persistence ≥ 0.7 | M1：visible ≥ 75% 历史窗口 | +0.10 |
+
+**满分 1.05 → clamp 1.0**：dual_source + Coinbase + 现货大单 + persistent = 1.05 / 1.0 顶档。
+
+### 12.6 L1 / L2 限制最终判决
+
+- **L1**：Binance 单家 OP 数据 → **永久承担**（无 Coinglass 路径可解）
+- **L2**：跨所共振计数 → **部分缓解**：
+  - 通过 Phase A `dual_source`（合约 vs Binance 现货）
+  - 通过 Phase C `coinbase_spot_confluence`（Binance 系 vs Coinbase 机构）
+  - 真正的 3+ 家共振（OKX/Bybit）需走原生 API，工作量 4-5 天，目前 ROI 不高
+
+### 12.7 Probe 工具代码
+
+- `backend/scripts/probe_coinglass.py`：现货合约全 endpoint 探测（已存在）
+- `backend/scripts/probe_multi_exchange.py`：多家交易所 OP 类 endpoint 探测（Phase C 前评估用）
+- 单次 Coinbase 验证：见 commit `2026-04-29` 提交记录中 inline 命令

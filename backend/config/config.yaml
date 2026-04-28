@@ -6,18 +6,22 @@ coins:
     exchange_primary: "Binance"
     ct_val: 0.01
     default: true
+    # Phase C：Coinbase 现货 product_id（None/缺省→自动派生 BTC-USD；""→禁用该币）
+    symbol_coinbase: "BTC-USD"
   ETH:
     ccy: "ETH"
     symbol_cg: "ETH"
     symbol_cg_pair: "ETHUSDT"
     exchange_primary: "Binance"
     ct_val: 0.1
+    symbol_coinbase: "ETH-USD"
   SOL:
     ccy: "SOL"
     symbol_cg: "SOL"
     symbol_cg_pair: "SOLUSDT"
     exchange_primary: "Binance"
     ct_val: 1
+    symbol_coinbase: "SOL-USD"
 
 sources:
   coinglass:
@@ -72,6 +76,14 @@ sources:
     ws_url: "wss://fstream.binance.com/ws/!ticker@arr"
     ws_reconnect_min_sec: 2
     ws_reconnect_max_sec: 30
+  # Phase C：Coinbase Exchange 公开 REST（仅 orderbook，免 auth）
+  # 用途：流动性墙引擎机构资金独立验证维度（coinbase_spot_confluence）
+  # 速率限制：Coinbase 上限 10/s（600/min），rate_per_min 设 60 留 10× 余量
+  coinbase:
+    base_url: "https://api.exchange.coinbase.com"
+    timeout_sec: 15
+    rate_per_min: 60
+    poll_interval: 90       # 与合约 orderbook_pressure 同节奏
 
 processors:
   cvd:

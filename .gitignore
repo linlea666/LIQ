@@ -36,3 +36,6 @@ backend/scripts/check_liquidation_endpoints_2.py
 # 仅入库 .schema.json（字段结构，几 KB）+ summary.md
 backend/scripts/coinglass_probe_samples/**/*.json
 !backend/scripts/coinglass_probe_samples/**/*.schema.json
+# Phase C：多家交易所 OP probe 输出（用于决策评估，决策定档后存档为文档第 12 节）
+# 仅入库脚本本身（probe_multi_exchange.py），输出 JSON 不入仓
+backend/scripts/multi_exchange_probe/

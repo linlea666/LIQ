@@ -52,6 +52,7 @@ from processors.cycle import calculate_cycle_position
 from processors.range_signal import calculate_range_signal
 from sources.coinglass import CoinglassSource, create_coinglass_source
 from sources.binance_futures import BinanceFuturesSource, create_binance_source
+from sources.coinbase_native import CoinbaseNativeSource
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,11 @@ class CoinState:
         # Phase B+：现货多家聚合 ±range 流动性时序（语义更强：真买卖家撤单）
         # 现货抽流动性 → active_attack_score 衰竭因子优先取此源；为空时 fallback 合约
         self.spot_aggregated_ask_bids_history: deque[_AskBidsRangeSnapshot] = deque(maxlen=12)
+        # Phase C：Coinbase 现货原生订单簿（机构资金独立验证维度，不走 Coinglass）
+        # 由 polls/coinbase_orderbook.poll_coinbase_orderbook 写入；仅存 latest 帧
+        # liquidity_wall_engine 的 _augment_zones_with_coinbase 消费此字段
+        from models.coinbase_orderbook import CoinbaseOrderbookFrame as _CoinbaseOrderbookFrame
+        self.coinbase_orderbook: Optional[_CoinbaseOrderbookFrame] = None
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -265,6 +271,12 @@ class Engine:
         self._bbx = BBXSource(
             cache_ttl=self._settings.bbx.cache_ttl,
             timeout_sec=self._settings.bbx.timeout_sec,
+        )
+        # Phase C：Coinbase Exchange 公开 REST（仅 orderbook，免 auth，独立 rate limiter）
+        self._cb: CoinbaseNativeSource = CoinbaseNativeSource(
+            base_url=self._settings.coinbase.base_url,
+            timeout_sec=self._settings.coinbase.timeout_sec,
+            rate_per_min=self._settings.coinbase.rate_per_min,
         )
         self._analyzer = create_analyzer()
         # MAA arbiter（懒创建：只在需要时导入，不影响旧链路）
@@ -829,6 +841,8 @@ class Engine:
         spot_agg_ask_bids_interval = _scaled(
             self._poll_cfg.get("spot_aggregated_ask_bids", 180)
         )
+        # Phase C：Coinbase 现货原生订单簿（独立 source，与合约 ob_pressure 同节奏）
+        coinbase_orderbook_interval = _scaled(self._settings.coinbase.poll_interval)
         # push_loop 不走 cg API（走内部 _recompute），不应被 priority 节流
         # candles_1h（hard-coded 60s）需要 priority 节流
         candles_1h_interval = _scaled(60)
@@ -897,6 +911,11 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 f"cg_spot_agg_ask_bids_{ccy}", self._poll_spot_aggregated_ask_bids_history, coin,
                 spot_agg_ask_bids_interval, s + 19.0,
+            )),
+            # Phase C：Coinbase 现货原生 orderbook（机构资金独立验证维度，不走 Coinglass）
+            asyncio.create_task(self._poll_loop(
+                f"cb_orderbook_{ccy}", self._poll_coinbase_orderbook, coin,
+                coinbase_orderbook_interval, s + 20.0,
             )),
             asyncio.create_task(self._poll_loop(
                 f"cg_indicators_{ccy}", self._poll_indicators, coin,
@@ -1002,6 +1021,7 @@ class Engine:
         await self._cg.close()
         await self._bn.close()
         await self._bbx.close()
+        await self._cb.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──
@@ -1389,6 +1409,16 @@ class Engine:
         """
         from polls.orderbook_pressure import poll_spot_aggregated_ask_bids_history
         await poll_spot_aggregated_ask_bids_history(self._cg, coin, self._states[coin.ccy])
+
+    async def _poll_coinbase_orderbook(self, coin: CoinConfig):
+        """Phase C：Coinbase 现货原生订单簿（机构资金独立验证维度）。
+
+        走 Coinbase Exchange 公开 REST（免 auth），独立 rate limiter，不消耗
+        Coinglass 配额。墙引擎 ``_augment_zones_with_coinbase`` 消费此源叠加
+        ``coinbase_spot_confluence`` → trust_score +0.10 独立加分。
+        """
+        from polls.coinbase_orderbook import poll_coinbase_orderbook
+        await poll_coinbase_orderbook(self._cb, coin, self._states[coin.ccy])
 
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data

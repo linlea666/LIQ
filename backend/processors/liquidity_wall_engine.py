@@ -73,13 +73,18 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "history_window_minutes": 60,          # 1h 滚动（5m × 12）
     "augment_match_tol_pct": 0.001,        # 大单 ↔ zone 容差匹配 0.1%
     "augment_match_tol_usd_min": 5.0,      # 容差最低 5 USD（防小币太小不够）
-    # M2.5 + Phase A：现货 vs 合约 区分（trust_score 计算权重）
+    # M2.5 + Phase A + Phase C：trust_score 计算权重（多维度独立累加，最终 clamp 到 1.0）
     "trust_base": 0.50,                    # 仅合约源（默认）
     "trust_bonus_dual_source": 0.30,       # Phase A：现货+合约 5m 双源共振（最强单一证据）
     "trust_bonus_spot_confluence": 0.15,   # 现货大单 lifecycle 共振
-    "trust_bonus_multi_exchange": 0.10,    # 多家交易所共振
+    "trust_bonus_multi_exchange": 0.10,    # 多家交易所共振（保留兼容，当前未触发；详见 audit）
     "trust_bonus_persistent": 0.10,        # 持续 ≥ 0.7
     "trust_persistent_threshold": 0.70,
+    # Phase C：Coinbase 现货原生 API（机构资金独立验证维度）
+    "trust_bonus_coinbase_confluence": 0.10,   # Coinbase 同价位有 ≥ ratio×wall_min 厚度时加分
+    "coinbase_min_usd_ratio": 0.30,            # Coinbase USD 至少为 wall_min_usd 的 30%（兼顾 USD/USDT 价差）
+    "coinbase_min_num_orders": 3,              # 至少 3 笔订单聚集（< 3 视为单大单 spoof 嫌疑）
+    "coinbase_match_tol_pct": 0.0010,          # 价位匹配容差 10 bp（吸收 USD/USDT spread）
 
     # M1：persistence / trend
     "warming_seconds": 1800,               # 30min 暖机期内不出 persistence/magnet
@@ -639,15 +644,81 @@ def _augment_zones_with_spot_large_orders(
             z.has_spot_confluence = True
 
 
+def _augment_zones_with_coinbase(
+    zones: list[WallZone],
+    coinbase_frame: Any,
+    cfg: dict,
+) -> None:
+    """Phase C：Coinbase 现货原生订单簿 → 在已有 zone 价区上叠加 Coinbase USD。
+
+    设计原则（dev-constraints #3 复用决策 + #2 全局视角）：
+      不在 Coinbase 数据上独立检测 zone，而是只在合约 / 现货已检出的 zone 价区
+      [price_low, price_high] 上累加 Coinbase USD。原因：
+        1. Coinbase 用 BTC-USD（法币），与项目主链 BTC-USDT 价位有 ~5bp spread；
+           独立跑 zone 边界会和合约 zone 错位
+        2. Coinbase 数据是"机构资金验证"维度，定位是补充而非替代主源
+        3. 不消耗任何额外计算（仅一遍 O(zones × bins) 扫描）
+
+    判定逻辑（决策点：用户选择 default_a_a_c）：
+      - 价位匹配容差：max(peak_price × coinbase_match_tol_pct, augment_match_tol_usd_min)
+        = 默认 10bp 或 5 USD（吸收 USD/USDT spread，详见 audit Phase C）
+      - 共振门槛：
+          coinbase_spot_usd ≥ wall_min_usd × coinbase_min_usd_ratio (默认 30%)
+        AND coinbase_num_orders ≥ coinbase_min_num_orders (默认 3 笔)
+      - num_orders < 3 视为单笔大单 spoof 嫌疑，不算 confluence
+
+    侧匹配：bid zone 累加 Coinbase bids，ask zone 累加 Coinbase asks。
+    """
+    if not zones or coinbase_frame is None:
+        return
+
+    bids = list(getattr(coinbase_frame, "bids", []) or [])
+    asks = list(getattr(coinbase_frame, "asks", []) or [])
+    if not bids and not asks:
+        return
+
+    wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
+    usd_ratio = cfg.get("coinbase_min_usd_ratio",
+                        ENGINE_DEFAULTS["coinbase_min_usd_ratio"])
+    min_orders = cfg.get("coinbase_min_num_orders",
+                         ENGINE_DEFAULTS["coinbase_min_num_orders"])
+    tol_pct = cfg.get("coinbase_match_tol_pct",
+                      ENGINE_DEFAULTS["coinbase_match_tol_pct"])
+    tol_usd_min = cfg.get("augment_match_tol_usd_min",
+                          ENGINE_DEFAULTS.get("augment_match_tol_usd_min", 5.0))
+    threshold_usd = wall_min * usd_ratio
+
+    for z in zones:
+        levels = bids if z.side == "bid" else asks
+        if not levels:
+            continue
+        tol = max(z.peak_price * tol_pct, tol_usd_min)
+        lo_bound = z.price_low - tol
+        hi_bound = z.price_high + tol
+
+        cb_usd = 0.0
+        cb_orders = 0
+        for lv in levels:
+            if lo_bound <= lv.price <= hi_bound:
+                cb_usd += lv.usd_value
+                cb_orders += lv.num_orders
+
+        z.coinbase_spot_usd = round(cb_usd, 2)
+        z.coinbase_num_orders = cb_orders
+        if cb_usd >= threshold_usd and cb_orders >= min_orders:
+            z.coinbase_spot_confluence = True
+
+
 def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
     """综合 trust_score（0-1）—— 区分高可信墙 vs 合约清算磁铁。
 
-    阶梯加分（GPT 反馈 + 用户洞察"现货=真买卖家、合约=磁铁"+ Phase A 双源源融合）：
+    阶梯加分（多维度独立累加，最终 clamp 到 1.0）：
       - base 0.50（合约 5m 热力图源，已是真实订单簿但有 spoof/钓鱼可能）
       - +0.30 双源共振 dual_source=True（现货 + 合约 5m 同价区都有 ≥ wall_min 厚度，
               单一硬证据中最强：真买卖家与杠杆资金共同布局）
       - +0.15 现货大单共振（额外 spot 大单 lifecycle 证据，与 dual_source 可叠加）
-      - +0.10 多家交易所共振（exchange_count ≥ 2）
+      - +0.10 多家交易所共振（exchange_count ≥ 2，当前 dead-code，预留未来原生 API 接入）
+      - +0.10 Coinbase 现货共振（Phase C：机构资金独立验证维度，正交于 Binance 系）
       - +0.10 持续 ≥ 0.7（visible ≥ 75% 历史窗口）
       - 单源现货 zone：spot_only 与合约 spot+depth 共用同一加分体系，但缺少 base 之外
         的合约源验证，需要更长持久或更多大单证据才能升到高分位。
@@ -668,6 +739,9 @@ def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
     if zone.exchange_count >= 2:
         score += cfg.get("trust_bonus_multi_exchange",
                          ENGINE_DEFAULTS["trust_bonus_multi_exchange"])
+    if zone.coinbase_spot_confluence:
+        score += cfg.get("trust_bonus_coinbase_confluence",
+                         ENGINE_DEFAULTS["trust_bonus_coinbase_confluence"])
     persistent_thr = cfg.get("trust_persistent_threshold",
                              ENGINE_DEFAULTS["trust_persistent_threshold"])
     if zone.persistence_score >= persistent_thr:
@@ -1459,6 +1533,12 @@ def build_liquidity_wall_outputs(
     if spot_large_orders:
         _augment_zones_with_spot_large_orders(walls_above, spot_large_orders, cfg)
         _augment_zones_with_spot_large_orders(walls_below, spot_large_orders, cfg)
+
+    # Phase C：Coinbase 现货原生 orderbook augment（机构资金独立验证维度）
+    coinbase_frame = getattr(state, "coinbase_orderbook", None)
+    if coinbase_frame is not None:
+        _augment_zones_with_coinbase(walls_above, coinbase_frame, cfg)
+        _augment_zones_with_coinbase(walls_below, coinbase_frame, cfg)
 
     # 强度等级
     _attach_strength_tier(walls_above, cfg)

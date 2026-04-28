@@ -28,6 +28,11 @@ class CoinConfig:
     exchange_primary: str
     ct_val: float = 1.0
     default: bool = False
+    # Phase C：Coinbase 现货原生 API product_id（如 "BTC-USD"）
+    #   - None / 缺省 → polls.coinbase_orderbook 自动派生 f"{ccy}-USD"
+    #   - 空字符串 ""    → 显式禁用该币种 Coinbase 拉取（如小币 Coinbase 不上架）
+    #   - 显式字符串 "X-Y" → 直接使用该 product_id
+    symbol_coinbase: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,19 @@ class BinanceSourceConfig:
     ws_url: str = "wss://fstream.binance.com/ws/!ticker@arr"
     ws_reconnect_min_sec: int = 2
     ws_reconnect_max_sec: int = 30
+
+
+@dataclass(frozen=True)
+class CoinbaseSourceConfig:
+    """Coinbase Exchange 公开 REST 数据源配置（Phase C，仅 orderbook，免 auth）。
+
+    速率限制：Coinbase 公开端点上限 10 req/s = 600/min。
+    rate_per_min 默认 60（1s 间隔），4 币 × 1/90s ≈ 0.04 req/s 远低于上限。
+    """
+    base_url: str = "https://api.exchange.coinbase.com"
+    timeout_sec: int = 15
+    rate_per_min: int = 60
+    poll_interval: int = 90
 
 
 @dataclass(frozen=True)
@@ -235,6 +253,7 @@ class Settings:
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     nofx: NOFXConfig = field(default_factory=NOFXConfig)
     market_action: MarketActionConfig = field(default_factory=MarketActionConfig)
+    coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -267,6 +286,7 @@ def _build_settings(raw: dict) -> Settings:
             exchange_primary=coin_raw["exchange_primary"],
             ct_val=float(coin_raw.get("ct_val", 1.0)),
             default=coin_raw.get("default", False),
+            symbol_coinbase=coin_raw.get("symbol_coinbase"),
         )
         coins[ccy] = cc
         if cc.default:
@@ -292,6 +312,14 @@ def _build_settings(raw: dict) -> Settings:
         ws_url=bn_raw.get("ws_url", "wss://fstream.binance.com/ws/!ticker@arr"),
         ws_reconnect_min_sec=int(bn_raw.get("ws_reconnect_min_sec", 2)),
         ws_reconnect_max_sec=int(bn_raw.get("ws_reconnect_max_sec", 30)),
+    )
+
+    cb_raw = src.get("coinbase", {})
+    coinbase = CoinbaseSourceConfig(
+        base_url=cb_raw.get("base_url", "https://api.exchange.coinbase.com"),
+        timeout_sec=int(cb_raw.get("timeout_sec", 15)),
+        rate_per_min=int(cb_raw.get("rate_per_min", 60)),
+        poll_interval=int(cb_raw.get("poll_interval", 90)),
     )
 
     processors = ProcessorsConfig(**raw["processors"])
@@ -448,6 +476,7 @@ def _build_settings(raw: dict) -> Settings:
         coinglass=coinglass,
         binance=binance,
         bbx=bbx,
+        coinbase=coinbase,
         processors=processors,
         ai=ai,
         push=push,

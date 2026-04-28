@@ -488,6 +488,11 @@ def _build_liquidity_wall_block(
             "exchange_count": z.exchange_count,
             "break_through_risk": round(z.break_through_risk, 3),
         }
+        # Phase C：Coinbase 现货共振维度（机构资金独立验证）
+        if z.coinbase_spot_confluence:
+            wall_dict["coinbase_confluence"] = True
+            wall_dict["coinbase_spot_usd"] = round(z.coinbase_spot_usd, 0)
+            wall_dict["coinbase_num_orders"] = z.coinbase_num_orders
         if z.next_magnet_price is not None:
             wall_dict["next_magnet_price"] = round(z.next_magnet_price, 4)
         if z.sweep_target and z.sweep_target.vacuum_gap_pct >= 0.5:

@@ -366,6 +366,15 @@ class WallZone(BaseModel):
     spot_current_usd: float = 0.0               # 现货侧同价区 USD 厚度（dual_source=True 时填）
     spot_max_usd_1h: float = 0.0                # 现货侧 1h 峰值（用于现货侧 trend 派生）
 
+    # ── Phase C：Coinbase 现货原生 API（机构买卖维度，独立于 Binance dual_source）──
+    # coinbase_spot_confluence = True 当且仅当 Coinbase 现货同价区有显著厚度
+    # （≥ wall_min_usd × 30%，且 num_orders ≥ 3 表示多笔聚集而非单大单 spoof）。
+    # 该字段独立于 dual_source / has_spot_confluence：捕获 Binance 之外的机构资金
+    # （主要是 USA ETF 链路）。trust_score +0.10 单独加分，详见 _compute_trust_score。
+    coinbase_spot_confluence: bool = False
+    coinbase_spot_usd: float = 0.0              # Coinbase 同价区当前帧 USD 厚度
+    coinbase_num_orders: int = 0                # Coinbase 同价区累计订单笔数（≥3 才算共振）
+
     # ── 行为评估（M2）──
     status: WallZoneStatus = "active"
     wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）

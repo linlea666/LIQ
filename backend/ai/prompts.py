@@ -1032,10 +1032,13 @@ def build_user_prompt(snapshot: dict) -> str:
     if _liq_walls or _liq_events or _liq_crowding:
         lines.extend([
             "",
-            "### 8d. 流动性墙引擎 [Coinglass · 5m 订单簿热力图 + 现货大单 + OI/Funding/LS 拥挤度]",
+            "### 8d. 流动性墙引擎 [Coinglass · 5m 订单簿热力图 + 现货大单 + OI/Funding/LS 拥挤度 + Coinbase 现货]",
             (
                 "⚠ 性质提示：墙=「挂单意图」，可被 spoof / 撤单；本块仅展示通过双源或"
                 "trust_score≥0.65 严格筛选后的「高可信墙」。"
+                "Coinbase共振 chip 表示该价位在 Coinbase 现货同时存在显著机构挂单"
+                "（≥3 笔订单聚集 + 与 wall_min 同档 USD），是 Binance 之外的独立机构验证；"
+                "Coinbase 共振 + 双源 = 同时跨链路（合约/Binance 现货/Coinbase 现货）布局，可信度最高。"
                 "需结合 §9g absorption zones（已成交硬证据）+ §1 CVD 综合判断；"
                 "禁止仅凭墙位作为决策唯一依据。"
             ),
@@ -1067,6 +1070,14 @@ def build_user_prompt(snapshot: dict) -> str:
                     f"{_fmt_usd_for_prompt(_usd)} | {_tier}(信任{_trust:.2f}) | "
                     f"持续{_persist:.0f}min · {_exch}所"
                 )
+                # Phase C：Coinbase 共振（机构资金独立验证维度）
+                if w.get("coinbase_confluence"):
+                    _cb_usd = w.get("coinbase_spot_usd", 0)
+                    _cb_orders = w.get("coinbase_num_orders", 0)
+                    _wall_line += (
+                        f" · Coinbase共振 {_fmt_usd_for_prompt(_cb_usd)}"
+                        f"({_cb_orders}笔)"
+                    )
                 if _btr >= 0.6:
                     _magnet = w.get("next_magnet_price")
                     _vac = w.get("vacuum_gap_pct")
