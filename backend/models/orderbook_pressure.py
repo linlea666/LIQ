@@ -1,18 +1,22 @@
 """挂单压力监测器 (Orderbook Pressure Monitor) · 数据模型
 
-本次重构（2026-04）后定位 = **盘口订单流仪表盘**（辅助参考），
-不再做"真假阻力"判定。原因：
+本模块定位 = **流动性墙 + 大单行为 + 持仓拥挤度 监测引擎**（辅助参考层）：
 
-  - 5min 快照无法支撑秒级"撤单 vs 被吃"判定（数据精度天花板）
-  - CVD 1h 与 wall 5min 时间分辨率错配（12× 差距，结构性误判）
-  - "fake_R/spoof" 标签是过度解读 → 容易误导新手交易员
+  L0  数据源（CoinState 共享，墙引擎只读）
+        ↓
+  L1  detect_walls_from_depth        从 5m 订单簿热力图找近距堆 (≤4%)
+  L1' detect_walls_from_large_orders 从大单 lifecycle 找远距堆 (4-12%)
+  L2  build_wall_zones               相邻 bin 合并为墙区（M1）
+  L3  compute_zone_persistence       基于 orderbook_depth_history 的可见时长（M1）
+  L4  detect_wall_events             基于 large_orders 18 字段差分识别 6 类事件（M2）
+  L5  build_position_crowding        OI / Funding / LS 拥挤度（M2）
+  L6  build_sweep_targets            max_pain → next_magnet_price（M2）
+  L7  augment_with_absorption        footprint absorption 共振加分
 
-新数据流：
-  L1 detect_walls_from_depth      —— 从 5min 订单簿热力图找近+中距堆 (≤4%)
-  L1' detect_walls_from_large_orders —— 从大单 lifecycle 找远距堆 (4-12%)
-  L2 augment_with_absorption      —— footprint absorption_zone 共振加分（×1.2）
-  L3 _compute_strength_score      —— USD × 持续时间 × whale × absorption
-  L4 _assign_strength_tier        —— 按绝对 USD 阈值分级 S/A/B/C
+铁律（与 V3 关键位 roadmap 一致）：
+  - 不输出"真假阻力 / spoof = true"绝对结论 → 改用 wall_removal_risk 软分
+  - 不直接修改 KL 的 final_score / strength_tier / cascade_risk
+  - 不重复轮询；所有数据从 CoinState 读
 
 字段命名遵循项目 model 风格：snake_case，金额用 USD，时间戳秒。
 """
@@ -45,8 +49,8 @@ WallLabel = Literal[
 class LargeOrderLifecycle(BaseModel):
     """单笔大单的完整生命周期。
 
-    映射 Coinglass /orderbook/large-limit-order(-history)，
-    本次重构新增 holding_age_sec 派生属性，用于 strength_score 公式。
+    映射 Coinglass /orderbook/large-limit-order(-history) 实测 18 字段（probe 验证）。
+    本次升级（M2）补齐 exchange_name 字段，用于多所共振计数。
     """
     id: int
     side: WallSide
@@ -57,12 +61,15 @@ class LargeOrderLifecycle(BaseModel):
     start_quantity: float
     current_quantity: float
     executed_volume: float = 0.0
-    executed_usd_value: float = 0.0
+    executed_usd_value: float = 0.0          # ⭐ M2 关键：墙被吃 USD 的硬证据
     start_usd_value: float = 0.0
     current_usd_value: float = 0.0
 
-    trade_count: int = 0
+    trade_count: int = 0                     # ⭐ M2 关键：触发成交次数
     state: Literal["holding", "ended"] = "holding"
+
+    # M2 新增：多所共振计数依赖
+    exchange_name: Optional[str] = None      # "Binance" / "OKX" / ...
 
     @property
     def holding_age_sec(self) -> int:
@@ -93,7 +100,7 @@ class OrderbookDepthSnapshot(BaseModel):
     """完整订单簿深度快照（含 latest 与 prev，用于减量对比）。
 
     bids/asks 价格升序；prev_* 可能为空（首次拉取或样本不够）。
-    本次重构后 prev_* 不再用于撤吃判定，但仍保留供未来诊断用。
+    M1 后由 orderbook_depth_history deque 滚动收集；prev 仍保留向后兼容。
     """
     coin: str
     exchange: str
@@ -107,16 +114,13 @@ class OrderbookDepthSnapshot(BaseModel):
     prev_asks: list[DepthBin] = Field(default_factory=list)
 
 
-# ── 压力堆(单个 wall) ────────────────────────────────────────────────────
+# ── 压力堆（单个 wall · 旧模型，保留向后兼容） ─────────────────────────
 class PressureWall(BaseModel):
-    """聚合后的单个挂单堆（中性辅助参考）。
+    """聚合后的单个挂单堆（**旧模型**，保留向后兼容）。
 
-    可能来源：
-      - depth_5m：多个小单聚合形成的"堆"（近+中距，≤4%）
-      - large_orders：单笔/多笔巨鲸大单（远距，4-12%；可精确知挂单时长）
-
-    重要约束：本模块只描述"挂单的客观状态"，不判定"真假阻力/支撑"。
-    最终交易决策应该由用户结合关键位、CVD、消息面等综合判断。
+    M1 后建议优先消费 WallZone（区间 + 持续性 + 行为）。
+    本模型仍由 detect_walls_from_depth / detect_walls_from_large_orders 输出，
+    在 OrderbookPressureSnapshot.walls 字段保留作 fallback。
     """
     side: WallSide
     price_lo: float
@@ -153,32 +157,221 @@ class PressureWall(BaseModel):
     reason: str = ""
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M1+M2 新增模型 · 流动性墙引擎核心
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 墙区状态（M2 行为评估输出）
+WallZoneStatus = Literal[
+    "active",          # 默认稳定
+    "strengthening",   # 增厚中（current > start）
+    "weakening",       # 减薄中（current < start 但仍 holding）
+    "removed",         # 已撤（state ended + executed=0）
+    "consumed",        # 已被吃（state ended + executed>0）
+    "reloaded",        # 撤后短时间同价位重挂
+    "absorbed",        # 被攻击但守住（有 absorption 信号）
+    "unknown",         # 数据不足
+]
+
+# 数据来源融合（M1）
+WallZoneSource = Literal[
+    "depth_only",          # 仅来自 5m 深度热力图
+    "large_order_only",    # 仅来自大单
+    "depth+large_order",   # 双源共振（最高可信）
+]
+
+# 趋势（M1）
+WallZoneTrend = Literal["new", "strengthening", "weakening", "stable"]
+
+# WallEvent 类型（M2）
+WallEventType = Literal[
+    "wall_appeared",
+    "wall_strengthened",
+    "wall_weakened",
+    "wall_removed",
+    "wall_consumed",
+    "wall_reloaded",
+]
+
+# 拥挤度推断状态（M2）
+InferredPositionState = Literal[
+    "long_opening",                  # 多头主动开仓
+    "short_opening",                 # 空头主动开仓
+    "long_closing_or_liquidation",   # 多头平仓 / 被清算
+    "short_covering_or_liquidation", # 空头回补 / 被清算
+    "liquidation_flush",             # 双向清算潮
+    "mixed",                         # 信号矛盾
+    "unknown",                       # 数据不足
+]
+
+# OI 保证金分布
+OIMarginSplit = Literal[
+    "coin_dominant",        # 币本位 OI 占优（存量博弈）
+    "stable_dominant",      # U 本位 OI 占优（新资金进入）
+    "balanced",
+    "unknown",
+]
+
+# 扫单磁铁方向
+SweepDirection = Literal["below", "above"]
+
+
+class PositionCrowdingSnapshot(BaseModel):
+    """持仓拥挤度上下文（M2）。
+
+    全部从 CoinState 读取，不发起新 poll：
+      - oi_exchange_rank["All"]：自带 5m/15m/30m/1h/4h/24h delta + 币本位/U 本位分流
+      - multi_funding：当前 funding rate
+      - funding_history_8h：用于百分位
+      - ls_ratio + top_position_ratio
+    """
+    # OI 多周期变化率（百分比，已是 percent_change_*，无需本地计算）
+    oi_delta_5m_pct: Optional[float] = None
+    oi_delta_15m_pct: Optional[float] = None
+    oi_delta_30m_pct: Optional[float] = None
+    oi_delta_1h_pct: Optional[float] = None
+    oi_delta_4h_pct: Optional[float] = None
+    oi_delta_24h_pct: Optional[float] = None
+
+    # OI 分流（GPT 提出的新洞察 · "U 本位激增 = 新资金 / 币本位激增 = 老用户加杠杆"）
+    oi_coin_margin_usd: Optional[float] = None
+    oi_stable_margin_usd: Optional[float] = None
+    oi_margin_split: OIMarginSplit = "unknown"
+
+    # Funding
+    funding_now_pct: Optional[float] = None       # 当前 funding 百分比
+    funding_percentile_30d: Optional[float] = None  # 0-1（30 天分位）
+
+    # 多空比
+    top_position_ls_ratio: Optional[float] = None    # 大户持仓多空比
+    global_account_ls_ratio: Optional[float] = None  # 全网账户多空比
+
+    # 推断
+    inferred_position_state: InferredPositionState = "unknown"
+    long_crowding_risk: float = 0.0      # 0-1
+    short_crowding_risk: float = 0.0     # 0-1
+
+    # 表达
+    explain_chips: list[str] = Field(default_factory=list)
+
+
+class SweepTarget(BaseModel):
+    """扫单磁铁（M2）—— 墙被打穿后的下一个目标。
+
+    第一版直接读 liq_max_pain.{long,short}_max_pain_liq_price，
+    后续可由 liq_maps 簇增强校验。
+    """
+    direction: SweepDirection                   # below = 下方多头磁铁；above = 上方空头磁铁
+    magnet_price: float
+    magnet_amount_usd: float                    # max_pain 提供的清算金额
+    distance_pct: float                         # 相对当前价的百分比（带符号）
+    vacuum_gap_pct: float = 0.0                 # wall 到 magnet 之间的真空跨度（%）
+    explain: str = ""                           # 前端文案（中文）
+
+
+class WallEvent(BaseModel):
+    """墙区事件（M2）—— 用 large_orders 18 字段差分识别。
+
+    事件流写到 OrderbookPressureSnapshot.wall_events，最近 100 条滚动保留。
+    """
+    ts_sec: int
+    side: WallSide
+    price_mid: float                            # 区间中位价
+    event_type: WallEventType
+    size_before_usd: Optional[float] = None
+    size_after_usd: Optional[float] = None
+    executed_usd_value: Optional[float] = None  # consumed 才有
+    confidence: float = 0.0                     # GPT 加权公式（0-1）
+    explain: str = ""                           # 前端 chip 文字
+
+
+class WallZone(BaseModel):
+    """墙区（M1+M2 核心模型）—— 相邻 bin 合并 + 持续性 + 行为 + 上下文。
+
+    取代单点 PressureWall 视角，回答"上方哪里有卖墙、下方哪里有买墙"。
+    """
+    # ── 区间定位（M1）──
+    side: WallSide                              # bid 下方买墙 / ask 上方卖墙
+    price_low: float
+    price_high: float
+    price_mid: float
+    peak_price: float                           # 厚度最大的 bin 价位
+    distance_pct: float                         # 带符号（price_mid - last) / last × 100
+
+    # ── 厚度统计（M1，基于滚动历史）──
+    current_usd: float                          # 当前帧 USD 厚度
+    max_usd_1h: float                           # 1h 内峰值
+    avg_usd_1h: float                           # 1h 内均值
+    bin_count: int                              # 合并了几个原始 bin
+
+    # ── 持续性（M1）──
+    seen_count: int                             # history 中出现帧数（最大 = window_size）
+    visible_minutes: float                      # 持续可见分钟数
+    persistence_score: float                    # 0-1
+    first_seen_ts: int = 0
+    last_seen_ts: int = 0
+    trend: WallZoneTrend = "new"
+
+    # ── 数据源融合（M1）──
+    source: WallZoneSource = "depth_only"
+    exchange_count: int = 1                     # 多所共振计数
+    large_order_ids: list[int] = Field(default_factory=list)
+
+    # ── 行为评估（M2）──
+    status: WallZoneStatus = "active"
+    wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）
+    wall_removal_risk: float = 0.0              # 0-1（不写"假单"）
+
+    # ── 上下文引用（M2）──
+    crowding_context: Optional[PositionCrowdingSnapshot] = None  # 与全局 crowding 同；冗余存方便前端 zone 自包含
+    sweep_target: Optional[SweepTarget] = None
+    break_through_risk: float = 0.0             # 0-1
+    next_magnet_price: Optional[float] = None   # 便于前端快速访问
+
+    # ── absorption（沿用 PressureWall 设计）──
+    confluence_with_absorption: bool = False
+    absorption_zone_price: Optional[float] = None
+
+    # ── 评分 + 表达 ──
+    strength_score: float = 0.0
+    strength_tier: Literal["S", "A", "B", "C"] = "C"
+    explain_chips: list[str] = Field(default_factory=list)
+
+
 # ── 顶层 snapshot（state 字段类型）────────────────────────────────────────
 class OrderbookPressureSnapshot(BaseModel):
-    """挂单压力监测器的顶层输出。
+    """挂单压力监测器的顶层输出（向后兼容 + M1+M2 新字段）。
 
-    被两个消费方使用：
-      - 前端独立卡片（直接渲染 walls）
-      - key_level_tracker_v2（作为 confirmation 入参；按 tier 匹配）
-
-    重要约束：snapshot 不再产出 OrderbookPressureSignal —— 已砍掉
-    独立 snipe 通道，避免数据基础不足却给出可执行交易指令。
+    兼容性策略：
+      - 旧 walls 字段保留（旧消费者 / 旧 kl_history.json 仍可用）
+      - 新 walls_above / walls_below / wall_zones / wall_events 为升级后主消费路径
+      - 旧字段（top_resistance / top_support）保留
+      - data_quality 加 "warming" 状态（暖机期 30min 内）
     """
     coin: str
     ts_sec: int
     last_price: float
     atr: Optional[float] = None
 
+    # ── 旧字段（保留向后兼容）──
     walls: list[PressureWall] = Field(default_factory=list)
-
-    # 顶层汇总（前端徽章 / KL tracker 快速读）
-    # 取最强 ask wall（≥A 级）的 price_mid，无则 None
     top_resistance: Optional[float] = None
     top_support: Optional[float] = None
 
-    # 元数据
+    # ── M1 新字段：墙区视图 ──
+    walls_above: list[WallZone] = Field(default_factory=list)   # 上方卖墙（升序，距现价由近到远）
+    walls_below: list[WallZone] = Field(default_factory=list)   # 下方买墙（降序，距现价由近到远）
+    wall_zones: list[WallZone] = Field(default_factory=list)    # = above + below 但保 strength_score 排序
+
+    # ── M2 新字段：事件 + 全局拥挤度 ──
+    wall_events: list[WallEvent] = Field(default_factory=list)  # 最近 100 条滚动
+    crowding_global: Optional[PositionCrowdingSnapshot] = None  # 全局拥挤度（也分发到每个 zone）
+
+    # ── 元数据 ──
+    history_window_minutes: int = 60            # 滚动历史窗口（M1 默认 1h）
     sample_count_depth: int = 0
+    sample_count_depth_history: int = 0          # M1 新增：滚动 deque 实际帧数
     sample_count_large_history: int = 0
     sample_count_large_orders_walls: int = 0    # 来自 large_orders 路径的 wall 数
-    data_quality: Literal["ok", "partial", "stale", "missing"] = "ok"
+    data_quality: Literal["ok", "partial", "stale", "warming", "missing"] = "ok"
     notes: list[str] = Field(default_factory=list)

@@ -167,6 +167,9 @@ class CoinState:
         self.large_orders_history: list[_LargeOrderLifecycle] = []
         # 由 polls/orderbook_pressure.poll_orderbook_pressure 写入（90s 间隔）
         self.orderbook_depth_snapshot: Optional[_OrderbookDepthSnapshot] = None
+        # M1 滚动深度历史（1h 窗口，按 ts_sec 去重写入）—— WallZone 持续性评分基础
+        # maxlen=12 = 1h（5m 颗粒）；后续可扩 72/288 但第一版 12 够用
+        self.orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None

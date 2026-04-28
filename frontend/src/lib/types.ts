@@ -1100,18 +1100,150 @@ export interface PressureWall {
   reason: string;
 }
 
+// ── M1+M2 流动性墙引擎类型（与后端 models/orderbook_pressure.py 对齐） ──
+
+export type WallZoneStatus =
+  | "active"
+  | "strengthening"
+  | "weakening"
+  | "removed"
+  | "consumed"
+  | "reloaded"
+  | "absorbed"
+  | "unknown";
+
+export type WallZoneSource =
+  | "depth_only"
+  | "large_order_only"
+  | "depth+large_order";
+
+export type WallZoneTrend = "new" | "strengthening" | "weakening" | "stable";
+
+export type WallEventType =
+  | "wall_appeared"
+  | "wall_strengthened"
+  | "wall_weakened"
+  | "wall_removed"
+  | "wall_consumed"
+  | "wall_reloaded";
+
+export type InferredPositionState =
+  | "long_opening"
+  | "short_opening"
+  | "long_closing_or_liquidation"
+  | "short_covering_or_liquidation"
+  | "liquidation_flush"
+  | "mixed"
+  | "unknown";
+
+export type OIMarginSplit =
+  | "coin_dominant"
+  | "stable_dominant"
+  | "balanced"
+  | "unknown";
+
+export type SweepDirection = "below" | "above";
+
+export interface PositionCrowdingSnapshot {
+  oi_delta_5m_pct: number | null;
+  oi_delta_15m_pct: number | null;
+  oi_delta_30m_pct: number | null;
+  oi_delta_1h_pct: number | null;
+  oi_delta_4h_pct: number | null;
+  oi_delta_24h_pct: number | null;
+  oi_coin_margin_usd: number | null;
+  oi_stable_margin_usd: number | null;
+  oi_margin_split: OIMarginSplit;
+  funding_now_pct: number | null;
+  funding_percentile_30d: number | null;
+  top_position_ls_ratio: number | null;
+  global_account_ls_ratio: number | null;
+  inferred_position_state: InferredPositionState;
+  long_crowding_risk: number;
+  short_crowding_risk: number;
+  explain_chips: string[];
+}
+
+export interface SweepTarget {
+  direction: SweepDirection;
+  magnet_price: number;
+  magnet_amount_usd: number;
+  distance_pct: number;
+  vacuum_gap_pct: number;
+  explain: string;
+}
+
+export interface WallEvent {
+  ts_sec: number;
+  side: WallSide;
+  price_mid: number;
+  event_type: WallEventType;
+  size_before_usd: number | null;
+  size_after_usd: number | null;
+  executed_usd_value: number | null;
+  confidence: number;
+  explain: string;
+}
+
+export interface WallZone {
+  side: WallSide;
+  price_low: number;
+  price_high: number;
+  price_mid: number;
+  peak_price: number;
+  distance_pct: number;
+  current_usd: number;
+  max_usd_1h: number;
+  avg_usd_1h: number;
+  bin_count: number;
+  seen_count: number;
+  visible_minutes: number;
+  persistence_score: number;
+  first_seen_ts: number;
+  last_seen_ts: number;
+  trend: WallZoneTrend;
+  source: WallZoneSource;
+  exchange_count: number;
+  large_order_ids: number[];
+  status: WallZoneStatus;
+  wall_consumed_confidence: number;
+  wall_removal_risk: number;
+  crowding_context: PositionCrowdingSnapshot | null;
+  sweep_target: SweepTarget | null;
+  break_through_risk: number;
+  next_magnet_price: number | null;
+  confluence_with_absorption: boolean;
+  absorption_zone_price: number | null;
+  strength_score: number;
+  strength_tier: "S" | "A" | "B" | "C";
+  explain_chips: string[];
+}
+
 export interface OrderbookPressureSnapshot {
   coin: string;
   ts_sec: number;
   last_price: number;
   atr: number | null;
+  /** 旧字段（保留向后兼容；前端优先消费 walls_above/below） */
   walls: PressureWall[];
   top_resistance: number | null;
   top_support: number | null;
+  /** M1+M2 新字段：墙区视图 */
+  walls_above: WallZone[];
+  walls_below: WallZone[];
+  wall_zones: WallZone[];
+  /** M2：行为事件流（最近 100 条） */
+  wall_events: WallEvent[];
+  /** M2：全局拥挤度（每 zone.crowding_context 是同一份的引用） */
+  crowding_global: PositionCrowdingSnapshot | null;
+  /** M1：滚动历史窗口（分钟） */
+  history_window_minutes: number;
   sample_count_depth: number;
+  sample_count_depth_history: number;
   sample_count_large_history: number;
   sample_count_large_orders_walls: number;
-  data_quality: "ok" | "partial" | "stale" | "missing";
+  /** "warming" = 暖机期（< 30min），不显示 magnet/persistence 数字 */
+  data_quality: "ok" | "partial" | "stale" | "warming" | "missing";
   notes: string[];
 }
 

@@ -618,6 +618,27 @@ def compute_pressure_snapshot(
             snap.notes.append(f"depth_age_{depth_age}s_gt_{int(stale_age)}s")
 
     _build_summary(walls, snap)
+
+    # ── M1+M2：流动性墙引擎升级层（旧 walls 路径仍保留作 fallback） ──
+    try:
+        from processors.liquidity_wall_engine import build_liquidity_wall_outputs
+        wall_out = build_liquidity_wall_outputs(state, snap, cfg, now)
+        snap.walls_above = wall_out.walls_above
+        snap.walls_below = wall_out.walls_below
+        snap.wall_zones = wall_out.zones
+        snap.wall_events = wall_out.events
+        snap.crowding_global = wall_out.crowding
+        snap.history_window_minutes = wall_out.window_min
+        snap.sample_count_depth_history = wall_out.history_size
+        if wall_out.warming and snap.data_quality not in ("stale", "missing"):
+            # warming 优先级 < stale/missing；高于 ok/partial（前端展示"暖机中"）
+            snap.data_quality = "warming"
+            snap.notes.append(f"warming_history_size_{wall_out.history_size}")
+    except Exception as exc:    # 防御：升级层异常不影响主路径
+        logger.warning("liquidity_wall_engine 调用失败 | coin=%s err=%s",
+                       state.coin, exc, exc_info=True)
+        snap.notes.append("liquidity_wall_engine_error")
+
     return snap
 
 

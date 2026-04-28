@@ -268,6 +268,7 @@ def _build_lifecycles(raw_list, fallback_exchange: str) -> list[LargeOrderLifecy
                 current_usd_value=float(item.get("current_usd_value", 0) or 0),
                 trade_count=int(item.get("trade_count", 0) or 0),
                 state=_parse_state(item.get("order_state")),
+                exchange_name=str(item.get("exchange_name") or fallback_exchange) or None,
             ))
         except (TypeError, ValueError):
             continue

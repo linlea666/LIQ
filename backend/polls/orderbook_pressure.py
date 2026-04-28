@@ -1,12 +1,15 @@
 """挂单压力监测器：订单簿深度热力图轮询。
 
-只负责数据拉取与最简解析，把原始 bins 写入 ``state.orderbook_depth_snapshot``。
-全部"找堆 / 撤单 vs 被吃 / 真假分类"逻辑在 ``processors/orderbook_pressure.py``。
+只负责数据拉取与最简解析，把原始 bins 写入：
+  - ``state.orderbook_depth_snapshot``（latest 帧，沿用旧消费者）
+  - ``state.orderbook_depth_history``（M1 滚动 deque，按 ts_sec 去重，maxlen=12 = 1h）
+
+全部"找堆 / WallZone 聚合 / 持续性评分 / 行为事件"逻辑在 ``processors/orderbook_pressure.py``。
 
 数据源：``/api/futures/orderbook/history``
   返回：list[ [ts_sec, [[bid_price, bid_qty_base], ...], [[ask_price, ask_qty_base], ...] ] ]
-  - limit=2 时给出最近 2 个 5m snapshot（latest + prev），可做"前后帧减量"
-  - 每个 snapshot ~30-40 KB，limit=2 ~ 60-75 KB / 次
+  - limit=12 时给出最近 1h 的 12 个 5m snapshot（M1 升级后默认）
+  - 每个 snapshot ~30-40 KB，limit=12 ~ 360-480 KB / 次（仍可接受）
 
 大单 lifecycle 的拉取仍在 ``polls/orderflow.poll_large_orders``，本 poll 不重复请求。
 """
@@ -81,16 +84,17 @@ async def poll_orderbook_pressure(
     使用单交易所深度（与 large_orders 来源一致，便于 L1+ 大单价位匹配）。
     后续真假分类的"小堆减量 vs 主动成交"对比依赖 prev_* snapshot。
     """
+    # M1：limit=12（1h 滚动） · 一次拉满，本地按 ts_sec 去重维护历史
     data = await cg.fetch_orderbook_heatmap(
         exchange=coin.exchange_primary,
         symbol=coin.symbol_cg_pair,
         interval="5m",
-        limit=2,
+        limit=12,
     )
     if not data or not isinstance(data, list):
         return
 
-    # 依时间升序：保证 data[-1] 是 latest，data[-2]（若有）是 prev
+    # 依时间升序：保证 data[-1] 是 latest
     parsed = []
     for row in data:
         p = _parse_snapshot_row(row, coin.exchange_primary, coin.symbol_cg_pair, coin.ccy)
@@ -99,6 +103,32 @@ async def poll_orderbook_pressure(
     if not parsed:
         return
     parsed.sort(key=lambda x: x[0])
+
+    # 取出已存在的 ts_sec，做去重写入
+    existing_ts = {snap.ts_sec for snap in state.orderbook_depth_history}
+
+    # ── 构造每帧 OrderbookDepthSnapshot 并按 ts_sec 去重写入 history ──
+    new_frames_count = 0
+    for ts, bids, asks in parsed:
+        if ts in existing_ts:
+            continue
+        frame = OrderbookDepthSnapshot(
+            coin=coin.ccy,
+            exchange=coin.exchange_primary,
+            symbol=coin.symbol_cg_pair,
+            ts_sec=ts or int(time.time()),
+            bids=bids,
+            asks=asks,
+            # prev_* 仍由 history 自身承载；保留旧字段空（向后兼容）
+            prev_ts_sec=None,
+            prev_bids=[],
+            prev_asks=[],
+        )
+        state.orderbook_depth_history.append(frame)
+        existing_ts.add(ts)
+        new_frames_count += 1
+
+    # ── 当前帧 + 上一帧（向后兼容旧消费者：仍喂 prev_* 字段）──
     latest_ts, latest_bids, latest_asks = parsed[-1]
     prev_ts, prev_bids, prev_asks = (None, [], [])
     if len(parsed) >= 2:
@@ -119,8 +149,9 @@ async def poll_orderbook_pressure(
     if "orderbook_depth_ready" not in state._log_once_keys:
         state._log_once_keys.add("orderbook_depth_ready")
         logger.info(
-            "订单簿深度热力图接通 | coin=%s exchange=%s bids_bins=%d asks_bins=%d prev=%s",
+            "订单簿深度热力图接通 | coin=%s exchange=%s bids_bins=%d asks_bins=%d "
+            "history_size=%d new_frames=%d",
             coin.ccy, coin.exchange_primary,
             len(latest_bids), len(latest_asks),
-            "yes" if prev_ts else "no",
+            len(state.orderbook_depth_history), new_frames_count,
         )

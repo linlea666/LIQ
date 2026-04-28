@@ -465,10 +465,23 @@ async def poll_oi_exchange_rank(
     try:
         exchanges = []
         total_oi = 0.0
+        all_aggregated: dict | None = None     # M2：All 行的完整 delta + 保证金分布
         for item in data:
             ex = item.get("exchange", "")
             if ex == "All":
                 total_oi = float(item.get("open_interest_usd", 0))
+                # M2 拥挤度引擎需要：6 周期 delta + 币本位/U 本位金额（liquidity_wall_engine 消费）
+                all_aggregated = {
+                    "oi_usd": float(item.get("open_interest_usd", 0) or 0),
+                    "oi_coin_margin_usd": float(item.get("open_interest_by_coin_margin", 0) or 0),
+                    "oi_stable_margin_usd": float(item.get("open_interest_by_stable_coin_margin", 0) or 0),
+                    "change_5m_pct": float(item.get("open_interest_change_percent_5m", 0) or 0),
+                    "change_15m_pct": float(item.get("open_interest_change_percent_15m", 0) or 0),
+                    "change_30m_pct": float(item.get("open_interest_change_percent_30m", 0) or 0),
+                    "change_1h_pct": float(item.get("open_interest_change_percent_1h", 0) or 0),
+                    "change_4h_pct": float(item.get("open_interest_change_percent_4h", 0) or 0),
+                    "change_24h_pct": float(item.get("open_interest_change_percent_24h", 0) or 0),
+                }
                 continue
             exchanges.append({
                 "exchange": ex,
@@ -481,6 +494,7 @@ async def poll_oi_exchange_rank(
             "ts": int(time.time()),
             "total_oi_usd": total_oi,
             "exchanges": exchanges[:8],
+            "all_aggregated": all_aggregated,   # M2 新增 key（旧消费者忽略即可）
         }
     except (ValueError, KeyError):
         logger.debug("oi_exchange_rank parse failed", exc_info=True)

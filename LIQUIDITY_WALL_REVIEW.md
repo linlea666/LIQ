@@ -515,3 +515,92 @@ backend/scripts/coinglass_probe_samples/
 | `backend/tests/test_key_level_freshness.py` | 修改 | +3 测试覆盖字段兼容 |
 | `backend/tests/test_orderbook_pressure.py` | 修改 | +3 测试覆盖 stale 赋值 |
 | `LIQUIDITY_WALL_REVIEW.md` | 新增 | 本评审文档 |
+
+---
+
+# M1+M2 落地完成记录（2026-04-28）
+
+## 一、最终采纳的 GPT 反馈精华
+
+| GPT 建议 | 落地 |
+|---|---|
+| **`executed_usd_value` 是硬证据但不能全替代 taker/CVD** | ✅ 采纳。新设计中 `wall_consumed_confidence = 0.50×lo + 0.25×taker + 0.25×price` 三项加权，taker/CVD 仍参与 |
+| **GPT `wall_consumed_confidence` 加权公式** | ✅ 直接复刻在 `_compute_wall_consumed_confidence` |
+| **`ts_sec` 去重写入 deque（90s poll 撞 5m 帧）** | ✅ `polls/orderbook_pressure.py` 用 `existing_ts` set 跳过重复 |
+| **`merge_pct` 上下限 clamp 0.05%–0.30%** | ✅ `_resolve_merge_pct` 强制 clamp |
+| **暖机期 < 30min 标 warming** | ✅ 但仅在 `1 ≤ history_size < 4` 或时间 < 30min 时才标；history==0 时回退旧路径，避免破坏旧测试夹具 |
+| **U 本位 / 币本位 OI 分流解释** | ✅ 新增 `oi_margin_split: coin_dominant/stable_dominant/balanced/unknown`，前端 chip "U本位主导(新资金加杠杆)" |
+| **不要把 wall_events 写进 KL lifecycle** | ✅ 引擎只写 `state.orderbook_pressure_snapshot`，KL tracker 通过 `pressure_snapshot=` 注入只读引用 |
+| **AI prompt 只给摘要 chip** | ⏳ 留 M3 KL 桥接阶段约束 |
+| **1247×12 个 bin 不暴露给前端** | ✅ snapshot 只输出聚合后的 ≤ 5 个/侧 `WallZone`，原始 history 留在 backend deque |
+
+## 二、最终路线图
+
+| 里程碑 | 状态 | 用户诉求覆盖 |
+|---|---|---|
+| **Phase 0** 调研 + 3 bug 修复 | ✅ commit 3731d24 | 数据前置 |
+| **M1** 墙观测层（聚合 + 持续性 + 趋势） | ✅ 本次 | 1/2/3 |
+| **M2** 行为事件 + 拥挤度 + 磁铁 | ✅ 本次 | 4/5/6 |
+| **M3** KL 桥接（只读 chip + contradiction，铁律守护） | ⏳ 待启动 | 关键位详情页墙提示 |
+
+## 三、本次 M1+M2 改动文件清单
+
+| 文件 | 类型 | 关键改动 |
+|---|---|---|
+| `backend/models/orderbook_pressure.py` | 扩展 | LargeOrderLifecycle +`exchange_name`；新增 WallZone / WallEvent / PositionCrowdingSnapshot / SweepTarget 4 个模型；OrderbookPressureSnapshot +`walls_above` / `walls_below` / `wall_zones` / `wall_events` / `crowding_global` / `history_window_minutes` / `sample_count_depth_history`；`data_quality` literal 加 `warming` |
+| `backend/engine.py` | 扩展 | CoinState 加 `orderbook_depth_history: deque(maxlen=12)` |
+| `backend/polls/orderbook_pressure.py` | 修改 | `limit=2 → 12`；按 `ts_sec` 去重写入 deque |
+| `backend/polls/orderflow.py` | 扩展 | `_build_lifecycles` 解析 `exchange_name`（多所共振依据） |
+| `backend/polls/derivatives.py` | 扩展 | `oi_exchange_rank` 加 `all_aggregated` key（6 周期 delta + U本位/币本位金额）|
+| `backend/processors/orderbook_pressure.py` | 修改 | 主入口 `compute_pressure_snapshot` 末尾调用引擎，整合新字段；旧 `walls` 路径完全保留 |
+| `backend/processors/liquidity_wall_engine.py` | **新增** | 700 行核心算法：M1 聚合/持续性/趋势 + M2 事件/拥挤度/磁铁/置信度/击穿风险 |
+| `backend/tests/test_liquidity_wall_engine.py` | **新增** | 45 个测试覆盖 M0-M2 + KL 隔离铁律 |
+| `frontend/src/lib/types.ts` | 扩展 | 8 个新类型 + OrderbookPressureSnapshot 7 个新字段 |
+| `frontend/src/components/MainView/LiquidityWallCard.tsx` | **新增** | 墙区视图 + 暖机横幅 + 全局拥挤度 chips + "如果打穿"展开卡 |
+| `frontend/src/components/MainView/OrderbookPressureView.tsx` | 修改 | 主视图按 `wall_zones` 存在性切换：新视图 / 旧视图 fallback；Footer 加滚动历史 + 墙区 + 事件计数 |
+
+## 四、验收结果
+
+| 维度 | 结果 |
+|---|---|
+| 后端 pytest | ✅ 1856 passed（前次 1811 + 新增 45）零回归 |
+| 后端 ReadLints | ✅ 0 errors |
+| 前端 `tsc --noEmit` | ✅ 0 errors |
+| 前端 ESLint | ✅ 0 errors / 0 warnings |
+| KL 铁律自动守护 | ✅ `test_kl_iso_walls_field_unchanged` 通过：旧 `walls` 字段 + KL 消费路径不变 |
+
+## 五、用户 6 大诉求 ↔ 实现位置最终映射
+
+| # | 诉求 | 数据字段 | 前端组件 |
+|---|---|---|---|
+| 1 | 上方哪里有卖墙 | `walls_above[]` | `LiquidityWallCard > WallSideCard(title="上方卖墙")` |
+| 2 | 下方哪里有买墙 | `walls_below[]` | `LiquidityWallCard > WallSideCard(title="下方买墙")` |
+| 3 | 多厚 / 多久 / 多源 | `current_usd / max_usd_1h / persistence_minutes / exchange_count` | `ZoneRow` 数据条（4 列）+ "多所共振"徽标 |
+| 4 | 增强 / 减弱 / 撤 / 吃 / 重挂 | `status / trend / wall_consumed_confidence / wall_removal_risk` | `ZoneRow` 状态徽标条（active/strengthening/weakening/removed/consumed/reloaded/absorbed）|
+| 5 | OI / 清算 / Funding / 拥挤 | `crowding_global` + `crowding_context.explain_chips` | `LiquidityWallCard > CrowdingChips`（顶部）+ 暖机横幅 |
+| 6 | 打穿后下一磁铁和风险区 | `sweep_target.{magnet_price, vacuum_gap_pct} + break_through_risk` | `ZoneRow > BreakThroughCard`（点击"如果打穿"展开）|
+
+## 六、铁律守护
+
+```
+不写：state.kl_history.* / KL.final_score / KL.strength_tier / KL.cascade_risk
+不喂：AI prompt 中 wall_zones / wall_events 原始数据
+只读：state.{taker_flow, cvd_*, oi_exchange_rank, multi_funding, ls_ratio, top_position_ratio,
+            liq_max_pain, liq_summary, footprint_*, large_orders_history, orderbook_depth_history}
+只写：state.orderbook_pressure_snapshot（向后兼容字段名 + 7 个新字段）
+```
+
+测试 `test_kl_iso_walls_field_unchanged` 自动验证：M1+M2 引擎调用后，旧 `walls` 字段 / `top_resistance` / `top_support` 仍由旧 `PressureWall` 路径填充，**不被新引擎污染**。这是 KL tracker 实际消费路径，铁律自动守护。
+
+## 七、下一步（M3 桥接 · 待批准启动）
+
+1. `KeyLevelV2.behavior` 加 `wall_context_ref`（只读引用 nearby zone 的 strength/status/persistence）
+2. `_apply_pressure_alignment` chip 升级：`ob_strong_bid → 稳定买墙 31m / 卖墙撤单风险 / 上方清算磁铁`
+3. `behavior_eval._detect_contradictions` 加 3 条规则：
+   - 强支撑 + 买墙 removed → contradiction(medium)
+   - 突破阻力 + 卖墙 reloaded → contradiction(high)
+   - 支撑 + 买墙 consumed + next_magnet 在下方 → contradiction(high)
+4. AI prompt：只追加 wall 摘要 chip 到 MAA facts，不给原始 zones/events
+5. KL `final_score / strength_tier / cascade_risk` 自动测试守护不变（铁律）
+
+预估 1-2 天，等用户拍板。

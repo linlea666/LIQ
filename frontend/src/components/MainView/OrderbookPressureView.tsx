@@ -9,6 +9,7 @@ import type {
   WallLabel,
   WallSource,
 } from "@/lib/types";
+import LiquidityWallCard from "./LiquidityWallCard";
 import OrderbookPressureCard from "./OrderbookPressureCard";
 
 /**
@@ -193,11 +194,28 @@ export default function OrderbookPressureView() {
     );
   }
 
+  // M1+M2 升级路径：有 wall_zones 时优先展示墙区视图（更直接回答 6 大诉求）
+  const hasWallZones = (snap.walls_above?.length || 0) + (snap.walls_below?.length || 0) > 0;
+  const isWarming = snap.data_quality === "warming";
+
   return (
     <div className="space-y-3">
       <Banner />
       <Header snap={snap} coin={coin} />
-      <StrongPressureCard walls={snap.walls || []} price={snap.last_price} coin={coin} />
+      {hasWallZones || isWarming ? (
+        <LiquidityWallCard
+          walls_above={snap.walls_above || []}
+          walls_below={snap.walls_below || []}
+          crowding={snap.crowding_global || null}
+          isWarming={isWarming}
+          historyWindowMinutes={snap.history_window_minutes || 60}
+          historySize={snap.sample_count_depth_history || 0}
+          lastPrice={snap.last_price}
+          coin={coin}
+        />
+      ) : (
+        <StrongPressureCard walls={snap.walls || []} price={snap.last_price} coin={coin} />
+      )}
       <DetailDrawer />
       <Footer snap={snap} />
     </div>
@@ -570,19 +588,30 @@ function Footer({ snap }: { snap: OrderbookPressureSnapshot }) {
       ? "text-emerald-400"
       : snap.data_quality === "partial"
         ? "text-yellow-400"
-        : "text-slate-500";
+        : snap.data_quality === "warming"
+          ? "text-amber-400"
+          : snap.data_quality === "stale"
+            ? "text-orange-400"
+            : "text-slate-500";
+  const histSize = snap.sample_count_depth_history || 0;
+  const histWindow = snap.history_window_minutes || 60;
   return (
     <div className="text-[10px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1 px-1">
       <span>
         depth 样本 <span className="text-slate-300">{snap.sample_count_depth}</span>
+      </span>
+      <span title={`滚动历史：${histSize} 帧 / 目标 ${histWindow / 5} 帧`}>
+        滚动历史 <span className="text-slate-300">{histSize}/{histWindow / 5}</span> 帧
       </span>
       <span>
         大单 lifecycle{" "}
         <span className="text-slate-300">{snap.sample_count_large_history}</span>
       </span>
       <span>
-        large_orders 墙{" "}
-        <span className="text-slate-300">{snap.sample_count_large_orders_walls}</span>
+        墙区 <span className="text-slate-300">{(snap.walls_above?.length || 0) + (snap.walls_below?.length || 0)}</span>
+      </span>
+      <span>
+        事件 <span className="text-slate-300">{snap.wall_events?.length || 0}</span>
       </span>
       <span>
         数据质量 <span className={qualityColor}>{snap.data_quality}</span>
