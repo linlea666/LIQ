@@ -206,6 +206,7 @@ export default function OrderbookPressureView() {
         <LiquidityWallCard
           walls_above={snap.walls_above || []}
           walls_below={snap.walls_below || []}
+          wall_events={snap.wall_events || []}
           crowding={snap.crowding_global || null}
           isWarming={isWarming}
           historyWindowMinutes={snap.history_window_minutes || 60}

@@ -327,6 +327,151 @@ class TestPersistenceAndTrend:
         assert len(zones) == 1
         assert zones[0].trend == "weakening"
 
+    def test_visible_minutes_uses_seed_threshold_not_wall_min(self):
+        """关键 bug 回归测试：seen 必须用 seed_min_usd（1M）门槛，
+        否则"价区内几个普通小 bin USD 之和 ≥ wall_min（500K）"会让所有 zone
+        都被判定 seen=12 → 全部"持续 55min"假象。
+
+        构造：
+          - 当前帧（i=11）：(99_500, 15) USD=1.49M（≥ seed → 形成 zone）
+          - 前 11 帧：(99_500, 4) USD=398K（< seed 1M，但 ≥ wall_min×0.8=400K
+            的边缘；旧 bug 会把这些都算成 seen）
+        预期：seen_count = 1（只有最后一帧），visible_minutes = 0，trend = new。
+        """
+        history = []
+        for i in range(11):
+            history.append(_make_frame(
+                1700_000_000 + i * 300,
+                bids=[(99_500, 4)], asks=[],   # 398K，普通小 bin（无种子）
+            ))
+        history.append(_make_frame(
+            1700_000_000 + 11 * 300,
+            bids=[(99_500, 15)], asks=[],      # 1.49M，种子（≥ seed_min）
+        ))
+        zones = _build_zones_for_side(
+            history, last_price=100_000, side="bid", atr=200.0,
+            cfg=ENGINE_DEFAULTS,
+        )
+        assert len(zones) == 1
+        z = zones[0]
+        assert z.seen_count == 1
+        assert z.visible_minutes == 0.0
+        assert z.trend == "new"
+
+    def test_visible_minutes_partial_history(self):
+        """仅后半段（6 帧）有种子 → seen_count = 6，visible_minutes ≈ 25min。"""
+        history = []
+        for i in range(6):
+            history.append(_make_frame(
+                1700_000_000 + i * 300,
+                bids=[(99_500, 4)], asks=[],   # 普通小 bin（无种子）
+            ))
+        for i in range(6, 12):
+            history.append(_make_frame(
+                1700_000_000 + i * 300,
+                bids=[(99_500, 15)], asks=[],  # 种子
+            ))
+        zones = _build_zones_for_side(
+            history, last_price=100_000, side="bid", atr=200.0,
+            cfg=ENGINE_DEFAULTS,
+        )
+        assert len(zones) == 1
+        z = zones[0]
+        assert z.seen_count == 6
+        # first_seen=帧 6（ts=1700_000_000+6×300）, last_seen=帧 11（+11×300）
+        # diff = 5 × 300 = 1500s = 25min
+        assert z.visible_minutes == pytest.approx(25, abs=1)
+
+
+# ════════════════════════════════════════════════════════════════════
+# M1 — Augment 容差匹配（大单 ↔ zone）
+# ════════════════════════════════════════════════════════════════════
+class TestAugmentTolerance:
+    """关键 bug 回归测试：大单 limit_price 是精确价（如 $77,455），
+    zone 边界由热力图离散 bin 决定（如 $77,460–510）。两者本就同源（都是
+    订单簿挂单），不容差匹配会因几 USD 错位而错过几乎所有大单。
+    """
+
+    def _make_zone(self, price_low: float, price_high: float, side: str = "ask") -> WallZone:
+        return WallZone(
+            side=side,
+            price_low=price_low,
+            price_high=price_high,
+            price_mid=(price_low + price_high) / 2,
+            peak_price=(price_low + price_high) / 2,
+            distance_pct=1.0,
+            current_usd=20_000_000,
+            max_usd_1h=20_000_000,
+            avg_usd_1h=20_000_000,
+            bin_count=2,
+            seen_count=12,
+            visible_minutes=55,
+            persistence_score=1.0,
+            trend="stable",
+            source="depth_only",
+        )
+
+    def _make_large_order(self, lid: int, price: float, side: str, exchange: str = "Binance") -> LargeOrderLifecycle:
+        return LargeOrderLifecycle(
+            id=lid, side=side, limit_price=price,
+            start_time_ms=1700_000_000_000,
+            start_quantity=25.8, current_quantity=25.8,
+            start_usd_value=2_000_000, current_usd_value=2_000_000,
+            executed_volume=0, executed_usd_value=0,
+            trade_count=0, state="holding",
+            exchange_name=exchange,
+        )
+
+    def test_large_order_within_zone_matched(self):
+        """大单 limit_price 直接落在 zone 价区内 → 匹配。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_large_orders
+        zones = [self._make_zone(77_460, 77_510, "ask")]
+        los = [self._make_large_order(1, 77_500, "ask")]
+        _augment_zones_with_large_orders(zones, los, last_price=76_700, cfg=ENGINE_DEFAULTS)
+        assert zones[0].large_order_ids == [1]
+        assert zones[0].source == "depth+large_order"
+
+    def test_large_order_5usd_outside_zone_matched_with_tolerance(self):
+        """大单 $77,455 vs zone $77,460–510 差 5 USD → 容差匹配应成功。
+        旧版严格 [low, high] 检查会错过；这是真实生产的常见场景。
+        """
+        from processors.liquidity_wall_engine import _augment_zones_with_large_orders
+        zones = [self._make_zone(77_460, 77_510, "ask")]
+        los = [self._make_large_order(2, 77_455, "ask")]
+        _augment_zones_with_large_orders(zones, los, last_price=76_700, cfg=ENGINE_DEFAULTS)
+        # 容差 = max(77485 × 0.001, 5) = max(77.5, 5) = 77.5 USD → 5 USD 错位匹配上
+        assert zones[0].large_order_ids == [2]
+
+    def test_large_order_far_outside_zone_not_matched(self):
+        """大单价位距 zone > 容差 → 不匹配。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_large_orders
+        zones = [self._make_zone(77_460, 77_510, "ask")]
+        los = [self._make_large_order(3, 78_000, "ask")]   # 远离 ~500 USD
+        _augment_zones_with_large_orders(zones, los, last_price=76_700, cfg=ENGINE_DEFAULTS)
+        assert zones[0].large_order_ids == []
+        assert zones[0].source == "depth_only"
+
+    def test_large_order_wrong_side_not_matched(self):
+        """卖墙 zone 不应匹配买方大单。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_large_orders
+        zones = [self._make_zone(77_460, 77_510, "ask")]
+        los = [self._make_large_order(4, 77_500, "bid")]
+        _augment_zones_with_large_orders(zones, los, last_price=76_700, cfg=ENGINE_DEFAULTS)
+        assert zones[0].large_order_ids == []
+
+    def test_exchange_count_aggregates_multiple_exchanges(self):
+        """同一 zone 价位有 BN + OKX + Bybit 三家大单 → exchange_count = 3。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_large_orders
+        zones = [self._make_zone(77_460, 77_510, "ask")]
+        los = [
+            self._make_large_order(5, 77_470, "ask", "Binance"),
+            self._make_large_order(6, 77_480, "ask", "OKX"),
+            self._make_large_order(7, 77_500, "ask", "Bybit"),
+        ]
+        _augment_zones_with_large_orders(zones, los, last_price=76_700, cfg=ENGINE_DEFAULTS)
+        assert zones[0].exchange_count == 3
+        assert len(zones[0].large_order_ids) == 3
+
 
 # ════════════════════════════════════════════════════════════════════
 # M1 — Warming

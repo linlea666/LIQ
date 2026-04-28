@@ -71,6 +71,8 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "max_zones_per_side": 5,               # 每侧最多输出 5 个墙区
     "max_distance_pct_for_zone": 12.0,     # 仅看 ±12% 内
     "history_window_minutes": 60,          # 1h 滚动（5m × 12）
+    "augment_match_tol_pct": 0.001,        # 大单 ↔ zone 容差匹配 0.1%
+    "augment_match_tol_usd_min": 5.0,      # 容差最低 5 USD（防小币太小不够）
 
     # M1：persistence / trend
     "warming_seconds": 1800,               # 30min 暖机期内不出 persistence/magnet
@@ -231,6 +233,27 @@ def _frame_zone_range_usd(
     return total
 
 
+def _frame_has_wall_seed(
+    frame: OrderbookDepthSnapshot,
+    raw: _RawZone,
+    seed_min_usd: float,
+) -> bool:
+    """该帧 zone 价区内是否存在 ≥ seed_min_usd 的"种子 bin"——
+    即"墙是否真的在该帧出现"。
+
+    用于 seen_count / first_seen_ts / last_seen_ts / visible_minutes 计算。
+    比"价区内总 USD ≥ wall_min_usd"更严格：避免"几个普通小 bin 之和达标"
+    导致每帧都被判 seen 而出现"所有 zone 都 55min 持续"的失真。
+    """
+    bins = frame.bids if raw.side == "bid" else frame.asks
+    if not bins:
+        return False
+    for b in bins:
+        if raw.price_low <= b.price <= raw.price_high and b.usd_value >= seed_min_usd:
+            return True
+    return False
+
+
 def _compute_zone_history_stats(
     raw: _RawZone,
     history: Sequence[OrderbookDepthSnapshot],
@@ -239,33 +262,37 @@ def _compute_zone_history_stats(
 ) -> dict:
     """对单个 raw zone 用 history 回填 max_usd_1h / avg_usd_1h / persistence / trend。
 
-    所有指标统一基于"该 zone 价区内全部 bin USD 总和"（zone 价区已由种子合并决定，
-    跨度通常几十 USD，不会被全 bin 灌水）。current/max/avg 同基准，trend 不失真。
+    采用**两层语义分离**：
+      - max/avg/current（流动性视图）：价区内**全部** bin USD 总和 → trend 不失真
+      - seen_count / visible_minutes（墙真实存在性）：价区内是否有 ≥ seed_min_usd
+        的种子 bin → 严格判定"墙真的在那一帧出现"
 
-    seen_count = 在 history 各帧中该价区 USD ≥ wall_min_usd 的帧数。
-    visible_minutes = (last_seen_ts - first_seen_ts) / 60。
-    persistence_score = clamp(visible_minutes / target_minutes, 0, 1)。
+    避免初版 bug：seen 用"全部 bin USD ≥ wall_min（500K）"门槛过松，价区内
+    几个普通小 bin 之和很容易达标，导致**所有 zone 都显示"持续 55min"**。
     """
     wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
+    seed_min = cfg.get("seed_min_usd", ENGINE_DEFAULTS["seed_min_usd"])
     target_min = cfg.get("persistence_target_minutes",
                          ENGINE_DEFAULTS["persistence_target_minutes"])
 
     frame_totals: list[tuple[int, float]] = []   # (ts_sec, range_usd_in_zone)
+    seen_ts: list[int] = []                      # 该帧"墙真的在"
     for frame in history:
         ft = _frame_zone_range_usd(frame, raw)
         frame_totals.append((frame.ts_sec, ft))
+        if _frame_has_wall_seed(frame, raw, seed_min):
+            seen_ts.append(frame.ts_sec)
 
-    seen = [(ts, v) for ts, v in frame_totals if v >= wall_min]
-    seen_count = len(seen)
-    if seen:
-        first_seen_ts = seen[0][0]
-        last_seen_ts = seen[-1][0]
+    seen_count = len(seen_ts)
+    if seen_ts:
+        first_seen_ts = seen_ts[0]
+        last_seen_ts = seen_ts[-1]
         visible_minutes = max(0.0, (last_seen_ts - first_seen_ts) / 60.0)
     else:
         first_seen_ts = last_seen_ts = 0
         visible_minutes = 0.0
 
-    valid_values = [v for _, v in frame_totals if v > 0]
+    valid_values = [v for _, v in frame_totals if v >= wall_min]
     if valid_values:
         max_usd = max(valid_values)
         avg_usd = sum(valid_values) / len(valid_values)
@@ -442,21 +469,35 @@ def _augment_zones_with_large_orders(
 ) -> None:
     """把 large_orders（仍 holding 的）匹配到 zone：
 
-    - 价格落入 [price_low, price_high] → 加入 large_order_ids
+    - 价格落入 [price_low - tol, price_high + tol] → 加入 large_order_ids
+      容差 tol = max(price * augment_match_tol_pct, augment_match_tol_usd_min)
+      原因：大单 limit_price 是精确价（如 $77,455），但 zone 边界由热力图离散
+      bin 决定（如 $77,460–510，步进 5/10 USD）。两者本就同源（都是订单簿挂单），
+      不容差匹配会因几 USD 错位而错过几乎所有大单。
     - 同时记录覆盖的 exchange_name 集合 → exchange_count
-    - source 升级：depth_only → depth+large_order；若仅有大单（无 depth）保持 depth_only
-      （depth_only/large_order_only 主要由当前实现决定，这里做"双源共振"标记即可）
+    - source 升级：depth_only → depth+large_order
     """
     if not zones or not large_orders:
         return
     holding = [lo for lo in large_orders if lo.state == "holding" and lo.limit_price > 0]
+    if not holding:
+        return
+
+    tol_pct = cfg.get("augment_match_tol_pct",
+                      ENGINE_DEFAULTS.get("augment_match_tol_pct", 0.001))   # 0.1%
+    tol_min = cfg.get("augment_match_tol_usd_min",
+                      ENGINE_DEFAULTS.get("augment_match_tol_usd_min", 5.0))  # ≥ 5 USD
+
     for z in zones:
+        tol = max(z.peak_price * tol_pct, tol_min)
+        lo_bound = z.price_low - tol
+        hi_bound = z.price_high + tol
         ids: list[int] = []
         exchanges: set[str] = set()
         for lo in holding:
             if lo.side != z.side:
                 continue
-            if z.price_low <= lo.limit_price <= z.price_high:
+            if lo_bound <= lo.limit_price <= hi_bound:
                 ids.append(lo.id)
                 if lo.exchange_name:
                     exchanges.add(lo.exchange_name)

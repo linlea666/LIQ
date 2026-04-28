@@ -18,6 +18,8 @@ import { useState } from "react";
 import { formatCnUsd, formatPrice } from "@/lib/format";
 import type {
   PositionCrowdingSnapshot,
+  WallEvent,
+  WallEventType,
   WallZone,
   WallZoneStatus,
   WallZoneTrend,
@@ -89,10 +91,21 @@ const TIER_STYLES: Record<string, { bg: string; fg: string }> = {
   C: { bg: "bg-slate-600/30", fg: "text-slate-400" },
 };
 
+// ── 事件类型样式（对应诉求 4：增强 / 减弱 / 撤掉 / 被吃 / 重挂） ────────
+const EVENT_STYLES: Record<WallEventType, { label: string; color: string; icon: string }> = {
+  wall_appeared:     { label: "出现",   color: "text-blue-300",    icon: "✨" },
+  wall_strengthened: { label: "增厚",   color: "text-emerald-300", icon: "↑" },
+  wall_weakened:     { label: "减薄",   color: "text-yellow-300",  icon: "↓" },
+  wall_removed:      { label: "撤掉",   color: "text-orange-300",  icon: "✗" },
+  wall_consumed:     { label: "被吃",   color: "text-red-300",     icon: "🔥" },
+  wall_reloaded:     { label: "重挂",   color: "text-violet-300",  icon: "↻" },
+};
+
 // ── 主入口 ──────────────────────────────────────────────────────────────
 interface Props {
   walls_above: WallZone[];
   walls_below: WallZone[];
+  wall_events: WallEvent[];
   crowding: PositionCrowdingSnapshot | null;
   isWarming: boolean;
   historyWindowMinutes: number;
@@ -104,6 +117,7 @@ interface Props {
 export default function LiquidityWallCard({
   walls_above,
   walls_below,
+  wall_events,
   crowding,
   isWarming,
   historyWindowMinutes,
@@ -139,6 +153,98 @@ export default function LiquidityWallCard({
           emptyText="下方 ±12% 内暂无满足条件的买墙"
         />
       </div>
+      {!isWarming && <WallEventsTimeline events={wall_events} coin={coin} />}
+    </div>
+  );
+}
+
+// ── 行为事件流（对应诉求 4：增强/减弱/撤掉/被吃/重挂） ─────────────────
+function WallEventsTimeline({ events, coin }: { events: WallEvent[]; coin: string }) {
+  const [open, setOpen] = useState(false);
+  if (!events || events.length === 0) {
+    return (
+      <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg px-3 py-2 text-[11px] text-slate-500">
+        📜 行为事件流：1h 内无显著事件（暖机后才记录；市场平淡时正常）
+      </div>
+    );
+  }
+  // 倒序展示（最新在前）
+  const sorted = [...events].sort((a, b) => b.ts_sec - a.ts_sec);
+  const visible = open ? sorted : sorted.slice(0, 5);
+
+  return (
+    <div className="bg-slate-800/40 border border-slate-700/60 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-700/50 flex items-center gap-2 text-[12px]">
+        <span className="font-semibold text-slate-300">📜 行为事件流</span>
+        <span className="text-[10px] text-slate-500">最近 {sorted.length} 条 · 倒序</span>
+        <div className="flex-1" />
+        {sorted.length > 5 && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="text-[11px] text-slate-400 hover:text-slate-200"
+          >
+            {open ? `收起（仅看前 5 条）` : `展开全部 ${sorted.length} 条`}
+          </button>
+        )}
+      </div>
+      <div className="divide-y divide-slate-700/40">
+        {visible.map((e, i) => (
+          <EventRow key={`${e.ts_sec}-${e.price_mid}-${i}`} event={e} coin={coin} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EventRow({ event, coin }: { event: WallEvent; coin: string }) {
+  const style = EVENT_STYLES[event.event_type];
+  const sideColor = event.side === "ask" ? "text-red-400" : "text-emerald-400";
+  const sideText = event.side === "ask" ? "卖墙" : "买墙";
+
+  // 时间格式 hh:mm
+  const d = new Date(event.ts_sec * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+
+  // 厚度变化
+  const sizeBefore = event.size_before_usd;
+  const sizeAfter = event.size_after_usd;
+  let deltaText: string | null = null;
+  if (sizeBefore != null && sizeAfter != null) {
+    const delta = sizeAfter - sizeBefore;
+    deltaText = (delta >= 0 ? "+" : "") + formatCnUsd(delta);
+  } else if (sizeBefore != null && event.event_type === "wall_removed") {
+    deltaText = "-" + formatCnUsd(sizeBefore);
+  } else if (sizeAfter != null && event.event_type === "wall_appeared") {
+    deltaText = "+" + formatCnUsd(sizeAfter);
+  }
+
+  return (
+    <div className="px-3 py-1.5 flex items-center gap-2 text-[11px] hover:bg-slate-700/15 transition-colors">
+      <span className="font-mono text-slate-500 shrink-0">{hh}:{mm}</span>
+      <span className={`font-mono shrink-0 ${sideColor}`}>{formatPrice(event.price_mid, coin)}</span>
+      <span className="text-slate-500 shrink-0">{sideText}</span>
+      <span className={`shrink-0 ${style.color}`} title={event.explain}>
+        {style.icon} {style.label}
+      </span>
+      {deltaText && (
+        <span className="font-mono text-slate-400 shrink-0">{deltaText}</span>
+      )}
+      {event.executed_usd_value != null && event.executed_usd_value > 0 && (
+        <span className="font-mono text-red-300 shrink-0" title="期间被市价单成交的金额">
+          🔥 吃 {formatCnUsd(event.executed_usd_value)}
+        </span>
+      )}
+      <span className="text-[10px] text-slate-500 truncate" title={event.explain}>
+        {event.explain}
+      </span>
+      <div className="flex-1" />
+      {event.confidence > 0 && (
+        <span className="text-[10px] text-slate-500 font-mono shrink-0" title="事件置信度">
+          {Math.round(event.confidence * 100)}%
+        </span>
+      )}
     </div>
   );
 }
@@ -375,16 +481,37 @@ function ZoneRow({
         ))}
       </div>
 
-      {/* "如果打穿"展开（暖机期不展示） */}
+      {/* "如果打穿"折叠态预览 + 详情（暖机期不展示） */}
       {!isWarming && zone.sweep_target && (
         <div className="mt-2 pt-2 border-t border-slate-700/30">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="text-[11px] text-slate-400 hover:text-slate-200 inline-flex items-center gap-1"
+            className="text-[11px] text-slate-400 hover:text-slate-200 inline-flex items-center gap-1.5 flex-wrap w-full"
           >
             <span>{open ? "▼" : "▶"}</span>
-            <span>如果打穿 → 下一磁铁</span>
+            <span>如果打穿</span>
+            <span className="text-slate-600">→</span>
+            <span className="text-slate-500">磁铁</span>
+            <span className="font-mono text-slate-300">
+              {formatPrice(zone.sweep_target.magnet_price, coin)}
+            </span>
+            <span className={`font-mono ${zone.sweep_target.distance_pct >= 0 ? "text-red-300" : "text-emerald-300"}`}>
+              ({zone.sweep_target.distance_pct >= 0 ? "+" : ""}{zone.sweep_target.distance_pct.toFixed(2)}%)
+            </span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">风险</span>
+            <span
+              className={`font-mono ${
+                zone.break_through_risk >= 0.7 ? "text-red-300" :
+                zone.break_through_risk >= 0.4 ? "text-yellow-300" : "text-slate-300"
+              }`}
+            >
+              {Math.round(zone.break_through_risk * 100)}%
+            </span>
+            {zone.sweep_target.vacuum_gap_pct >= 0.5 && (
+              <span className="text-red-300/80 text-[10px]">⚠ 真空 {zone.sweep_target.vacuum_gap_pct.toFixed(2)}%</span>
+            )}
           </button>
           {open && (
             <BreakThroughCard zone={zone} lastPrice={lastPrice} coin={coin} />
