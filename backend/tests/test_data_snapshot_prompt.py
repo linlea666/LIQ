@@ -101,7 +101,26 @@ def _full_snapshot() -> dict:
                 {"price": 87000, "strength_tier": "S", "side": "resistance",
                  "state": "approaching", "confluence_score": 82, "source_count": 4,
                  "distance_pct": 1.2, "test_count": 2, "sweep_usd": 0,
-                 "cascade_risk": 0.0, "sources": ["liq_cluster", "poc", "ma60_daily"]},
+                 "cascade_risk": 0.0, "sources": ["liq_cluster", "poc", "ma60_daily"],
+                 # M2.5 · 行为观测层（V3 双轨）→ 触发 §9g.1 渲染
+                 "behavior": {
+                     "behavior_state": "flip_pending",
+                     "state_confidence": 0.55,
+                     "breakout_validity": 0.62,
+                     "retest_quality": 0.0,
+                     "selloff_continuation_risk": 0.0,
+                     "capitulation_bottom_score": 0.0,
+                     "flip_confirmation": 0.45,
+                     "false_break_risk": 0.20,
+                     "explain_chips": ["突破质量良好", "等待回踩验证"],
+                     "components_used": ["breakout_validity", "flip_confirmation"],
+                     "evaluated_at": 1713763800,
+                     "bounce_quality_enhanced": 0.0,
+                     "breakout_stage_enhanced": 1,
+                     "fake_break_strength": 0.0,
+                     "dynamic_break_depth_pct": 0.45,
+                     "contradiction_with_state": [],
+                 }},
             ],
             "signals": [],
         },
@@ -297,6 +316,75 @@ class TestKeepDataSections:
         snap["orderbook_spread_pct"] = 41.76  # P0.8 HIGH-1 场景
         out = build_data_snapshot_prompt(snap)
         assert "极端异常值" in out
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 2.5 §9g.1 行为观测层（V3 · M2.5 双轨）渲染验证
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestKeyLevelBehaviorSection:
+    """§9g.1 是 V3 关键位行为观测层在数据切片中的呈现。
+
+    设计纪律：
+      - 同份切片同时含 §9g（V2 状态机）+ §9g.1（V2.5 双轨观测）
+      - §9g.1 仅在存在显著 behavior 时渲染（pending+无冲突→ 不渲染）
+      - 冲突预警必须以 ⚠ 提示，但**不**让其他 AI 推翻 9g
+    """
+
+    def test_renders_when_behavior_state_active(self):
+        """含 flip_pending 的 level → 9g.1 应出现 + 含 behavior_state 中文。"""
+        out = build_data_snapshot_prompt(_full_snapshot())
+        assert "### 9g.1" in out
+        assert "翻转待确认" in out  # flip_pending 中文
+        assert "conf=" in out  # 置信度展示
+
+    def test_renders_significant_scores(self):
+        """≥ 0.4 的分数应展示；< 0.4 的不展示（避免噪声）。"""
+        out = build_data_snapshot_prompt(_full_snapshot())
+        assert "突破:0.62" in out  # >= 0.4
+        assert "翻转:0.45" in out  # >= 0.4
+        # false_break_risk=0.20 < 0.4 → 不应展示
+        seg_91 = out.split("### 9g.1", 1)[1].split("### 9g2", 1)[0] \
+            if "### 9g2" in out else out.split("### 9g.1", 1)[1]
+        assert "假破:0.20" not in seg_91
+
+    def test_section_91_disclaimer_does_not_override_9g(self):
+        """§9g.1 必须明确为辅助层，不得让 AI 单独反驳 9g。"""
+        out = build_data_snapshot_prompt(_full_snapshot())
+        seg_91 = out.split("### 9g.1", 1)[1]
+        assert "第二意见" in seg_91 or "辅助" in seg_91
+
+    def test_skip_when_pending_and_no_contradiction(self):
+        """pending state + 无冲突 → 该 level 不出现在 §9g.1（无信号）。"""
+        snap = _full_snapshot()
+        snap["key_levels"]["levels"][0]["behavior"]["behavior_state"] = "pending"
+        snap["key_levels"]["levels"][0]["behavior"]["contradiction_with_state"] = []
+        out = build_data_snapshot_prompt(snap)
+        # 仅一个 level，pending 且无冲突 → §9g.1 整段不渲染
+        assert "### 9g.1" not in out
+
+    def test_renders_when_pending_but_has_contradiction(self):
+        """pending state + 有冲突 → 仍要展示该 level（让 AI 看到风险）。"""
+        snap = _full_snapshot()
+        snap["key_levels"]["levels"][0]["behavior"]["behavior_state"] = "pending"
+        snap["key_levels"]["levels"][0]["behavior"]["contradiction_with_state"] = [
+            "支撑接触但破位延续风险高"
+        ]
+        out = build_data_snapshot_prompt(snap)
+        assert "### 9g.1" in out
+        assert "⚠" in out
+        assert "破位延续风险" in out
+
+    def test_dual_track_v1_v2_comparison_renders(self):
+        """V1 bounce_quality + V2 enhanced 都存在 → 双轨对照应展示。"""
+        snap = _full_snapshot()
+        lv = snap["key_levels"]["levels"][0]
+        lv["bounce_quality"] = "proactive"
+        lv["behavior"]["bounce_quality_enhanced"] = 0.42
+        lv["behavior"]["behavior_state"] = "weak_bounce"
+        out = build_data_snapshot_prompt(snap)
+        assert "V1反弹=主动" in out
+        assert "V2=0.42" in out
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -798,6 +798,20 @@ export interface BehaviorEval {
   explain_chips: string[];            // 行为侧 chip（独立显示，不污染原 explain_chips）
   components_used: string[];          // 数据完整性：哪些子因子参与了计算
   evaluated_at: number;               // 评估时间戳（秒）
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // M2.5 双轨并行 · 影子字段（与后端 BehaviorEval 一致）
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 旧 4 个 tracker 函数（_assess_bounce_quality / _assess_breakout_stage /
+  // _fake_break_reclaim / _is_broken）保持不变；这里同时输出 V2 增强版结果，
+  // 用于前端"V1 vs V2 对比"展示与 M3 回测决定何时切换。
+  bounce_quality_enhanced?: number;   // 0-1 连续（替代 V1 的 proactive/passive 分类）
+  breakout_stage_enhanced?: number;   // 0/1/2/3，时间窗按 timeframe 自适应缩放
+  fake_break_strength?: number;       // 0-1 假突破回收强度（替代 V1 布尔事件）
+  dynamic_break_depth_pct?: number;   // 动态破位阈值百分比（V1 固定 0.3%）
+
+  // state vs behavior 严重不一致时记入（白话原因，前端 ⚠ 提示）
+  contradiction_with_state?: string[];
 }
 
 // M1 新增：清算磁铁通道（独立列表，不参与 levels 评分）

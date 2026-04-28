@@ -37,7 +37,12 @@ from processors.key_level_behavior_eval import (
     _calc_selloff_continuation,
     _clamp01,
     _derive_behavior_state,
+    _detect_contradictions,
     _prepare_context,
+    assess_fake_break_strength,
+    compute_bounce_quality_v2,
+    compute_breakout_stage_v2,
+    compute_dynamic_break_depth_pct,
     evaluate_behavior,
 )
 
@@ -541,6 +546,234 @@ class TestClamp01:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 与 run_tracker_v2 集成回归
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2.5 · V2 双轨增强函数（影子字段）测试
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestBounceQualityV2:
+    def _ctx(self, candles, atr=500):
+        return _prepare_context(
+            candles_15m=candles, candles_1h=None, cvd=None,
+            oi_change_pct_1h=0.0, taker_buy_vol=0, taker_sell_vol=0,
+            atr=atr, cfg=_DEFAULT_BEHAVIOR_CFG,
+        )
+
+    def test_zero_when_not_bounced(self):
+        """非 bounced state → 严格返回 0.0（不污染影子）。"""
+        for state in ("idle", "approaching", "testing", "broken", "flipped", "swept"):
+            lv = KeyLevelV2(price=100_000, side="support", state=state)
+            score = compute_bounce_quality_v2(lv, self._ctx(_candles()), _DEFAULT_BEHAVIOR_CFG)
+            assert score == 0.0, f"state={state} 应该返回 0.0，得到 {score}"
+
+    def test_high_quality_proactive(self):
+        """支撑反弹 + 阳线 + 高 z-score + 大实体 → 高分。"""
+        # 历史均量 100，最后一根放量到 300（z-score 大），阳线
+        candles = _candles(n=30, base=100_000, base_vol=100,
+                           last_open=99_900, last_close=100_300, last_high=100_350,
+                           last_low=99_900, last_vol=300)
+        ctx = self._ctx(candles)
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        score = compute_bounce_quality_v2(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        assert score >= 0.65
+
+    def test_low_quality_passive(self):
+        """支撑反弹 + 缩量 → 低分。"""
+        candles = _candles(n=30, base=100_000, base_vol=200,
+                           last_open=99_950, last_close=100_050, last_high=100_080,
+                           last_low=99_940, last_vol=60)  # 0.3x
+        ctx = self._ctx(candles)
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        score = compute_bounce_quality_v2(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        assert score <= 0.40
+
+    def test_wrong_direction_returns_zero(self):
+        """支撑反弹但收阴线 → 方向不对，返回 0.0。"""
+        candles = _candles(n=30, base=100_000, base_vol=100,
+                           last_open=100_100, last_close=99_950, last_vol=300)
+        ctx = self._ctx(candles)
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        score = compute_bounce_quality_v2(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        assert score == 0.0
+
+
+class TestBreakoutStageV2:
+    def _ctx(self, candles):
+        return _prepare_context(
+            candles_15m=candles, candles_1h=None, cvd=None,
+            oi_change_pct_1h=0.0, taker_buy_vol=0, taker_sell_vol=0,
+            atr=500, cfg=_DEFAULT_BEHAVIOR_CFG,
+        )
+
+    def test_zero_when_not_broken_or_flipped(self):
+        for state in ("idle", "approaching", "testing", "bounced", "swept", "fake_break"):
+            lv = KeyLevelV2(price=100_000, side="support", state=state,
+                            state_ts=int(time.time()) - 100)
+            stage = compute_breakout_stage_v2(
+                lv, atr=500, ctx=self._ctx(_candles()),
+                cfg=_DEFAULT_BEHAVIOR_CFG, now=int(time.time()),
+            )
+            assert stage == 0
+
+    def test_1d_timeframe_extends_window(self):
+        """1D 关键位破位 5 小时（旧固定窗已过期）→ V2 仍返回 stage 1。"""
+        now = int(time.time())
+        lv = KeyLevelV2(
+            price=100_000, side="support", state="broken",
+            state_ts=now - 5 * 3600,  # 5 小时前
+            timeframe="1D",
+        )
+        stage = compute_breakout_stage_v2(
+            lv, atr=500, ctx=self._ctx(_candles()),
+            cfg=_DEFAULT_BEHAVIOR_CFG, now=now,
+        )
+        # 旧固定窗 stage1=900s（15min）→ 5h 早过期
+        # 新自适应窗 stage1=900*24=21600s（6h）→ 5h 内仍是 stage 1
+        assert stage == 1
+
+    def test_15m_timeframe_compresses_window(self):
+        """15m 关键位破位 5 分钟 → V2 缩放后仍是 stage 1。"""
+        now = int(time.time())
+        lv = KeyLevelV2(
+            price=100_000, side="support", state="broken",
+            state_ts=now - 5 * 60,
+            timeframe="15m",
+        )
+        stage = compute_breakout_stage_v2(
+            lv, atr=500, ctx=self._ctx(_candles()),
+            cfg=_DEFAULT_BEHAVIOR_CFG, now=now,
+        )
+        # 15m: stage1=900*0.25=225s，5min=300s → 已超 stage 1，进入 stage 2 判定
+        # 但 candles 没有触达 level 的回踩 → 返回 stage 1
+        assert stage in (1, 2)
+
+
+class TestFakeBreakStrength:
+    def _ctx(self, candles):
+        return _prepare_context(
+            candles_15m=candles, candles_1h=None, cvd=None,
+            oi_change_pct_1h=0.0, taker_buy_vol=0, taker_sell_vol=0,
+            atr=500, cfg=_DEFAULT_BEHAVIOR_CFG,
+        )
+
+    def test_zero_when_not_relevant_state(self):
+        for state in ("idle", "bounced", "flipped", "swept", "testing"):
+            lv = KeyLevelV2(price=100_000, side="support", state=state)
+            assert assess_fake_break_strength(lv, self._ctx(_candles())) == 0.0
+
+    def test_long_lower_wick_high_strength(self):
+        """支撑 fake_break + 长下影回收 → 高分。"""
+        # 倒数第二根（已收盘）：长下影 + close ≥ price
+        candles = _candles(n=30, base=100_000, base_vol=100)
+        candles[-2] = CandleData(
+            coin="BTC", ts=candles[-2].ts,
+            o=100_050, h=100_100, l=99_300, c=100_080, vol=200,
+        )
+        # 当前根的 last_wick_lower_ratio 由 prepare_context 算出
+        # 我们手动构造让 prepare_context 看到长下影
+        candles[-1] = CandleData(
+            coin="BTC", ts=candles[-1].ts,
+            o=100_080, h=100_120, l=99_400, c=100_100, vol=150,
+        )
+        lv = KeyLevelV2(price=100_000, side="support", state="fake_break",
+                        fake_break_count=1)
+        score = assess_fake_break_strength(lv, self._ctx(candles))
+        assert score >= 0.55
+
+    def test_close_below_price_returns_zero(self):
+        """支撑 fake_break 但 last_closed.close < price → 0（未真正回收）。"""
+        candles = _candles(n=30, base=100_000)
+        candles[-2] = CandleData(
+            coin="BTC", ts=candles[-2].ts,
+            o=99_900, h=99_950, l=99_500, c=99_700, vol=100,
+        )
+        lv = KeyLevelV2(price=100_000, side="support", state="fake_break")
+        score = assess_fake_break_strength(lv, self._ctx(candles))
+        assert score == 0.0
+
+
+class TestDynamicBreakDepthPct:
+    def test_returns_max_of_cfg_and_atr_pct(self):
+        # ATR=500, price=100_000 → ATR%=0.5%, k=0.3 → 0.15%
+        # cfg=0.3% → max(0.3, 0.15)=0.3
+        depth = compute_dynamic_break_depth_pct(atr=500, price=100_000, cfg=_DEFAULT_BEHAVIOR_CFG)
+        assert abs(depth - 0.3) < 1e-6
+
+    def test_high_volatility_uses_atr(self):
+        # ATR=2000, price=100_000 → ATR%=2%, k=0.3 → 0.6%
+        # cfg=0.3% → max(0.3, 0.6)=0.6
+        depth = compute_dynamic_break_depth_pct(atr=2000, price=100_000, cfg=_DEFAULT_BEHAVIOR_CFG)
+        assert abs(depth - 0.6) < 1e-6
+
+    def test_zero_inputs_return_cfg(self):
+        depth = compute_dynamic_break_depth_pct(atr=0, price=100_000, cfg=_DEFAULT_BEHAVIOR_CFG)
+        assert abs(depth - 0.3) < 1e-6
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2.5 · 冲突预警（state vs behavior 不一致）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestContradictionDetection:
+    def test_broken_with_low_validity_and_high_false_risk(self):
+        lv = KeyLevelV2(price=100_000, side="support", state="broken")
+        e = BehaviorEval(breakout_validity=0.20, false_break_risk=0.75)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("可能假破" in c for c in out)
+
+    def test_broken_low_validity_only(self):
+        lv = KeyLevelV2(price=100_000, side="resistance", state="broken")
+        e = BehaviorEval(breakout_validity=0.15, false_break_risk=0.40)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("假突破" in c for c in out)
+
+    def test_bounced_with_unhealthy_retest(self):
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced")
+        e = BehaviorEval(retest_quality=0.20)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("不健康" in c for c in out)
+
+    def test_flipped_unconfirmed(self):
+        lv = KeyLevelV2(price=100_000, side="support", state="flipped")
+        e = BehaviorEval(flip_confirmation=0.20)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("市场未确认" in c for c in out)
+
+    def test_v1_v2_divergence_proactive_to_passive(self):
+        """V1 主动 vs V2 被动（背离 → 提示）。"""
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced",
+                        bounce_quality="proactive")
+        e = BehaviorEval(bounce_quality_enhanced=0.20, retest_quality=0.50)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("V1 标记主动" in c for c in out)
+
+    def test_no_contradiction_when_aligned(self):
+        """state == bounced + 高 retest_quality + V1 V2 一致 → 无冲突。"""
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced",
+                        bounce_quality="proactive")
+        e = BehaviorEval(retest_quality=0.75, bounce_quality_enhanced=0.80)
+        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert out == []
+
+
+class TestEvalWritesV2Fields:
+    def test_evaluate_behavior_populates_v2_shadow_fields(self):
+        """主入口必须写入所有 V2 影子字段（即使值为 0 也是显式赋值）。"""
+        lv = KeyLevelV2(price=100_000, side="support", state="bounced",
+                        state_ts=int(time.time()) - 60,
+                        bounce_quality="proactive", breakout_stage=0)
+        snap = _snapshot([lv])
+        evaluate_behavior(snap, candles_15m=_candles(last_vol=200))
+        b = snap.levels[0].behavior
+        assert b is not None
+        # V2 影子字段都是浮点数 / 整数，不是 None
+        assert isinstance(b.bounce_quality_enhanced, float)
+        assert isinstance(b.breakout_stage_enhanced, int)
+        assert isinstance(b.fake_break_strength, float)
+        assert isinstance(b.dynamic_break_depth_pct, float)
+        # contradiction_with_state 必须是 list（即使空）
+        assert isinstance(b.contradiction_with_state, list)
+
 
 class TestIntegrationWithTracker:
     def test_run_tracker_v2_writes_behavior(self):

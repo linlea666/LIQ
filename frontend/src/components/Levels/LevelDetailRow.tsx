@@ -22,10 +22,6 @@ import { useState } from "react";
 import { formatPrice, formatCnUsd } from "@/lib/format";
 import { summarizeSources } from "@/lib/sourceBrief";
 import {
-  bounceQualityBrief,
-  breakoutStageBrief,
-} from "@/lib/structureBrief";
-import {
   cascadeBrief,
   displayScore,
   fmtUsdShort,
@@ -97,8 +93,8 @@ export default function LevelDetailRow({
   const moreChipCount = Math.max(0, chipsRaw.length - briefChips.length);
 
   const cb = cascadeBrief(lv);
-  const bounce = bounceQualityBrief(lv.bounce_quality);
-  const stage = breakoutStageBrief(lv.breakout_stage);
+  // M2.5：bounce_quality / breakout_stage 已下沉到 LevelBehaviorPanel V1/V2 双轨块，
+  // 不再单独 brief 化展示，避免重复信息。
   const cascadeTooltip =
     cb?.hint ??
     (cascadePct > 0 ? `cascade_risk=${cascadePct.toFixed(0)}%` : "无显著级联风险");
@@ -338,26 +334,9 @@ export default function LevelDetailRow({
                   </div>
                 )}
 
-                {/* 当前状态附加（反弹质量 / 突破阶段） */}
-                {(bounce || stage) && (
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-1">
-                      ⚡ 当前状态附加
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-slate-300">
-                      {bounce && (
-                        <span title={bounce.hint} className={bounce.color}>
-                          {bounce.label}
-                        </span>
-                      )}
-                      {stage && (
-                        <span title={stage.hint} className={stage.color}>
-                          {stage.label}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* M2.5：旧"⚡ 当前状态附加"已下沉到 LevelBehaviorPanel 的 V1/V2 双轨块，
+                    避免同一信息（V1 反弹质量 / V1 突破阶段）在折叠区出现两处。
+                    Main row 仍保留 bounce / stage chip 用作不展开时的速览。 */}
               </div>
 
               {/* 右列：风险 + 失效 + 数据 + 生命周期 */}
@@ -476,7 +455,14 @@ export default function LevelDetailRow({
 
                 {/* M4 · 行为评估面板（V3 行为验证层 · 2026-04 · 纯观测） */}
                 {lv.behavior && (
-                  <LevelBehaviorPanel behavior={lv.behavior} state={lv.state} />
+                  <LevelBehaviorPanel
+                    behavior={lv.behavior}
+                    state={lv.state}
+                    v1={{
+                      bounce_quality: lv.bounce_quality,
+                      breakout_stage: lv.breakout_stage,
+                    }}
+                  />
                 )}
 
                 {/* 生命周期 */}

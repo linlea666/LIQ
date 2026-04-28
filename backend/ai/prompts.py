@@ -1528,6 +1528,87 @@ def build_user_prompt(snapshot: dict) -> str:
                 for w in sig.get("warnings", []):
                     lines.append(f"    ⚠ {w}")
 
+        # ── §9g.1 行为观测层（V3 · M2.5 双轨观测，仅辅助参考） ──
+        # 设计纪律：
+        #   1. 9g 已是关键位决策表（V2 状态机）；本块为"第二意见"，AI 不应基于此推翻 9g
+        #   2. 只展示存在显著观测的 level（behavior_state ≠ pending 或 有冲突预警 或 V1/V2 显著背离）
+        #   3. 逐行紧凑格式，避免占用过多 token
+        #   4. 详见 backend/processors/key_level_behavior_eval.py 顶部"设计纪律"
+        kl_levels = kl.get("levels", []) or []
+        # 全量扫描而非 [:10]，避免 V1 表已截掉但 V2 有强观测的 level 被遗漏
+        behavior_lines: list[str] = []
+        for lv in kl_levels:
+            beh = lv.get("behavior") or {}
+            if not beh:
+                continue
+            bstate = beh.get("behavior_state", "pending")
+            contradictions = beh.get("contradiction_with_state", []) or []
+            # 跳过纯 pending 且无冲突的 level（无信号）
+            if bstate == "pending" and not contradictions:
+                continue
+            side_cn = "支撑" if lv.get("side") == "support" else "阻力"
+            state_cn = {
+                "idle": "待观察", "approaching": "正接近",
+                "testing": "正测试", "swept": "已扫取",
+                "bounced": "已反弹", "broken": "已突破",
+                "flipped": "已翻转", "fake_break": "假突破",
+            }.get(lv.get("state", ""), lv.get("state", ""))
+            bstate_cn = {
+                "true_breakout": "真破位",
+                "failed_breakout": "假破位",
+                "healthy_retest": "健康回踩",
+                "weak_bounce": "弱反弹",
+                "capitulation_bottom": "投降式底部",
+                "selloff_continuation": "破位延续",
+                "flip_confirmed": "翻转已确认",
+                "flip_pending": "翻转待确认",
+                "pending": "待评估",
+            }.get(bstate, bstate)
+            conf_pct = int(round(float(beh.get("state_confidence", 0)) * 100))
+
+            # 关键分数（≥ 0.4 才展示，避免噪声）
+            score_parts: list[str] = []
+            for fld_key, fld_cn in (
+                ("breakout_validity", "突破"),
+                ("retest_quality", "回踩"),
+                ("selloff_continuation_risk", "抛压延续"),
+                ("capitulation_bottom_score", "投降"),
+                ("flip_confirmation", "翻转"),
+                ("false_break_risk", "假破"),
+            ):
+                v = float(beh.get(fld_key, 0) or 0)
+                if v >= 0.4:
+                    score_parts.append(f"{fld_cn}:{v:.2f}")
+            scores_str = " ".join(score_parts) if score_parts else "无显著分数"
+
+            # V1/V2 双轨对照（仅当 V1 存在 bounce_quality 时）
+            bq_v1 = lv.get("bounce_quality") or ""
+            bq_v2 = float(beh.get("bounce_quality_enhanced", 0) or 0)
+            dual_str = ""
+            if bq_v1 and bq_v2 > 0:
+                bq_v1_cn = {"proactive": "主动", "passive": "被动"}.get(bq_v1, bq_v1)
+                dual_str = f" [V1反弹={bq_v1_cn}/V2={bq_v2:.2f}]"
+
+            contra_str = ""
+            if contradictions:
+                contra_str = "  ⚠ " + " · ".join(contradictions[:2])
+
+            behavior_lines.append(
+                f"- ${lv.get('price', 0):,.0f}({side_cn}·{state_cn}) "
+                f"behavior={bstate_cn}·conf={conf_pct}% | {scores_str}{dual_str}{contra_str}"
+            )
+
+        if behavior_lines:
+            lines.append("")
+            lines.append("### 9g.1 行为观测层（V3·M2.5 双轨 · 仅辅助验证）")
+            lines.append(
+                "[字段语义] 9g 是关键位决策表（已生效）；本块为**第二意见**，"
+                "用以观测 V2 状态机判定与「量价独立验证」是否一致。"
+                "若 9g 状态与本块 behavior_state 严重不一致（含 ⚠ 标记），"
+                "说明该 level 可信度需打折，但**不要**用本块单独反驳 9g 决策。"
+            )
+            lines.extend(behavior_lines)
+
     # ── §9g2 K 线形态检测 ──
     cp_name = snapshot.get("candlestick_pattern_name", "")
     cp_side = snapshot.get("candlestick_pattern_side", "")

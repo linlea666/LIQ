@@ -308,6 +308,36 @@ class BehaviorEval(BaseModel):
     # 评估时间戳（用于前端"评估于 X 秒前"显示与回测对齐）
     evaluated_at: int = 0
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M2.5（双轨并行 · 影子字段）— 旧 4 个 tracker 函数的 V2 增强版输出
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 设计：旧 _assess_bounce_quality / _assess_breakout_stage / _fake_break_reclaim
+    #       / _is_broken 在 tracker 中保持不变（生产链路稳定）；这里同步计算"V2 增强版"
+    #       结果作为影子字段，前端可对比新旧、AI 可同时参考、M3 回测可分桶验证。
+    # 严格只读：影子字段写入后**不会**反向影响 lv.state / lv.bounce_quality / lv.breakout_stage。
+    #
+    # 字段对照：
+    #   bounce_quality_enhanced     vs  lv.bounce_quality (string proactive/passive/"")
+    #     V2: 用 z-score / percentile 自适应代替死阈值 1.5x；输出 0-1 连续分。
+    #   breakout_stage_enhanced     vs  lv.breakout_stage (固定 0/1/2/3)
+    #     V2: 时间窗按 lv.timeframe 自适应缩放（1D 用 24h，1W 用 1 周），让长周期位也能拿到 stage 3。
+    #   fake_break_strength         vs  事件级 lv.state == "fake_break"（旧只有布尔）
+    #     V2: 0-1 连续，看 close 回收强度（长下影 / 实体 / 连续根数）。
+    #   dynamic_break_depth_pct     vs  cfg["break_depth_pct"]（默认 0.3 死阈值）
+    #     V2: max(cfg_pct, 0.3 × ATR%)，自适应不同 regime 的波动率。仅记录展示，不真用。
+    bounce_quality_enhanced: float = 0.0
+    breakout_stage_enhanced: int = 0
+    fake_break_strength: float = 0.0
+    dynamic_break_depth_pct: float = 0.0
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # M2.5 新增：state vs behavior 冲突预警
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 当旧 state 与新 behavior_state 严重不一致时记入（白话原因）。
+    # 不写入 lv.contradiction_reasons（保持主路径清洁），仅前端 / AI 可见。
+    # 例如：state=broken 但 false_break_risk≥0.65 → "形态破位但量价未确认"。
+    contradiction_with_state: list[str] = Field(default_factory=list)
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # M2 新增：cascade_risk 4 子分（拆解原 0-1 单值）

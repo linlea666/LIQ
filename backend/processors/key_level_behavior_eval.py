@@ -344,6 +344,17 @@ def _evaluate_one_level(
     e.explain_chips = _build_chips(lv, e, ctx)
     e.components_used = used
 
+    # ── M2.5 · V2 双轨影子字段（不影响生产链路，仅记录） ──
+    # 即使在 idle / approaching 等 M1 不评估 6 分的 state，也要计算 V2 影子，
+    # 给前端"V1 vs V2 对比"和 M3 回测提供完整数据。
+    e.bounce_quality_enhanced = compute_bounce_quality_v2(lv, ctx, cfg)
+    e.breakout_stage_enhanced = compute_breakout_stage_v2(lv, snapshot.atr, ctx, cfg, now)
+    e.fake_break_strength = assess_fake_break_strength(lv, ctx)
+    e.dynamic_break_depth_pct = compute_dynamic_break_depth_pct(snapshot.atr, snapshot.current_price, cfg)
+
+    # ── M2.5 · 冲突预警（state vs behavior_state 严重不一致时记入） ──
+    e.contradiction_with_state = _detect_contradictions(lv, e, cfg)
+
     return e
 
 
@@ -892,3 +903,314 @@ def _clamp01(x: float) -> float:
     if x > 1:
         return 1.0
     return float(x)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2.5 · V2 双轨增强函数（旧 4 个 tracker 函数的影子升级版）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# 设计纪律：
+#   1. 这些函数只读 KeyLevelV2 + ctx，输出写入 lv.behavior 影子字段
+#   2. 旧 _assess_bounce_quality / _assess_breakout_stage / _fake_break_reclaim
+#      / _is_broken 在 tracker 中保持不变，生产链路 0 影响
+#   3. M3 回测时分桶对比"V1 vs V2"准确率，数据驱动决定何时切换
+#   4. 函数签名独立可单测；不依赖 tracker 内部状态
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def compute_bounce_quality_v2(lv: KeyLevelV2, ctx: dict, cfg: dict) -> float:
+    """V2 反弹质量（0-1 连续）：替代旧死阈值 1.5x / 0.8x。
+
+    旧 `_assess_bounce_quality` 的问题：
+      - 死阈值 vol ≥ 1.5×均量 / vol < 0.8×均量 → BTC/ETH/SOL 共用，
+        高波动期把正常反弹打成 proactive，盘整期把弱反弹打成 passive
+    V2 改进：
+      - 用 vol_zscore_recent + panic_volume_percentile 自适应基线
+      - 输出 0-1 连续（前端可呈现进度条；M3 回测可分桶）
+
+    返回：
+      0.0 → 极弱（缩量到地量）
+      0.3 → 偏弱
+      0.5 → 中性
+      0.7 → 偏强（放量但未极端）
+      1.0 → 极强（高 z-score + 高 percentile）
+
+    仅 lv.state == "bounced" 时输出 ≠ 0；其它状态返回 0.0。
+    """
+    if lv.state != "bounced":
+        return 0.0
+
+    last = ctx.get("last_bar_15m")
+    if not last:
+        return 0.0
+    is_support = lv.side == "support"
+
+    # 方向必须一致：支撑反弹应是阳线（close > open）
+    direction_ok = (last.close > last.open) if is_support else (last.close < last.open)
+    if not direction_ok:
+        return 0.0  # 方向不对，谈不上"主动反弹"
+
+    # 基础分：vol_ratio_recent 0-2 → 0-1
+    vr = float(ctx.get("vol_ratio_recent", 0.0))
+    base = min(vr / 2.0, 1.0) if vr > 0 else 0.0
+
+    # 加成：z-score 方向（≥ 1.5 σ 算极端放量）
+    z = float(ctx.get("vol_zscore_recent", 0.0))
+    if z >= 2.0:
+        base = min(base + 0.15, 1.0)
+    elif z >= 1.0:
+        base = min(base + 0.08, 1.0)
+    elif z <= -1.0:
+        base = max(base - 0.10, 0.0)
+
+    # 加成：percentile 极端
+    p = float(ctx.get("panic_volume_percentile", 0.0))
+    if p >= 0.90:
+        base = min(base + 0.10, 1.0)
+
+    # 实体强度（非十字星）
+    body_ratio = float(ctx.get("last_body_ratio", 0.0))
+    if body_ratio >= 0.5:
+        base = min(base + 0.05, 1.0)
+    elif body_ratio < 0.2:
+        base = max(base - 0.10, 0.0)  # 十字星反弹不可信
+
+    return _clamp01(base)
+
+
+# 时间框架到秒数的缩放系数（基线为 1H）
+_TF_SCALE_SECONDS = {
+    "15m": 0.25,
+    "30m": 0.5,
+    "1H":  1.0, "1h": 1.0,
+    "2H":  2.0, "2h": 2.0,
+    "4H":  4.0, "4h": 4.0,
+    "12H": 12.0, "12h": 12.0,
+    "1D":  24.0, "1d": 24.0,
+    "3D":  72.0, "3d": 72.0,
+    "1W":  168.0, "1w": 168.0,
+}
+
+
+def compute_breakout_stage_v2(
+    lv: KeyLevelV2, atr: float, ctx: dict, cfg: dict, now: int,
+) -> int:
+    """V2 突破阶段（0/1/2/3）：替代旧固定时间窗。
+
+    旧 `_assess_breakout_stage` 的问题：
+      - 固定时间窗 stage1=900s / stage2=5400s（1.5h）
+      - 1D/1W 级别永远走不到 stage 3（24h+ 才回踩 → 早过期）
+      - 1D/1W 关键位 confidence 永远偏低，强位拿不到 A 级信号
+    V2 改进：
+      - 时间窗按 lv.timeframe 自适应缩放：
+        * 15m：stage1=225s / stage2=1350s（0.25 倍）
+        * 1H： stage1=900s / stage2=5400s （1 倍 = 旧默认）
+        * 1D： stage1=21600s / stage2=129600s（24 倍 = 6h / 36h）
+        * 1W： stage1=151200s / stage2=907200s（168 倍 ≈ 1.75d / 10.5d）
+
+    严格只读：基于 lv.state / lv.state_ts / candles_15m，不修改 lv。
+    """
+    if lv.state not in ("broken", "flipped"):
+        return 0
+    if atr <= 0:
+        return 0
+
+    age = now - (lv.state_ts or 0)
+    if age <= 0:
+        return 0
+
+    candles_15m = ctx.get("candles_15m") or []
+
+    # 自适应缩放
+    tf = (lv.timeframe or "1H").strip()
+    scale = _TF_SCALE_SECONDS.get(tf, 1.0)
+    base_stage1 = int(cfg.get("breakout_stage1_max_sec", 900))
+    base_stage2 = int(cfg.get("breakout_retest_max_sec", 5400))
+    base_expire = int(cfg.get("breakout_expire_sec", 21600))
+    stage1_max = int(base_stage1 * scale)
+    stage2_max = int(base_stage2 * scale)
+    expire = int(base_expire * scale)
+
+    if age > expire:
+        return 0
+    if age < stage1_max:
+        return 1
+    if not candles_15m:
+        return 1
+
+    # stage 2：是否出现回踩
+    retest_tol = atr * float(cfg.get("breakout_retest_atr_mult", 0.5))
+    confirm_atr = atr * float(cfg.get("breakout_confirm_atr_mult", 0.3))
+    is_support = lv.side == "support"
+
+    retest_idx = -1
+    for idx, bar in enumerate(candles_15m):
+        bar_age = now - bar.ts
+        if bar_age <= 0 or bar_age > stage2_max:
+            continue
+        if bar.ts < (lv.state_ts or 0):
+            continue
+        if (
+            abs(bar.high - lv.price) <= retest_tol
+            or abs(bar.low - lv.price) <= retest_tol
+        ):
+            retest_idx = idx
+            break
+
+    if retest_idx == -1:
+        return 1
+    if retest_idx + 1 >= len(candles_15m):
+        return 2
+
+    # stage 3：回踩后的下一根 bar 反向继续推进 ≥ confirm_atr
+    follow = candles_15m[retest_idx + 1]
+    if is_support:
+        if follow.close <= lv.price - confirm_atr:
+            return 3
+    else:
+        if follow.close >= lv.price + confirm_atr:
+            return 3
+    return 2
+
+
+def assess_fake_break_strength(lv: KeyLevelV2, ctx: dict) -> float:
+    """V2 假突破回收强度（0-1 连续）：替代旧布尔事件。
+
+    旧 `_fake_break_reclaim` 的问题：
+      - 只看 close 是否回到未破侧 → 长下影回收 vs 实体震荡回收混淆
+      - 长下影 = 真假突破反转更可信；实体 = 弱震荡不一定反转
+    V2 改进：
+      - 长下影 / 长上影占比 → 越长越好
+      - 是否两根连续站回未破侧（双重确认）
+      - 输出 0-1，让 signal_builder 能分档使用
+
+    仅 lv.state == "fake_break" 或 lv.state == "broken" 时输出 ≠ 0；
+    其它状态返回 0.0。
+    """
+    if lv.state not in ("fake_break", "broken"):
+        return 0.0
+    candles = ctx.get("candles_15m") or []
+    if len(candles) < 2 or lv.price <= 0:
+        return 0.0
+    is_support = lv.side == "support"
+
+    # 取最近一根已收盘 bar
+    last_closed = candles[-2]
+    if last_closed.close <= 0:
+        return 0.0
+    # 必须 close 已回到未破侧
+    if is_support:
+        if last_closed.close < lv.price:
+            return 0.0
+        wick_ratio = float(ctx.get("last_wick_lower_ratio", 0.0))  # 支撑：长下影
+    else:
+        if last_closed.close > lv.price:
+            return 0.0
+        wick_ratio = float(ctx.get("last_wick_upper_ratio", 0.0))  # 阻力：长上影
+
+    # 基础分：影线占比
+    if wick_ratio >= 0.6:
+        base = 0.85
+    elif wick_ratio >= 0.4:
+        base = 0.65
+    elif wick_ratio >= 0.25:
+        base = 0.45
+    else:
+        base = 0.25  # 实体收回，弱信号
+
+    # 加成：连续 2 根站回（last + prev_closed）
+    if len(candles) >= 3:
+        prev_closed = candles[-3]
+        if is_support and prev_closed.close >= lv.price:
+            base = min(base + 0.10, 1.0)
+        elif (not is_support) and prev_closed.close <= lv.price:
+            base = min(base + 0.10, 1.0)
+
+    # 加成：fake_break_count 历史多次（防守强）
+    fbc = lv.fake_break_count or 0
+    if fbc >= 2:
+        base = min(base + 0.05, 1.0)
+
+    return _clamp01(base)
+
+
+def compute_dynamic_break_depth_pct(atr: float, price: float, cfg: dict) -> float:
+    """V2 动态破位阈值（百分比）：替代旧固定 0.3%。
+
+    旧 `_is_broken` 用固定 `cfg["break_depth_pct"] = 0.3%` 的问题：
+      - ATR 0.5%（盘整）：0.3% 偏松 → 噪声波动也判破
+      - ATR 2%（高波动）：0.3% 偏严 → 实破还在 testing
+    V2 改进：
+      - depth_pct = max(cfg_pct, k × ATR%)，k 默认 0.3
+      - 让破位事件触发率在不同 regime 下公平
+
+    注：这是"建议值"，仅写入 lv.behavior.dynamic_break_depth_pct 用于展示与回测；
+    旧 _is_broken 在 tracker 中**保持读 cfg["break_depth_pct"]**，不变。
+    """
+    cfg_pct = float(cfg.get("break_depth_pct", 0.3))
+    if atr <= 0 or price <= 0:
+        return cfg_pct
+    atr_pct = atr / price * 100
+    k = float(cfg.get("dynamic_break_depth_atr_mult", 0.3))
+    return max(cfg_pct, k * atr_pct)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# M2.5 · 冲突预警派生（state vs behavior 严重不一致 → 写入 contradiction_with_state）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _detect_contradictions(lv: KeyLevelV2, e: BehaviorEval, cfg: dict) -> list[str]:
+    """检查旧 state 与新 behavior 是否极端不一致；返回白话冲突列表。
+
+    设计纪律：
+      - 仅"两者方向相反"才记入，避免噪声（轻微差异不算冲突）
+      - 不写入 lv.contradiction_reasons（保持主路径清洁，那个用来记 V3 评分扣分原因）
+      - 仅前端 / AI 可见，不影响信号生成
+
+    检测规则（与 _derive_behavior_state 阈值同源 + 0.05 偏移避免边界震荡）：
+      1. state==broken & breakout_validity<0.30 & false_break_risk≥0.65
+         → "形态破位但量价未确认（可能假破）"
+      2. state==broken & breakout_validity<0.30 & state ≠ fake_break
+         → "突破质量极弱，警惕假突破"
+      3. state==bounced & retest_quality<0.30
+         → "反弹生效但量能/深度不健康"
+      4. state==flipped & flip_confirmation<0.30
+         → "几何翻转但市场未确认"
+      5. state ∈ {testing,bounced} & support & selloff_continuation_risk≥0.65
+         → "支撑接触但破位延续风险高"
+      6. V1 vs V2 显著背离（仅 bounce_quality 一项，最易感知）：
+         lv.bounce_quality=="proactive" & e.bounce_quality_enhanced<0.35
+         → "V1 标记主动反弹，V2 评估为被动（建议关注）"
+         lv.bounce_quality=="passive" & e.bounce_quality_enhanced>0.65
+         → "V1 标记被动反弹，V2 评估为主动（建议关注）"
+    """
+    out: list[str] = []
+    state = lv.state
+    is_support = lv.side == "support"
+
+    if state == "broken":
+        if e.breakout_validity < 0.30 and e.false_break_risk >= 0.65:
+            out.append("形态破位但量价未确认（可能假破）")
+        elif e.breakout_validity < 0.30:
+            out.append("突破质量极弱，警惕假突破")
+
+    if state == "bounced" and e.retest_quality < 0.30:
+        out.append("反弹生效但量能/深度不健康")
+
+    if state == "flipped" and e.flip_confirmation < 0.30:
+        out.append("几何翻转但市场未确认")
+
+    if state in ("testing", "bounced") and is_support \
+            and e.selloff_continuation_risk >= 0.65:
+        out.append("支撑接触但破位延续风险高")
+
+    # V1 vs V2 双轨背离（仅 bounce_quality 维度，最易解读）
+    bq_v1 = lv.bounce_quality or ""
+    bq_v2 = e.bounce_quality_enhanced
+    if bq_v1 == "proactive" and bq_v2 < 0.35:
+        out.append("V1 标记主动反弹，V2 评估为被动（建议关注）")
+    elif bq_v1 == "passive" and bq_v2 > 0.65:
+        out.append("V1 标记被动反弹，V2 评估为主动（建议关注）")
+
+    return out
