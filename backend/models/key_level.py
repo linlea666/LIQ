@@ -337,6 +337,9 @@ class BehaviorEval(BaseModel):
     # 不写入 lv.contradiction_reasons（保持主路径清洁），仅前端 / AI 可见。
     # 例如：state=broken 但 false_break_risk≥0.65 → "形态破位但量价未确认"。
     contradiction_with_state: list[str] = Field(default_factory=list)
+    # V3-M4 P1-4：与 contradiction_with_state 一一对应的严重度（low/medium/high）
+    # 旧前端读 contradiction_with_state 不受影响；新前端按 severity 上色提醒
+    contradiction_severities: list[str] = Field(default_factory=list)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # M3.1 新增：评估元信息（GPT 审查采纳 · 区分"未评估"vs"评估为 0"）

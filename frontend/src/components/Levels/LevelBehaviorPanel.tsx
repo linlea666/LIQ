@@ -195,6 +195,9 @@ export default function LevelBehaviorPanel({
   const scores = pickRelevantScores(behavior, state);
   const hasAnyScore = scores.some(([, v]) => v > 0);
   const contradictions = behavior.contradiction_with_state ?? [];
+  // V3-M4 P1-4：与 contradictions 一一对应的严重度（low/medium/high）
+  // 旧 snapshot 不存在该字段时全部默认 medium（已有黄色基调；不会突然变红）
+  const contradictionSeverities = behavior.contradiction_severities ?? [];
 
   // M2.5 双轨：判断是否有 V1/V2 对照可显示
   const v1Bounce = v1BounceLabel(v1?.bounce_quality);
@@ -407,16 +410,37 @@ export default function LevelBehaviorPanel({
         </div>
       )}
 
-      {/* M2.5 冲突预警（state vs behavior 不一致；普通+专家都显示，关键预警不能藏） */}
+      {/* M2.5 冲突预警（state vs behavior 不一致；普通+专家都显示，关键预警不能藏）
+          V3-M4 P1-4：按 severity（low/medium/high）上色 */}
       {contradictions.length > 0 && (
         <div className="mb-2 pt-1 border-t border-rose-700/30">
           <div className="text-[10px] text-rose-400 mb-1">⚠ state vs behavior 冲突</div>
           <ul className="space-y-0.5">
-            {contradictions.map((c) => (
-              <li key={c} className="text-[10px] text-rose-300/90 leading-tight">
-                · {c}
-              </li>
-            ))}
+            {contradictions.map((c, i) => {
+              const severity = contradictionSeverities[i] ?? "medium";
+              const sevCls =
+                severity === "high"
+                  ? "text-rose-300"
+                  : severity === "medium"
+                  ? "text-amber-300/90"
+                  : "text-slate-400";
+              const sevBadge =
+                severity === "high"
+                  ? "🔴"
+                  : severity === "medium"
+                  ? "🟡"
+                  : "⚪";
+              return (
+                <li
+                  key={c}
+                  className={`text-[10px] leading-tight ${sevCls}`}
+                  title={`严重度：${severity}`}
+                >
+                  <span className="mr-1">{sevBadge}</span>
+                  {c}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

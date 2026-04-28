@@ -718,42 +718,43 @@ class TestContradictionDetection:
     def test_broken_with_low_validity_and_high_false_risk(self):
         lv = KeyLevelV2(price=100_000, side="support", state="broken")
         e = BehaviorEval(breakout_validity=0.20, false_break_risk=0.75)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert any("可能假破" in c for c in out)
+        reasons, _sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("可能假破" in c for c in reasons)
 
     def test_broken_low_validity_only(self):
         lv = KeyLevelV2(price=100_000, side="resistance", state="broken")
         e = BehaviorEval(breakout_validity=0.15, false_break_risk=0.40)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert any("假突破" in c for c in out)
+        reasons, _sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("假突破" in c for c in reasons)
 
     def test_bounced_with_unhealthy_retest(self):
         lv = KeyLevelV2(price=100_000, side="support", state="bounced")
         e = BehaviorEval(retest_quality=0.20)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert any("不健康" in c for c in out)
+        reasons, _sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("不健康" in c for c in reasons)
 
     def test_flipped_unconfirmed(self):
         lv = KeyLevelV2(price=100_000, side="support", state="flipped")
         e = BehaviorEval(flip_confirmation=0.20)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert any("市场未确认" in c for c in out)
+        reasons, _sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("市场未确认" in c for c in reasons)
 
     def test_v1_v2_divergence_proactive_to_passive(self):
         """V1 主动 vs V2 被动（背离 → 提示）。"""
         lv = KeyLevelV2(price=100_000, side="support", state="bounced",
                         bounce_quality="proactive")
         e = BehaviorEval(bounce_quality_enhanced=0.20, retest_quality=0.50)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert any("V1 标记主动" in c for c in out)
+        reasons, _sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert any("V1 标记主动" in c for c in reasons)
 
     def test_no_contradiction_when_aligned(self):
         """state == bounced + 高 retest_quality + V1 V2 一致 → 无冲突。"""
         lv = KeyLevelV2(price=100_000, side="support", state="bounced",
                         bounce_quality="proactive")
         e = BehaviorEval(retest_quality=0.75, bounce_quality_enhanced=0.80)
-        out = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
-        assert out == []
+        reasons, sev = _detect_contradictions(lv, e, _DEFAULT_BEHAVIOR_CFG)
+        assert reasons == []
+        assert sev == []
 
 
 class TestEvalWritesV2Fields:
@@ -946,3 +947,216 @@ class TestBehaviorHealthStats:
         assert s["input_skip_calls"] == 1
         # input_skip 阶段不进入 level_eval_total（atr<=0 直接跳过 level 循环）
         assert s["level_eval_total"] == 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M4 P1-3 · capitulation_bottom_score 二次确认门槛
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestCapitulationSecondaryConfirm:
+    """高分场景下，次根 K（candles[-2]）必须收阳才允许 score > 0.50。"""
+
+    def _high_score_ctx(
+        self, *, secondary_close: float, secondary_open: float = 100.0,
+    ) -> dict:
+        """构造满足 panic+wick+cvd+oi 全高分 + 自定义次根 K 的 ctx。"""
+        # 次根 K（candles[-2]）：用户控制 close vs open；其它 K 中性
+        # 当前 K（candles[-1]）：插针长下影 + 极端放量
+        bars = _candles(n=30, base=100.0, base_vol=100.0)
+        # 改写次根（倒数第二）
+        sec = bars[-2]
+        bars[-2] = CandleData(
+            coin="BTC", ts=sec.ts,
+            o=secondary_open, h=secondary_open + 5,
+            l=secondary_open - 5, c=secondary_close,
+            vol=100.0,
+        )
+        # 当前 K：长下影 0.6 + 极端放量
+        last = bars[-1]
+        bars[-1] = CandleData(
+            coin="BTC", ts=last.ts,
+            o=99.0, h=100.5, l=95.0, c=99.5, vol=10000.0,
+        )
+        cvd = CVDData(
+            coin="BTC", inst_type="CONTRACTS", series=[],
+            trend_1h="weakening", has_divergence=True,
+        )
+        ctx = _prepare_context(
+            candles_15m=bars, candles_1h=None, cvd=cvd,
+            oi_change_pct_1h=-2.5, taker_buy_vol=10, taker_sell_vol=90,
+            atr=2.0, cfg=_DEFAULT_BEHAVIOR_CFG,
+        )
+        return ctx
+
+    def test_high_score_capped_when_secondary_red(self):
+        """次根 K 阴线（close < open）→ 即使全因子高分，score 也被 cap 到 0.50。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="broken")
+        ctx = self._high_score_ctx(secondary_close=95.0, secondary_open=100.0)  # 阴线
+        score = _calc_capitulation(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        # 缺次根 K 收阳确认 → cap 在 cap_secondary_confirm_cap (0.50)
+        assert score <= 0.50 + 1e-6
+
+    def test_high_score_uncapped_when_secondary_green(self):
+        """次根 K 阳线（close > open）→ 不 cap，可达高分。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="broken")
+        ctx = self._high_score_ctx(secondary_close=105.0, secondary_open=100.0)  # 阳线
+        score = _calc_capitulation(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        # 全因子高分 + 二次确认 → 应明显高于 cap
+        assert score > 0.55
+
+    def test_short_candles_capped(self):
+        """candles_15m 不足 2 根 → 视为未确认 → cap。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="broken")
+        # 只有 1 根的 panic 极端 K（用 _calc_capitulation 直接喂受限 ctx）
+        ctx = _prepare_context(
+            candles_15m=[CandleData(coin="BTC", ts=int(time.time()), o=99, h=100.5, l=95,
+                                     c=99.5, vol=10000.0)],
+            candles_1h=None,
+            cvd=CVDData(coin="BTC", inst_type="CONTRACTS", series=[],
+                         trend_1h="weakening", has_divergence=True),
+            oi_change_pct_1h=-2.5, taker_buy_vol=10, taker_sell_vol=90,
+            atr=2.0, cfg=_DEFAULT_BEHAVIOR_CFG,
+        )
+        score = _calc_capitulation(lv, ctx, _DEFAULT_BEHAVIOR_CFG)
+        assert score <= 0.50 + 1e-6
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M4 P1-4 · _detect_contradictions 新增 3 条规则 + severity
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestContradictionsNewRules:
+    """V3-M4 P1-4 新增的 3 条强对立规则 + severities 一一对应。"""
+
+    def test_returns_tuple_of_two_lists(self):
+        """新签名：return (reasons, severities)，长度一致。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="idle", strength_tier="C")
+        beh = BehaviorEval()
+        out = _detect_contradictions(lv, beh, _DEFAULT_BEHAVIOR_CFG)
+        assert isinstance(out, tuple) and len(out) == 2
+        reasons, sev = out
+        assert isinstance(reasons, list)
+        assert isinstance(sev, list)
+        assert len(reasons) == len(sev)
+
+    def test_rule7_broken_vs_capitulation_high(self):
+        """state=broken & support & capitulation_bottom≥0.70 → 强对立 high。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="broken", strength_tier="B")
+        beh = BehaviorEval(
+            breakout_validity=0.50,  # 不触发规则 1/2
+            capitulation_bottom_score=0.75,
+        )
+        reasons, sev = _detect_contradictions(lv, beh, _DEFAULT_BEHAVIOR_CFG)
+        assert any("恐慌见底候选" in r for r in reasons)
+        # 该条对应 severity = high
+        for r, s in zip(reasons, sev):
+            if "恐慌见底候选" in r:
+                assert s == "high"
+
+    def test_rule8_fake_break_vs_breakout_validity_high(self):
+        """state=fake_break & breakout_validity≥0.70 → 强对立 high。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="fake_break", strength_tier="B")
+        beh = BehaviorEval(breakout_validity=0.80)
+        reasons, sev = _detect_contradictions(lv, beh, _DEFAULT_BEHAVIOR_CFG)
+        assert any("V1 判假突破" in r and "V2 看真突破" in r for r in reasons)
+        for r, s in zip(reasons, sev):
+            if "V1 判假突破" in r:
+                assert s == "high"
+
+    def test_rule9_strong_support_high_selloff(self):
+        """tier=S/A & support & selloff_continuation_risk≥0.70 → high。"""
+        lv = KeyLevelV2(price=100.0, side="support", state="testing", strength_tier="S")
+        beh = BehaviorEval(selloff_continuation_risk=0.75)
+        reasons, sev = _detect_contradictions(lv, beh, _DEFAULT_BEHAVIOR_CFG)
+        # 规则 5 (testing+selloff≥0.65) 也会触发，不冲突
+        # 规则 9 应单独追加"强支撑（S级）..."
+        rule9_msgs = [r for r in reasons if "强支撑" in r]
+        assert len(rule9_msgs) == 1
+        idx = reasons.index(rule9_msgs[0])
+        assert sev[idx] == "high"
+
+    def test_no_contradictions_returns_empty(self):
+        lv = KeyLevelV2(price=100.0, side="support", state="idle", strength_tier="C")
+        beh = BehaviorEval()
+        reasons, sev = _detect_contradictions(lv, beh, _DEFAULT_BEHAVIOR_CFG)
+        assert reasons == []
+        assert sev == []
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M4 P1-5 · V1 不变性 + 异常恢复 + 序列化往返
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestV1FieldsUnchangedByEvalation:
+    """evaluate_behavior 必须严格只写 lv.behavior，不能改 V1 关键字段。"""
+
+    def test_v1_state_and_score_fields_preserved(self):
+        lv = KeyLevelV2(
+            price=100_000, side="support", state="bounced",
+            state_ts=int(time.time()) - 60,
+            bounce_quality="proactive",
+            breakout_stage=2,
+            cascade_risk=0.6,
+            final_score=72.5,
+            strength_tier="A",
+            confluence_score=85.0,
+        )
+        snap = _snapshot([lv], price=100_500, atr=500)
+        # 记录调用前 V1 快照
+        before = {
+            "state": lv.state,
+            "state_ts": lv.state_ts,
+            "bounce_quality": lv.bounce_quality,
+            "breakout_stage": lv.breakout_stage,
+            "cascade_risk": lv.cascade_risk,
+            "final_score": lv.final_score,
+            "strength_tier": lv.strength_tier,
+            "confluence_score": lv.confluence_score,
+        }
+        evaluate_behavior(snap, candles_15m=_candles(), candles_1h=_candles())
+        # 调用后 V1 字段应原样保留
+        assert lv.state == before["state"]
+        assert lv.state_ts == before["state_ts"]
+        assert lv.bounce_quality == before["bounce_quality"]
+        assert lv.breakout_stage == before["breakout_stage"]
+        assert lv.cascade_risk == before["cascade_risk"]
+        assert lv.final_score == before["final_score"]
+        assert lv.strength_tier == before["strength_tier"]
+        assert lv.confluence_score == before["confluence_score"]
+        # 但 lv.behavior 应被填充
+        assert lv.behavior is not None
+        assert lv.behavior.behavior_eval_available is True
+
+
+class TestBehaviorEvalErrorIsolation:
+    """单 level 评估失败不应影响其他 level（M3.1 已实现 + P1-5 加测）。"""
+
+    def test_one_failed_level_does_not_break_others(self, monkeypatch):
+        """通过 monkeypatch 让特定 lv 进入异常路径，验证其他 lv 仍成功。"""
+        from processors import key_level_behavior_eval as mod
+
+        # 让 _evaluate_one_level 在第一个 lv 上抛异常，第二个正常
+        original = mod._evaluate_one_level
+        call_count = [0]
+
+        def faulty(lv, snapshot, ctx, cfg, now):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("simulated failure")
+            return original(lv, snapshot, ctx, cfg, now)
+
+        monkeypatch.setattr(mod, "_evaluate_one_level", faulty)
+
+        lv1 = KeyLevelV2(price=100_000, side="support", state="bounced",
+                         state_ts=int(time.time()) - 60)
+        lv2 = KeyLevelV2(price=102_000, side="resistance", state="bounced",
+                         state_ts=int(time.time()) - 60)
+        snap = _snapshot([lv1, lv2], price=100_500, atr=500)
+        evaluate_behavior(snap, candles_15m=_candles(), candles_1h=_candles())
+        # lv1 失败 → behavior_eval_available=False + evaluator_error
+        assert lv1.behavior is not None
+        assert lv1.behavior.behavior_eval_available is False
+        assert "simulated failure" in lv1.behavior.evaluator_error
+        # lv2 应正常评估
+        assert lv2.behavior is not None
+        assert lv2.behavior.behavior_eval_available is True

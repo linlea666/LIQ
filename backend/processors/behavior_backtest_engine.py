@@ -48,10 +48,42 @@ from models.key_level import KeyLevelSnapshotV2, KeyLevelV2
 # 配置
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DEFAULT_FUTURE_WINDOW_SEC = 4 * 3600         # 4h 后判真相
+DEFAULT_FUTURE_WINDOW_SEC = 4 * 3600         # 4h 后判真相（基线 = 1H timeframe）
 DEFAULT_TRUTH_ATR_MULT = 1.0                 # 偏离 1×ATR 算"显著"
 DEFAULT_AMBIGUOUS_ATR_BAND = 0.3             # ≤ 0.3×ATR 算"未动" → ambiguous
 DEFAULT_V2_BINARY_THRESHOLD = 0.5            # V2 0-1 → 二分类阈值
+
+# V3-M4 P1-2：按 timeframe 缩放 future_window_sec / tolerance_sec
+# 基线为 1H → 1.0；1D level 用 24×window 才能等到回踩，1W 用 168×。
+# 与 key_level_behavior_eval._TF_SCALE_SECONDS 同源（保持一致；各自定义避免跨模块耦合）。
+_TF_WINDOW_SCALE: dict[str, float] = {
+    "15m": 0.25, "30m": 0.5,
+    "1H": 1.0,  "1h": 1.0,
+    "2H": 2.0,  "2h": 2.0,
+    "4H": 4.0,  "4h": 4.0,
+    "12H": 12.0, "12h": 12.0,
+    "1D": 24.0,  "1d": 24.0,
+    "3D": 72.0,  "3d": 72.0,
+    "1W": 168.0, "1w": 168.0,
+}
+# 容差缩放上限（避免 1W level 的 tolerance 撑到 100h+ 导致 future 配对失真）
+_TOLERANCE_CAP_SEC = 6 * 3600
+
+
+def _resolve_tf_scaled_window(
+    timeframe: str, base_window_sec: int, base_tolerance_sec: int,
+) -> tuple[int, int]:
+    """按 timeframe 缩放 future_window / tolerance（V3-M4 P1-2）。
+
+    返回 (scaled_window_sec, scaled_tolerance_sec)；timeframe 未知时按 1.0 处理。
+    tolerance 同比例缩放但封顶 _TOLERANCE_CAP_SEC，防止超长窗口下配对漂移过大。
+    """
+    tf = (timeframe or "1H").strip()
+    scale = _TF_WINDOW_SCALE.get(tf, 1.0)
+    return (
+        int(base_window_sec * scale),
+        min(int(base_tolerance_sec * scale), _TOLERANCE_CAP_SEC),
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -218,6 +250,17 @@ class ComparisonStats:
     mcnemar_stat: float = 0.0      # χ² = (|b-c|-1)²/(b+c) （连续性校正）
     mcnemar_p_value: float = 1.0
 
+    # ── 多重比较修正（V3-M4 P1-1 新增 · 跨维度族错误率控制） ──
+    # 解决"3 维度平行检验导致的假阳性膨胀（α=0.05 → 实际 ≈ 14.3%）"。
+    # 由 run_full_comparison 在 3 个 stats 出来后回写：
+    #   mcnemar_p_bonferroni = min(1, p × N_tests)         （保守，控 FWER）
+    #   mcnemar_p_fdr        = BH 修正后 q 值              （宽松，控 FDR）
+    # 决策（is_v2_significantly_better）使用 Bonferroni 修正后的 p。
+    # 单维度查询（如 compute_*_stats 直接调用）不做修正，二者 = mcnemar_p_value。
+    family_size: int = 1                  # 修正时所属"检验族"大小（默认 1=不修正）
+    mcnemar_p_bonferroni: float = 1.0     # Bonferroni 修正后 p
+    mcnemar_p_fdr: float = 1.0            # BH 修正后 q（FDR 控制）
+
     # ── Wilson 95% CI（M3.1 新增 · 替代点估计） ──
     accuracy_ci_v1: tuple[float, float] = (0.0, 0.0)
     accuracy_ci_v2: tuple[float, float] = (0.0, 0.0)
@@ -249,6 +292,9 @@ class ComparisonStats:
             "discordant_v1_right_v2_wrong": self.discordant_v1_right_v2_wrong,
             "mcnemar_stat": round(self.mcnemar_stat, 4),
             "mcnemar_p_value": round(self.mcnemar_p_value, 4),
+            "family_size": self.family_size,
+            "mcnemar_p_bonferroni": round(self.mcnemar_p_bonferroni, 4),
+            "mcnemar_p_fdr": round(self.mcnemar_p_fdr, 4),
             "accuracy_ci_v1": [round(x, 4) for x in self.accuracy_ci_v1],
             "accuracy_ci_v2": [round(x, 4) for x in self.accuracy_ci_v2],
             "is_v2_significantly_better": self.is_v2_significantly_better,
@@ -440,17 +486,23 @@ def build_outcome_records(
     ambiguous_band: float = DEFAULT_AMBIGUOUS_ATR_BAND,
     deduplicate: bool = True,
     require_behavior_eval: bool = True,
+    timeframe_adaptive_window: bool = True,
 ) -> list[OutcomeRecord]:
     """从一组历史快照生成 OutcomeRecord。
 
     流程：
       1. history 按 ts 升序排序
-      2. 对每个 (base_snap, future_snap) 配对，按 level_id 匹配 lv
+      2. 对每个 base_snap：按 lv.timeframe 缩放 window 后单独配对 future_snap
       3. 调用 3 个 evaluate_* 函数生成真相
       4. 过滤无 level_id / 无 ATR / 无配对的样本
 
-    设计选择（M3.1 升级）：
+    设计选择（M3.1 + M4 P1-2 升级）：
       - level_id 是配对依据（M3 R9 已稳定）；缺 level_id 的旧样本被跳过
+      - **timeframe 自适应窗口**（V3-M4 P1-2，默认 True）：
+        future_window_sec 视为 1H timeframe 基线，按 lv.timeframe 缩放：
+          15m→×0.25 / 1H→×1.0 / 4H→×4.0 / 1D→×24 / 1W→×168
+        否则 1D/1W level 在 4h 窗口下还没回踩就盖戳，导致大量误判。
+        若 timeframe_adaptive_window=False 则保持旧行为（向后兼容测试）
       - **事件去重**（deduplicate=True，默认）：同一 (level_id, state, state_ts)
         在 N 个连续快照中只保留**最早一条**，避免一个物理事件膨胀样本数；
         若 deduplicate=False 则保留全部时序观测（旧行为）
@@ -468,16 +520,10 @@ def build_outcome_records(
     seen_event_keys: set[tuple[str, str, int]] = set()
 
     for i, base in enumerate(ordered):
-        future = _find_future_snapshot(ordered, i, future_window_sec, tolerance_sec)
-        if future is None:
-            continue
-        future_price = future.current_price
-        future_atr = future.atr if future.atr > 0 else base.atr
-        if future_price <= 0 or future_atr <= 0:
-            continue
-
         # 优先用 lv 自身 regime；fallback 到 snapshot 级 regime
         snap_regime = getattr(base, "regime", "") or ""
+        # 缓存：每个 timeframe 在当前 base 下只查一次 future（避免 O(N×L) 二次遍历）
+        future_cache: dict[str, Optional[KeyLevelSnapshotV2]] = {}
 
         for lv in base.levels:
             if not lv.level_id:
@@ -494,6 +540,24 @@ def build_outcome_records(
                 if key in seen_event_keys:
                     continue
                 seen_event_keys.add(key)
+
+            # V3-M4 P1-2：按 timeframe 缩放 window；同 base 同 tf 缓存复用
+            tf_key = (lv.timeframe or "1H").strip() if timeframe_adaptive_window else "_FIXED_"
+            if tf_key not in future_cache:
+                if timeframe_adaptive_window:
+                    win, tol = _resolve_tf_scaled_window(
+                        tf_key, future_window_sec, tolerance_sec,
+                    )
+                else:
+                    win, tol = future_window_sec, tolerance_sec
+                future_cache[tf_key] = _find_future_snapshot(ordered, i, win, tol)
+            future = future_cache[tf_key]
+            if future is None:
+                continue
+            future_price = future.current_price
+            future_atr = future.atr if future.atr > 0 else base.atr
+            if future_price <= 0 or future_atr <= 0:
+                continue
 
             dist_atr = _signed_distance_atr(lv.price, future_price, lv.side, future_atr)
             lv_regime = getattr(lv, "regime_at_score", "") or snap_regime
@@ -683,6 +747,92 @@ def _is_calibration_monotonic(buckets: list[CalibrationBucket]) -> bool:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 多重比较修正（V3-M4 P1-1 · 跨维度族错误率控制）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 痛点：
+#   run_full_comparison 同时跑 3 个维度（bounce_quality / breakout_stage /
+#   fake_break），各得一个 McNemar p 值。若直接以"任一 p<0.05 即认为 V2 显著优"，
+#   则族错误率（Family-Wise Error Rate）= 1 - 0.95^3 ≈ 14.3%，远高于 5%。
+#
+# 解决：
+#   - Bonferroni：p_adj = min(1, p × N)，最严格，控 FWER
+#   - Benjamini-Hochberg (BH/FDR)：控期望错误发现率，比 Bonferroni 宽松一些，
+#     大规模检验中更实用；这里 N=3 时差别不大但保留以便后续扩展（如多 coin / 多 regime）
+#
+# 决策（_evaluate_decision）使用 Bonferroni 后的 p（最严格 → 最少假阳性）。
+
+def bonferroni_correction(p_values: list[float]) -> list[float]:
+    """Bonferroni 修正：p_adj_i = min(1, p_i × N)。
+
+    无脑保守，直接乘检验数。N<=1 时返回原 p。
+    """
+    n = len(p_values)
+    if n <= 1:
+        return list(p_values)
+    return [min(1.0, p * n) for p in p_values]
+
+
+def benjamini_hochberg_correction(p_values: list[float]) -> list[float]:
+    """Benjamini-Hochberg (FDR) 修正。
+
+    步骤：
+      1. 把 p_values 升序排列，记原索引
+      2. 按排名 i (1-based) 计算 q_i = p_i × N / i
+      3. 从大到小累计取最小值（保证单调）：q_i = min(q_i, q_{i+1})
+      4. 按原索引顺序输出
+
+    返回与输入等长的 q 值列表（每个 q ≤ 1.0）。
+    """
+    n = len(p_values)
+    if n <= 1:
+        return list(p_values)
+    indexed = sorted(enumerate(p_values), key=lambda x: x[1])  # [(orig_idx, p), ...]
+    q_sorted = [0.0] * n
+    # 步骤 2 + 3：从大到小累积取 min
+    last_q = 1.0
+    for rank in range(n - 1, -1, -1):
+        _, p = indexed[rank]
+        q_raw = p * n / (rank + 1)  # rank 是 0-based，所以 +1
+        last_q = min(last_q, q_raw)
+        q_sorted[rank] = min(1.0, last_q)
+    out = [0.0] * n
+    for sort_pos, (orig_idx, _) in enumerate(indexed):
+        out[orig_idx] = q_sorted[sort_pos]
+    return out
+
+
+def _apply_multiple_comparison(stats_list: list[ComparisonStats]) -> None:
+    """对一组 ComparisonStats 就地写入 Bonferroni / FDR 修正 + 重算 is_v2_significantly_better。
+
+    设计：
+      - 修正只作用在 mcnemar_p_value（McNemar 是配对样本主指标）
+      - 修正后用 mcnemar_p_bonferroni（更严格）作为决策 p
+      - decision_reasons 中"McNemar p"行替换为"McNemar p (Bonferroni N=3)"
+      - 单维度调用 compute_*_stats 不会经过此函数 → 保持原始 p（行为兼容）
+    """
+    if not stats_list:
+        return
+    n = len(stats_list)
+    p_raws = [s.mcnemar_p_value for s in stats_list]
+    p_bonf = bonferroni_correction(p_raws)
+    p_fdr = benjamini_hochberg_correction(p_raws)
+
+    for i, s in enumerate(stats_list):
+        s.family_size = n
+        s.mcnemar_p_bonferroni = p_bonf[i]
+        s.mcnemar_p_fdr = p_fdr[i]
+        # 用修正后 p 重判决策
+        is_better, reasons = _evaluate_decision(
+            s.confusion_v1, s.confusion_v2,
+            s.mcnemar_p_bonferroni, s.sample_size,
+            s.calibration_monotonic,
+            p_label=f"McNemar p (Bonferroni N={n})",
+        )
+        s.is_v2_significantly_better = is_better
+        s.decision_reasons = reasons
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 三个维度的 V1/V2 命中率计算
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -698,12 +848,15 @@ def _evaluate_decision(
     c_v1: ConfusionMatrix, c_v2: ConfusionMatrix,
     mcnemar_p: float, sample_size: int,
     calibration_monotonic: bool,
+    *,
+    p_label: str = "McNemar p",
 ) -> tuple[bool, list[str]]:
     """V2 显著优于 V1 的多条件联合判定（M3.1 升级 · GPT 审查采纳）。
 
     必要条件（全部满足才算"V2 显著优"）：
       1. 样本量 ≥ MIN_SAMPLES_TRUSTED (=100)
       2. McNemar p < 0.05（配对检验显著，非卡方）
+         · 多维度调用时由 _apply_multiple_comparison 替换为 Bonferroni 后的 p
       3. Δprecision ≥ 0.05（精度提升，避免靠 recall 崩塌赢 acc）
       4. V2 recall ≥ V1 recall × RECALL_FLOOR_RATIO (=0.85)（recall 不崩塌）
       5. 校准曲线弱单调（高分桶 hit_rate ≥ 低分桶；breakout_stage 维度跳过此项）
@@ -719,7 +872,7 @@ def _evaluate_decision(
 
     cond_p = mcnemar_p < P_VALUE_SIGNIFICANT
     reasons.append(
-        f"{'✓' if cond_p else '✗'} McNemar p={mcnemar_p:.4f} < {P_VALUE_SIGNIFICANT}"
+        f"{'✓' if cond_p else '✗'} {p_label}={mcnemar_p:.4f} < {P_VALUE_SIGNIFICANT}"
     )
 
     delta_prec = c_v2.precision - c_v1.precision
@@ -849,6 +1002,11 @@ def _build_comparison_stats(
         discordant_v1_right_v2_wrong=discordant_c,
         mcnemar_stat=mcnemar_stat,
         mcnemar_p_value=mcnemar_p,
+        # family_size / mcnemar_p_bonferroni / mcnemar_p_fdr 由 run_full_comparison
+        # 在 3 个维度都算完后回写；这里先把默认值设为原始 p，确保单维度调用也有合理值
+        family_size=1,
+        mcnemar_p_bonferroni=mcnemar_p,
+        mcnemar_p_fdr=mcnemar_p,
         accuracy_ci_v1=ci_v1,
         accuracy_ci_v2=ci_v2,
         is_v2_significantly_better=is_better,
@@ -962,6 +1120,7 @@ def run_full_comparison(
     state_filter: Optional[list[str]] = None,
     deduplicate_events: bool = True,
     require_behavior_eval: bool = True,
+    timeframe_adaptive_window: bool = True,
 ) -> dict:
     """端到端运行：从历史快照 → records → 三维度对比 → 摘要 dict。
 
@@ -973,6 +1132,11 @@ def run_full_comparison(
       - 事件去重（默认 True）
       - 元信息过滤（默认 True，跳过 behavior_eval_available=False 的样本）
       - regime / state 过滤
+
+    V3-M4 升级：
+      - P1-1：3 维度构成检验族，做 Bonferroni / FDR 修正后再判决策
+      - P1-2：future_window 按 lv.timeframe 自适应（1D=24h+ / 1W=1 周+），
+        让长周期 level 不被短窗口"过早盖戳"
     """
     records = build_outcome_records(
         history,
@@ -983,6 +1147,7 @@ def run_full_comparison(
         ambiguous_band=ambiguous_band,
         deduplicate=deduplicate_events,
         require_behavior_eval=require_behavior_eval,
+        timeframe_adaptive_window=timeframe_adaptive_window,
     )
 
     bq = compute_bounce_quality_stats(
@@ -998,6 +1163,9 @@ def run_full_comparison(
         tier_filter=tier_filter, regime_filter=regime_filter, state_filter=state_filter,
     )
 
+    # V3-M4 P1-1：3 个维度构成"检验族"，做 Bonferroni / FDR 修正后重判决策
+    _apply_multiple_comparison([bq, bs, fb])
+
     return {
         "coin": coin,
         "params": {
@@ -1009,6 +1177,7 @@ def run_full_comparison(
             "breakout_stage_threshold": breakout_stage_threshold,
             "deduplicate_events": deduplicate_events,
             "require_behavior_eval": require_behavior_eval,
+            "timeframe_adaptive_window": timeframe_adaptive_window,
             "min_samples_trusted": MIN_SAMPLES_TRUSTED,
             "min_samples_observe": MIN_SAMPLES_OBSERVE,
             "recall_floor_ratio": RECALL_FLOOR_RATIO,
@@ -1022,4 +1191,143 @@ def run_full_comparison(
             "breakout_stage": bs.to_dict(),
             "fake_break": fb.to_dict(),
         },
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M4 P0-3 · 滚动统计（rolling stats）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 设计：
+#   按 step_hours 步进生成 anchor_ts；每个 anchor 取
+#   (anchor_ts - window_days × 86400, anchor_ts] 内的快照子集，
+#   调用 run_full_comparison，提取关键指标做时间序列展示。
+#
+# 输出指标（每个 anchor 一行 / 每个维度一行）：
+#   - sample_size, mcnemar_p_bonferroni, delta_precision, delta_recall
+#   - is_v2_significantly_better（是否当前满足切换门槛）
+#   - 用于 v1v2-rolling API + 前端 14 天折线
+#
+# 性能：
+#   - 内存计算（不持久化）；大 history 时较慢（O(anchors × records)）
+#   - 由调用方加缓存（API 层 5min TTL）；CLI 可直接调用
+
+def compute_rolling_comparison(
+    history: list[KeyLevelSnapshotV2],
+    *,
+    coin: str,
+    window_days: int = 7,
+    step_hours: int = 24,
+    max_anchors: int = 14,
+    end_ts: Optional[int] = None,
+    future_window_sec: int = DEFAULT_FUTURE_WINDOW_SEC,
+    tolerance_sec: int = 600,
+    truth_atr_mult: float = DEFAULT_TRUTH_ATR_MULT,
+    ambiguous_band: float = DEFAULT_AMBIGUOUS_ATR_BAND,
+    v2_threshold: float = DEFAULT_V2_BINARY_THRESHOLD,
+    breakout_stage_threshold: int = 3,
+    timeframe_adaptive_window: bool = True,
+    deduplicate_events: bool = True,
+    require_behavior_eval: bool = True,
+) -> dict:
+    """生成 N 个时间锚点的 V1/V2 对比指标时间序列。
+
+    Args:
+      history: 历史快照
+      window_days: 每个 anchor 回看几天的数据（默认 7 天）
+      step_hours: anchor 之间的步长（默认 24h，即每天一锚）
+      max_anchors: 最多生成多少个 anchor（默认 14，覆盖 ~14 天）
+      end_ts: 最右锚点的时间戳（默认 = max(history.ts)）
+
+    Returns:
+      {
+        "coin": "BTC",
+        "params": {...},
+        "anchors": [
+          {"anchor_ts": ..., "sample_size": 80,
+           "bounce_quality": {sample_size, mcnemar_p_bonferroni, delta_precision, ...},
+           "breakout_stage": {...},
+           "fake_break": {...}},
+          ...
+        ]
+      }
+    """
+    if not history:
+        return {
+            "coin": coin,
+            "params": {
+                "window_days": window_days,
+                "step_hours": step_hours,
+                "max_anchors": max_anchors,
+            },
+            "anchors": [],
+        }
+
+    ordered = sorted(history, key=lambda h: h.ts)
+    actual_end_ts = end_ts if end_ts is not None else ordered[-1].ts
+    step_sec = step_hours * 3600
+    window_sec = window_days * 86400
+
+    anchors: list[dict] = []
+    for i in range(max_anchors):
+        anchor_ts = actual_end_ts - i * step_sec
+        sub_start = anchor_ts - window_sec
+        sub_history = [s for s in ordered if sub_start < s.ts <= anchor_ts]
+        if len(sub_history) < 2:
+            # 至少需要 2 个快照才能配对
+            continue
+        try:
+            result = run_full_comparison(
+                sub_history, coin=coin,
+                future_window_sec=future_window_sec,
+                tolerance_sec=tolerance_sec,
+                truth_atr_mult=truth_atr_mult,
+                ambiguous_band=ambiguous_band,
+                v2_threshold=v2_threshold,
+                breakout_stage_threshold=breakout_stage_threshold,
+                deduplicate_events=deduplicate_events,
+                require_behavior_eval=require_behavior_eval,
+                timeframe_adaptive_window=timeframe_adaptive_window,
+            )
+        except Exception:
+            # 单 anchor 异常不应阻断整个 series
+            continue
+
+        def _slim(s: dict) -> dict:
+            """提取折线展示所需的关键指标，丢弃完整混淆矩阵以减小 payload。"""
+            return {
+                "sample_size": s.get("sample_size", 0),
+                "mcnemar_p_value": s.get("mcnemar_p_value", 1.0),
+                "mcnemar_p_bonferroni": s.get("mcnemar_p_bonferroni", 1.0),
+                "delta_precision": s.get("delta_precision", 0.0),
+                "delta_recall": s.get("delta_recall", 0.0),
+                "delta_accuracy": s.get("delta_accuracy", 0.0),
+                "delta_balanced_accuracy": s.get("delta_balanced_accuracy", 0.0),
+                "is_v2_significantly_better": s.get("is_v2_significantly_better", False),
+                "calibration_monotonic": s.get("calibration_monotonic", False),
+            }
+
+        anchors.append({
+            "anchor_ts": anchor_ts,
+            "window_start_ts": sub_start,
+            "snapshot_count": len(sub_history),
+            "total_records": result.get("total_records", 0),
+            "bounce_quality": _slim(result["stats"]["bounce_quality"]),
+            "breakout_stage": _slim(result["stats"]["breakout_stage"]),
+            "fake_break": _slim(result["stats"]["fake_break"]),
+        })
+
+    # 反转：旧→新排列，方便前端按时间正序绘折线
+    anchors.reverse()
+
+    return {
+        "coin": coin,
+        "params": {
+            "window_days": window_days,
+            "step_hours": step_hours,
+            "max_anchors": max_anchors,
+            "end_ts": actual_end_ts,
+            "future_window_sec": future_window_sec,
+            "timeframe_adaptive_window": timeframe_adaptive_window,
+        },
+        "anchors": anchors,
     }

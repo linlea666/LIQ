@@ -312,6 +312,7 @@ async def get_v1v2_stats(
     stage_threshold: int = Query(3, ge=1, le=3, description="突破阶段二分类阈值"),
     deduplicate: bool = Query(True, description="按 (level_id,state,state_ts) 去重"),
     require_behavior_eval: bool = Query(True, description="过滤 behavior_eval_available=False 的样本"),
+    timeframe_adaptive_window: bool = Query(True, description="future_window 按 lv.timeframe 自适应（1D×24/1W×168）"),
 ):
     """V1 vs V2 关键位行为对比统计（M3.1 升级：McNemar / Wilson CI / 校准 / 多过滤）。
 
@@ -337,6 +338,7 @@ async def get_v1v2_stats(
                 "breakout_stage_threshold": stage_threshold,
                 "deduplicate_events": deduplicate,
                 "require_behavior_eval": require_behavior_eval,
+                "timeframe_adaptive_window": timeframe_adaptive_window,
             },
             "total_records": 0,
             "tier_filter": [],
@@ -376,6 +378,7 @@ async def get_v1v2_stats(
         state_filter=state_filter,
         deduplicate_events=deduplicate,
         require_behavior_eval=require_behavior_eval,
+        timeframe_adaptive_window=timeframe_adaptive_window,
     )
     result["history_size"] = len(history)
     return result
@@ -395,6 +398,97 @@ async def get_behavior_eval_health():
     """
     from processors.key_level_behavior_eval import get_health_stats
     return get_health_stats()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# V3-M4 · 切换状态 chip（M4-6）+ rolling 滑窗折线（M4-3）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.get("/key-levels/behavior-switch-state")
+async def get_behavior_switch_state():
+    """V3-M4 P0-6：返回各维度当前生效的 V1/V2 版本（默认全 V1）。
+
+    用途：
+      - 前端 v1v2-compare 页顶部 chip 区显示
+      - M4-5 CLI 检查当前状态
+      - M4-2 审计（切换历史从此值的变化推导）
+    """
+    from processors.behavior_switch_config import get_switch_state
+    return {
+        "ready": True,
+        "state": get_switch_state(),
+        "default_version": "V1",
+    }
+
+
+# rolling 缓存（5min TTL；进程内单例）
+# key = (coin, window_days, step_hours, max_anchors, future_window_sec)
+# value = (computed_at_ts, result_dict)
+_ROLLING_CACHE: dict[tuple, tuple[float, dict]] = {}
+_ROLLING_CACHE_TTL_SEC = 300.0  # 5 分钟
+
+
+@router.get("/key-levels/v1v2-rolling/{coin}")
+async def get_v1v2_rolling(
+    coin: str,
+    window_days: int = Query(7, ge=1, le=30, description="单 anchor 回看窗口（天）"),
+    step_hours: int = Query(24, ge=1, le=168, description="anchor 步长（小时）"),
+    max_anchors: int = Query(14, ge=2, le=60, description="最多 anchor 数（默认 14 ≈ 2 周）"),
+    future_window_sec: int = Query(14400, ge=1800, le=259200, description="判真相窗口（秒，1H 基线）"),
+    timeframe_adaptive_window: bool = Query(True),
+    no_cache: bool = Query(False, description="跳过缓存（调试用）"),
+):
+    """V3-M4 P0-3：14 天滑窗 V1/V2 对比指标时间序列（用于前端折线）。
+
+    每个 anchor 的回看窗口 = (anchor_ts - window_days×86400, anchor_ts]，
+    步长 = step_hours，最多 max_anchors 个。每个 anchor 内部跑 run_full_comparison。
+
+    性能：单次 ~50-500ms（取决于 history 大小）；启用 5min TTL 内存缓存。
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    history = _engine.get_kl_history(coin)
+    if not history:
+        return {
+            "ready": True,
+            "coin": coin,
+            "params": {
+                "window_days": window_days, "step_hours": step_hours,
+                "max_anchors": max_anchors,
+                "future_window_sec": future_window_sec,
+                "timeframe_adaptive_window": timeframe_adaptive_window,
+            },
+            "anchors": [],
+            "history_size": 0,
+            "_cache_hit": False,
+        }
+
+    cache_key = (
+        coin, window_days, step_hours, max_anchors,
+        future_window_sec, timeframe_adaptive_window,
+    )
+    now = time.time()
+    if not no_cache:
+        cached = _ROLLING_CACHE.get(cache_key)
+        if cached and (now - cached[0]) < _ROLLING_CACHE_TTL_SEC:
+            result = dict(cached[1])
+            result["_cache_hit"] = True
+            result["_cache_age_sec"] = round(now - cached[0], 1)
+            return result
+
+    from processors.behavior_backtest_engine import compute_rolling_comparison
+    result = compute_rolling_comparison(
+        history, coin=coin,
+        window_days=window_days, step_hours=step_hours, max_anchors=max_anchors,
+        future_window_sec=future_window_sec,
+        timeframe_adaptive_window=timeframe_adaptive_window,
+    )
+    result["history_size"] = len(history)
+    result["ready"] = True
+    result["_cache_hit"] = False
+    _ROLLING_CACHE[cache_key] = (now, result)
+    return result
 
 
 def _empty_stats_dict(dimension: str) -> dict:
@@ -422,6 +516,9 @@ def _empty_stats_dict(dimension: str) -> dict:
         "discordant_v1_right_v2_wrong": 0,
         "mcnemar_stat": 0.0,
         "mcnemar_p_value": 1.0,
+        "family_size": 1,
+        "mcnemar_p_bonferroni": 1.0,
+        "mcnemar_p_fdr": 1.0,
         "accuracy_ci_v1": [0.0, 0.0],
         "accuracy_ci_v2": [0.0, 0.0],
         "is_v2_significantly_better": False,

@@ -812,6 +812,9 @@ export interface BehaviorEval {
 
   // state vs behavior 严重不一致时记入（白话原因，前端 ⚠ 提示）
   contradiction_with_state?: string[];
+  // V3-M4 P1-4：与 contradiction_with_state 一一对应的严重度（low/medium/high）
+  // 旧 snapshot 不存在该字段时按 "medium" 兜底；前端按值上色（low=灰/med=黄/high=红）
+  contradiction_severities?: ("low" | "medium" | "high" | string)[];
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // M3.1 新增：评估元信息（"未评估"vs"评估为 0" 的区分）
@@ -890,6 +893,13 @@ export interface ComparisonStats {
   decision_reasons?: string[];
   calibration_v2?: CalibrationBucketDict[];
   calibration_monotonic?: boolean;
+
+  // V3-M4 P1-1 新增：跨维度族错误率控制（Bonferroni / FDR）
+  // 决策（is_v2_significantly_better）使用 mcnemar_p_bonferroni（最严格）。
+  // family_size=1 表示该 stats 单独计算未参与多重比较修正。
+  family_size?: number;
+  mcnemar_p_bonferroni?: number;
+  mcnemar_p_fdr?: number;
 }
 
 export interface V1V2StatsResponse {
@@ -907,6 +917,8 @@ export interface V1V2StatsResponse {
     min_samples_trusted?: number;
     min_samples_observe?: number;
     recall_floor_ratio?: number;
+    // V3-M4 P1-2 新增
+    timeframe_adaptive_window?: boolean;
   };
   total_records: number;
   tier_filter: string[];
@@ -918,6 +930,61 @@ export interface V1V2StatsResponse {
     breakout_stage: ComparisonStats;
     fake_break: ComparisonStats;
   };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V3-M4 · 切换状态 chip（M4-6）+ rolling 滑窗（M4-3）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface BehaviorSwitchStateResponse {
+  ready: boolean;
+  state: {
+    bounce_quality?: "V1" | "V2" | string;
+    breakout_stage?: "V1" | "V2" | string;
+    fake_break?: "V1" | "V2" | string;
+    break_depth?: "V1" | "V2" | string;
+  };
+  default_version: "V1" | "V2" | string;
+}
+
+// 单 anchor 单维度的精简指标（折线展示用）
+export interface RollingDimensionPoint {
+  sample_size: number;
+  mcnemar_p_value: number;
+  mcnemar_p_bonferroni: number;
+  delta_precision: number;
+  delta_recall: number;
+  delta_accuracy: number;
+  delta_balanced_accuracy: number;
+  is_v2_significantly_better: boolean;
+  calibration_monotonic: boolean;
+}
+
+export interface RollingAnchor {
+  anchor_ts: number;
+  window_start_ts: number;
+  snapshot_count: number;
+  total_records: number;
+  bounce_quality: RollingDimensionPoint;
+  breakout_stage: RollingDimensionPoint;
+  fake_break: RollingDimensionPoint;
+}
+
+export interface V1V2RollingResponse {
+  ready?: boolean;
+  coin: string;
+  params: {
+    window_days: number;
+    step_hours: number;
+    max_anchors: number;
+    end_ts?: number;
+    future_window_sec?: number;
+    timeframe_adaptive_window?: boolean;
+  };
+  anchors: RollingAnchor[];
+  history_size?: number;
+  _cache_hit?: boolean;
+  _cache_age_sec?: number;
 }
 
 // M1 新增：数据新鲜度元信息

@@ -150,6 +150,9 @@ _DEFAULT_BEHAVIOR_CFG = {
     "cap_weight_cvd_divergence": 0.20,
     "cap_weight_oi_drop": 0.15,
     "cap_weight_funding_reset": 0.10,
+    # V3-M4 P1-3：未拿到次根 K 收阳确认时，capitulation_bottom_score 的最高上限
+    # （超过此值的会被 cap 到此值；意味着"候选观察"而非"高置信确认"）
+    "cap_secondary_confirm_cap": 0.50,
     # flip_confirmation 因子权重
     "fc_weight_breakout_validity": 0.30,
     "fc_weight_retest_quality": 0.30,
@@ -516,7 +519,10 @@ def _evaluate_one_level(
     e.dynamic_break_depth_pct = compute_dynamic_break_depth_pct(snapshot.atr, snapshot.current_price, cfg)
 
     # ── M2.5 · 冲突预警（state vs behavior_state 严重不一致时记入） ──
-    e.contradiction_with_state = _detect_contradictions(lv, e, cfg)
+    # V3-M4 P1-4：reasons + severities 一一对应，severity ∈ low/medium/high
+    contradictions, severities = _detect_contradictions(lv, e, cfg)
+    e.contradiction_with_state = contradictions
+    e.contradiction_severities = severities
 
     return e
 
@@ -789,6 +795,12 @@ def _calc_capitulation(lv: KeyLevelV2, ctx: dict, cfg: dict) -> float:
     """门槛触发式：必须先达到 panic_volume_percentile gate 才计算其他子项。
 
     高分严格要求：极端放量 + 长下影 + CVD 背离 + OI 释放。
+
+    V3-M4 P1-3：二次确认门槛（GPT 审查采纳）：
+      若「次根 K（最近一根已收盘 15m K）非阳线」（close <= open）→ score cap 在 0.50。
+      逻辑：单根长下影只是"可能见底"的候选信号；只有下一根继续收阳才算市场确认。
+      没有这个门槛会让"下跌中途长下影插针"被直接判 capitulation_flush，
+      诱导 AI 给"做多入场"建议（已在 prompt §9g.1 显式禁止，但底层分数也要兜住）。
     """
     panic_pct = float(ctx.get("panic_volume_percentile", 0.0))
     gate = float(cfg.get("cap_panic_gate", 0.85))
@@ -843,7 +855,22 @@ def _calc_capitulation(lv: KeyLevelV2, ctx: dict, cfg: dict) -> float:
         + weights["oi"] * f_oi
         + weights["funding"] * f_funding
     )
-    return _clamp01(score)
+    score = _clamp01(score)
+
+    # V3-M4 P1-3：二次确认门槛 — 次根 K 必须收阳才允许进入"high confidence"区
+    # 检测的是"最近一根已收盘 K"（candles[-2]，因 candles[-1] 可能未收盘），
+    # close > open 视为收阳；缺数据时按"未确认"处理（保守 cap）
+    cap_threshold = float(cfg.get("cap_secondary_confirm_cap", 0.50))
+    candles = ctx.get("candles_15m") or []
+    secondary_confirmed = False
+    if len(candles) >= 2:
+        last_closed = candles[-2]
+        if last_closed and last_closed.close > last_closed.open:
+            secondary_confirmed = True
+
+    if not secondary_confirmed and score > cap_threshold:
+        return cap_threshold
+    return score
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1323,57 +1350,88 @@ def compute_dynamic_break_depth_pct(atr: float, price: float, cfg: dict) -> floa
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def _detect_contradictions(lv: KeyLevelV2, e: BehaviorEval, cfg: dict) -> list[str]:
-    """检查旧 state 与新 behavior 是否极端不一致；返回白话冲突列表。
+def _detect_contradictions(
+    lv: KeyLevelV2, e: BehaviorEval, cfg: dict,
+) -> tuple[list[str], list[str]]:
+    """检查旧 state 与新 behavior 是否极端不一致；返回 (reasons, severities)。
 
     设计纪律：
       - 仅"两者方向相反"才记入，避免噪声（轻微差异不算冲突）
       - 不写入 lv.contradiction_reasons（保持主路径清洁，那个用来记 V3 评分扣分原因）
       - 仅前端 / AI 可见，不影响信号生成
+      - severities 与 reasons 同长，one-to-one 对应（low/medium/high）
 
-    检测规则（与 _derive_behavior_state 阈值同源 + 0.05 偏移避免边界震荡）：
-      1. state==broken & breakout_validity<0.30 & false_break_risk≥0.65
+    检测规则（V3-M4 P1-4 升级，含 GPT 审查补的 3 条强对立规则）：
+      原 6 条（保留）：
+      1. state==broken & breakout_validity<0.30 & false_break_risk≥0.65 [med]
          → "形态破位但量价未确认（可能假破）"
-      2. state==broken & breakout_validity<0.30 & state ≠ fake_break
+      2. state==broken & breakout_validity<0.30 [med]
          → "突破质量极弱，警惕假突破"
-      3. state==bounced & retest_quality<0.30
+      3. state==bounced & retest_quality<0.30 [low]
          → "反弹生效但量能/深度不健康"
-      4. state==flipped & flip_confirmation<0.30
+      4. state==flipped & flip_confirmation<0.30 [med]
          → "几何翻转但市场未确认"
-      5. state ∈ {testing,bounced} & support & selloff_continuation_risk≥0.65
+      5. state ∈ {testing,bounced} & support & selloff_continuation_risk≥0.65 [high]
          → "支撑接触但破位延续风险高"
-      6. V1 vs V2 显著背离（仅 bounce_quality 一项，最易感知）：
-         lv.bounce_quality=="proactive" & e.bounce_quality_enhanced<0.35
-         → "V1 标记主动反弹，V2 评估为被动（建议关注）"
-         lv.bounce_quality=="passive" & e.bounce_quality_enhanced>0.65
-         → "V1 标记被动反弹，V2 评估为主动（建议关注）"
+      6. V1/V2 bounce_quality 双轨方向背离 [low]
+
+      新增 3 条（V3-M4 P1-4）：
+      7. state==broken & support & capitulation_bottom_score≥0.70 [high]
+         → "V1 判破位下行，V2 看到恐慌见底候选（方向严重对立）"
+      8. state==fake_break & breakout_validity≥0.70 [high]
+         → "V1 判假突破，V2 看真突破质量（方向严重对立）"
+      9. strength_tier∈{S,A} & support & selloff_continuation_risk≥0.70 [high]
+         → "强支撑（{tier}级）面临高破位延续风险"
     """
     out: list[str] = []
+    sev: list[str] = []
     state = lv.state
     is_support = lv.side == "support"
 
+    def _add(reason: str, severity: str) -> None:
+        out.append(reason)
+        sev.append(severity)
+
+    # 规则 1-2：state=broken 但行为分极弱
     if state == "broken":
         if e.breakout_validity < 0.30 and e.false_break_risk >= 0.65:
-            out.append("形态破位但量价未确认（可能假破）")
+            _add("形态破位但量价未确认（可能假破）", "medium")
         elif e.breakout_validity < 0.30:
-            out.append("突破质量极弱，警惕假突破")
+            _add("突破质量极弱，警惕假突破", "medium")
 
+    # 规则 3：state=bounced 但回踩质量差
     if state == "bounced" and e.retest_quality < 0.30:
-        out.append("反弹生效但量能/深度不健康")
+        _add("反弹生效但量能/深度不健康", "low")
 
+    # 规则 4：state=flipped 但翻转未确认
     if state == "flipped" and e.flip_confirmation < 0.30:
-        out.append("几何翻转但市场未确认")
+        _add("几何翻转但市场未确认", "medium")
 
+    # 规则 5：testing/bounced 中支撑面临高延续下行
     if state in ("testing", "bounced") and is_support \
             and e.selloff_continuation_risk >= 0.65:
-        out.append("支撑接触但破位延续风险高")
+        _add("支撑接触但破位延续风险高", "high")
 
-    # V1 vs V2 双轨背离（仅 bounce_quality 维度，最易解读）
+    # 规则 6：V1 vs V2 bounce_quality 双轨背离
     bq_v1 = lv.bounce_quality or ""
     bq_v2 = e.bounce_quality_enhanced
     if bq_v1 == "proactive" and bq_v2 < 0.35:
-        out.append("V1 标记主动反弹，V2 评估为被动（建议关注）")
+        _add("V1 标记主动反弹，V2 评估为被动（建议关注）", "low")
     elif bq_v1 == "passive" and bq_v2 > 0.65:
-        out.append("V1 标记被动反弹，V2 评估为主动（建议关注）")
+        _add("V1 标记被动反弹，V2 评估为主动（建议关注）", "low")
 
-    return out
+    # ── V3-M4 P1-4 新增 3 条强对立规则 ──
+    # 规则 7：V1 判破位下行 vs V2 看见底候选（方向严重对立 → high）
+    if state == "broken" and is_support and e.capitulation_bottom_score >= 0.70:
+        _add("V1 判破位下行，V2 看到恐慌见底候选（方向严重对立）", "high")
+
+    # 规则 8：V1 判假突破 vs V2 看真突破质量（方向严重对立 → high）
+    if state == "fake_break" and e.breakout_validity >= 0.70:
+        _add("V1 判假突破，V2 看真突破质量（方向严重对立）", "high")
+
+    # 规则 9：强支撑（S/A 级）面临高破位延续风险（罕见 → high）
+    if (lv.strength_tier or "") in ("S", "A") and is_support \
+            and e.selloff_continuation_risk >= 0.70:
+        _add(f"强支撑（{lv.strength_tier}级）面临高破位延续风险", "high")
+
+    return out, sev

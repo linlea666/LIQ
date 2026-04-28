@@ -22,7 +22,12 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { API_BASE } from "@/lib/constants";
 import V1V2CompareCard from "@/components/Levels/V1V2CompareCard";
-import type { V1V2StatsResponse } from "@/lib/types";
+import V1V2RollingChart from "@/components/Levels/V1V2RollingChart";
+import type {
+  BehaviorSwitchStateResponse,
+  V1V2RollingResponse,
+  V1V2StatsResponse,
+} from "@/lib/types";
 
 const TIER_OPTIONS = ["S", "A", "B", "C"] as const;
 const STATE_OPTIONS = ["broken", "flipped", "bounced", "fake_break", "testing"] as const;
@@ -50,6 +55,11 @@ export default function V1V2ComparePage() {
   const [data, setData] = useState<V1V2StatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // V3-M4 P0-3 / P0-6：rolling 滑窗折线 + 切换状态 chip
+  const [rolling, setRolling] = useState<V1V2RollingResponse | null>(null);
+  const [switchState, setSwitchState] =
+    useState<BehaviorSwitchStateResponse | null>(null);
 
   const queryString = useMemo(() => {
     const sp = new URLSearchParams();
@@ -96,6 +106,47 @@ export default function V1V2ComparePage() {
     };
   }, [coin, queryString, refreshNonce]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // V3-M4 P0-3：rolling 滑窗（独立 fetch；不阻塞主表）
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let cancelled = false;
+    fetch(
+      `${API_BASE}/api/key-levels/v1v2-rolling/${coin}?window_days=7&step_hours=24&max_anchors=14`,
+      { signal: ctrl.signal },
+    )
+      .then((r) => (r.ok ? (r.json() as Promise<V1V2RollingResponse>) : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setRolling(d);
+      })
+      .catch(() => {
+        // 静默失败：rolling 是辅助视图
+      });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [coin, refreshNonce]);
+
+  // V3-M4 P0-6：切换状态 chip（独立 fetch；不依赖 coin）
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let cancelled = false;
+    fetch(`${API_BASE}/api/key-levels/behavior-switch-state`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? (r.json() as Promise<BehaviorSwitchStateResponse>) : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setSwitchState(d);
+      })
+      .catch(() => {
+        // 静默失败：chip 是辅助提示
+      });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [refreshNonce]);
 
   const toggleTier = (t: string) => {
     setTierFilter((prev) =>
@@ -148,6 +199,48 @@ export default function V1V2ComparePage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-6 space-y-6">
+        {/* V3-M4 P0-6 · 切换状态 chip 区（生产实际生效的版本） */}
+        {switchState && (
+          <section className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="text-[11px] text-slate-500">
+                🔧 当前生产实际生效版本（M4-1 路由器接管前默认全 V1）
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(switchState.state).map(([dim, ver]) => {
+                  const v2 = ver === "V2";
+                  const dimLabel: Record<string, string> = {
+                    bounce_quality: "反弹质量",
+                    breakout_stage: "突破阶段",
+                    fake_break: "假破回收",
+                    break_depth: "破位阈值",
+                  };
+                  return (
+                    <span
+                      key={dim}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                        v2
+                          ? "bg-purple-500/20 text-purple-200 border border-purple-500/40"
+                          : "bg-slate-700/40 text-slate-300 border border-slate-600/40"
+                      }`}
+                      title={`维度：${dim}，当前生效：${ver}`}
+                    >
+                      {dimLabel[dim] ?? dim}{" "}
+                      <span
+                        className={`font-mono ${
+                          v2 ? "text-purple-100" : "text-slate-100"
+                        }`}
+                      >
+                        {ver}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* 参数控制区 */}
         <section className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4">
           <h2 className="text-sm font-semibold text-white mb-3">回测参数</h2>
@@ -276,18 +369,30 @@ export default function V1V2ComparePage() {
               <V1V2CompareCard stats={data.stats.fake_break} />
             </div>
 
+            {/* V3-M4 P0-3：14 天滑窗折线（独立 section） */}
+            {rolling && rolling.anchors.length > 0 && (
+              <V1V2RollingChart
+                anchors={rolling.anchors}
+                windowDays={rolling.params.window_days}
+                stepHours={rolling.params.step_hours}
+                cacheHit={rolling._cache_hit}
+              />
+            )}
+
             <section className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4 text-[11px] text-slate-500 leading-relaxed">
-              <h3 className="text-sm font-semibold text-slate-300 mb-2">📖 怎么解读这个页面（M3.1 升级）</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">📖 怎么解读这个页面（M3.1 + M4 P1 升级）</h3>
               <ul className="space-y-1 list-disc list-inside">
                 <li><b>样本量门槛</b>：n &lt; {MIN_SAMPLES_OBSERVE} 完全不可信；{MIN_SAMPLES_OBSERVE}-{MIN_SAMPLES_TRUSTED} 观察期；≥ {MIN_SAMPLES_TRUSTED} 才可作为 M4 切换依据</li>
-                <li><b>V2 显著优于 V1</b>（多条件联合判定）：McNemar p &lt; 0.05 + Δprecision ≥ 0.05 + V2 recall ≥ V1×0.85 + 校准弱单调</li>
+                <li><b>V2 显著优于 V1</b>（多条件联合判定）：McNemar Bonferroni p &lt; 0.05 + Δprecision ≥ 0.05 + V2 recall ≥ V1×0.85 + 校准弱单调</li>
+                <li><b className="text-amber-300/90">M4 P1-1 · 多重比较修正</b>：3 维度并行检验会让族错误率从 5% 膨胀到 ~14.3%；用 Bonferroni（p × 3）控 FWER，决策卡 Bonferroni p（最严格）</li>
+                <li><b className="text-amber-300/90">M4 P1-2 · timeframe 自适应窗口</b>：future_window 按 lv.timeframe 缩放（15m=×0.25 / 1H=×1 / 1D=×24 / 1W=×168），让长周期 level 不被短窗口&ldquo;过早盖戳&rdquo;</li>
                 <li><b>McNemar 检验</b>：V1/V2 是配对样本（同一事件两个判定），McNemar 比 χ² 更严谨</li>
                 <li><b>Wilson 95% CI</b>：accuracy 区间估计；CI 不重叠时差异更可信，重叠时谨慎</li>
                 <li><b>分桶校准</b>：V2 高分桶 hit_rate 应 ≥ 低分桶（弱单调）；不单调说明 V2 分数判别力不足</li>
                 <li><b>balanced_accuracy / MCC</b>：类别不平衡时比 accuracy/F1 更稳健</li>
                 <li><b>剔除模糊样本</b>：未来价格仅小幅偏移（&lt; 0.3×ATR）的样本不计入分母，避免噪声</li>
                 <li><b>事件去重</b>：同一 (level_id, state, state_ts) 在多个快照中只算一条，防膨胀</li>
-                <li>本页**不影响**实盘信号；切换决策由 M4 阶段在统计稳定后人工拍板</li>
+                <li>本页<b>不影响</b>实盘信号；切换决策由 M4 阶段在统计稳定后人工拍板</li>
               </ul>
             </section>
           </>

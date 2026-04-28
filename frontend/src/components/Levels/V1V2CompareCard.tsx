@@ -208,6 +208,9 @@ export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
   }
 
   const mcnemarP = stats.mcnemar_p_value ?? 1.0;
+  const mcnemarPBonf = stats.mcnemar_p_bonferroni ?? mcnemarP;
+  const familySize = stats.family_size ?? 1;
+  const corrected = familySize > 1; // 是否进入了多重比较修正
   const reasons = stats.decision_reasons ?? [];
   const calibration: CalibrationBucketDict[] = stats.calibration_v2 ?? [];
   const showCalibration = calibration.length > 0;
@@ -271,6 +274,21 @@ export default function V1V2CompareCard({ stats }: { stats: ComparisonStats }) {
             {mcnemarP < 1e-4 ? "<0.0001" : mcnemarP.toFixed(4)}
           </span>
         </span>
+        {/* V3-M4 P1-1：Bonferroni 修正后的 p（决策依据） */}
+        {corrected && (
+          <span title={`3 维度族错误率控制（FWER）：原始 p × ${familySize}`}>
+            Bonferroni
+            <span className="text-slate-600 mx-0.5">N={familySize}</span>p
+            ={" "}
+            <span
+              className={`font-mono ml-0.5 ${
+                mcnemarPBonf < 0.05 ? "text-emerald-300" : "text-slate-400"
+              }`}
+            >
+              {mcnemarPBonf < 1e-4 ? "<0.0001" : mcnemarPBonf.toFixed(4)}
+            </span>
+          </span>
+        )}
         {(stats.discordant_v1_wrong_v2_right !== undefined ||
           stats.discordant_v1_right_v2_wrong !== undefined) && (
           <span className="text-slate-600">

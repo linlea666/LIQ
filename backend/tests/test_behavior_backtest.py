@@ -822,3 +822,343 @@ class TestFilters:
         assert s.sample_size == 2
         s_empty = compute_breakout_stage_stats(recs, state_filter=["flipped"])
         assert s_empty.sample_size == 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 20. V3-M4 P1-1 · 多重比较修正（Bonferroni / FDR）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from processors.behavior_backtest_engine import (  # noqa: E402
+    _apply_multiple_comparison,
+    benjamini_hochberg_correction,
+    bonferroni_correction,
+)
+
+
+class TestBonferroniCorrection:
+    def test_single_p_unchanged(self):
+        assert bonferroni_correction([0.04]) == [0.04]
+
+    def test_three_p_multiplied(self):
+        # n=3 → p × 3
+        out = bonferroni_correction([0.01, 0.02, 0.10])
+        assert len(out) == 3
+        assert abs(out[0] - 0.03) < 1e-9
+        assert abs(out[1] - 0.06) < 1e-9
+        assert abs(out[2] - 0.30) < 1e-9
+
+    def test_caps_at_one(self):
+        out = bonferroni_correction([0.5, 0.4, 0.3])
+        assert all(p <= 1.0 for p in out)
+        assert out[0] == 1.0
+        assert out[1] == 1.0
+        assert abs(out[2] - 0.9) < 1e-9
+
+    def test_empty_returns_empty(self):
+        assert bonferroni_correction([]) == []
+
+
+class TestBenjaminiHochberg:
+    def test_single_p_unchanged(self):
+        assert benjamini_hochberg_correction([0.04]) == [0.04]
+
+    def test_monotonic_after_correction(self):
+        # 升序排列后 BH 应保持单调（步进取 min）
+        ps = [0.01, 0.04, 0.09]
+        qs = benjamini_hochberg_correction(ps)
+        # q1 = min(0.01*3/1, q2) = min(0.03, q2)
+        # q2 = min(0.04*3/2, q3) = min(0.06, q3)
+        # q3 = 0.09*3/3 = 0.09
+        assert abs(qs[2] - 0.09) < 1e-9
+        assert abs(qs[1] - 0.06) < 1e-9
+        assert abs(qs[0] - 0.03) < 1e-9
+
+    def test_handles_unsorted_input(self):
+        # 输入 [0.10, 0.01, 0.05]（无序），输出按原 index 顺序
+        qs = benjamini_hochberg_correction([0.10, 0.01, 0.05])
+        # 排序后：(idx=1, p=0.01), (idx=2, p=0.05), (idx=0, p=0.10)
+        # 排名 1: 0.01*3/1 = 0.03 → q=0.03
+        # 排名 2: 0.05*3/2 = 0.075 → q=0.075
+        # 排名 3: 0.10*3/3 = 0.10  → q=0.10
+        # 单调步进: q3=0.10, q2=min(0.075,0.10)=0.075, q1=min(0.03,0.075)=0.03
+        assert abs(qs[1] - 0.03) < 1e-9    # 原 idx=1
+        assert abs(qs[2] - 0.075) < 1e-9   # 原 idx=2
+        assert abs(qs[0] - 0.10) < 1e-9    # 原 idx=0
+
+    def test_caps_at_one(self):
+        qs = benjamini_hochberg_correction([0.5, 0.7, 0.9])
+        assert all(q <= 1.0 for q in qs)
+
+
+class TestApplyMultipleComparison:
+    def test_three_dimensions_get_corrected(self):
+        """run_full_comparison 内部 → 3 维度回写 family_size=3 + bonferroni p。"""
+        # 用 _make_bounce_record 等已有 helper 构造
+        bounce_recs = [
+            _make_bounce_record(v1_bq="proactive", v2_bq=0.85, truth="real_bounce")
+            for _ in range(110)
+        ]
+        breakout_recs = [
+            _make_breakout_record(v1_stage=3, v2_stage=3, truth="true_breakout")
+            for _ in range(50)
+        ]
+        all_recs = bounce_recs + breakout_recs
+        bq = compute_bounce_quality_stats(all_recs)
+        bs = compute_breakout_stage_stats(all_recs)
+        fb = compute_fake_break_stats(all_recs)
+        # 单独调用 → family_size=1，bonferroni == raw
+        assert bq.family_size == 1
+        assert abs(bq.mcnemar_p_bonferroni - bq.mcnemar_p_value) < 1e-9
+        # 通过 _apply_multiple_comparison 回写 → family_size=3
+        _apply_multiple_comparison([bq, bs, fb])
+        assert bq.family_size == 3
+        assert bs.family_size == 3
+        assert fb.family_size == 3
+        # bonferroni p ≥ raw p（保守变严格）
+        assert bq.mcnemar_p_bonferroni >= bq.mcnemar_p_value - 1e-9
+
+    def test_decision_reasons_use_bonferroni_label(self):
+        """修正后 decision_reasons 应改用 'Bonferroni N=3' 标签。"""
+        recs = [
+            _make_bounce_record(v1_bq="passive", v2_bq=0.85, truth="real_bounce")
+            for _ in range(150)
+        ]
+        bq = compute_bounce_quality_stats(recs)
+        bs = compute_breakout_stage_stats([])
+        fb = compute_fake_break_stats([])
+        _apply_multiple_comparison([bq, bs, fb])
+        # 至少有一条 reason 出现 "Bonferroni"
+        assert any("Bonferroni" in r for r in bq.decision_reasons)
+
+
+class TestRunFullComparisonMultipleComparison:
+    def test_full_comparison_writes_correction_fields(self):
+        """端到端：run_full_comparison 输出应包含 mcnemar_p_bonferroni / fdr。"""
+        # 构造一个非空 history（bounced）
+        lv = _lv(level_id="L1", side="support", state="bounced", price=100_000,
+                 bounce_quality="proactive",
+                 behavior=_beh(bounce_quality_enhanced=0.8))
+        snaps = [
+            _snap(ts=i * 14400, current_price=100_500 + i * 100, atr=500, levels=[lv])
+            for i in range(3)
+        ]
+        # 注：lv 在多 snapshot 中复用 → state_ts 默认 0 → 会被去重为 1 条
+        result = run_full_comparison(snaps, coin="BTC", future_window_sec=14400)
+        for dim in ("bounce_quality", "breakout_stage", "fake_break"):
+            stats = result["stats"][dim]
+            assert "family_size" in stats
+            assert "mcnemar_p_bonferroni" in stats
+            assert "mcnemar_p_fdr" in stats
+            assert stats["family_size"] == 3
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 21. V3-M4 P1-2 · timeframe 自适应 future window
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from processors.behavior_backtest_engine import (  # noqa: E402
+    _resolve_tf_scaled_window,
+)
+
+
+class TestTimeframeScaledWindow:
+    def test_default_1h_scale_one(self):
+        win, tol = _resolve_tf_scaled_window("1H", 14400, 600)
+        assert win == 14400
+        assert tol == 600
+
+    def test_15m_quarter(self):
+        win, tol = _resolve_tf_scaled_window("15m", 14400, 600)
+        assert win == 3600  # 14400 × 0.25
+        assert tol == 150
+
+    def test_daily_24x(self):
+        win, tol = _resolve_tf_scaled_window("1D", 14400, 600)
+        assert win == 14400 * 24
+        # tol 应该被 cap 到 _TOLERANCE_CAP_SEC（6h = 21600）
+        assert tol == 600 * 24  # 14400s 仍未触顶
+        # 触顶检验
+        win2, tol2 = _resolve_tf_scaled_window("1D", 14400, 1000)
+        assert tol2 == 21600  # 1000×24 = 24000 > cap 21600 → cap
+
+    def test_unknown_tf_default_one(self):
+        win, tol = _resolve_tf_scaled_window("XYZ", 14400, 600)
+        assert win == 14400
+
+
+class TestTimeframeAdaptiveWindowInBuild:
+    def test_1h_level_pairs_at_4h(self):
+        """1H level + 4h base window → 应配对到 base+4h 的快照。"""
+        lv = _lv(level_id="L1", side="support", state="bounced", price=100_000,
+                 bounce_quality="proactive",
+                 behavior=_beh(bounce_quality_enhanced=0.7))
+        # 注意：lv 默认 timeframe="" → 走 fallback "1H"
+        snaps = [
+            _snap(ts=0, current_price=100_000, atr=500, levels=[lv]),
+            _snap(ts=14400, current_price=100_500, atr=500),  # +4h
+            _snap(ts=14400 * 24, current_price=200_000, atr=500),  # +96h
+        ]
+        recs = build_outcome_records(snaps, coin="BTC", future_window_sec=14400)
+        assert len(recs) == 1
+        assert recs[0].future_ts == 14400  # 1H scale=1 → base+4h
+
+    def test_1d_level_pairs_at_96h_when_adaptive_on(self):
+        """1D level + 4h base window + adaptive=True → 缩放到 96h，仅 +96h 的快照命中。"""
+        from models.key_level import KeyLevelV2  # noqa: F401  ← reuse imported name
+        # 用全字段构造，timeframe="1D"
+        lv = KeyLevelV2(
+            level_id="L1", price=100_000, side="support", state="bounced",
+            state_ts=0, bounce_quality="proactive", strength_tier="A",
+            timeframe="1D",
+            behavior=_beh(bounce_quality_enhanced=0.7),
+        )
+        snaps = [
+            _snap(ts=0, current_price=100_000, atr=500, levels=[lv]),
+            _snap(ts=14400, current_price=100_500, atr=500),       # +4h
+            _snap(ts=14400 * 24, current_price=110_000, atr=500),  # +96h（1D 目标）
+        ]
+        recs = build_outcome_records(snaps, coin="BTC", future_window_sec=14400,
+                                     timeframe_adaptive_window=True)
+        # 配对应找到 +96h 那个快照（不是 +4h）
+        assert len(recs) == 1
+        assert recs[0].future_ts == 14400 * 24
+        assert recs[0].timeframe == "1D"
+
+    def test_adaptive_off_uses_fixed_window(self):
+        """adaptive=False → 仍用 4h 窗口，1D level 也配对到 +4h。"""
+        from models.key_level import KeyLevelV2
+        lv = KeyLevelV2(
+            level_id="L1", price=100_000, side="support", state="bounced",
+            state_ts=0, bounce_quality="proactive", strength_tier="A",
+            timeframe="1D",
+            behavior=_beh(bounce_quality_enhanced=0.7),
+        )
+        snaps = [
+            _snap(ts=0, current_price=100_000, atr=500, levels=[lv]),
+            _snap(ts=14400, current_price=100_500, atr=500),
+            _snap(ts=14400 * 24, current_price=110_000, atr=500),
+        ]
+        recs = build_outcome_records(snaps, coin="BTC", future_window_sec=14400,
+                                     timeframe_adaptive_window=False)
+        assert len(recs) == 1
+        assert recs[0].future_ts == 14400  # fixed 4h
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 22. V3-M4 P1-5 · anti-leak 防护 + 序列化往返
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestAntiLeakage:
+    def test_record_uses_base_state_not_future(self):
+        """OutcomeRecord.state 应来自 base 时刻 lv.state，与 future 时刻无关。
+
+        反例：若回测引擎读 future_snap.levels[*].state，一旦未来 state 翻转
+        将污染当前预测的标签。
+        """
+        from models.key_level import KeyLevelV2
+        # base: bounced；future: 同 lv 已 broken
+        base_lv = KeyLevelV2(
+            level_id="L1", price=100_000, side="support", state="bounced",
+            state_ts=0, bounce_quality="proactive",
+            behavior=_beh(bounce_quality_enhanced=0.7),
+        )
+        future_lv = KeyLevelV2(
+            level_id="L1", price=100_000, side="support", state="broken",
+            state_ts=14000, bounce_quality="",
+            behavior=_beh(bounce_quality_enhanced=0.05),
+        )
+        snaps = [
+            _snap(ts=0, current_price=100_000, atr=500, levels=[base_lv]),
+            _snap(ts=14400, current_price=100_750, atr=500, levels=[future_lv]),
+        ]
+        recs = build_outcome_records(snaps, coin="BTC", future_window_sec=14400)
+        assert len(recs) == 1
+        # 关键断言：state 来自 base，不是 future
+        assert recs[0].state == "bounced"
+        # v2_bounce_quality_enhanced 也来自 base
+        assert abs(recs[0].v2_bounce_quality_enhanced - 0.7) < 1e-6
+
+    def test_future_atr_falls_back_to_base_when_zero(self):
+        """future.atr=0 时应退回 base.atr，避免 dist 计算除零。"""
+        lv = _lv(level_id="L1", side="support", state="bounced", price=100_000,
+                 bounce_quality="proactive",
+                 behavior=_beh(bounce_quality_enhanced=0.7))
+        snaps = [
+            _snap(ts=0, current_price=100_000, atr=500, levels=[lv]),
+            _snap(ts=14400, current_price=100_750, atr=0.0),  # 异常 atr
+        ]
+        recs = build_outcome_records(snaps, coin="BTC", future_window_sec=14400)
+        assert len(recs) == 1
+        assert recs[0].future_atr == 500  # 退回 base.atr
+
+
+class TestSerializationRoundtrip:
+    def test_comparison_stats_to_dict_has_all_m4_fields(self):
+        """ComparisonStats.to_dict() 应包含 P1-1 新增的 family_size / bonferroni / fdr。"""
+        cm = ConfusionMatrix(tp=10, fp=2, tn=10, fn=3)
+        s = ComparisonStats(
+            dimension="bounce_quality", sample_size=25, ambiguous_count=5,
+            confusion_v1=cm, confusion_v2=cm,
+            mcnemar_p_value=0.04,
+        )
+        d = s.to_dict()
+        assert "family_size" in d
+        assert "mcnemar_p_bonferroni" in d
+        assert "mcnemar_p_fdr" in d
+        # 默认 family_size=1（未被 _apply_multiple_comparison 触碰）
+        assert d["family_size"] == 1
+        # mcnemar_p_bonferroni 默认 = 1.0（dataclass 默认值）
+        assert d["mcnemar_p_bonferroni"] == 1.0
+
+    def test_dict_is_json_serializable(self):
+        """to_dict() 输出应可直接 json.dumps（无 numpy/datetime/tuple）。"""
+        import json
+        cm = ConfusionMatrix(tp=10, fp=2, tn=10, fn=3)
+        s = ComparisonStats(
+            dimension="fake_break", sample_size=25, ambiguous_count=0,
+            confusion_v1=cm, confusion_v2=cm,
+        )
+        # accuracy_ci_v1 / v2 是 tuple → to_dict 输出 list（已 round 过）
+        d = s.to_dict()
+        # 验证可序列化
+        text = json.dumps(d)
+        assert "fake_break" in text
+        # 反序列化检查 ci 字段是 list
+        parsed = json.loads(text)
+        assert isinstance(parsed["accuracy_ci_v1"], list)
+
+
+class TestBehaviorEvalSerializationRoundtrip:
+    """BehaviorEval 模型的 model_dump / model_validate 往返不丢字段。
+
+    保护 kl_history.json 的反序列化兼容性 + M4 P1-4 新增的 contradiction_severities。
+    """
+    def test_full_roundtrip_preserves_m4_fields(self):
+        from models.key_level import BehaviorEval
+        original = BehaviorEval(
+            breakout_validity=0.8, retest_quality=0.6,
+            selloff_continuation_risk=0.3, capitulation_bottom_score=0.4,
+            flip_confirmation=0.5, false_break_risk=0.2,
+            behavior_state="true_breakout", state_confidence=0.85,
+            explain_chips=["放量站稳", "CVD 对齐"],
+            components_used=["breakout_validity"],
+            evaluated_at=1700000000,
+            bounce_quality_enhanced=0.75,
+            breakout_stage_enhanced=2,
+            fake_break_strength=0.1,
+            dynamic_break_depth_pct=0.45,
+            contradiction_with_state=["V1 标记主动反弹，V2 评估为被动（建议关注）"],
+            contradiction_severities=["low"],
+            behavior_eval_available=True,
+            behavior_eval_version="1.1",
+            input_quality="ok",
+            missing_inputs=[],
+        )
+        # 通过 model_dump → model_validate 模拟 kl_history.json 的存读循环
+        d = original.model_dump()
+        restored = BehaviorEval.model_validate(d)
+        assert restored.breakout_validity == 0.8
+        assert restored.contradiction_severities == ["low"]
+        assert restored.behavior_eval_version == "1.1"
+        assert restored.bounce_quality_enhanced == 0.75
+        assert restored.evaluated_at == 1700000000
