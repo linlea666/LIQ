@@ -66,6 +66,8 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "merge_pct_min": 0.0005,               # 0.05% 下限
     "merge_pct_max": 0.0030,               # 0.30% 上限
     "wall_min_usd": 500_000.0,             # 单墙区最低 USD（C 级门槛）
+    "seed_min_usd": 1_000_000.0,           # 种子 bin 最低 USD（≥ 此阈值才算"显著厚度"）
+    "top_seed_count": 30,                  # 每侧 top USD 的 bin 数（防种子膨胀）
     "max_zones_per_side": 5,               # 每侧最多输出 5 个墙区
     "max_distance_pct_for_zone": 12.0,     # 仅看 ±12% 内
     "history_window_minutes": 60,          # 1h 滚动（5m × 12）
@@ -207,15 +209,17 @@ def _merge_adjacent_bins_to_zones(
     return zones
 
 
-def _frame_zone_total_usd(
+def _frame_zone_range_usd(
     frame: OrderbookDepthSnapshot,
     raw: _RawZone,
-    last_price: float,
-    cfg: dict,
 ) -> float:
-    """在指定历史帧中，统计落在 raw zone 价区内的 USD 总厚度。
+    """统计某帧中落在 zone 价区 [price_low, price_high] 内的**全部** bin USD 之和。
 
-    zone 价区 = [price_low, price_high]；同侧 bin 才算。
+    既然 zone 的价区**已经由种子 bin 合并决定**（很窄，通常几十 USD 跨度），
+    "价区内全部 bin"几乎都是 zone 的有效流动性，不会出现"全 bin 灌水"问题。
+    用全部 bin 而非仅种子，理由：
+      - current/max/avg 同基准（避免 trend 失真）
+      - 反映该价位完整流动性厚度（用户视角更直观）
     """
     bins = frame.bids if raw.side == "bid" else frame.asks
     if not bins:
@@ -235,7 +239,10 @@ def _compute_zone_history_stats(
 ) -> dict:
     """对单个 raw zone 用 history 回填 max_usd_1h / avg_usd_1h / persistence / trend。
 
-    seen_count = 在 history 各帧中该价区累积 USD ≥ wall_min_usd 的帧数。
+    所有指标统一基于"该 zone 价区内全部 bin USD 总和"（zone 价区已由种子合并决定，
+    跨度通常几十 USD，不会被全 bin 灌水）。current/max/avg 同基准，trend 不失真。
+
+    seen_count = 在 history 各帧中该价区 USD ≥ wall_min_usd 的帧数。
     visible_minutes = (last_seen_ts - first_seen_ts) / 60。
     persistence_score = clamp(visible_minutes / target_minutes, 0, 1)。
     """
@@ -243,9 +250,9 @@ def _compute_zone_history_stats(
     target_min = cfg.get("persistence_target_minutes",
                          ENGINE_DEFAULTS["persistence_target_minutes"])
 
-    frame_totals: list[tuple[int, float]] = []   # (ts_sec, total_usd)
+    frame_totals: list[tuple[int, float]] = []   # (ts_sec, range_usd_in_zone)
     for frame in history:
-        ft = _frame_zone_total_usd(frame, raw, last_price, cfg)
+        ft = _frame_zone_range_usd(frame, raw)
         frame_totals.append((frame.ts_sec, ft))
 
     seen = [(ts, v) for ts, v in frame_totals if v >= wall_min]
@@ -268,8 +275,9 @@ def _compute_zone_history_stats(
 
     persistence_score = max(0.0, min(1.0, visible_minutes / max(target_min, 1.0)))
 
-    # current = 最新帧值（即 raw.total_usd，已是 latest 聚合）
-    current_usd = raw.total_usd
+    # current = 当前帧（history[-1]）该价区内全部 bin USD 总和
+    # 比 raw.total_usd（仅种子）更全；避免 current vs max 基准不一致
+    current_usd = frame_totals[-1][1] if frame_totals else raw.total_usd
 
     trend = _classify_zone_trend(
         seen_count=seen_count, current_usd=current_usd,
@@ -325,7 +333,16 @@ def _build_zones_for_side(
     atr: Optional[float],
     cfg: dict,
 ) -> list[WallZone]:
-    """完整 M1 流水：filter → merge → history stats → WallZone。"""
+    """完整 M1 流水：filter → 选种子 → merge → history stats → WallZone。
+
+    关键设计（修复初版"全 bin 合并"灌水问题）：
+      1. 在 ±max_distance_pct 内过滤 bin（按侧）
+      2. **只用"种子 bin"参与合并**：USD ≥ seed_min_usd 且在 top_seed_count 内
+      3. 相邻种子（gap ≤ merge_pct）合并成 zone
+      4. zone.current_usd = 该 zone 价区内**仅种子 bin** 的 USD 之和（真实墙厚度，
+         不被中间密集小 bin 灌水）
+      5. 历史回填用同一定义（_frame_zone_seed_usd），保证 current/max/avg 同基准
+    """
     if not history:
         return []
     latest = history[-1]
@@ -339,9 +356,19 @@ def _build_zones_for_side(
     if not bins_in_range:
         return []
 
-    merge_pct = _resolve_merge_pct(atr, last_price, cfg)
-    raw_zones = _merge_adjacent_bins_to_zones(bins_in_range, merge_pct, side)
+    # ── 选种子：USD 排序 → top-N 且 ≥ seed_min_usd ──
+    seed_min = cfg.get("seed_min_usd", ENGINE_DEFAULTS["seed_min_usd"])
+    top_n = cfg.get("top_seed_count", ENGINE_DEFAULTS["top_seed_count"])
+    sorted_by_usd = sorted(bins_in_range, key=lambda b: b.usd_value, reverse=True)
+    seeds = [b for b in sorted_by_usd[:top_n] if b.usd_value >= seed_min]
+    if not seeds:
+        return []
 
+    # ── 仅用种子合并相邻成 zone ──
+    merge_pct = _resolve_merge_pct(atr, last_price, cfg)
+    raw_zones = _merge_adjacent_bins_to_zones(seeds, merge_pct, side)
+
+    # ── 单 zone 总厚度（仅种子）≥ wall_min_usd 才保留 ──
     wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
     raw_zones = [z for z in raw_zones if z.total_usd >= wall_min]
     if not raw_zones:

@@ -255,8 +255,8 @@ class TestZoneAggregation:
 class TestPersistenceAndTrend:
 
     def test_zone_persistence_full_history(self):
-        # 同一 zone 在 12 帧都有 ≥ wall_min_usd → seen_count = 12
-        bids = [(99_500, 10)]   # 10 × 99500 ≈ 995k
+        # 同一 zone 在 12 帧都有 ≥ wall_min_usd（且 ≥ seed_min_usd 1M）→ seen_count = 12
+        bids = [(99_500, 15)]   # 15 × 99500 ≈ 1.49M（> seed_min 1M）
         history = [_make_frame(1700_000_000 + i * 300, bids=bids, asks=[])
                    for i in range(12)]
         zones = _build_zones_for_side(
@@ -274,7 +274,7 @@ class TestPersistenceAndTrend:
 
     def test_zone_persistence_cold_start(self):
         # 仅 1 帧历史 → trend = new, persistence_score = 0
-        bids = [(99_500, 10)]
+        bids = [(99_500, 15)]   # USD 1.49M（> seed_min）
         history = [_make_frame(1700_000_000, bids=bids, asks=[])]
         zones = _build_zones_for_side(
             history, last_price=100_000, side="bid", atr=200.0,
@@ -287,20 +287,17 @@ class TestPersistenceAndTrend:
         assert z.visible_minutes == 0.0
 
     def test_zone_trend_strengthening(self):
-        # 12 帧中前 9 帧 USD 小、后 3 帧 USD 大（current >> avg）→ strengthening
-        # 需要保证 seen_count > 2，否则会被 new 优先
+        # 12 帧中前 9 帧 USD ~1.49M、后 3 帧 USD ~5.97M（current >> avg）→ strengthening
         history = []
-        # 前 9 帧 USD ≈ 1M
         for i in range(9):
             history.append(_make_frame(
                 1700_000_000 + i * 300,
-                bids=[(99_500, 10)], asks=[],
+                bids=[(99_500, 15)], asks=[],   # USD 1.49M
             ))
-        # 后 3 帧 USD ≈ 3M（增厚）
         for i in range(9, 12):
             history.append(_make_frame(
                 1700_000_000 + i * 300,
-                bids=[(99_500, 30)], asks=[],
+                bids=[(99_500, 60)], asks=[],   # USD 5.97M（增厚）
             ))
         zones = _build_zones_for_side(
             history, last_price=100_000, side="bid", atr=200.0,
@@ -311,17 +308,17 @@ class TestPersistenceAndTrend:
         assert z.trend == "strengthening"
 
     def test_zone_trend_weakening(self):
-        # 前 9 帧 USD 大、后 3 帧 USD 小 → weakening
+        # 前 9 帧 USD ~5.97M、后 3 帧 USD ~1.49M → weakening
         history = []
         for i in range(9):
             history.append(_make_frame(
                 1700_000_000 + i * 300,
-                bids=[(99_500, 30)], asks=[],
+                bids=[(99_500, 60)], asks=[],
             ))
         for i in range(9, 12):
             history.append(_make_frame(
                 1700_000_000 + i * 300,
-                bids=[(99_500, 10)], asks=[],
+                bids=[(99_500, 15)], asks=[],
             ))
         zones = _build_zones_for_side(
             history, last_price=100_000, side="bid", atr=200.0,
