@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useMarketStore } from "@/stores/marketStore";
 import TopStrip from "@/components/Brain/TopStrip";
+import SweepWatchPanel from "@/components/Brain/SweepWatchPanel";
 import PriceAxisMap from "@/components/Brain/PriceAxisMap";
 import ZoneDetailCard from "@/components/Brain/ZoneDetailCard";
 import OpportunityBoard from "@/components/Brain/OpportunityBoard";
@@ -102,6 +103,15 @@ export default function TradingBrainPage() {
                 {snap.summary}
               </p>
             )}
+          </div>
+
+          {/* W4-T1 阶段 4：扫单观察台（双向 / 5 态机 / 3 派生分 / trace 抽屉） */}
+          <div className="shrink-0 border-b border-slate-800 bg-slate-950/30 px-3 py-2">
+            <SweepWatchPanel
+              coin={snap.coin}
+              sweepWatch={snap.sweep_watch}
+              onSelectZone={setSelectedId}
+            />
           </div>
 
           {/* 第一排：价格轴 / 详情卡 / 机会雷达

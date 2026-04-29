@@ -28,6 +28,8 @@ backend/data/roll/
 backend/data/liquidity_wall_history/
 # W4-T1 · 流动性墙后验报告输出（CLI 生成）
 backend/data/liquidity_wall_postmortem/
+# W4-T1 阶段 4 · sweep_watch trace 落盘（7 天保留，运行时生成）
+backend/data/sweep_watch/
 # 本地 Cursor MCP 配置（机器相关绝对路径）
 .cursor/mcp.json
 # P0 · TrendExhaustion 影子日志 / 日报（运行时生成，不进仓）

@@ -2442,6 +2442,60 @@ export interface BrainFutBook {
   notes: string[];
 }
 
+/** W4-T1 阶段 4：扫单观察 5 态机阶段。 */
+export type SweepPhase =
+  | "waiting"
+  | "approaching"
+  | "in_sweep"
+  | "swept_reclaiming"
+  | "swept_continuing";
+
+/** W4-T1 阶段 4：扫单观察方向。 */
+export type SweepSide = "below" | "above";
+
+/** W4-T1 阶段 4：单条算法 trace 记录（每个关键决策步骤一条）。 */
+export interface SweepWatchTraceEntry {
+  ts_iso: string;
+  side: SweepSide;
+  /** 步骤名（select_representative / phase_decision / reversal_potential / ...）。 */
+  step: string;
+  /** 输入字段 → 值（JSON-safe）。 */
+  inputs: Record<string, unknown>;
+  /** 输出（标量 / 字符串 / 嵌套结构都可能）。 */
+  output: unknown;
+  /** 命中规则名（如 closest_strong_role_zone）。 */
+  rule_hit: string | null;
+  /** 人类可读说明。 */
+  notes: string;
+}
+
+/** W4-T1 阶段 4：单侧（below/above）观察对象。 */
+export interface SweepWatchSide {
+  direction: SweepSide;
+  label: string;
+  representative_zone_id: string;
+  representative_zone_label: string;
+  price_band: [number, number];
+  /** 距现价百分比（带符号；下方为负）。 */
+  distance_pct: number;
+  sweep_phase: SweepPhase;
+  sweep_attractiveness: number;
+  reversal_potential: number;
+  continuation_risk: number;
+  triggers: string[];
+  invalidations: string[];
+}
+
+/** W4-T1 阶段 4：双向止损扫单观察聚合对象。 */
+export interface BrainSweepWatch {
+  coin: string;
+  last_price: number;
+  ts_iso: string;
+  below: SweepWatchSide | null;
+  above: SweepWatchSide | null;
+  trace_log: SweepWatchTraceEntry[];
+}
+
 export interface TradingBrainSnapshot {
   coin: string;
   ts: number;
@@ -2459,4 +2513,6 @@ export interface TradingBrainSnapshot {
   spot_book: BrainSpotBook | null;
   /** Phase C：合约流动性堆积模块（合约侧热力柱 + 清算磁铁叠加） */
   fut_book: BrainFutBook | null;
+  /** W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志） */
+  sweep_watch: BrainSweepWatch | null;
 }

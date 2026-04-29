@@ -7,9 +7,15 @@
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+import logging
+from typing import Literal, Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from models.sweep_watch import BrainSweepWatch  # noqa: F401
+
+_logger = logging.getLogger(__name__)
 
 
 class BrainZoneRoles(BaseModel):
@@ -452,3 +458,23 @@ class TradingBrainSnapshot(BaseModel):
 
     fut_book: Optional[BrainFutBook] = None
     """Phase C：合约流动性堆积模块（合约侧热力柱 + 清算磁铁叠加）。"""
+
+    sweep_watch: Optional["BrainSweepWatch"] = None
+    """W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志）。
+    仅在 zones 已构建后调用，不修改任何既有评分；前端独立面板展示。"""
+
+
+# Forward ref 解析：sweep_watch 字段引用 BrainSweepWatch（避免循环 import）。
+# 若该模块加载失败则保留前向声明，但**必须**记录 warning（否则 builder 后续传非
+# None 的 sweep_watch 会因前向引用未解析而触发 pydantic 错误，且故障源被吞）。
+def _rebuild_with_sweep_watch() -> None:
+    try:
+        from models.sweep_watch import BrainSweepWatch  # noqa: F401
+        TradingBrainSnapshot.model_rebuild()
+    except Exception as exc:
+        _logger.warning(
+            "TradingBrainSnapshot.sweep_watch forward ref unresolved: %s", exc,
+        )
+
+
+_rebuild_with_sweep_watch()

@@ -11,9 +11,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from models.key_level import KeyLevelSnapshotV2, KeyLevelV2, LiqMagnetLevel
 from models.liquidation import LiqCluster, LiquidationMap
@@ -1104,6 +1107,27 @@ def build_trading_brain_snapshot(
     spot_book = _build_spot_book(op)
     fut_book = _build_fut_book(op=op, liq=liq, kl=kl, last_price=last_price)
 
+    # W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志）。
+    # 不引入新数据源，全部从 zones + events + ctx 派生；trace 同步落盘给 archiver。
+    sweep_watch = None
+    try:
+        from processors.sweep_watch_engine import build_sweep_watch
+        sweep_watch = build_sweep_watch(
+            coin=coin.upper(),
+            last_price=last_price,
+            zones=zones,
+            events=events,
+            ctx=ctx,
+            now_sec=now_sec,
+        )
+        try:
+            from processors.sweep_watch_archiver import append_sweep_watch_frame
+            append_sweep_watch_frame(sweep_watch)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("sweep_watch archive failed for %s: %s", coin, exc)
+    except Exception as exc:  # pragma: no cover  # 防御：不让 sweep_watch 故障拖垮主接口
+        logger.warning("sweep_watch build failed for %s: %s", coin, exc)
+
     return TradingBrainSnapshot(
         coin=coin.upper(),
         ts=ts,
@@ -1118,4 +1142,5 @@ def build_trading_brain_snapshot(
         opportunities=opportunities,
         spot_book=spot_book,
         fut_book=fut_book,
+        sweep_watch=sweep_watch,
     )
