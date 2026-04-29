@@ -1127,7 +1127,10 @@ export type WallEventType =
   | "wall_weakened"
   | "wall_removed"
   | "wall_consumed"
-  | "wall_reloaded";
+  | "wall_reloaded"
+  /** W2-T5：第 7 类复合事件 — 同帧既有 ended_with_exec 又有 ended_no_exec
+   *  语义：机构试盘 + 撤退 footprint，比单一 spoof 更可疑 */
+  | "wall_consumed_and_removed";
 
 export type InferredPositionState =
   | "long_opening"
@@ -1185,6 +1188,8 @@ export interface WallEvent {
   executed_usd_value: number | null;
   confidence: number;
   explain: string;
+  /** W1-T4：同物理墙跨帧稳定 ID，关联 zone（前端可据此 group/highlight） */
+  wall_zone_id?: string;
 }
 
 export interface WallZone {
@@ -1218,10 +1223,30 @@ export interface WallZone {
   status: WallZoneStatus;
   wall_consumed_confidence: number;
   wall_removal_risk: number;
+  /** Phase C：Coinbase 现货独立验证维度（与 Binance/OKX 系正交） */
+  coinbase_spot_confluence?: boolean;
+  coinbase_spot_usd?: number;
+  coinbase_num_orders?: number;
+  /** W2-T4：Coinbase 单笔大单分支 — max(level.usd_value/num_orders) over zone overlap
+   *  ≥ 100k → SR +0.05（机构 footprint 硬证据） */
+  coinbase_max_single_order_usd?: number;
   crowding_context: PositionCrowdingSnapshot | null;
   sweep_target: SweepTarget | null;
   break_through_risk: number;
   next_magnet_price: number | null;
+  /** W1-T4：同物理墙跨帧稳定 ID（SHA1 短 hash），后验脚本据此串联生命周期 */
+  wall_zone_id?: string;
+  /** W2-T1：trust_score 拆分（透明化 + 维度独立）
+   *  raw = 原始多因子分；trust_components 各因子贡献明细
+   *  SR (support_resistance) = 作为支撑/阻力被反弹的可信度
+   *  SA (sweep_attractiveness) = 作为扫单磁铁被打穿的可吸引度
+   *  二者可同时高（"双向博弈热点"） */
+  raw_trust_score?: number;
+  trust_components?: Record<string, number>;
+  support_resistance_trust_score?: number;
+  sweep_attractiveness_score?: number;
+  /** W2-T1：实时主动攻击强度（taker 同向 + cvd_spot + 流动性衰竭，已 W2-T3 stale 降权） */
+  active_attack_score?: number;
   confluence_with_absorption: boolean;
   absorption_zone_price: number | null;
   strength_score: number;
@@ -1255,6 +1280,9 @@ export interface OrderbookPressureSnapshot {
   /** "warming" = 暖机期（< 30min），不显示 magnet/persistence 数字 */
   data_quality: "ok" | "partial" | "stale" | "warming" | "missing";
   notes: string[];
+  /** W2-T4：USD/USDT 基差 = (coinbase_mid - ticker_last) / ticker_last × 100 (单位 %)
+   *  正常 BTC < 5bp（0.05%），> 30bp 表示明显基差异常 */
+  usd_usdt_basis_pct?: number | null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

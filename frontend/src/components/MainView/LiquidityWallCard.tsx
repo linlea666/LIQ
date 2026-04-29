@@ -91,7 +91,7 @@ const TIER_STYLES: Record<string, { bg: string; fg: string }> = {
   C: { bg: "bg-slate-600/30", fg: "text-slate-400" },
 };
 
-// ── 事件类型样式（对应诉求 4：增强 / 减弱 / 撤掉 / 被吃 / 重挂） ────────
+// ── 事件类型样式（对应诉求 4：增强 / 减弱 / 撤掉 / 被吃 / 重挂 / W2-T5 试盘+撤退） ──
 const EVENT_STYLES: Record<WallEventType, { label: string; color: string; icon: string }> = {
   wall_appeared:     { label: "出现",   color: "text-blue-300",    icon: "✨" },
   wall_strengthened: { label: "增厚",   color: "text-emerald-300", icon: "↑" },
@@ -99,6 +99,9 @@ const EVENT_STYLES: Record<WallEventType, { label: string; color: string; icon: 
   wall_removed:      { label: "撤掉",   color: "text-orange-300",  icon: "✗" },
   wall_consumed:     { label: "被吃",   color: "text-red-300",     icon: "🔥" },
   wall_reloaded:     { label: "重挂",   color: "text-violet-300",  icon: "↻" },
+  // W2-T5：第 7 类复合事件 — 同帧既被部分吃单又被部分撤单（机构试盘 + 撤退 footprint）
+  // 紫色 + 醒目图标，区分单一 consumed (红) / removed (橙)
+  wall_consumed_and_removed: { label: "试盘+撤", color: "text-fuchsia-300", icon: "⚡" },
 };
 
 // ── 主入口 ──────────────────────────────────────────────────────────────
@@ -112,6 +115,9 @@ interface Props {
   historySize: number;
   lastPrice: number;
   coin: string;
+  /** W2-T4：顶层 USD/USDT 基差（仅 BTC 等可对比 Coinbase 的币种有值）
+   *  正常 < 5bp（0.05%），≥ 5bp 时显示警示 chip */
+  usdUsdtBasisPct?: number | null;
 }
 
 // Phase B：来源筛选 4 档（与 WallZoneSource 对齐）
@@ -138,6 +144,7 @@ export default function LiquidityWallCard({
   historySize,
   lastPrice,
   coin,
+  usdUsdtBasisPct,
 }: Props) {
   const [filter, setFilter] = useState<SourceFilter>("all");
 
@@ -157,6 +164,7 @@ export default function LiquidityWallCard({
     <div className="space-y-3">
       {isWarming && <WarmingBanner historySize={historySize} historyWindowMinutes={historyWindowMinutes} />}
       {crowding && <CrowdingChips crowding={crowding} />}
+      <BasisAlertChip basisPct={usdUsdtBasisPct} />
       <SourceFilterTabs filter={filter} setFilter={setFilter} counts={counts} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <WallSideCard
@@ -351,6 +359,38 @@ function EventRow({ event, coin }: { event: WallEvent; coin: string }) {
           {Math.round(event.confidence * 100)}%
         </span>
       )}
+    </div>
+  );
+}
+
+// ── W2-T4：USD/USDT 基差警示 chip ─────────────────────────────────────
+// 正常 BTC < 5bp（0.05%）。仅当 |basis| ≥ 5bp 时显示提醒，避免噪音。
+// > 30bp 表示明显基差异常（高亮 amber/red），可能是 Coinbase 数据老化或市场极端
+function BasisAlertChip({ basisPct }: { basisPct: number | null | undefined }) {
+  if (basisPct == null || Math.abs(basisPct) < 0.05) return null;
+  const abs = Math.abs(basisPct);
+  const tone = abs >= 0.3 ? "amber" : "slate";
+  const cls =
+    tone === "amber"
+      ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+      : "bg-slate-700/30 border-slate-600/40 text-slate-300";
+  const direction = basisPct > 0 ? "USD 溢价" : "USDT 溢价";
+  return (
+    <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-[11px] ${cls}`}>
+      <span>📊</span>
+      <span>
+        USD/USDT 基差 <span className="font-mono">{basisPct >= 0 ? "+" : ""}{basisPct.toFixed(3)}%</span>
+        <span className="text-[10px] text-slate-400 ml-1">({direction})</span>
+      </span>
+      <span
+        className="text-[10px] text-slate-500 cursor-help"
+        title={
+          `Coinbase mid 与 BTCUSDT last 价格比例。正常 < 5bp（0.05%），` +
+          `≥ 30bp 表示明显基差异常。Coinbase 共振判定中容差已吸收 10bp 以内的差异。`
+        }
+      >
+        ⓘ
+      </span>
     </div>
   );
 }
@@ -614,6 +654,32 @@ function ZoneRow({
         {zone.large_order_ids.length > 0 && (
           <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300" title={`覆盖 ${zone.large_order_ids.length} 笔合约大单`}>
             🐳 合约大单 ×{zone.large_order_ids.length}
+          </span>
+        )}
+        {/* W3-T1：Coinbase 现货共振叠加徽章（与 dual_source / has_spot_confluence 可同时显示） */}
+        {zone.coinbase_spot_confluence && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-300"
+            title={
+              `🏦 Coinbase 现货共振：机构资金独立验证维度（与 Binance/OKX 系正交）。` +
+              `Coinbase 同价区累计 ${formatCnUsd(zone.coinbase_spot_usd ?? 0)}` +
+              `（${zone.coinbase_num_orders ?? 0} 笔订单 ≥ 阈值）`
+            }
+          >
+            🏦 Coinbase {formatCnUsd(zone.coinbase_spot_usd ?? 0)}
+          </span>
+        )}
+        {/* W3-T1 + W2-T4：机构单笔大单徽章 — 区分散户聚集 vs 机构布局 */}
+        {(zone.coinbase_max_single_order_usd ?? 0) >= 100_000 && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/15 text-purple-300"
+            title={
+              `💼 机构单笔大单：Coinbase 同价区单笔最大订单 ` +
+              `${formatCnUsd(zone.coinbase_max_single_order_usd ?? 0)}（≥ 10 万 USD/笔）。` +
+              `区分"散户 N 单聚集"vs"机构孤立巨单"，是支撑/阻力可信度的硬证据`
+            }
+          >
+            💼 机构单笔 {formatCnUsd(zone.coinbase_max_single_order_usd ?? 0)}
           </span>
         )}
         {zone.confluence_with_absorption && (

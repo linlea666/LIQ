@@ -213,6 +213,7 @@ export default function OrderbookPressureView() {
           historySize={snap.sample_count_depth_history || 0}
           lastPrice={snap.last_price}
           coin={coin}
+          usdUsdtBasisPct={snap.usd_usdt_basis_pct}
         />
       ) : (
         <StrongPressureCard walls={snap.walls || []} price={snap.last_price} coin={coin} />

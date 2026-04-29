@@ -59,6 +59,7 @@ def _make_zone(
     trust_score: float = 0.5,
     dual_source: bool = False,
     has_spot_confluence: bool = False,
+    coinbase_spot_confluence: bool = False,
     source: str = "depth_only",
     wall_removal_risk: float = 0.0,
     break_through_risk: float = 0.0,
@@ -83,6 +84,7 @@ def _make_zone(
         trust_score=trust_score,
         dual_source=dual_source,
         has_spot_confluence=has_spot_confluence,
+        coinbase_spot_confluence=coinbase_spot_confluence,
         wall_removal_risk=wall_removal_risk,
         break_through_risk=break_through_risk,
         next_magnet_price=next_magnet_price,
@@ -476,3 +478,75 @@ class TestSideMatchingAndWaitIgnore:
         snap = _make_snapshot(walls_below=[zone])
         _apply_pressure_alignment([sig], snap, atr=300.0)
         assert "ob_dual_source_bid" in sig.confirmations
+
+
+# ─────────────────────────────────────────────────────────────────
+# 7. W3-T1：Coinbase 共振叠加 chip
+# ─────────────────────────────────────────────────────────────────
+
+class TestCoinbaseConfluenceChip:
+    def test_coinbase_alone_yields_ob_coinbase_bid(self):
+        """coinbase_spot_confluence + 普通合约（trust < 0.65）墙：
+           主路径不会加 dual/spot/trusted chip，仅追加 ob_coinbase_bid 叠加 chip。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.5,  # 普通
+            coinbase_spot_confluence=True,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        # Coinbase chip 必须被追加
+        assert "ob_coinbase_bid" in sig.confirmations
+        # 互斥优先级路径无任何 chip（trust < 0.65 且无现货共振）
+        assert "ob_dual_source_bid" not in sig.confirmations
+        assert "ob_trusted_bid" not in sig.confirmations
+
+    def test_coinbase_layers_on_top_of_dual_source(self):
+        """关键不变量：双源墙 + Coinbase 共振时，两个 chip 同时出现（叠加，不互斥）。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.95,
+            dual_source=True,
+            coinbase_spot_confluence=True,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        assert "ob_dual_source_bid" in sig.confirmations
+        assert "ob_coinbase_bid" in sig.confirmations
+
+    def test_coinbase_layers_on_top_of_trusted(self):
+        """trust ≥ 0.65 + Coinbase 共振 → ob_trusted + ob_coinbase 同时。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.70,
+            coinbase_spot_confluence=True,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        assert "ob_trusted_bid" in sig.confirmations
+        assert "ob_coinbase_bid" in sig.confirmations
+
+    def test_no_coinbase_no_chip(self):
+        """coinbase_spot_confluence=False → 不加 ob_coinbase_*"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone("bid", 63000.0, dual_source=True, trust_score=0.9)
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        assert "ob_coinbase_bid" not in sig.confirmations
+
+    def test_short_signal_with_ask_coinbase_yields_ob_coinbase_ask(self):
+        """空向信号 + ask wall + Coinbase 共振 → ob_coinbase_ask"""
+        sig = _make_short_signal(63000.0)
+        zone = _make_zone(
+            "ask", 63000.0,
+            trust_score=0.85,
+            dual_source=True,
+            coinbase_spot_confluence=True,
+        )
+        snap = _make_snapshot(walls_above=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        assert "ob_coinbase_ask" in sig.confirmations
+        assert "ob_dual_source_ask" in sig.confirmations

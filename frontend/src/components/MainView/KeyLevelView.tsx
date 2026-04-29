@@ -632,6 +632,9 @@ const CONFIRMATION_LABELS: Record<string, string> = {
   ob_spot_confluence_ask: "💰 现货大单共振",
   ob_trusted_bid: "⚡ 较可信买墙",
   ob_trusted_ask: "⚡ 较可信卖墙",
+  // W3-T1：Coinbase 现货共振叠加 chip（机构资金独立验证维度，与上述任一可同时出现）
+  ob_coinbase_bid: "🏦 Coinbase 共振支撑",
+  ob_coinbase_ask: "🏦 Coinbase 共振阻力",
   ob_wall_strengthened: "📈 该位墙增厚",
 };
 

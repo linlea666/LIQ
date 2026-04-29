@@ -1210,12 +1210,14 @@ def _apply_pressure_alignment(
     与 warning 字符串。所有改动**仅追加** confirmations / warnings，不动
     final_score / strength_tier / cascade_risk（V3 铁律）。
 
-    新路径输出（按优先级互斥）：
+    新路径输出（按优先级互斥 + Coinbase 叠加）：
       A. confirmations（key 化，前端 CONFIRMATION_LABELS 映射）：
          - ob_dual_source_bid/ask     双源高可信墙（dual_source=True）
          - ob_spot_only_bid/ask       仅现货墙（source="spot_only"）
          - ob_spot_confluence_bid/ask 现货大单共振（has_spot_confluence=True）
          - ob_trusted_bid/ask         较可信合约墙（trust_score >= 0.65）
+         - ob_coinbase_bid/ask        ⭐ W3-T1：Coinbase 现货共振（机构资金独立验证维度）
+                                       叠加而非互斥 — 双源墙 + Coinbase 同价区共振时同时出现
          - ob_wall_strengthened       最近 30min 该价位墙增厚事件
 
       B. warnings（中文短句，前端原样渲染）：
@@ -1307,10 +1309,15 @@ def _apply_pressure_alignment(
 def _append_zone_trust_chip(
     sig: KeyLevelSignal, zone: WallZone, side_label: str
 ) -> None:
-    """根据 zone 信任档位在 sig.confirmations 加单一互斥 chip key。
+    """根据 zone 信任档位在 sig.confirmations 加 chip key。
 
-    优先级（从高到低，互斥）：
+    互斥优先级（从高到低）：
       双源 > 仅现货 > 现货共振 > 可信合约 > （普通合约不加 chip，已由旧 ob_strong_* 路径覆盖）
+
+    W3-T1 叠加（与互斥优先级正交）：
+      - ob_coinbase_<side>：当 coinbase_spot_confluence=True 时**额外**追加，
+        机构资金独立验证维度（Binance/OKX 系之外的 Coinbase 现货共振）。
+        与上述任一互斥 chip 可同时出现，前端按"叠加证据"展示。
     """
     if zone.dual_source:
         sig.confirmations.append(f"ob_dual_source_{side_label}")
@@ -1320,6 +1327,10 @@ def _append_zone_trust_chip(
         sig.confirmations.append(f"ob_spot_confluence_{side_label}")
     elif zone.trust_score >= 0.65:
         sig.confirmations.append(f"ob_trusted_{side_label}")
+
+    # W3-T1：Coinbase 现货共振叠加 chip（机构资金独立验证）
+    if getattr(zone, "coinbase_spot_confluence", False):
+        sig.confirmations.append(f"ob_coinbase_{side_label}")
 
 
 def _append_zone_risk_warnings(
