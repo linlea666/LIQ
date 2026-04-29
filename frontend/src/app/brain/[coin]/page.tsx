@@ -47,7 +47,7 @@ export default function TradingBrainPage() {
   );
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-200">
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-200">
       <header className="shrink-0 border-b border-slate-800 bg-slate-900/95 px-4 py-2 backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -104,9 +104,13 @@ export default function TradingBrainPage() {
             )}
           </div>
 
-          <main className="flex flex-[3] min-h-0 overflow-hidden">
+          {/* 第一排：价格轴 / 详情卡 / 机会雷达
+              响应式：
+                ≥1280px (xl)：左 280 / 右 360；≥1536px (2xl)：左 320 / 右 400
+                <1280px (lg)：左 260 / 右 320 */}
+          <main className="flex min-h-[420px] flex-[3] overflow-hidden">
             <section
-              className={`w-[300px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition ${
+              className={`w-[260px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition xl:w-[300px] 2xl:w-[320px] ${
                 hoverZoneId ? "ring-1 ring-blue-500/30" : ""
               }`}
             >
@@ -120,11 +124,11 @@ export default function TradingBrainPage() {
               />
             </section>
 
-            <section className="flex-1 min-w-0 border-r border-slate-800">
+            <section className="flex-1 min-w-[300px] border-r border-slate-800">
               <ZoneDetailCard zone={selectedZone} coin={snap.coin} />
             </section>
 
-            <section className="w-[360px] shrink-0 bg-slate-900/30">
+            <section className="w-[320px] shrink-0 bg-slate-900/30 xl:w-[360px] 2xl:w-[400px]">
               <OpportunityBoard
                 opportunities={snap.opportunities}
                 coin={snap.coin}
@@ -133,9 +137,10 @@ export default function TradingBrainPage() {
             </section>
           </main>
 
-          {/* Phase B + C：第三排 50/50 双卡（现货订单簿 / 合约堆积） */}
-          <section className="flex flex-[2] min-h-0 shrink-0 overflow-hidden border-t border-slate-800 bg-slate-900/30">
-            <div className="flex-1 min-w-0 border-r border-slate-800">
+          {/* 第三排：50/50 双卡（现货订单簿 / 合约堆积）
+              <1024px 自动堆叠为上下两块以避免压扁 */}
+          <section className="flex min-h-[360px] flex-[2] shrink-0 flex-col overflow-hidden border-t border-slate-800 bg-slate-900/30 lg:flex-row">
+            <div className="flex-1 min-w-0 border-b border-slate-800 lg:border-b-0 lg:border-r">
               <SpotOrderBookPanel
                 spotBook={snap.spot_book}
                 coin={snap.coin}
@@ -151,7 +156,7 @@ export default function TradingBrainPage() {
             </div>
           </section>
 
-          <footer className="h-[110px] shrink-0 border-t border-slate-800 bg-slate-900/30">
+          <footer className="h-[100px] shrink-0 border-t border-slate-800 bg-slate-900/30 2xl:h-[120px]">
             <EventTimeline
               events={snap.events}
               hoverZoneId={hoverZoneId}
