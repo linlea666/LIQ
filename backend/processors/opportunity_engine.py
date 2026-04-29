@@ -342,7 +342,11 @@ def _build_support_limit_probe(
     targets = _select_targets_for_long(
         zone=zone, all_zones=all_zones, hard_stop=hard,
     )
-    if not targets or max(t.rr for t in targets) < _MIN_RR_T1:
+    # P0 修复：原用 max(t.rr ...) 取所有 target 中最高 RR 比对门槛，
+    # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
+    # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
+    # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
+    if not targets or targets[0].rr < _MIN_RR_T1:
         return None
 
     aggressive = SetupEntryStyle(
@@ -442,7 +446,11 @@ def _build_resistance_limit_probe(
     targets = _select_targets_for_short(
         zone=zone, all_zones=all_zones, hard_stop=hard,
     )
-    if not targets or max(t.rr for t in targets) < _MIN_RR_T1:
+    # P0 修复：原用 max(t.rr ...) 取所有 target 中最高 RR 比对门槛，
+    # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
+    # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
+    # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
+    if not targets or targets[0].rr < _MIN_RR_T1:
         return None
 
     aggressive = SetupEntryStyle(
@@ -562,7 +570,11 @@ def _build_fake_break_reclaim(
         targets = _select_targets_for_short(
             zone=zone, all_zones=all_zones, hard_stop=hard,
         )
-    if not targets or max(t.rr for t in targets) < _MIN_RR_T1:
+    # P0 修复：原用 max(t.rr ...) 取所有 target 中最高 RR 比对门槛，
+    # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
+    # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
+    # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
+    if not targets or targets[0].rr < _MIN_RR_T1:
         return None
 
     if side == "long":

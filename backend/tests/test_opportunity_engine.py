@@ -207,6 +207,70 @@ def test_atr_zero_falls_back_to_pct_buffer():
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# P0 回归：T1 RR 门槛（修复 max(t.rr) 误放低 T1 RR 的 setup）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_t1_rr_below_threshold_drops_setup_even_if_t3_high():
+    """P0 修复：T1（首要目标）RR < 2.0 即使 T2/T3 RR 很高也必须拒绝。
+
+    旧 bug：用 max(t.rr for t in targets) ≥ 2 判定，等价于"任一远期 target
+    RR 高就放行"，会让 OpportunityBoard 显示 T1 RR=0.7~0.9 的伪机会。
+    与"高盈亏比机会雷达"定位严重矛盾（GPT 第 15 节痛点）。
+
+    场景：support 99000；T1 99400 (近且 RR 低 ~0.77)；T3 105000 (远 RR ~11)。
+    """
+    last = 100_000.0
+    sup = _zone(price_mid=99_000.0, distance_pct=-1.0)
+    near_low_rr = _target_zone_above(99_400.0, role="key_level_only")
+    far_high_rr = _target_zone_above(105_000.0, role="liquidation_magnet")
+    opps = build_opportunities(
+        zones=[sup, near_low_rr, far_high_rr], last_price=last, atr=400.0,
+    )
+    # 即使整体 max RR 很高，T1 RR < 2.0 也必须拒绝该 setup
+    long_setups = [o for o in opps if o.setup_type == "support_limit_probe"]
+    assert not long_setups, (
+        f"T1 RR < 2.0 时不应生成 support_limit_probe；实际产出: "
+        f"{[(o.setup_id, [t.rr for t in o.targets]) for o in long_setups]}"
+    )
+
+
+def test_t1_rr_meets_threshold_setup_passes():
+    """T1 RR ≥ 2.0 时 setup 正常生成（保留正向场景的回归保障）。"""
+    last = 100_000.0
+    sup = _zone(price_mid=99_000.0, distance_pct=-1.0)
+    # T1 价格 101_500：reward ~2500 / risk ~520 → RR ~4.8 远超门槛
+    t1 = _target_zone_above(101_500.0)
+    opps = build_opportunities(zones=[sup, t1], last_price=last, atr=400.0)
+    long_setups = [o for o in opps if o.setup_type == "support_limit_probe"]
+    assert long_setups, "T1 RR ≥ 2.0 应正常生成 setup"
+    assert long_setups[0].targets[0].rr >= 2.0
+
+
+def test_t1_rr_threshold_applies_to_resistance_short():
+    """空头方向同样适用：T1 RR < 2.0 必须被拒。"""
+    last = 100_000.0
+    res = _zone(
+        price_mid=101_000.0,
+        distance_pct=1.0,
+        support_trust=0.0,
+        resistance_trust=0.85,
+        roles_kw={"key_level": True, "spot_supply_wall": True},
+        dominant_role="spot_defense",
+    )
+    near_low_rr = _target_zone_below(100_600.0, role="key_level_only")
+    far_high_rr = _target_zone_below(95_000.0, role="liquidation_magnet")
+    opps = build_opportunities(
+        zones=[res, near_low_rr, far_high_rr], last_price=last, atr=400.0,
+    )
+    short_setups = [o for o in opps if o.setup_type == "resistance_limit_probe"]
+    assert not short_setups, (
+        f"T1 RR < 2.0 时不应生成 resistance_limit_probe；实际产出: "
+        f"{[(o.setup_id, [t.rr for t in o.targets]) for o in short_setups]}"
+    )
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # P1-C 修复回归：invalidation_clarity 钟形函数（替代旧"风险越大越高分"单调函数）
 # ────────────────────────────────────────────────────────────────────────────
 
