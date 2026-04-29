@@ -974,12 +974,13 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
     candidate = t[l : r + 1]
     try:
-        return json.loads(candidate)
+        # strict=False：容忍 LLM 长字符串内偶发未转义控制字符（与 MAA arbiter 同步口径）
+        return json.loads(candidate, strict=False)
     except Exception:
         try:
             import re
             cleaned = re.sub(r",(\s*[}\]])", r"\1", candidate)
-            return json.loads(cleaned)
+            return json.loads(cleaned, strict=False)
         except Exception:
             return None
 

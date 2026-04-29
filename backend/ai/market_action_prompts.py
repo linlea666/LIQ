@@ -859,7 +859,10 @@ def extract_json_payload(raw: str) -> dict[str, Any]:
 
     block = re.sub(r"(^|\s)//[^\n]*", "", block)
     block = re.sub(r",(\s*[}\]])", r"\1", block)
-    payload = json.loads(block)
+    # strict=False：容忍 LLM 在长字符串内偶发夹带未转义控制字符 (0x00-0x1f) 导致
+    # "Invalid control character at: line N column M" 失败。该宽容只影响字符串内
+    # 的字面控制字符；JSON 结构本身仍按标准校验，下游 isinstance(dict) 不放松。
+    payload = json.loads(block, strict=False)
     if not isinstance(payload, dict):
         raise ValueError(f"json root is not dict: {type(payload)}")
     return payload
