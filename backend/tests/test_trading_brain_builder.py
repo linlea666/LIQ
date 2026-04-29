@@ -54,6 +54,15 @@ def test_merge_tolerance_no_atr():
     assert abs(t - 300.0) < 1e-6
 
 
+def test_merge_tolerance_clamps_extreme_atr_to_upper():
+    """P2-3：极端 ATR 时 raw 容差被 0.8% × price 上限 clamp，避免过度合并。"""
+    t = merge_tolerance(100_000.0, atr=10_000.0)  # 0.5 × 10000 = 5000，超 800 上限
+    assert t == 100_000.0 * 0.008
+    # 下限：ATR=0 但价格极小（理论上不会触发，仍要保证不塌零）
+    t2 = merge_tolerance(100.0, atr=0.0)
+    assert t2 == 100.0 * 0.003  # 0.3 仍在 [0.15%=0.15, 0.8%=0.8] 区间内
+
+
 def test_build_merges_adjacent_wall_and_level():
     last = 100_000.0
     w = _wall(price_mid=100_200.0, price_low=100_150.0, price_high=100_250.0, side="ask")

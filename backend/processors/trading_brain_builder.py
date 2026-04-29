@@ -70,11 +70,16 @@ class _Cluster:
 
 
 def merge_tolerance(last_price: float, atr: float) -> float:
-    """Q2=A：max(0.5×ATR, 0.3%×价)。ATR 缺失时只用 0.3%。"""
+    """聚合容差：max(0.5×ATR, 0.3%×价)，并 clamp 到 [0.15%, 0.8%] × 价。
+
+    P2-3：极端波动期 ATR 暴涨会让 raw 容差爆掉，把"现货墙 + 关键位 + 清算簇 + 磁铁"
+    错误合一区。加 0.8% 上限防过度合并；0.15% 下限防 ATR 极小时聚类塌陷。
+    """
     pct = abs(last_price) * 0.003
-    if atr and atr > 0:
-        return max(0.5 * atr, pct)
-    return pct
+    raw = max(0.5 * atr, pct) if atr and atr > 0 else pct
+    upper = abs(last_price) * 0.008
+    lower = abs(last_price) * 0.0015
+    return max(lower, min(raw, upper))
 
 
 def _fmt_usd_short(usd: float) -> str:

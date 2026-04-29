@@ -56,14 +56,16 @@ export function translateDirection(d: "long" | "short" | "neutral"): string {
   return "等待";
 }
 
-/** UI 转译 setup 状态 */
+/** UI 转译 setup 状态。
+ * 注意 confirmed 显示为「结构确认」而非「已确认」—— 避免被误读为"可以入场"。
+ * 状态机的 confirmed 仅指"结构吸收信号已达成"，不含交易决策语义。 */
 export function translateSetupState(name: string): string {
   const m: Record<string, string> = {
     forming: "酝酿中",
     waiting_for_trigger: "等待触发",
     triggered: "已触达",
     confirmation_pending: "等待确认",
-    confirmed: "已确认",
+    confirmed: "结构确认",
     invalidated: "结构失效",
     cancelled: "已取消",
     missed: "已错过",

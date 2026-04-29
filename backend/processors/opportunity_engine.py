@@ -95,7 +95,28 @@ def _regime_blocks_short(ctx: Optional[BrainContextChips]) -> bool:
     return r in ("trend_up", "up_trend", "bullish_trend")
 
 
-# ── targets：从其它 zones 找 T1/T2/T3 ─────────────────────────────────
+# ── targets：从其它 zones 找 T1/T2/T3（带路径阻力评分，P1-F）──────────────
+def _path_obstacle_score(
+    *, lo: float, hi: float, zones: list[BrainPriceZone],
+    exclude_id: str = "",
+) -> float:
+    """计算从 lo 到 hi 之间（开区间）所有 zones 的 sweep_attractiveness 总和，clamp 到 0–1。
+
+    P1-F：旧逻辑只按距离取最近 3 个 target，忽略中间路径上的扫单磁铁/合约墙，
+    导致 T2/T3 的 RR 被高估（"达到 T2 必须先穿 T1 + 中间磁铁"）。
+    新逻辑给每个 target 附带 path_obstacle_score，asymmetry_score 内再据此打折。
+    """
+    if hi <= lo:
+        return 0.0
+    total = 0.0
+    for z in zones:
+        if z.zone_id == exclude_id:
+            continue
+        if lo < z.price_mid < hi:
+            total += float(z.sweep_attractiveness or 0.0)
+    return round(min(1.0, total), 3)
+
+
 def _select_targets_for_long(
     *, zone: BrainPriceZone, all_zones: list[BrainPriceZone], hard_stop: float,
 ) -> list[SetupTarget]:
@@ -117,11 +138,16 @@ def _select_targets_for_long(
             else "short_liq_magnet" if z.dominant_role in ("liquidation_magnet", "futures_target")
             else "key_level"
         )
+        path_obs = _path_obstacle_score(
+            lo=zone.price_high, hi=z.price_mid, zones=all_zones,
+            exclude_id=zone.zone_id,
+        )
         out.append(SetupTarget(
             price=_round_price(z.price_mid),
             type=ttype,
             rr=rr,
             note=z.dominant_label,
+            path_obstacle_score=path_obs,
         ))
         if len(out) >= 3:
             break
@@ -149,11 +175,16 @@ def _select_targets_for_short(
             else "long_liq_magnet" if z.dominant_role in ("liquidation_magnet", "futures_target")
             else "key_level"
         )
+        path_obs = _path_obstacle_score(
+            lo=z.price_mid, hi=zone.price_low, zones=all_zones,
+            exclude_id=zone.zone_id,
+        )
         out.append(SetupTarget(
             price=_round_price(z.price_mid),
             type=ttype,
             rr=rr,
             note=z.dominant_label,
+            path_obstacle_score=path_obs,
         ))
         if len(out) >= 3:
             break
@@ -222,13 +253,17 @@ def _asymmetry_score(
     quality_per_t = []
     for t in targets:
         if t.type in ("short_liq_magnet", "long_liq_magnet"):
-            quality_per_t.append(0.8)
+            base = 0.8
         elif t.type == "spot_wall":
-            quality_per_t.append(0.9)
+            base = 0.9
         elif t.type == "key_level":
-            quality_per_t.append(0.75)
+            base = 0.75
         else:
-            quality_per_t.append(0.6)
+            base = 0.6
+        # P1-F：路径阻力折扣 — 中间扫单磁铁/合约墙越多，target 实际抵达概率越低
+        # 折扣强度 0.3：path_obstacle=1.0 时质量被打 70 折，0.5 时打 85 折
+        adjusted = base * max(0.4, 1.0 - 0.3 * float(t.path_obstacle_score or 0.0))
+        quality_per_t.append(adjusted)
     target_quality = sum(quality_per_t) / len(quality_per_t)
 
     liq_path = 1.0 - min(zone.break_through_risk * 0.5, 0.5)

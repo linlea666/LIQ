@@ -215,6 +215,10 @@ class SetupTarget(BaseModel):
     rr: float
     """相对硬止损的盈亏比（仅展示）。"""
     note: str = ""
+    path_obstacle_score: float = 0.0
+    """P1-F：路径阻力评分（0–1）。从 zone 到该 target 之间所有 zones 的
+    sweep_attractiveness 总和（clamped）。值越高 → 中间扫单磁铁越多 → 实际能抵达
+    该 target 的概率越低；asymmetry_score 内会用此扣 target_quality。"""
 
 
 class SetupRiskPlan(BaseModel):

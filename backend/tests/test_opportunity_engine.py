@@ -242,6 +242,34 @@ def test_invalidation_clarity_atr_missing_uses_price_proxy():
     assert 0.99 <= s <= 1.0  # 0.6 个 proxy 单位应到达 peak
 
 
+def test_path_obstacle_score_filled_for_t2_t3():
+    """P1-F：T1 path_obstacle=0；T2/T3 应统计中间路径上 zone 的 sweep_attractiveness。"""
+    last = 100_000.0
+    z_anchor = _zone(price_mid=99_000.0, distance_pct=-1.0, support_trust=0.85)
+    # 路径上插入一个高 sweep_attractiveness 的清算磁铁
+    z_obstacle = _zone(
+        zone_id="obs1", price_mid=100_500.0, distance_pct=0.5,
+        dominant_role="liquidation_magnet", support_trust=0.0,
+        sweep_attractiveness=0.85,
+    )
+    z_t1 = _target_zone_above(101_500.0)  # T2
+    z_t2 = _target_zone_above(102_500.0)  # T3
+    opps = build_opportunities(
+        zones=[z_anchor, z_obstacle, z_t1, z_t2], last_price=last, atr=400.0,
+    )
+    o = next(o for o in opps if o.setup_type == "support_limit_probe")
+    # T1 = z_obstacle 自身（最近的上方 zone，是磁铁）
+    # T2/T3 = z_t1, z_t2，路径上有 z_obstacle 提供 0.85 sweep_attractiveness
+    if len(o.targets) >= 2:
+        # T1 自身路径阻力为 0（zone.price_high 到 z_obstacle.price_mid 之间无其他 zone）
+        # T2 路径上有 z_obstacle 在区间内 → path_obstacle_score > 0
+        t1, t2 = o.targets[0], o.targets[1]
+        assert t1.path_obstacle_score == 0.0
+        assert t2.path_obstacle_score > 0.0, (
+            f"T2 路径上有磁铁 z_obstacle，path_obstacle 应非零，got {t2.path_obstacle_score}"
+        )
+
+
 def test_real_setup_far_stop_gets_lower_asymmetry_than_optimal_stop():
     """端到端：同样的 zone/target，hard_stop 远的 setup 不对称分应低于 hard_stop 适中的。
     （这是 P1-C 修复后才会成立的关键回归。）"""
