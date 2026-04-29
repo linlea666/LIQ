@@ -36,8 +36,8 @@ export default function TradingBrainPage() {
   }, [coinParam, loadTradingBrain]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
-      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-900/90 px-4 py-3 backdrop-blur">
+    <div className="flex h-screen flex-col bg-slate-950 text-slate-200">
+      <header className="shrink-0 border-b border-slate-800 bg-slate-900/90 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <Link
@@ -59,7 +59,14 @@ export default function TradingBrainPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-4 px-4 py-4">
+      {snap?.data_quality?.is_partial_ready && (
+        <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/20 px-4 py-1.5 text-center text-[11px] text-amber-200">
+          数据未就绪：{snap.data_quality.ready_count}/{snap.data_quality.total_count} 项核心源已接入，
+          暖机期间仅显示已到达的字段
+        </div>
+      )}
+
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {err && (
           <div className="rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-[12px] text-rose-200">
             {err}

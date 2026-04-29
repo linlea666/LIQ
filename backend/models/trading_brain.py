@@ -98,6 +98,13 @@ class BrainDataQuality(BaseModel):
     stale_sources: list[str] = Field(default_factory=list)
     missing_sources: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # 暖机/数据齐备度（Phase 0）
+    is_partial_ready: bool = False
+    """True 表示尚未拿全核心源（KL/挂单墙/清算 任一缺失），UI 应显示 banner。"""
+    ready_count: int = 0
+    """已就绪的核心源数量（最大 = total_count）。"""
+    total_count: int = 3
+    """核心源总数：当前=3（KL、挂单墙、清算地图）。"""
 
 
 class BrainContextChips(BaseModel):

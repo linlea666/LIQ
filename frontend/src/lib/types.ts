@@ -2248,6 +2248,10 @@ export interface BrainDataQuality {
   stale_sources: string[];
   missing_sources: string[];
   notes: string[];
+  /** Phase 0：核心源（KL/挂单墙/清算）齐备度 */
+  is_partial_ready: boolean;
+  ready_count: number;
+  total_count: number;
 }
 
 export interface BrainContextChips {

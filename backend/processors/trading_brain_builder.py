@@ -509,19 +509,29 @@ def build_trading_brain_snapshot(
     if max_zones > 0:
         zones = zones[:max_zones]
 
-    summary = _build_summary(zones, last_price)
     rankings = _rankings(zones)
     events = _build_events(op, now_sec=now_sec)
 
     # 数据质量
     dq_notes: list[str] = []
     lq = op.data_quality if op else ""
+    ready_count = sum(1 for x in (kl, op, liq) if x is not None)
+    total_count = 3
+    is_partial_ready = ready_count < total_count
     if not op:
         dq_notes.append("挂单压力/流动性墙快照暂不可用")
     if not kl:
         dq_notes.append("关键位 V2 快照暂不可用")
     if not liq:
         dq_notes.append("清算地图暂不可用")
+
+    if is_partial_ready and not zones:
+        summary = (
+            f"数据未就绪：{ready_count}/{total_count} 项核心源已接入；"
+            f"暖机期间仅展示已到达的字段，请稍候再看。"
+        )
+    else:
+        summary = _build_summary(zones, last_price)
 
     freshness_score = None
     stale: list[str] = []
@@ -577,5 +587,8 @@ def build_trading_brain_snapshot(
             stale_sources=stale,
             missing_sources=missing,
             notes=dq_notes,
+            is_partial_ready=is_partial_ready,
+            ready_count=ready_count,
+            total_count=total_count,
         ),
     )
