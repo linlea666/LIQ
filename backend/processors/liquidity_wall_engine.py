@@ -1341,6 +1341,45 @@ def _liquidity_drain_pct(history: Optional[Sequence], side: str) -> Optional[flo
     return (base - cur) / base
 
 
+def _stale_weight(age_sec: int, fresh_max: int = 600, dead_min: int = 900) -> float:
+    """W2-T3：根据数据 age 计算降权系数（0-1）。
+
+    - age ≤ fresh_max（默认 10min）→ 1.0（数据新鲜，全权重）
+    - age ≥ dead_min（默认 15min）→ 0.0（数据 stale，因子贡献清零）
+    - 中间线性 ramp：avoid cliff jump
+
+    设计理由：
+      - taker_flow 5min 拉一次，>10min 仍未刷新 = 拉取出错 → 不应用作"实时攻击"信号
+      - cvd 5min 粒度，>15min 跨多帧 → 趋势判定可能滞后
+      - drain 30min 窗口本身已带容差，>15min 该衰减早就过期了
+      - age = 0（数据源完全没时间戳，旧测试夹具）→ 1.0 不降权（向后兼容）
+    """
+    if age_sec <= 0 or age_sec <= fresh_max:
+        return 1.0
+    if age_sec >= dead_min:
+        return 0.0
+    # 线性插值：age=fresh_max → 1.0；age=dead_min → 0.0
+    return round(max(0.0, min(1.0, (dead_min - age_sec) / max(dead_min - fresh_max, 1))), 3)
+
+
+def _ts_of(obj: Any, attr_candidates: tuple = ("ts_sec", "ts")) -> int:
+    """从对象多个候选字段取 unix-second 时间戳；失败返 0。"""
+    if obj is None:
+        return 0
+    for attr in attr_candidates:
+        v = getattr(obj, attr, None)
+        if v is not None:
+            try:
+                ts = int(v)
+                # 兼容 ms：> 1e12 视为 ms 转 s
+                if ts > 1_000_000_000_000:
+                    return ts // 1000
+                return ts
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
 def _compute_active_attack_score(
     zone: WallZone,
     taker_flow: Any,
@@ -1348,41 +1387,61 @@ def _compute_active_attack_score(
     cfg: dict,
     ask_bids_history: Optional[Sequence] = None,
     spot_ask_bids_history: Optional[Sequence] = None,
+    now_sec: Optional[int] = None,
 ) -> float:
     """Phase A+B+：实时主动攻击强度（0-1，作为 break_through_risk 加项）。
 
     回应 GPT P1-3："break_through_risk 缺乏'主动攻击'因子，纯静态指标无法
     反映正在发生的吃单/挤兑。"
 
-    构成（同向攻击才计分；逆向攻击 = 0；三因子加权）：
-      - 0.40 × taker 同向占比（bid wall 看 sell_ratio；ask wall 看 buy_ratio）
+    W2-T3 升级（source-aware stale 降权）：
+      数据源新鲜度直接决定该因子的权重。stale 数据（如 taker_flow 已 30min 未更新）
+      不再被错误当作"实时攻击"，避免在数据老化时 break_through_risk 被高估。
+      - taker_flow.ts：> 10min ramp 降权；> 15min 因子清零
+      - cvd_spot：从 series[-1].ts 推 age（无 series 时 fallback obj.ts）
+      - drain factor：以 history[-1].ts_sec 为准
+      now_sec=None 或对象无 ts → 默认全权重（向后兼容旧测试夹具）
+
+    构成（同向攻击才计分；逆向攻击 = 0；三因子加权 × 各自 stale 降权系数）：
+      - 0.40 × taker 同向占比 × stale_weight(taker_age)
+              bid wall 看 sell_ratio；ask wall 看 buy_ratio
               ≥ 60% 同向 → 1.0（线性映射 0.5→0, 0.6→1.0）
-      - 0.30 × cvd_spot 同向 trend
+      - 0.30 × cvd_spot 同向 trend × stale_weight(cvd_age)
               bid wall：trend ∈ {down, strong_down} / ask wall：trend ∈ {up, strong_up}
-      - 0.30 × **流动性衰竭因子**（Phase B 引入，B+ 升级为现货优先 + fallback 合约）
-              数据源优先级：现货 aggregated > 合约 aggregated
-              语义：现货抽流动性 = 真买卖家撤单，比合约（杠杆移仓）更可信
+      - 0.30 × **流动性衰竭因子** × stale_weight(drain_age)
+              现货优先 → 合约 fallback
               30min 内 same-side USD 下跌 ≥ 5% → 1.0（线性映射）
     """
     score = 0.0
-    # 1) taker 同向占比
+
+    # 1) taker 同向占比 × stale 降权
     if taker_flow is not None:
+        taker_factor = 0.0
+        # 兼容两种字段名：旧 buy_volume_usd / sell_volume_usd（测试夹具）+
+        # 新 buy_ratio / sell_ratio（生产 TakerFlowData 模型）
         try:
-            buy = float(getattr(taker_flow, "buy_volume_usd", 0) or 0)
-            sell = float(getattr(taker_flow, "sell_volume_usd", 0) or 0)
-            total = buy + sell
-            if total > 0:
-                if zone.side == "bid":
-                    same_ratio = sell / total
-                else:
-                    same_ratio = buy / total
-                if same_ratio > 0.5:
-                    # 0.5→0, 0.6→1.0（线性映射，clamp 上限 1.0）
-                    score += 0.40 * min(1.0, max(0.0, (same_ratio - 0.5) / 0.10))
+            br = getattr(taker_flow, "buy_ratio", None)
+            sr = getattr(taker_flow, "sell_ratio", None)
+            if br is not None and sr is not None and (float(br) + float(sr)) > 0:
+                same_ratio = float(sr) if zone.side == "bid" else float(br)
+            else:
+                buy = float(getattr(taker_flow, "buy_volume_usd", 0) or 0)
+                sell = float(getattr(taker_flow, "sell_volume_usd", 0) or 0)
+                total = buy + sell
+                same_ratio = (sell if zone.side == "bid" else buy) / total if total > 0 else 0.0
+            if same_ratio > 0.5:
+                taker_factor = min(1.0, max(0.0, (same_ratio - 0.5) / 0.10))
         except (TypeError, ValueError):
             pass
+        if taker_factor > 0:
+            tw = 1.0
+            if now_sec is not None:
+                ts = _ts_of(taker_flow)
+                if ts > 0:
+                    tw = _stale_weight(now_sec - ts, fresh_max=600, dead_min=900)
+            score += 0.40 * taker_factor * tw
 
-    # 2) cvd_spot 同向趋势
+    # 2) cvd_spot 同向趋势 × stale 降权
     if cvd_spot is not None:
         trend = getattr(cvd_spot, "trend_1h", None)
         if zone.side == "bid":
@@ -1390,16 +1449,28 @@ def _compute_active_attack_score(
         else:
             same_trend = trend in ("up", "strong_up")
         if same_trend:
-            score += 0.30
+            cw = 1.0
+            if now_sec is not None:
+                # CVDData 有 series[-1].ts；旧夹具没 series → 退化全权重
+                series = getattr(cvd_spot, "series", None) or []
+                ts = _ts_of(series[-1]) if series else _ts_of(cvd_spot)
+                if ts > 0:
+                    cw = _stale_weight(now_sec - ts, fresh_max=600, dead_min=900)
+            score += 0.30 * cw
 
-    # 3) Phase B+：流动性衰竭因子（现货优先 → 合约 fallback）
+    # 3) Phase B+：流动性衰竭因子 × stale 降权（现货优先 → 合约 fallback）
     drain_pct = _liquidity_drain_pct(spot_ask_bids_history, zone.side)
+    drain_history = spot_ask_bids_history
     if drain_pct is None:
-        # 现货无数据 → fallback 合约
         drain_pct = _liquidity_drain_pct(ask_bids_history, zone.side)
+        drain_history = ask_bids_history
     if drain_pct is not None and drain_pct > 0:
-        # 0% 衰减 → 0；≥ 5% 衰减 → 1.0（线性）
-        score += 0.30 * min(1.0, drain_pct / 0.05)
+        dw = 1.0
+        if now_sec is not None and drain_history:
+            ts = _ts_of(drain_history[-1])
+            if ts > 0:
+                dw = _stale_weight(now_sec - ts, fresh_max=600, dead_min=900)
+        score += 0.30 * min(1.0, drain_pct / 0.05) * dw
 
     return round(min(1.0, score), 3)
 
@@ -1941,8 +2012,8 @@ def build_liquidity_wall_outputs(
         z.status = _classify_zone_status(z, z_events)
 
         # W2-T1：active_attack_score 提升为 zone 字段（供 SR/SA + archiver 复用）
-        # 必须在 break_through_risk 之前写入；break_through_risk 内部仍独立调用以
-        # 维持原签名兼容（W2-T2 阶段重构时再统一）
+        # 必须在 break_through_risk 之前写入
+        # W2-T3：传入 now_sec 启用 source-aware stale 降权（数据老化时因子贡献清零）
         z.active_attack_score = _compute_active_attack_score(
             z,
             getattr(state, "taker_flow", None),
@@ -1954,6 +2025,7 @@ def build_liquidity_wall_outputs(
             spot_ask_bids_history=list(
                 getattr(state, "spot_aggregated_ask_bids_history", []) or []
             ),
+            now_sec=now,
         )
 
         # break_through_risk（Phase A+B+：主动攻击 + 流动性衰竭，现货优先 fallback 合约）
