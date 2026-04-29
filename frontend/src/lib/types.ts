@@ -2203,6 +2203,14 @@ export interface BrainScenario {
   invalidates_if: string;
 }
 
+export type BrainDominantRole =
+  | "spot_defense"
+  | "futures_target"
+  | "liquidation_magnet"
+  | "contested"
+  | "key_level_only"
+  | "other";
+
 export interface BrainPriceZone {
   zone_id: string;
   coin: string;
@@ -2212,6 +2220,8 @@ export interface BrainPriceZone {
   distance_pct: number;
   roles: BrainZoneRoles;
   dominant_label: string;
+  /** Phase 1：主导角色（前端按此上色 + 排行分桶） */
+  dominant_role: BrainDominantRole;
   wall_zone_ids: string[];
   key_level_prices: number[];
   support_trust: number;
@@ -2230,6 +2240,10 @@ export interface BrainRankings {
   resistance_trust: string[];
   sweep_targets: string[];
   break_through_risk: string[];
+  /** Phase 1：按 dominant_role 分桶 */
+  top_defenses: string[];
+  top_targets: string[];
+  top_contested: string[];
 }
 
 export interface BrainEvent {

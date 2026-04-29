@@ -39,6 +39,25 @@ class BrainScenario(BaseModel):
     invalidates_if: str = ""
 
 
+DominantRole = Literal[
+    "spot_defense",
+    "futures_target",
+    "liquidation_magnet",
+    "contested",
+    "key_level_only",
+    "other",
+]
+"""价格区主导角色（语义分层，UI 颜色映射，禁喊单）：
+
+- spot_defense：现货供需墙 / Coinbase 共振 / 关键位 ≥A，更适合作支撑/阻力候选
+- futures_target：合约挂单墙 + 清算磁铁，更易被扫；目标位 / 不入场区
+- liquidation_magnet：纯清算簇/磁铁，磁吸目标位
+- contested：同价区 spot 与 futures+liq 共存，争夺区（建议观察）
+- key_level_only：仅有关键位证据
+- other：其他/弱聚合
+"""
+
+
 class BrainPriceZone(BaseModel):
     """大屏核心单元：统一价格区。"""
 
@@ -52,6 +71,9 @@ class BrainPriceZone(BaseModel):
     roles: BrainZoneRoles = Field(default_factory=BrainZoneRoles)
     dominant_label: str = ""
     """主导标签（人类可读，如「多源争夺区」「清算磁铁」）。"""
+
+    dominant_role: DominantRole = "other"
+    """主导角色（语义分层；前端按此上色 + 排行分桶）。"""
 
     wall_zone_ids: list[str] = Field(default_factory=list)
     key_level_prices: list[float] = Field(default_factory=list)
@@ -76,6 +98,13 @@ class BrainRankings(BaseModel):
     resistance_trust: list[str] = Field(default_factory=list)
     sweep_targets: list[str] = Field(default_factory=list)
     break_through_risk: list[str] = Field(default_factory=list)
+    # Phase 1：按 dominant_role 分桶的排行
+    top_defenses: list[str] = Field(default_factory=list)
+    """spot_defense 角色，按 max(support_trust, resistance_trust) 排序。"""
+    top_targets: list[str] = Field(default_factory=list)
+    """futures_target / liquidation_magnet，按 sweep_attractiveness 排序。"""
+    top_contested: list[str] = Field(default_factory=list)
+    """contested 角色，按 (support_trust + sweep_attractiveness) 综合排序。"""
 
 
 class BrainEvent(BaseModel):

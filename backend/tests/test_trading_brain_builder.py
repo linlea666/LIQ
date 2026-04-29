@@ -161,6 +161,110 @@ def test_wall_events_recent_only():
     assert "新出现" in snap.events[0].message
 
 
+def test_dominant_role_spot_defense():
+    """现货墙 + Coinbase + 关键位高 trust → spot_defense（防守位）。"""
+    last = 100_000.0
+    w = _wall(
+        price_mid=99_000.0, price_low=98_900.0, price_high=99_100.0,
+        side="bid", source="spot+depth",
+        has_spot_confluence=True, coinbase_spot_confluence=True,
+        support_resistance_trust_score=0.85,
+    )
+    lv = KeyLevelV2(price=99_010.0, side="support", strength_tier="A",
+                    confluence_score=72.0, final_score=78.0)
+    kl = KeyLevelSnapshotV2(ts=1, levels=[lv])
+    op = OrderbookPressureSnapshot(coin="BTC", ts_sec=1, last_price=last, walls_below=[w])
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=400.0, kl=kl, op=op, liq=None)
+    z0 = next((z for z in snap.zones if 98_800 <= z.price_mid <= 99_200), None)
+    assert z0 is not None
+    # 这个 zone 没有清算磁铁/合约目标 → spot_defense
+    assert z0.dominant_role in ("spot_defense", "contested")
+    assert z0.zone_id in snap.rankings.top_defenses or z0.zone_id in snap.rankings.top_contested
+
+
+def test_dominant_role_pure_liquidation_magnet():
+    """只有清算簇 → liquidation_magnet。"""
+    last = 100_000.0
+    cluster = LiqCluster(price_center=95_000.0, price_from=94_900, price_to=95_100,
+                         total_usd=50_000_000.0, side="long", exchange_count=3)
+    liq = LiquidationMap(
+        coin="BTC", ts=1, cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50", short_bands=[], long_bands=[])],
+        clusters_below=[cluster],
+    )
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=600.0,
+                                         kl=None, op=None, liq=liq)
+    z0 = next(z for z in snap.zones if 94_800 <= z.price_mid <= 95_200)
+    assert z0.dominant_role == "liquidation_magnet"
+    assert z0.zone_id in snap.rankings.top_targets
+
+
+def test_dominant_role_contested_when_spot_and_target_overlap():
+    """现货墙 + 合约墙 + 清算磁铁 同价区 → contested。"""
+    last = 100_000.0
+    w_spot = _wall(price_mid=99_000.0, price_low=98_900, price_high=99_100,
+                   side="bid", source="spot+depth", has_spot_confluence=True,
+                   support_resistance_trust_score=0.7)
+    w_fut = _wall(price_mid=99_010.0, price_low=98_910, price_high=99_110,
+                  side="bid", source="depth_only",
+                  support_resistance_trust_score=0.4)
+    cluster = LiqCluster(price_center=99_050.0, price_from=98_950, price_to=99_150,
+                         total_usd=80_000_000.0, side="long", exchange_count=4)
+    liq = LiquidationMap(
+        coin="BTC", ts=1, cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50", short_bands=[], long_bands=[])],
+        clusters_below=[cluster],
+    )
+    op = OrderbookPressureSnapshot(coin="BTC", ts_sec=1, last_price=last,
+                                   walls_below=[w_spot, w_fut])
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=400.0,
+                                         kl=None, op=op, liq=liq)
+    z0 = next(z for z in snap.zones if 98_800 <= z.price_mid <= 99_200)
+    assert z0.dominant_role == "contested"
+    assert z0.zone_id in snap.rankings.top_contested
+
+
+def test_dominant_role_futures_target_no_spot():
+    """合约墙 + 清算磁铁，无现货 → futures_target。"""
+    last = 100_000.0
+    w = _wall(price_mid=98_500.0, price_low=98_400, price_high=98_600,
+              side="bid", source="depth_only", has_spot_confluence=False,
+              support_resistance_trust_score=0.45)
+    cluster = LiqCluster(price_center=98_500.0, price_from=98_400, price_to=98_600,
+                         total_usd=60_000_000.0, side="long", exchange_count=3)
+    liq = LiquidationMap(
+        coin="BTC", ts=1, cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50", short_bands=[], long_bands=[])],
+        clusters_below=[cluster],
+    )
+    op = OrderbookPressureSnapshot(coin="BTC", ts_sec=1, last_price=last, walls_below=[w])
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=400.0,
+                                         kl=None, op=op, liq=liq)
+    z0 = next(z for z in snap.zones if 98_300 <= z.price_mid <= 98_700)
+    assert z0.dominant_role == "futures_target"
+    assert z0.zone_id in snap.rankings.top_targets
+
+
+def test_dominant_role_key_level_only_low_trust():
+    """关键位 trust 低 + 无墙 → key_level_only。"""
+    last = 100_000.0
+    lv = KeyLevelV2(price=98_000.0, side="support", strength_tier="C",
+                    confluence_score=30.0, final_score=35.0)
+    kl = KeyLevelSnapshotV2(ts=1, levels=[lv])
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=400.0,
+                                         kl=kl, op=None, liq=None)
+    z0 = next(z for z in snap.zones if 97_900 <= z.price_mid <= 98_100)
+    assert z0.dominant_role == "key_level_only"
+
+
+def test_partial_ready_flags_in_data_quality():
+    snap = build_trading_brain_snapshot(coin="BTC", last_price=50_000.0, atr=200.0,
+                                         kl=None, op=None, liq=None)
+    assert snap.data_quality.is_partial_ready is True
+    assert snap.data_quality.ready_count == 0
+    assert snap.data_quality.total_count == 3
+
+
 def test_summary_nonempty_with_zones():
     last = 100_000.0
     w = _wall(

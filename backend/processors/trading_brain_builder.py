@@ -303,6 +303,12 @@ def _build_zone_from_cluster(
     else:
         dom = "价格关注区"
 
+    dom_role = _classify_dominant_role(
+        roles=roles,
+        max_sup=max_sup,
+        max_res=max_res,
+    )
+
     scen = BrainScenario(
         if_hold="关注该区是否出现成交吸收、墙厚度是否维持、现货/合约 CVD 是否同向走弱。",
         if_break="关注邻近清算磁铁、打穿风险评分与流动性真空；不作为交易指令。",
@@ -318,6 +324,7 @@ def _build_zone_from_cluster(
         distance_pct=round(dist, 3),
         roles=roles,
         dominant_label=dom,
+        dominant_role=dom_role,
         wall_zone_ids=sorted(set(wall_ids)),
         key_level_prices=sorted(set(kl_prices)),
         support_trust=round(max_sup, 3),
@@ -329,6 +336,45 @@ def _build_zone_from_cluster(
         scenario=scen,
         layer_notes=layer_notes[:8],
     )
+
+
+def _classify_dominant_role(
+    *,
+    roles: BrainZoneRoles,
+    max_sup: float,
+    max_res: float,
+) -> str:
+    """将多 role 标记折叠为单一主导角色，前端按此上色 + 排行分桶。
+
+    优先级（由高到低）：
+      1. spot_defense  ：spot_supply_wall ∨ coinbase_confluence ∨ (key_level ∧ trust ≥ 0.55)
+                         若同时存在 futures_liquidity_wall ∧ liquidation_magnet → contested
+      2. contested     ：现货层与（合约+清算）层并存
+      3. futures_target：futures_liquidity_wall ∧ liquidation_magnet（无现货防守）
+      4. liquidation_magnet：仅清算磁铁
+      5. key_level_only：只有关键位但无墙/磁铁
+      6. other         ：其他
+
+    保守原则：spot_defense 必须有"硬证据"（现货墙/Coinbase）或"高 trust 关键位"，
+    避免把弱关键位也视为防守位。
+    """
+    has_spot = bool(roles.spot_supply_wall or roles.coinbase_confluence)
+    strong_kl = bool(roles.key_level and max(max_sup, max_res) >= 0.55)
+    has_target = bool(roles.futures_liquidity_wall and roles.liquidation_magnet)
+
+    if (has_spot or strong_kl) and (
+        roles.futures_liquidity_wall or roles.liquidation_magnet
+    ):
+        return "contested"
+    if has_spot or strong_kl:
+        return "spot_defense"
+    if has_target:
+        return "futures_target"
+    if roles.liquidation_magnet:
+        return "liquidation_magnet"
+    if roles.key_level:
+        return "key_level_only"
+    return "other"
 
 
 def _build_summary(zones: list[BrainPriceZone], last_price: float) -> str:
@@ -427,6 +473,34 @@ def _build_events(
 
 
 def _rankings(zones: list[BrainPriceZone]) -> BrainRankings:
+    defenses = [
+        z.zone_id for z in sorted(
+            [x for x in zones if x.dominant_role == "spot_defense"],
+            key=lambda z: (
+                -max(z.support_trust, z.resistance_trust),
+                abs(z.distance_pct),
+            ),
+        )[:8]
+    ]
+    targets = [
+        z.zone_id for z in sorted(
+            [
+                x for x in zones
+                if x.dominant_role in ("futures_target", "liquidation_magnet")
+            ],
+            key=lambda z: (-z.sweep_attractiveness, abs(z.distance_pct)),
+        )[:8]
+    ]
+    contested = [
+        z.zone_id for z in sorted(
+            [x for x in zones if x.dominant_role == "contested"],
+            key=lambda z: (
+                -(max(z.support_trust, z.resistance_trust) + z.sweep_attractiveness),
+                abs(z.distance_pct),
+            ),
+        )[:8]
+    ]
+
     sup_ids = [
         z.zone_id for z in sorted(
             [x for x in zones if x.support_trust >= 0.05 and (x.roles.key_level or x.roles.spot_supply_wall)],
@@ -462,6 +536,9 @@ def _rankings(zones: list[BrainPriceZone]) -> BrainRankings:
         resistance_trust=res_ids,
         sweep_targets=sweep_ids,
         break_through_risk=btr_ids,
+        top_defenses=defenses,
+        top_targets=targets,
+        top_contested=contested,
     )
 
 
