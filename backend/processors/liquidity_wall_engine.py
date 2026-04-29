@@ -833,8 +833,17 @@ def _augment_zones_with_coinbase(
             z.coinbase_spot_confluence = True
 
 
-def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
+def _compute_trust_breakdown(zone: WallZone, cfg: dict) -> tuple[float, dict[str, float]]:
     """综合 trust_score（0-1）—— 区分高可信墙 vs 合约清算磁铁。
+
+    W2-T1 新增主函数：返回 (final_score, components)，components 含各因子贡献明细，
+    供：
+      - archiver 落盘（后验脚本分析"哪些因子最能预测墙被反弹/打穿"）
+      - AI snapshot 透明化（可选展示）
+      - 前端 hover 显示构成
+
+    既有调用方继续用 _compute_trust_score（向后兼容包装，仅返回 final）。
+
 
     阶梯加分（多维度独立累加，最终 clamp 到 1.0）：
       - base 0.50（合约 5m 热力图源，已是真实订单簿但有 spoof/钓鱼可能）
@@ -853,25 +862,145 @@ def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
       ≥ 0.50：普通（仅单源，需结合磁铁/被扫风险解读）
       < 0.50：短期墙
     """
-    score = cfg.get("trust_base", ENGINE_DEFAULTS["trust_base"])
+    components: dict[str, float] = {}
+    base = cfg.get("trust_base", ENGINE_DEFAULTS["trust_base"])
+    components["base"] = round(base, 3)
+    score = base
+
     if zone.dual_source:
-        score += cfg.get("trust_bonus_dual_source",
-                         ENGINE_DEFAULTS.get("trust_bonus_dual_source", 0.30))
+        bonus = cfg.get("trust_bonus_dual_source",
+                        ENGINE_DEFAULTS.get("trust_bonus_dual_source", 0.30))
+        score += bonus
+        components["dual_source"] = round(bonus, 3)
     if zone.has_spot_confluence:
-        score += cfg.get("trust_bonus_spot_confluence",
-                         ENGINE_DEFAULTS["trust_bonus_spot_confluence"])
+        bonus = cfg.get("trust_bonus_spot_confluence",
+                        ENGINE_DEFAULTS["trust_bonus_spot_confluence"])
+        score += bonus
+        components["spot_confluence"] = round(bonus, 3)
     if zone.exchange_count >= 2:
-        score += cfg.get("trust_bonus_multi_exchange",
-                         ENGINE_DEFAULTS["trust_bonus_multi_exchange"])
+        bonus = cfg.get("trust_bonus_multi_exchange",
+                        ENGINE_DEFAULTS["trust_bonus_multi_exchange"])
+        score += bonus
+        components["multi_exchange"] = round(bonus, 3)
     if zone.coinbase_spot_confluence:
-        score += cfg.get("trust_bonus_coinbase_confluence",
-                         ENGINE_DEFAULTS["trust_bonus_coinbase_confluence"])
+        bonus = cfg.get("trust_bonus_coinbase_confluence",
+                        ENGINE_DEFAULTS["trust_bonus_coinbase_confluence"])
+        score += bonus
+        components["coinbase_confluence"] = round(bonus, 3)
     persistent_thr = cfg.get("trust_persistent_threshold",
                              ENGINE_DEFAULTS["trust_persistent_threshold"])
     if zone.persistence_score >= persistent_thr:
-        score += cfg.get("trust_bonus_persistent",
-                         ENGINE_DEFAULTS["trust_bonus_persistent"])
-    return max(0.0, min(1.0, score))
+        bonus = cfg.get("trust_bonus_persistent",
+                        ENGINE_DEFAULTS["trust_bonus_persistent"])
+        score += bonus
+        components["persistent"] = round(bonus, 3)
+    final = round(max(0.0, min(1.0, score)), 3)
+    components["total"] = final
+    return final, components
+
+
+def _compute_trust_score(zone: WallZone, cfg: dict) -> float:
+    """向后兼容包装（既有测试 / KL bridge 仍按 float 调用）。
+
+    新代码请直接用 _compute_trust_breakdown 拿 components。
+    """
+    final, _ = _compute_trust_breakdown(zone, cfg)
+    return final
+
+
+def _compute_support_resistance_trust_score(zone: WallZone, cfg: dict) -> float:
+    """SR：作为支撑/阻力被反弹的可信度（W2-T1 独立维度）。
+
+    与 trust_score 不同的核心点：
+      - trust_score：墙的"真实性"（是不是 spoof / 是不是真买卖家挂的）
+      - SR：墙的"作用力"（真的被打到时会不会反弹？）
+      实际差异：dual_source + 多重硬证据的高 trust 墙，若也容易撤单（wall_removal_risk
+      高），SR 应显著低于 trust（因为反弹时墙可能消失，价格穿过）。
+
+    公式（与 trust 共享因子但调整权重 + 加 wall_consumed_confidence 正贡献 -
+    wall_removal_risk 负贡献）：
+      base 0.30（合约单源给低基准；spot 多源才能上 0.85+）
+      +0.30 dual_source（同 trust 权重）
+      +0.15 has_spot_confluence
+      +0.10 coinbase_spot_confluence
+      +0.10 persistence ≥ 0.7
+      +0.10 wall_consumed_confidence ≥ 0.6（已被验证承接过卖盘 → 强支撑/阻力硬证据）
+      −0.30 × wall_removal_risk（容易消失的墙不可信）
+    """
+    sr = 0.30
+    if zone.dual_source:
+        sr += 0.30
+    if zone.has_spot_confluence:
+        sr += 0.15
+    if zone.coinbase_spot_confluence:
+        sr += 0.10
+    if zone.persistence_score >= 0.7:
+        sr += 0.10
+    if zone.wall_consumed_confidence >= 0.6:
+        sr += 0.10
+    sr -= 0.30 * max(0.0, min(1.0, zone.wall_removal_risk))
+    return round(max(0.0, min(1.0, sr)), 3)
+
+
+def _compute_sweep_attractiveness_score(
+    zone: WallZone,
+    crowding: Optional[PositionCrowdingSnapshot],
+    last_price: float,
+    cfg: dict,
+) -> float:
+    """SA：作为扫单磁铁被打穿的可吸引度（W2-T1 独立维度）。
+
+    与 SR 完全不同的因子组合 —— 关键洞察：高 trust 大墙也可能因为是机构清算磁铁
+    而被打穿（高 SA），SR 与 SA 可以同时高（"双向博弈热点"，需结合 §1 CVD / §9g
+    absorption 综合判断方向）。
+
+    构成（条件性加分，无 base，clamp 1.0）：
+      0.25 × 同向 crowding_risk（bid wall 看 long_crowding，ask wall 看 short_crowding；
+            墙下方拥挤多头止损 = 扫单动机）
+      磁铁邻近 + 真空（最高 0.20）：
+        - magnet 距 < 0.5%：+0.15
+        - magnet 距 < 2%：  +0.10
+        - magnet 距 < 5%：  +0.05
+        - vacuum_gap_pct ≥ 1%：+0.05；≥ 0.5%：+0.025
+      0.20 × active_attack_score（同向 taker + cvd 同向 + 流动性衰竭）
+      0.15 × wall_removal_risk（spoof 容易撤）
+      厚度衰减（最高 0.10）：
+        - current/max < 0.3：+0.10
+        - current/max < 0.5：+0.05
+    """
+    sa = 0.0
+    if crowding is not None:
+        if zone.side == "bid":
+            crowd_risk = float(getattr(crowding, "long_crowding_risk", 0) or 0)
+        else:
+            crowd_risk = float(getattr(crowding, "short_crowding_risk", 0) or 0)
+        sa += 0.25 * max(0.0, min(1.0, crowd_risk))
+
+    sweep = zone.sweep_target
+    if sweep is not None and last_price > 0 and sweep.magnet_price > 0:
+        dist_pct = abs(sweep.magnet_price - last_price) / last_price
+        if dist_pct < 0.005:
+            sa += 0.15
+        elif dist_pct < 0.02:
+            sa += 0.10
+        elif dist_pct < 0.05:
+            sa += 0.05
+        if sweep.vacuum_gap_pct >= 1.0:
+            sa += 0.05
+        elif sweep.vacuum_gap_pct >= 0.5:
+            sa += 0.025
+
+    sa += 0.20 * max(0.0, min(1.0, zone.active_attack_score))
+    sa += 0.15 * max(0.0, min(1.0, zone.wall_removal_risk))
+
+    if zone.max_usd_1h > 0:
+        ratio = zone.current_usd / zone.max_usd_1h
+        if ratio < 0.3:
+            sa += 0.10
+        elif ratio < 0.5:
+            sa += 0.05
+
+    return round(max(0.0, min(1.0, sa)), 3)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1689,10 +1818,17 @@ def build_liquidity_wall_outputs(
 
     # M2.5：trust_score（必须在 spot augment + tier 之后；用 has_spot_confluence /
     # exchange_count / persistence_score 综合）
+    # W2-T1：用 _compute_trust_breakdown 同时拿 components；写入 raw_trust_score
     for z in walls_above:
-        z.trust_score = _compute_trust_score(z, cfg)
+        final, comps = _compute_trust_breakdown(z, cfg)
+        z.trust_score = final
+        z.raw_trust_score = final
+        z.trust_components = comps
     for z in walls_below:
-        z.trust_score = _compute_trust_score(z, cfg)
+        final, comps = _compute_trust_breakdown(z, cfg)
+        z.trust_score = final
+        z.raw_trust_score = final
+        z.trust_components = comps
 
     # ── M2：拥挤度（一次性算，全局共享） ──
     crowding = None
@@ -1743,6 +1879,22 @@ def build_liquidity_wall_outputs(
                      if e.side == z.side and abs(e.price_mid - z.price_mid) < 1e-6]
         z.status = _classify_zone_status(z, z_events)
 
+        # W2-T1：active_attack_score 提升为 zone 字段（供 SR/SA + archiver 复用）
+        # 必须在 break_through_risk 之前写入；break_through_risk 内部仍独立调用以
+        # 维持原签名兼容（W2-T2 阶段重构时再统一）
+        z.active_attack_score = _compute_active_attack_score(
+            z,
+            getattr(state, "taker_flow", None),
+            getattr(state, "cvd_spot", None),
+            cfg,
+            ask_bids_history=list(
+                getattr(state, "aggregated_ask_bids_history", []) or []
+            ),
+            spot_ask_bids_history=list(
+                getattr(state, "spot_aggregated_ask_bids_history", []) or []
+            ),
+        )
+
         # break_through_risk（Phase A+B+：主动攻击 + 流动性衰竭，现货优先 fallback 合约）
         z.break_through_risk = _compute_break_through_risk(
             z, crowding, z.sweep_target, cfg,
@@ -1754,6 +1906,13 @@ def build_liquidity_wall_outputs(
             spot_ask_bids_history=list(
                 getattr(state, "spot_aggregated_ask_bids_history", []) or []
             ),
+        )
+
+        # W2-T1：SR / SA 独立维度（必须在 active_attack / sweep_target / removal_risk
+        # / consumed_confidence 都写入后计算）
+        z.support_resistance_trust_score = _compute_support_resistance_trust_score(z, cfg)
+        z.sweep_attractiveness_score = _compute_sweep_attractiveness_score(
+            z, crowding, last_price, cfg,
         )
 
         # zone-level explain_chips（最多 3 条；Phase A 优先输出双源/现货标签）

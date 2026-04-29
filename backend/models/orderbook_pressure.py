@@ -391,6 +391,24 @@ class WallZone(BaseModel):
     wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）
     wall_removal_risk: float = 0.0              # 0-1（不写"假单"）
 
+    # ── W2-T1：trust_score 拆分（透明化 + 维度独立）──
+    # raw_trust_score：原始多因子加权（与 trust_score 等价；显式命名供后验脚本/AI 引用）
+    # trust_components：各因子贡献明细（base / dual_source / spot_confluence / ...）
+    # support_resistance_trust_score (SR)：作为支撑/阻力被反弹的可信度（独立维度）
+    #   - 共享 trust 因子，但额外对 wall_removal_risk 给负贡献
+    #   - 加 wall_consumed_confidence 正贡献（已被验证承接过买卖盘）
+    # sweep_attractiveness_score (SA)：作为扫单磁铁被打穿的可吸引度（独立维度）
+    #   - 完全不同的因子组合：crowding 同向 + magnet 邻近 + active_attack + thinning
+    #   - SR 与 SA 可同时高（"双向博弈热点"）
+    # active_attack_score：实时同向 taker + cvd_spot + 流动性衰竭（0-1）
+    #   - 原本是 break_through_risk 的中间计算；现提升为字段供 SR/SA 复用，
+    #     也方便 archiver 落盘 + 前端展示（W3-T1）
+    raw_trust_score: float = 0.0
+    trust_components: dict = Field(default_factory=dict)  # str -> float
+    support_resistance_trust_score: float = 0.0
+    sweep_attractiveness_score: float = 0.0
+    active_attack_score: float = 0.0
+
     # ── 上下文引用（M2）──
     crowding_context: Optional[PositionCrowdingSnapshot] = None  # 与全局 crowding 同；冗余存方便前端 zone 自包含
     sweep_target: Optional[SweepTarget] = None
