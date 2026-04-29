@@ -228,6 +228,20 @@ WallEventType = Literal[
     "wall_consumed_and_removed",
 ]
 
+# W3-T2：墙区主导角色分类（互斥）
+# 优先级（高→低）：dual_battleground > institutional_footprint > support_resistance_strong
+# > magnet_strong > spoof_suspect > transient > ordinary
+DominantRole = Literal[
+    "dual_battleground",         # 双向博弈热点（SR ≥ 0.6 AND SA ≥ 0.6）
+    "institutional_footprint",   # 机构 footprint（coinbase_max_single_order_usd ≥ 100k）
+    "support_resistance_strong", # 强支撑/阻力（SR ≥ 0.7 且 SA < 0.4）
+    "magnet_strong",             # 强清算磁铁（SA ≥ 0.6 且 SR < 0.5）
+    "spoof_suspect",             # 撤单嫌疑（trust < 0.55 且 wall_removal_risk ≥ 0.6）
+    "transient",                 # 短期墙（persistence < 0.3 且不变薄）
+    "ordinary",                  # 普通（默认）
+]
+
+
 # 拥挤度推断状态（M2）
 InferredPositionState = Literal[
     "long_opening",                  # 多头主动开仓
@@ -417,6 +431,11 @@ class WallZone(BaseModel):
     support_resistance_trust_score: float = 0.0
     sweep_attractiveness_score: float = 0.0
     active_attack_score: float = 0.0
+
+    # W3-T2：主导角色分类（基于 SR/SA/trust/removal_risk/persistence 综合判定）
+    # 让 AI/前端一目了然该墙的"性质"，省去多字段组合推理；archiver 落盘后
+    # W4-T1 后验脚本可直接统计各角色的实际反弹/打穿率
+    dominant_role: DominantRole = "ordinary"
 
     # ── 上下文引用（M2）──
     crowding_context: Optional[PositionCrowdingSnapshot] = None  # 与全局 crowding 同；冗余存方便前端 zone 自包含

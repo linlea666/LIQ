@@ -1119,6 +1119,18 @@ export type WallZoneSource =
   | "spot_only"          // Phase A：现货 5m 热力图独立 zone
   | "spot+depth";        // Phase A：现货+合约双源共振（💎 双源高可信墙）
 
+/** W3-T2：墙区主导角色分类（互斥）
+ *  优先级：dual_battleground > institutional_footprint > support_resistance_strong
+ *         > magnet_strong > spoof_suspect > transient > ordinary */
+export type DominantRole =
+  | "dual_battleground"          // 双向博弈热点（SR ≥ 0.6 AND SA ≥ 0.6）
+  | "institutional_footprint"    // 机构 footprint（coinbase_max_single ≥ 100k）
+  | "support_resistance_strong"  // 强支撑/阻力（SR ≥ 0.7 且 SA < 0.4）
+  | "magnet_strong"              // 强清算磁铁（SA ≥ 0.6 且 SR < 0.5）
+  | "spoof_suspect"              // 撤单嫌疑（trust < 0.55 且 removal_risk ≥ 0.6）
+  | "transient"                  // 短期墙（persistence < 0.3 且不变薄）
+  | "ordinary";                  // 普通（默认）
+
 export type WallZoneTrend = "new" | "strengthening" | "weakening" | "stable";
 
 export type WallEventType =
@@ -1247,6 +1259,8 @@ export interface WallZone {
   sweep_attractiveness_score?: number;
   /** W2-T1：实时主动攻击强度（taker 同向 + cvd_spot + 流动性衰竭，已 W2-T3 stale 降权） */
   active_attack_score?: number;
+  /** W3-T2：主导角色（基于 SR/SA/trust/removal/persistence 综合判定，互斥分类） */
+  dominant_role?: DominantRole;
   confluence_with_absorption: boolean;
   absorption_zone_price: number | null;
   strength_score: number;

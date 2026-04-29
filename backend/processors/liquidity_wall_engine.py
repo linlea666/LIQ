@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Sequence
 
 from models.orderbook_pressure import (
     DepthBin,
+    DominantRole,
     InferredPositionState,
     LargeOrderLifecycle,
     OIMarginSplit,
@@ -1043,6 +1044,51 @@ def _compute_sweep_attractiveness_score(
             sa += 0.05
 
     return round(max(0.0, min(1.0, sa)), 3)
+
+
+def _classify_dominant_role(zone: WallZone) -> DominantRole:
+    """W3-T2：基于多字段综合判定墙的主导角色（互斥分类）。
+
+    优先级（从高到低）：
+      1. dual_battleground         双向博弈热点 — SR ≥ 0.6 AND SA ≥ 0.6
+                                    SR 与 SA 同时高，需结合 §1 CVD / §9g absorption
+                                    综合判断方向（W2-T1 核心洞察）
+      2. institutional_footprint   机构 footprint — coinbase_max_single_order_usd ≥ 100k
+                                    Coinbase 单笔订单 ≥ 10 万 USD/笔（机构挂单 vs 散户聚集）
+      3. support_resistance_strong 强支撑/阻力 — SR ≥ 0.7 且 SA < 0.4
+                                    干净的强反弹墙（双源 + 持续 + 已被验证承接过）
+      4. magnet_strong             强清算磁铁 — SA ≥ 0.6 且 SR < 0.5
+                                    纯吸引扫单（高 removal_risk + magnet 邻近 + thinning）
+      5. spoof_suspect             撤单嫌疑 — trust < 0.55 且 wall_removal_risk ≥ 0.6
+                                    （注：不写"假单"绝对结论，只标"嫌疑"）
+      6. transient                 短期墙 — persistence < 0.3 且 current/max ≥ 0.7（不变薄）
+                                    刚出现的稳定墙，等待更多数据确认性质
+      7. ordinary                  普通（默认 fallback）
+
+    设计原则：
+      - 互斥：每个 zone 只有一个 dominant_role，避免前端展示混乱
+      - 优先 SR/SA 共振判定（W2-T1 投资）
+      - institutional_footprint 优先于 SR ≥ 0.7：机构布局信号比"反弹可信"更具体
+      - spoof_suspect 优先于 transient：撤单嫌疑比"等待"更应被警示
+    """
+    sr = zone.support_resistance_trust_score
+    sa = zone.sweep_attractiveness_score
+
+    if sr >= 0.6 and sa >= 0.6:
+        return "dual_battleground"
+    if zone.coinbase_max_single_order_usd >= 100_000:
+        return "institutional_footprint"
+    if sr >= 0.7 and sa < 0.4:
+        return "support_resistance_strong"
+    if sa >= 0.6 and sr < 0.5:
+        return "magnet_strong"
+    if zone.trust_score < 0.55 and zone.wall_removal_risk >= 0.6:
+        return "spoof_suspect"
+    if zone.persistence_score < 0.3:
+        # 不变薄：current/max ≥ 0.7（避免与"变薄+短期"混淆，那是 break_through_risk 的领域）
+        if zone.max_usd_1h > 0 and zone.current_usd / zone.max_usd_1h >= 0.7:
+            return "transient"
+    return "ordinary"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2112,6 +2158,9 @@ def build_liquidity_wall_outputs(
         z.sweep_attractiveness_score = _compute_sweep_attractiveness_score(
             z, crowding, last_price, cfg,
         )
+
+        # W3-T2：dominant_role 主导角色分类（必须在 SR/SA 之后）
+        z.dominant_role = _classify_dominant_role(z)
 
         # zone-level explain_chips（最多 3 条；Phase A 优先输出双源/现货标签）
         chips: list[str] = []
