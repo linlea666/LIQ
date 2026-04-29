@@ -47,7 +47,7 @@ export default function TradingBrainPage() {
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-200">
+    <div className="brain-page flex min-h-screen flex-col bg-slate-950 text-slate-200">
       <header className="shrink-0 border-b border-slate-800 bg-slate-900/95 px-4 py-2 backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
