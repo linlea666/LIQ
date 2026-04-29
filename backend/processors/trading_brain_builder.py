@@ -30,6 +30,8 @@ from models.trading_brain import (
     BrainPriceZone,
     BrainRankings,
     BrainScenario,
+    BrainSpotBook,
+    BrainSpotBookItem,
     BrainZoneRoles,
     TradingBrainSnapshot,
 )
@@ -542,6 +544,103 @@ def _rankings(zones: list[BrainPriceZone]) -> BrainRankings:
     )
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Phase B：现货订单簿模块（从 walls_above / walls_below 抽取，按距离分层）
+# ────────────────────────────────────────────────────────────────────────────
+
+# 距离档位阈值（与产品规则一致）
+_BRACKET_NEAR = 0.5    # |dist_pct| ≤ 0.5%
+_BRACKET_MID = 2.0     # 0.5% < |dist_pct| ≤ 2.0%
+_BRACKET_FAR = 5.0     # 2.0% < |dist_pct| ≤ 5.0%（>5% 截断）
+
+# 各档位每侧上限（与 BrainSpotBook.bracket_caps 默认一致）
+_BRACKET_CAP = {"near": 8, "mid": 8, "far": 6}
+
+
+def _bracket_of(distance_pct: float) -> Optional[str]:
+    """返回 'near' / 'mid' / 'far'；超过 _BRACKET_FAR 返回 None（不展示）。"""
+    a = abs(distance_pct)
+    if a <= _BRACKET_NEAR:
+        return "near"
+    if a <= _BRACKET_MID:
+        return "mid"
+    if a <= _BRACKET_FAR:
+        return "far"
+    return None
+
+
+def _wall_to_book_item(w: WallZone) -> BrainSpotBookItem:
+    """从 WallZone 抽取展示项；不重新计算任何评分字段（铁律）。
+
+    现货厚度 = spot_current_usd（Binance 现货侧 5m 深度共振）
+             + coinbase_spot_usd（Coinbase 现货独立链路）
+    合约厚度 = max(current_usd - spot_usd, 0)
+    """
+    spot_usd = float(getattr(w, "spot_current_usd", 0.0) or 0.0) + float(
+        getattr(w, "coinbase_spot_usd", 0.0) or 0.0
+    )
+    total_usd = float(getattr(w, "current_usd", 0.0) or 0.0)
+    fut_usd = max(total_usd - spot_usd, 0.0)
+    bracket = _bracket_of(w.distance_pct) or "far"
+    return BrainSpotBookItem(
+        wall_zone_id=w.wall_zone_id or "",
+        side="bid" if w.side == "bid" else "ask",
+        price=float(w.peak_price or w.price_mid),
+        distance_pct=float(w.distance_pct),
+        bracket=bracket,  # type: ignore[arg-type]
+        total_usd=total_usd,
+        spot_usd=spot_usd,
+        futures_usd=fut_usd,
+        is_dual_source=bool(getattr(w, "dual_source", False)),
+        has_coinbase=bool(getattr(w, "coinbase_spot_confluence", False)),
+        trust_score=float(getattr(w, "trust_score", 0.0) or 0.0),
+        strength_tier=getattr(w, "strength_tier", "C"),
+        dominant_role=str(getattr(w, "dominant_role", "ordinary") or "ordinary"),
+    )
+
+
+def _trim_brackets(items: list[BrainSpotBookItem]) -> list[BrainSpotBookItem]:
+    """各档位按距离升序排序后截断到 cap，串接成最终列表。"""
+    grouped: dict[str, list[BrainSpotBookItem]] = {"near": [], "mid": [], "far": []}
+    for it in items:
+        grouped.setdefault(it.bracket, []).append(it)
+    for k, lst in grouped.items():
+        lst.sort(key=lambda x: abs(x.distance_pct))
+        cap = _BRACKET_CAP.get(k, 8)
+        grouped[k] = lst[:cap]
+    return grouped["near"] + grouped["mid"] + grouped["far"]
+
+
+def _build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainSpotBook]:
+    """从 OrderbookPressureSnapshot 抽出现货订单簿视图。
+
+    数据源缺失或无 wall_zone 时返回 None（前端隐藏模块）。
+    """
+    if not op:
+        return None
+    above = list(getattr(op, "walls_above", None) or [])
+    below = list(getattr(op, "walls_below", None) or [])
+    if not above and not below:
+        return None
+    asks_raw = [
+        _wall_to_book_item(w)
+        for w in above
+        if _bracket_of(getattr(w, "distance_pct", 0.0)) is not None
+    ]
+    bids_raw = [
+        _wall_to_book_item(w)
+        for w in below
+        if _bracket_of(getattr(w, "distance_pct", 0.0)) is not None
+    ]
+    asks = _trim_brackets(asks_raw)
+    bids = _trim_brackets(bids_raw)
+    return BrainSpotBook(
+        asks=asks,
+        bids=bids,
+        bracket_caps=dict(_BRACKET_CAP),
+    )
+
+
 def build_trading_brain_snapshot(
     *,
     coin: str,
@@ -680,6 +779,8 @@ def build_trading_brain_snapshot(
             dq=dq,
         ))
 
+    spot_book = _build_spot_book(op)
+
     return TradingBrainSnapshot(
         coin=coin.upper(),
         ts=ts,
@@ -692,4 +793,5 @@ def build_trading_brain_snapshot(
         events=events,
         data_quality=dq,
         opportunities=opportunities,
+        spot_book=spot_book,
     )

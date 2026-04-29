@@ -2345,6 +2345,39 @@ export interface TradeSetupCandidate {
   notes: string[];
 }
 
+export type BrainSpotBookBracket = "near" | "mid" | "far";
+
+export interface BrainSpotBookItem {
+  wall_zone_id: string;
+  /** bid = 下方支撑买墙；ask = 上方阻力卖墙 */
+  side: "bid" | "ask";
+  price: number;
+  /** 带符号距离百分比（正=上方，负=下方） */
+  distance_pct: number;
+  /** 距离档位：near ≤0.5% / mid 0.5–2% / far 2–5% */
+  bracket: BrainSpotBookBracket;
+  /** 整段墙体当前帧 USD 厚度（含合约+现货） */
+  total_usd: number;
+  /** 现货侧 USD（spot_current_usd + coinbase_spot_usd），越高越是真买卖家 */
+  spot_usd: number;
+  /** 合约侧 USD = max(total - spot, 0) */
+  futures_usd: number;
+  is_dual_source: boolean;
+  has_coinbase: boolean;
+  trust_score: number;
+  strength_tier: "S" | "A" | "B" | "C";
+  dominant_role: string;
+}
+
+export interface BrainSpotBook {
+  /** 上方卖墙（按 |distance_pct| 升序） */
+  asks: BrainSpotBookItem[];
+  /** 下方买墙（按 |distance_pct| 升序） */
+  bids: BrainSpotBookItem[];
+  bracket_caps: { near: number; mid: number; far: number };
+  notes: string[];
+}
+
 export interface TradingBrainSnapshot {
   coin: string;
   ts: number;
@@ -2358,4 +2391,6 @@ export interface TradingBrainSnapshot {
   data_quality: BrainDataQuality;
   /** Phase 2：高盈亏比观察区候选（前端机会雷达消费） */
   opportunities: TradeSetupCandidate[];
+  /** Phase B：现货订单簿模块（按距离分层） */
+  spot_book: BrainSpotBook | null;
 }

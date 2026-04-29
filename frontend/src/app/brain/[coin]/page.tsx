@@ -9,6 +9,7 @@ import PriceAxisMap from "@/components/Brain/PriceAxisMap";
 import ZoneDetailCard from "@/components/Brain/ZoneDetailCard";
 import OpportunityBoard from "@/components/Brain/OpportunityBoard";
 import EventTimeline from "@/components/Brain/EventTimeline";
+import SpotOrderBookPanel from "@/components/Brain/SpotOrderBookPanel";
 import { ROLE_COLORS } from "@/components/Brain/types";
 
 export default function TradingBrainPage() {
@@ -102,7 +103,7 @@ export default function TradingBrainPage() {
             )}
           </div>
 
-          <main className="flex flex-1 min-h-0 overflow-hidden">
+          <main className="flex flex-[3] min-h-0 overflow-hidden">
             <section
               className={`w-[300px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition ${
                 hoverZoneId ? "ring-1 ring-blue-500/30" : ""
@@ -131,7 +132,18 @@ export default function TradingBrainPage() {
             </section>
           </main>
 
-          <footer className="h-[120px] shrink-0 border-t border-slate-800 bg-slate-900/30">
+          {/* Phase B：现货订单簿模块（Phase C 将在右半区并入合约堆积模块） */}
+          <section className="flex flex-[2] min-h-0 shrink-0 overflow-hidden border-t border-slate-800 bg-slate-900/30">
+            <div className="flex-1 min-w-0">
+              <SpotOrderBookPanel
+                spotBook={snap.spot_book}
+                coin={snap.coin}
+                onSelectZone={setSelectedId}
+              />
+            </div>
+          </section>
+
+          <footer className="h-[110px] shrink-0 border-t border-slate-800 bg-slate-900/30">
             <EventTimeline
               events={snap.events}
               hoverZoneId={hoverZoneId}

@@ -182,6 +182,76 @@ def test_dominant_role_spot_defense():
     assert z0.zone_id in snap.rankings.top_defenses or z0.zone_id in snap.rankings.top_contested
 
 
+def test_spot_book_brackets_and_caps():
+    """Phase B: spot_book 应按 near/mid/far 分桶并截断；现货厚度独立计算。"""
+    last = 100_000.0
+    near_ask = _wall(
+        wall_zone_id="ask_near", side="ask",
+        price_mid=100_300.0, price_low=100_250.0, price_high=100_350.0,
+        peak_price=100_300.0, distance_pct=0.30,
+        current_usd=2_000_000.0, dual_source=True,
+        spot_current_usd=900_000.0, coinbase_spot_usd=200_000.0,
+        coinbase_spot_confluence=True,
+    )
+    mid_ask = _wall(
+        wall_zone_id="ask_mid", side="ask",
+        price_mid=101_500.0, price_low=101_400.0, price_high=101_600.0,
+        peak_price=101_500.0, distance_pct=1.50,
+        current_usd=1_500_000.0,
+        spot_current_usd=0.0,
+    )
+    far_ask = _wall(
+        wall_zone_id="ask_far", side="ask",
+        price_mid=104_000.0, price_low=103_950.0, price_high=104_050.0,
+        peak_price=104_000.0, distance_pct=4.00,
+        current_usd=900_000.0,
+    )
+    too_far_ask = _wall(
+        wall_zone_id="ask_xfar", side="ask",
+        price_mid=110_000.0, price_low=109_950.0, price_high=110_050.0,
+        peak_price=110_000.0, distance_pct=10.00,
+        current_usd=500_000.0,
+    )
+    near_bid = _wall(
+        wall_zone_id="bid_near", side="bid",
+        price_mid=99_700.0, price_low=99_650.0, price_high=99_750.0,
+        peak_price=99_700.0, distance_pct=-0.30,
+        current_usd=2_500_000.0,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_above=[near_ask, mid_ask, far_ask, too_far_ask],
+        walls_below=[near_bid],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    sb = snap.spot_book
+    assert sb is not None
+    assert all(item.wall_zone_id != "ask_xfar" for item in sb.asks)
+    near = [x for x in sb.asks if x.bracket == "near"]
+    mid = [x for x in sb.asks if x.bracket == "mid"]
+    far = [x for x in sb.asks if x.bracket == "far"]
+    assert near and near[0].wall_zone_id == "ask_near"
+    assert mid and mid[0].wall_zone_id == "ask_mid"
+    assert far and far[0].wall_zone_id == "ask_far"
+    near_item = near[0]
+    assert near_item.spot_usd == 900_000.0 + 200_000.0
+    assert near_item.futures_usd == max(2_000_000.0 - 1_100_000.0, 0.0)
+    assert near_item.is_dual_source is True
+    assert near_item.has_coinbase is True
+    assert sb.bracket_caps == {"near": 8, "mid": 8, "far": 6}
+    assert sb.bids and sb.bids[0].wall_zone_id == "bid_near"
+
+
+def test_spot_book_none_when_no_orderbook():
+    """无 OrderbookPressureSnapshot 时 spot_book 应为 None。"""
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=100_000.0, atr=400.0, kl=None, op=None, liq=None,
+    )
+    assert snap.spot_book is None
+
+
 def test_dominant_role_pure_liquidation_magnet():
     """只有清算簇 → liquidation_magnet。"""
     last = 100_000.0
