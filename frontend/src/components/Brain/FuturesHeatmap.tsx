@@ -66,13 +66,27 @@ function HeatRow({
 
   const sweepHigh = bin.sweep_attractiveness >= 0.55;
 
+  // 档位 2A：长/短窗口对比
+  const max1h = bin.max_usd_1h ?? 0;
+  const max8h = bin.max_usd_8h ?? 0;
+  const pers8h = bin.persistence_score_8h ?? 0;
+  const weakerThan1h = max1h > 0 && bin.total_usd < max1h * 0.70;
+  const stronger8h = max8h > 0 && max1h > 0 && max8h > max1h * 1.30;
+
+  const titleText =
+    `合约堆积 · ${bin.dominant_role}\n` +
+    `当前 ${fmtUsd(bin.futures_usd)}（总 ${fmtUsd(bin.total_usd)}）\n` +
+    (max1h > 0 ? `1h 峰值 ${fmtUsd(max1h)}　持续 ${(bin.persistence_score * 100).toFixed(0)}%\n` : "") +
+    (max8h > 0 ? `8h 峰值 ${fmtUsd(max8h)}　持续 ${(pers8h * 100).toFixed(0)}%\n` : "") +
+    `打穿风险 ${(bin.break_through_risk * 100).toFixed(0)}%`;
+
   return (
     <div
       className={`group flex cursor-pointer items-center gap-2 rounded border border-slate-800/70 bg-slate-900/40 px-2 py-1.5 transition hover:border-slate-600 hover:bg-slate-800/60 ${
         bin.is_attached_magnet ? "border-l-2 border-l-amber-400" : ""
       }`}
       onClick={() => bin.wall_zone_id && onSelectZone?.(bin.wall_zone_id)}
-      title={`合约厚度 ${fmtUsd(bin.futures_usd)} / 总 ${fmtUsd(bin.total_usd)} · 持续 ${(bin.persistence_score * 100).toFixed(0)}% · 打穿风险 ${(bin.break_through_risk * 100).toFixed(0)}%`}
+      title={titleText}
     >
       <div className="w-[78px] shrink-0 tabular-nums">
         <div className={`text-[12px] font-semibold ${isAsk ? "text-rose-300" : "text-emerald-300"}`}>
@@ -99,7 +113,7 @@ function HeatRow({
             </div>
           )}
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400">
           <span className="tabular-nums text-slate-300">{fmtUsd(bin.futures_usd)}</span>
           {sweepHigh && (
             <span className="rounded bg-amber-900/60 px-1 text-amber-200">
@@ -114,6 +128,22 @@ function HeatRow({
           {bin.persistence_score >= 0.6 && (
             <span className="rounded border border-slate-700 px-1 text-slate-300">
               持续 {(bin.persistence_score * 100).toFixed(0)}%
+            </span>
+          )}
+          {weakerThan1h && (
+            <span
+              className="rounded bg-amber-900/50 px-1 text-amber-200"
+              title="1h 峰值更厚，墙正在变薄"
+            >
+              1h 峰 {fmtUsd(max1h)}
+            </span>
+          )}
+          {stronger8h && (
+            <span
+              className="rounded bg-sky-900/50 px-1 text-sky-200"
+              title="过去 8h 历史更厚（中期布墙，结构更稳）"
+            >
+              8h 峰 {fmtUsd(max8h)}
             </span>
           )}
         </div>

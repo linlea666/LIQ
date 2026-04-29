@@ -72,7 +72,10 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "top_seed_count": 30,                  # 每侧 top USD 的 bin 数（防种子膨胀）
     "max_zones_per_side": 5,               # 每侧最多输出 5 个墙区
     "max_distance_pct_for_zone": 12.0,     # 仅看 ±12% 内
-    "history_window_minutes": 60,          # 1h 滚动（5m × 12）
+    "history_window_minutes": 60,          # 1h 滚动（5m × 12 帧）—— max_usd_1h 等字段窗口
+    "history_window_minutes_long": 480,    # 8h 滚动（5m × 96 帧）—— max_usd_8h 等长窗口字段
+                                            # · Coinglass 文档：5m × limit=100 ≈ 8.3h 上限
+                                            # · 下游按 ts_sec 真截窗，与 1h 双窗口独立计算
     "augment_match_tol_pct": 0.001,        # 大单 ↔ zone 容差匹配 0.1%
     "augment_match_tol_usd_min": 5.0,      # 容差最低 5 USD（防小币太小不够）
     # M2.5 + Phase A + Phase C：trust_score 计算权重（多维度独立累加，最终 clamp 到 1.0）
@@ -363,13 +366,36 @@ def _bin_overlap_ratio(
     return min(1.0, overlap / bin_width)
 
 
+def _slice_history_by_window(
+    history: Sequence[OrderbookDepthSnapshot],
+    window_minutes: Optional[int],
+) -> Sequence[OrderbookDepthSnapshot]:
+    """按 ts_sec 真截窗：仅保留 [last_ts - window*60, last_ts] 内的帧。
+
+    档位 2A 关键修复：原实现直接遍历 history 全部，"max_usd_1h" 的实际窗口
+    由 deque maxlen 隐式决定（maxlen=12 时是 1h，maxlen=100 时静默变成 8h）。
+    扩窗后必须按时间戳真截窗，让字段名与语义严格一致。
+
+    window_minutes 为 None 或 ≤ 0 时返回全量（向后兼容）；冷启动 history < window
+    时尽力而为返回全部已积累帧。
+    """
+    if not history or not window_minutes or window_minutes <= 0:
+        return history
+    last_ts = history[-1].ts_sec
+    if last_ts <= 0:
+        return history
+    cutoff = last_ts - window_minutes * 60
+    return [f for f in history if f.ts_sec >= cutoff]
+
+
 def _compute_zone_history_stats(
     raw: _RawZone,
     history: Sequence[OrderbookDepthSnapshot],
     last_price: float,
     cfg: dict,
+    window_minutes: int = 60,
 ) -> dict:
-    """对单个 raw zone 用 history 回填 max_usd_1h / avg_usd_1h / persistence / trend。
+    """对单个 raw zone 用 history 回填 max/avg/persistence/trend（按 window 截窗）。
 
     采用**两层语义分离**：
       - max/avg/current（流动性视图）：价区内**全部** bin USD 总和 → trend 不失真
@@ -378,15 +404,24 @@ def _compute_zone_history_stats(
 
     避免初版 bug：seen 用"全部 bin USD ≥ wall_min（500K）"门槛过松，价区内
     几个普通小 bin 之和很容易达标，导致**所有 zone 都显示"持续 55min"**。
+
+    档位 2A 升级（window_minutes 参数化）：
+      - window_minutes=60  → 1h 窗口字段（max_usd_1h / avg_usd_1h / seen_count
+        / persistence_score / first_seen_ts / last_seen_ts / trend）
+      - window_minutes=480 → 8h 窗口字段（max_usd_8h / avg_usd_8h / seen_count_8h
+        / persistence_score_8h），trend 仍以 1h 为准（更敏感）。
+      - 由 _slice_history_by_window 按 ts_sec 真截窗，与 deque maxlen 解耦。
     """
     wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
     seed_min = cfg.get("seed_min_usd", ENGINE_DEFAULTS["seed_min_usd"])
     target_min = cfg.get("persistence_target_minutes",
                          ENGINE_DEFAULTS["persistence_target_minutes"])
 
+    windowed = _slice_history_by_window(history, window_minutes)
+
     frame_totals: list[tuple[int, float]] = []   # (ts_sec, range_usd_in_zone)
     seen_ts: list[int] = []                      # 该帧"墙真的在"
-    for frame in history:
+    for frame in windowed:
         ft = _frame_zone_range_usd(frame, raw)
         frame_totals.append((frame.ts_sec, ft))
         if _frame_has_wall_seed(frame, raw, seed_min):
@@ -411,13 +446,13 @@ def _compute_zone_history_stats(
 
     persistence_score = max(0.0, min(1.0, visible_minutes / max(target_min, 1.0)))
 
-    # current = 当前帧（history[-1]）该价区内全部 bin USD 总和
+    # current = 截窗内最新帧（windowed[-1]）该价区内全部 bin USD 总和
     # 比 raw.total_usd（仅种子）更全；避免 current vs max 基准不一致
     current_usd = frame_totals[-1][1] if frame_totals else raw.total_usd
 
     trend = _classify_zone_trend(
         seen_count=seen_count, current_usd=current_usd,
-        max_usd=max_usd, avg_usd=avg_usd, history_len=len(history), cfg=cfg,
+        max_usd=max_usd, avg_usd=avg_usd, history_len=len(windowed), cfg=cfg,
     )
 
     return {
@@ -510,9 +545,19 @@ def _build_zones_for_side(
     if not raw_zones:
         return []
 
+    window_1h = cfg.get("history_window_minutes",
+                        ENGINE_DEFAULTS["history_window_minutes"])
+    window_8h = cfg.get("history_window_minutes_long",
+                        ENGINE_DEFAULTS["history_window_minutes_long"])
+
     zones: list[WallZone] = []
     for raw in raw_zones:
-        stats = _compute_zone_history_stats(raw, history, last_price, cfg)
+        # 1h 窗口（主路径，所有现有 strength_score / event / 阈值仍走这套字段）
+        stats = _compute_zone_history_stats(raw, history, last_price, cfg,
+                                            window_minutes=window_1h)
+        # 档位 2A：8h 窗口（仅做"长期强度"参考字段，不改任何下游评分）
+        stats_long = _compute_zone_history_stats(raw, history, last_price, cfg,
+                                                 window_minutes=window_8h)
         price_mid = (raw.price_low + raw.price_high) / 2.0
         distance_pct = (price_mid - last_price) / max(last_price, 1e-9) * 100.0
         zone = WallZone(
@@ -532,6 +577,11 @@ def _build_zones_for_side(
             first_seen_ts=stats["first_seen_ts"],
             last_seen_ts=stats["last_seen_ts"],
             trend=stats["trend"],
+            # 8h 长窗口（参考字段，与 1h 字段独立）
+            max_usd_8h=stats_long["max_usd_1h"],
+            avg_usd_8h=stats_long["avg_usd_1h"],
+            seen_count_8h=stats_long["seen_count"],
+            persistence_score_8h=stats_long["persistence_score"],
             source="depth_only",                # 默认；后续 _augment_with_large_orders 可升级
         )
         zones.append(zone)
@@ -646,7 +696,16 @@ def _augment_zones_with_spot_depth(
     if not zones or not spot_history:
         return
     wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
+    seed_min = cfg.get("seed_min_usd", ENGINE_DEFAULTS["seed_min_usd"])
+    target_min = cfg.get("persistence_target_minutes",
+                         ENGINE_DEFAULTS["persistence_target_minutes"])
+    window_1h = cfg.get("history_window_minutes",
+                        ENGINE_DEFAULTS["history_window_minutes"])
+    window_8h = cfg.get("history_window_minutes_long",
+                        ENGINE_DEFAULTS["history_window_minutes_long"])
     latest_spot = spot_history[-1]
+    spot_1h = _slice_history_by_window(spot_history, window_1h)
+    spot_8h = _slice_history_by_window(spot_history, window_8h)
 
     def _frame_zone_usd(bins: list, zone_lo: float, zone_hi: float) -> float:
         if not bins:
@@ -660,21 +719,60 @@ def _augment_zones_with_spot_depth(
                 total += b.usd_value * ratio
         return total
 
+    def _frame_has_seed(bins: list, zone_lo: float, zone_hi: float) -> bool:
+        """档位 2A：判断该帧 spot 价区内是否有 ≥ seed_min 的种子 bin。"""
+        if not bins:
+            return False
+        bin_step = _estimate_bin_step(bins)
+        half = bin_step / 2.0 if bin_step > 0 else 0.0
+        for b in bins:
+            if _bin_overlap_ratio(b.price, half, zone_lo, zone_hi) > 0:
+                if b.usd_value >= seed_min:
+                    return True
+        return False
+
+    def _aggregate(frames: Sequence[OrderbookDepthSnapshot], side: WallSide,
+                   lo: float, hi: float) -> tuple[float, float, int, float]:
+        """返回 (max_usd, avg_usd, seen_count, persistence_score)。"""
+        totals: list[float] = []
+        seen_ts: list[int] = []
+        for f in frames:
+            bins = f.bids if side == "bid" else f.asks
+            if not bins:
+                continue
+            totals.append(_frame_zone_usd(bins, lo, hi))
+            if _frame_has_seed(bins, lo, hi):
+                seen_ts.append(f.ts_sec)
+        if not totals:
+            return 0.0, 0.0, 0, 0.0
+        valid = [v for v in totals if v >= wall_min]
+        max_usd = max(valid) if valid else max(totals)
+        avg_usd = (sum(valid) / len(valid)) if valid else (sum(totals) / len(totals))
+        seen_count = len(seen_ts)
+        if seen_count >= 2:
+            visible_min = max(0.0, (seen_ts[-1] - seen_ts[0]) / 60.0)
+        else:
+            visible_min = 0.0
+        persistence = max(0.0, min(1.0, visible_min / max(target_min, 1.0)))
+        return max_usd, avg_usd, seen_count, persistence
+
     for z in zones:
         bins_latest = latest_spot.bids if z.side == "bid" else latest_spot.asks
         cur_usd = _frame_zone_usd(bins_latest, z.price_low, z.price_high)
-        frame_totals: list[float] = []
-        for frame in spot_history:
-            bins = frame.bids if z.side == "bid" else frame.asks
-            if not bins:
-                continue
-            frame_totals.append(_frame_zone_usd(bins, z.price_low, z.price_high))
-        max_usd = max(frame_totals) if frame_totals else cur_usd
+        max_1h, _avg_1h, _seen_1h, _pers_1h = _aggregate(spot_1h, z.side,
+                                                         z.price_low, z.price_high)
+        max_8h, avg_8h, seen_8h, pers_8h = _aggregate(spot_8h, z.side,
+                                                       z.price_low, z.price_high)
 
         z.spot_current_usd = round(cur_usd, 2)
-        z.spot_max_usd_1h = round(max_usd, 2)
+        z.spot_max_usd_1h = round(max_1h, 2)
+        # 档位 2A：8h 长窗口字段（与合约侧 8h 字段平行）
+        z.spot_max_usd_8h = round(max_8h, 2)
+        z.spot_avg_usd_8h = round(avg_8h, 2)
+        z.spot_seen_count_8h = seen_8h
+        z.spot_persistence_score_8h = round(pers_8h, 3)
 
-        if cur_usd >= wall_min and max_usd >= wall_min:
+        if cur_usd >= wall_min and max_1h >= wall_min:
             z.dual_source = True
             z.source = "spot+depth"
 
@@ -711,6 +809,12 @@ def _build_spot_only_zones(
         z.source = "spot_only"
         z.spot_current_usd = z.current_usd
         z.spot_max_usd_1h = z.max_usd_1h
+        # 档位 2A：spot_only zone 的 spot 侧 8h 字段直接镜像主 8h 字段
+        # （此 zone 本身就来自 spot history，无需重新算）
+        z.spot_max_usd_8h = z.max_usd_8h
+        z.spot_avg_usd_8h = z.avg_usd_8h
+        z.spot_seen_count_8h = z.seen_count_8h
+        z.spot_persistence_score_8h = z.persistence_score_8h
         out.append(z)
     return out
 

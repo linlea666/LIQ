@@ -316,6 +316,19 @@ class BrainSpotBookItem(BaseModel):
     dominant_role: str = "ordinary"
     """沿用 WallZone.dominant_role（true_support / sweep_target / ordinary 等）。"""
 
+    # ── 档位 2A：长/短窗口强度对比（仅展示，不重新评分）──
+    # 让用户区分"刚挂的新墙"vs"几小时一直挂着的真结构"。
+    # max_usd_1h / persistence_score 为现有 1h 字段；max_usd_8h / persistence_8h
+    # 为新加 8h 字段。WallZone 已用 ts_sec 真截窗双窗口计算，UI 直接透传即可。
+    max_usd_1h: float = 0.0
+    """1h 内峰值厚度 USD。"""
+    max_usd_8h: float = 0.0
+    """8h 内峰值厚度 USD（5m × 100 帧）。冷启动期 ≈ max_usd_1h。"""
+    persistence_score: float = 0.0
+    """1h 持续性 0–1。"""
+    persistence_score_8h: float = 0.0
+    """8h 持续性 0–1。"""
+
 
 class BrainSpotBook(BaseModel):
     """现货订单簿模块输出（按距离分层）。"""
@@ -361,6 +374,14 @@ class BrainFutBin(BaseModel):
     dominant_role: str = "ordinary"
     is_attached_magnet: bool = False
     """是否与 LiqCluster / LiqMagnet 同价区共振（前端叠加磁铁标记）。"""
+
+    # ── 档位 2A：长/短窗口强度对比（仅展示，不重新评分）──
+    max_usd_1h: float = 0.0
+    """1h 内峰值厚度 USD（含合约+现货）。"""
+    max_usd_8h: float = 0.0
+    """8h 内峰值厚度 USD（5m × 100 帧）。冷启动期 ≈ max_usd_1h。"""
+    persistence_score_8h: float = 0.0
+    """8h 持续性 0–1。"""
 
 
 class BrainFutMagnet(BaseModel):

@@ -754,3 +754,92 @@ def test_fragility_only_counts_pure_futures_wall_not_spot():
     # fragility 应为 0（现货墙的攻击信号不计入支撑脆性）
     assert z.support_fragility == 0.0
     assert abs(z.support_trust - 0.80) < 0.001
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 档位 2A · 长/短窗口字段透传 (BrainSpotBookItem / BrainFutBin)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_long_window_fields_propagate_to_brain_spot_book_item():
+    """WallZone.max_usd_8h / persistence_score_8h 应透传到 BrainSpotBookItem。"""
+    last = 100_000.0
+    w = _wall(
+        wall_zone_id="w_8h_spot", side="bid",
+        price_mid=99_700.0, price_low=99_650.0, price_high=99_750.0,
+        peak_price=99_700.0, distance_pct=-0.30,
+        current_usd=2_500_000.0,
+        max_usd_1h=3_000_000.0,
+        persistence_score=0.80,
+        max_usd_8h=5_200_000.0,
+        avg_usd_8h=3_500_000.0,
+        seen_count_8h=84,
+        persistence_score_8h=1.0,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_below=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    sb = snap.spot_book
+    assert sb is not None
+    item = next(i for i in sb.bids if i.wall_zone_id == "w_8h_spot")
+    assert abs(item.max_usd_1h - 3_000_000.0) < 1e-3
+    assert abs(item.max_usd_8h - 5_200_000.0) < 1e-3
+    assert abs(item.persistence_score - 0.80) < 1e-3
+    assert abs(item.persistence_score_8h - 1.0) < 1e-3
+
+
+def test_long_window_fields_propagate_to_brain_fut_bin():
+    """WallZone.max_usd_8h / persistence_score_8h 应透传到 BrainFutBin。"""
+    last = 100_000.0
+    w = _wall(
+        wall_zone_id="w_8h_fut", side="ask",
+        price_mid=100_500.0, price_low=100_450.0, price_high=100_550.0,
+        peak_price=100_500.0, distance_pct=0.50,
+        current_usd=1_800_000.0,
+        max_usd_1h=2_100_000.0,
+        persistence_score=0.65,
+        max_usd_8h=3_950_000.0,
+        avg_usd_8h=2_400_000.0,
+        seen_count_8h=88,
+        persistence_score_8h=0.92,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_above=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    fb = snap.fut_book
+    assert fb is not None
+    bin_item = next(b for b in fb.bins_above if b.wall_zone_id == "w_8h_fut")
+    assert abs(bin_item.max_usd_1h - 2_100_000.0) < 1e-3
+    assert abs(bin_item.max_usd_8h - 3_950_000.0) < 1e-3
+    assert abs(bin_item.persistence_score - 0.65) < 1e-3
+    assert abs(bin_item.persistence_score_8h - 0.92) < 1e-3
+
+
+def test_long_window_default_zero_when_wall_zone_lacks_fields():
+    """旧 WallZone（无 8h 字段）应透传为 0，不破坏序列化。"""
+    last = 100_000.0
+    w = _wall(  # 默认 _wall 不传 max_usd_8h 等 → WallZone 字段值为 0
+        wall_zone_id="w_legacy", side="bid",
+        price_mid=99_500.0, price_low=99_450.0, price_high=99_550.0,
+        distance_pct=-0.50,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_below=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    sb = snap.spot_book
+    assert sb is not None
+    item = next(i for i in sb.bids if i.wall_zone_id == "w_legacy")
+    assert item.max_usd_8h == 0.0
+    assert item.persistence_score_8h == 0.0

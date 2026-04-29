@@ -170,13 +170,16 @@ class CoinState:
         self.spot_large_orders_history: list[_LargeOrderLifecycle] = []
         # 由 polls/orderbook_pressure.poll_orderbook_pressure 写入（90s 间隔）
         self.orderbook_depth_snapshot: Optional[_OrderbookDepthSnapshot] = None
-        # M1 滚动深度历史（1h 窗口，按 ts_sec 去重写入）—— WallZone 持续性评分基础
-        # maxlen=12 = 1h（5m 颗粒）；后续可扩 72/288 但第一版 12 够用
-        self.orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
+        # M1 滚动深度历史 —— WallZone 持续性评分基础。
+        # 档位 2A：maxlen=100（Coinglass 文档上限，5m × 100 ≈ 8.3h 完整窗口）
+        #   · 下游 _compute_zone_history_stats 按 ts_sec 真截窗为 1h / 8h 双窗口
+        #   · max_usd_1h 严格只看过去 60min，max_usd_8h 看过去 480min
+        #   · 同一次 API 调用拉 100 帧，不增加配额成本
+        self.orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=100)
         # Phase A：现货 5m 深度热力图独立 deque（与合约 history 同结构、同窗口）
         # 由 polls/orderbook_pressure.poll_spot_orderbook_pressure 写入
         # 用于 liquidity_wall_engine 双源 zone 检测（spot+depth = 💎 双源高可信墙）
-        self.spot_orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=12)
+        self.spot_orderbook_depth_history: deque[_OrderbookDepthSnapshot] = deque(maxlen=100)
         # Phase B：合约多家聚合 ±range 流动性时序（与 heatmap 互补）
         # 由 polls/orderbook_pressure.poll_aggregated_ask_bids_history 写入
         # 用于 _compute_active_attack_score 的"宏观流动性衰竭"因子

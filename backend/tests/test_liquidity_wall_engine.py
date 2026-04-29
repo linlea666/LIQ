@@ -1378,3 +1378,141 @@ class TestMainEntryAndKLIsolation:
         # 即使 wall_zones 出值，walls 字段仍由旧 PressureWall 路径填充（不被新引擎污染）
         assert hasattr(snap, "walls_above")
         assert hasattr(snap, "wall_zones")
+
+
+# ════════════════════════════════════════════════════════════════════
+# 档位 2A — 8h 长窗口字段 + ts_sec 真截窗（关键 bug 修复 + 扩窗）
+# ════════════════════════════════════════════════════════════════════
+class TestLongWindowAndSliceFix:
+    """覆盖三件事：
+      1. _slice_history_by_window 按 ts_sec 真截窗
+      2. _build_zones_for_side 同时填 1h + 8h 字段
+      3. 关键 bug：max_usd_1h 不再受 deque maxlen 影响（按 ts_sec 严格 60min）
+    """
+
+    def _make_history_long(self) -> list[OrderbookDepthSnapshot]:
+        """构造 96 帧（8h），bid 侧在 95_000 一直挂 ≥ 1.5M 种子。
+
+        前 83 帧 max=3M，最后 13 帧 max=1.5M（1h 截窗 cutoff=last-3600 含 13 帧）
+        → 8h max 应捕获 3M，1h max 仅 1.5M（验证窗口隔离）。
+        """
+        frames: list[OrderbookDepthSnapshot] = []
+        base_ts = 1_700_000_000
+        for i in range(96):
+            ts = base_ts + i * 300        # 5min 一帧 × 96 = 480min = 8h
+            usd_qty = 30 if i < 83 else 15  # 前 83 帧大墙 / 最后 13 帧缩半
+            frames.append(_make_frame(
+                ts,
+                bids=[(95_000.0, usd_qty), (94_900.0, 1.0)],
+                asks=[(105_000.0, 1.0)],
+            ))
+        return frames
+
+    def test_slice_history_by_window_strict_ts_cutoff(self):
+        """_slice_history_by_window 按 ts 截窗：window=60 仅留过去 60min 的帧。"""
+        from processors.liquidity_wall_engine import _slice_history_by_window
+        history = self._make_history_long()           # 96 帧（8h）
+        sliced = _slice_history_by_window(history, 60)
+        # 60min × 60s / 300s/帧 = 12 帧，含 last 那一帧 → 13 帧（last_ts - 60*60 ≤ ts ≤ last_ts）
+        assert 12 <= len(sliced) <= 13
+        # 截到的全部 ts 在 [last_ts - 3600, last_ts]
+        last_ts = history[-1].ts_sec
+        for f in sliced:
+            assert f.ts_sec >= last_ts - 3600
+
+    def test_slice_history_returns_full_when_window_none(self):
+        """window_minutes=None / 0 → 返回原 history（向后兼容）。"""
+        from processors.liquidity_wall_engine import _slice_history_by_window
+        history = self._make_history_long()
+        assert list(_slice_history_by_window(history, None)) == list(history)
+        assert list(_slice_history_by_window(history, 0)) == list(history)
+
+    def test_slice_history_cold_start_under_window(self):
+        """history < window 时 graceful return all（冷启动场景）。"""
+        from processors.liquidity_wall_engine import _slice_history_by_window
+        history = self._make_history_long()[:6]    # 仅 6 帧（30min < 1h）
+        sliced = _slice_history_by_window(history, 60)
+        assert list(sliced) == list(history)
+
+    def test_compute_zone_history_stats_window_isolation(self):
+        """同一 raw zone 在 1h vs 8h 窗口下 max/avg 不同：
+          - 8h max = 3M（前 7h 大墙）
+          - 1h max = 1.5M（最后 1h 缩半）
+        """
+        from processors.liquidity_wall_engine import (
+            _compute_zone_history_stats,
+        )
+        from processors.liquidity_wall_engine import _RawZone
+        history = self._make_history_long()
+        raw = _RawZone(
+            side="bid", price_low=95_000.0, price_high=95_000.0,
+            peak_price=95_000.0, peak_usd=1_500_000,
+            total_usd=1_500_000, total_qty=15.0, bin_count=1,
+        )
+        stats_1h = _compute_zone_history_stats(raw, history, 100_000.0,
+                                                ENGINE_DEFAULTS, window_minutes=60)
+        stats_8h = _compute_zone_history_stats(raw, history, 100_000.0,
+                                                ENGINE_DEFAULTS, window_minutes=480)
+        # 1h max 来自最后 1h 帧（usd_qty=15 → 95_000 × 15 ≈ 1.425M）
+        assert stats_1h["max_usd_1h"] < 2_000_000
+        # 8h max 含前 7h 大墙（usd_qty=30 → 95_000 × 30 ≈ 2.85M）
+        assert stats_8h["max_usd_1h"] > 2_500_000
+        # 8h 也应看到更多帧
+        assert stats_8h["seen_count"] > stats_1h["seen_count"]
+
+    def test_build_zones_for_side_fills_both_1h_and_8h_fields(self):
+        """_build_zones_for_side 一次构建同时填 1h + 8h 双字段集合。"""
+        history = self._make_history_long()
+        zones = _build_zones_for_side(
+            history=history, last_price=100_000.0, side="bid",
+            atr=200.0, cfg=ENGINE_DEFAULTS,
+        )
+        assert zones, "应至少识别一个 95_000 大墙"
+        z = zones[0]
+        # 1h 字段：所有现有逻辑/event/strength_score 仍用
+        assert z.max_usd_1h > 0
+        assert 0.0 <= z.persistence_score <= 1.0
+        # 8h 字段：新加，应大于 0；最大值应 ≥ 1h 最大值
+        assert z.max_usd_8h > 0
+        assert z.max_usd_8h >= z.max_usd_1h, "8h 窗口包含 1h，max 不应更小"
+        assert z.seen_count_8h >= z.seen_count
+        assert 0.0 <= z.persistence_score_8h <= 1.0
+
+    def test_max_usd_1h_no_longer_depends_on_deque_maxlen_bug_fix(self):
+        """关键 bug 修复回归：deque maxlen=100 时 max_usd_1h 仍严格只看过去 60min。
+
+        修复前：_compute_zone_history_stats 直接遍历 history 全部，maxlen 变 100
+        会让 "max_usd_1h" 静默扩成 8h max。修复后必须按 ts_sec 严格截窗。
+        """
+        history = self._make_history_long()                    # 96 帧 = 8h
+        # 模拟生产 deque maxlen=100：history 不被截
+        zones = _build_zones_for_side(
+            history=history, last_price=100_000.0, side="bid",
+            atr=200.0, cfg=ENGINE_DEFAULTS,
+        )
+        z = zones[0]
+        # 前 84 帧 max=3M，最后 12 帧 max=1.5M
+        # max_usd_1h 必须 < 2M（仅最后 1h），否则就是 bug 又回来了
+        assert z.max_usd_1h < 2_000_000, (
+            f"max_usd_1h={z.max_usd_1h} 不应包含 1h 之外的帧（bug regression）"
+        )
+
+    def test_attach_spot_depth_fills_8h_fields(self):
+        """_attach_spot_depth_to_zone 同时填 spot 1h + 8h 字段。"""
+        from processors.liquidity_wall_engine import _augment_zones_with_spot_depth
+        spot_history = self._make_history_long()
+        # 构造一个合约 zone 在 95_000 附近
+        z = WallZone(
+            side="bid", price_low=94_950.0, price_high=95_050.0, price_mid=95_000.0,
+            peak_price=95_000.0, distance_pct=-5.0,
+            current_usd=2_000_000, max_usd_1h=2_000_000, avg_usd_1h=1_800_000,
+            bin_count=2, seen_count=12, visible_minutes=55, persistence_score=1.0,
+        )
+        _augment_zones_with_spot_depth([z], spot_history, ENGINE_DEFAULTS)
+        # 1h 字段：保留旧逻辑
+        assert z.spot_max_usd_1h > 0
+        # 8h 字段：新加，且应 ≥ 1h（窗口包含关系）
+        assert z.spot_max_usd_8h > 0
+        assert z.spot_max_usd_8h >= z.spot_max_usd_1h
+        assert z.spot_seen_count_8h >= 0
+        assert 0.0 <= z.spot_persistence_score_8h <= 1.0

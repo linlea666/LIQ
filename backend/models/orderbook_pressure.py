@@ -372,6 +372,16 @@ class WallZone(BaseModel):
     last_seen_ts: int = 0
     trend: WallZoneTrend = "new"
 
+    # ── 档位 2A · 8h 长窗口字段（合约侧）──
+    # 与 max_usd_1h / avg_usd_1h / seen_count / persistence_score 一一对应，
+    # 仅窗口不同：1h 看过去 60min，8h 看过去 480min（Coinglass 5m × 100 帧上限）。
+    # 字段独立、默认值 0；现有 strength_score / 阈值 / event 仍用 1h 字段，不破坏。
+    # 用途：UI 展示"这墙最强时多大、过去 8h 是不是一直在"，区分新墙 vs 中期布墙。
+    max_usd_8h: float = 0.0                     # 8h 内峰值
+    avg_usd_8h: float = 0.0                     # 8h 内均值
+    seen_count_8h: int = 0                      # 8h history 中出现帧数（最大 ≈ 96）
+    persistence_score_8h: float = 0.0           # 0-1，8h 持续性（visible_min_8h / target）
+
     # ── 数据源融合（M1）──
     source: WallZoneSource = "depth_only"
     exchange_count: int = 1                     # 多所共振计数
@@ -395,6 +405,11 @@ class WallZone(BaseModel):
     dual_source: bool = False
     spot_current_usd: float = 0.0               # 现货侧同价区 USD 厚度（dual_source=True 时填）
     spot_max_usd_1h: float = 0.0                # 现货侧 1h 峰值（用于现货侧 trend 派生）
+    # ── 档位 2A · 8h 长窗口字段（现货侧，与合约侧 8h 平行）──
+    spot_max_usd_8h: float = 0.0                # 现货侧 8h 峰值
+    spot_avg_usd_8h: float = 0.0                # 现货侧 8h 均值
+    spot_seen_count_8h: int = 0                 # 现货 8h history 中出现帧数
+    spot_persistence_score_8h: float = 0.0      # 0-1，现货侧 8h 持续性
 
     # ── Phase C：Coinbase 现货原生 API（机构买卖维度，独立于 Binance dual_source）──
     # coinbase_spot_confluence = True 当且仅当 Coinbase 现货同价区有显著厚度

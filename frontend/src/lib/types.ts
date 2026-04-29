@@ -2375,6 +2375,14 @@ export interface BrainSpotBookItem {
   trust_score: number;
   strength_tier: "S" | "A" | "B" | "C";
   dominant_role: string;
+  /** 档位 2A：1h 内峰值 USD（旧后端可能为 0） */
+  max_usd_1h?: number;
+  /** 档位 2A：8h 内峰值 USD（5m × 100 帧） */
+  max_usd_8h?: number;
+  /** 档位 2A：1h 持续性 0–1 */
+  persistence_score?: number;
+  /** 档位 2A：8h 持续性 0–1 */
+  persistence_score_8h?: number;
 }
 
 export interface BrainSpotBook {
@@ -2401,6 +2409,12 @@ export interface BrainFutBin {
   dominant_role: string;
   /** 与磁铁/清算簇同价区共振（前端高亮"扫单目标墙"） */
   is_attached_magnet: boolean;
+  /** 档位 2A：1h 内峰值 USD（合约+现货含） */
+  max_usd_1h?: number;
+  /** 档位 2A：8h 内峰值 USD（5m × 100 帧） */
+  max_usd_8h?: number;
+  /** 档位 2A：8h 持续性 0–1 */
+  persistence_score_8h?: number;
 }
 
 export interface BrainFutMagnet {

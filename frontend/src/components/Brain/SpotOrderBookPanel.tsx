@@ -62,6 +62,23 @@ function ItemRow({
   const sideTone = isAsk ? "text-rose-300" : "text-emerald-300";
   const distTone = isAsk ? "text-rose-200/80" : "text-emerald-200/80";
 
+  // 档位 2A：长/短窗口对比
+  const max1h = item.max_usd_1h ?? 0;
+  const max8h = item.max_usd_8h ?? 0;
+  const pers1h = item.persistence_score ?? 0;
+  const pers8h = item.persistence_score_8h ?? 0;
+  // 当前显著弱于 1h 峰值（< 70%）→ 提示"1h 内更强"
+  const weakerThan1h = max1h > 0 && item.total_usd < max1h * 0.70;
+  // 8h 峰值显著大于 1h 峰值（> 1.3×）→ 提示"8h 历史更厚"
+  const stronger8h = max8h > 0 && max1h > 0 && max8h > max1h * 1.30;
+
+  const titleText =
+    `墙区 · ${item.dominant_role}\n` +
+    `当前 ${fmtUsd(item.total_usd)}（现货 ${fmtUsd(item.spot_usd)} / 合约 ${fmtUsd(item.futures_usd)}）\n` +
+    (max1h > 0 ? `1h 峰值 ${fmtUsd(max1h)}　持续 ${(pers1h * 100).toFixed(0)}%\n` : "") +
+    (max8h > 0 ? `8h 峰值 ${fmtUsd(max8h)}　持续 ${(pers8h * 100).toFixed(0)}%\n` : "") +
+    `点击查看墙区详情`;
+
   return (
     <div
       className={`group flex cursor-pointer items-center gap-2 rounded border border-slate-800/70 bg-slate-900/40 px-2 py-1.5 transition hover:border-slate-600 hover:bg-slate-800/60 ${
@@ -70,7 +87,7 @@ function ItemRow({
         ""
       }`}
       onClick={() => item.wall_zone_id && onSelectZone?.(item.wall_zone_id)}
-      title={`点击查看墙区详情 · ${item.dominant_role}`}
+      title={titleText}
     >
       <div className="w-[78px] shrink-0 tabular-nums">
         <div className={`text-[12px] font-semibold ${sideTone}`}>
@@ -86,19 +103,34 @@ function ItemRow({
           <div
             className="absolute inset-y-0 left-0 flex"
             style={{ width: `${totalPct}%` }}
-            title={`总 ${fmtUsd(item.total_usd)} · 现货 ${fmtUsd(item.spot_usd)} · 合约 ${fmtUsd(item.futures_usd)}`}
           >
             <div className="h-full bg-emerald-500/70" style={{ width: `${spotPct}%` }} />
             <div className="h-full bg-blue-500/55" style={{ width: `${100 - spotPct}%` }} />
           </div>
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400">
           <span className="tabular-nums text-slate-300">{fmtUsd(item.total_usd)}</span>
           <span className="text-emerald-400">现 {Math.round(spotPct)}%</span>
           {item.is_dual_source && <span className="rounded bg-fuchsia-900/60 px-1 text-fuchsia-200">双源</span>}
           {item.has_coinbase && <span className="rounded bg-amber-900/60 px-1 text-amber-200">CB</span>}
           {item.strength_tier && item.strength_tier !== "C" && (
             <span className="rounded border border-slate-600 px-1 text-slate-300">{item.strength_tier}</span>
+          )}
+          {weakerThan1h && (
+            <span
+              className="rounded bg-amber-900/50 px-1 text-amber-200"
+              title="1h 峰值更厚，墙正在变薄"
+            >
+              1h 峰 {fmtUsd(max1h)}
+            </span>
+          )}
+          {stronger8h && (
+            <span
+              className="rounded bg-sky-900/50 px-1 text-sky-200"
+              title="过去 8h 历史更厚（中期布墙，结构更稳）"
+            >
+              8h 峰 {fmtUsd(max8h)}
+            </span>
           )}
         </div>
       </div>

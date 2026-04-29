@@ -2,14 +2,18 @@
 
 只负责数据拉取与最简解析，把原始 bins 写入：
   - ``state.orderbook_depth_snapshot``（latest 帧，沿用旧消费者）
-  - ``state.orderbook_depth_history``（M1 滚动 deque，按 ts_sec 去重，maxlen=12 = 1h）
+  - ``state.orderbook_depth_history``（滚动 deque，按 ts_sec 去重，maxlen=100 = 8.3h）
+
+档位 2A：limit=100（Coinglass 文档上限），同一次 API 调用，不增加配额。
+下游 ``processors/liquidity_wall_engine._compute_zone_history_stats`` 按 ts_sec
+真截窗为 1h / 8h 双窗口（max_usd_1h 严格仅看过去 60min，与 maxlen 解耦）。
 
 全部"找堆 / WallZone 聚合 / 持续性评分 / 行为事件"逻辑在 ``processors/orderbook_pressure.py``。
 
 数据源：``/api/futures/orderbook/history``
   返回：list[ [ts_sec, [[bid_price, bid_qty_base], ...], [[ask_price, ask_qty_base], ...] ] ]
-  - limit=12 时给出最近 1h 的 12 个 5m snapshot（M1 升级后默认）
-  - 每个 snapshot ~30-40 KB，limit=12 ~ 360-480 KB / 次（仍可接受）
+  - limit=100 给出最近 ≈8.3h 的 100 个 5m snapshot
+  - 每个 snapshot ~10-15 KB（5m 间隔），limit=100 ~ 1.0-1.5 MB / 次
 
 大单 lifecycle 的拉取仍在 ``polls/orderflow.poll_large_orders``，本 poll 不重复请求。
 """
@@ -88,12 +92,15 @@ async def poll_orderbook_pressure(
     使用单交易所深度（与 large_orders 来源一致，便于 L1+ 大单价位匹配）。
     后续真假分类的"小堆减量 vs 主动成交"对比依赖 prev_* snapshot。
     """
-    # M1：limit=12（1h 滚动） · 一次拉满，本地按 ts_sec 去重维护历史
+    # 档位 2A：limit=100（Coinglass 文档上限，5m × 100 ≈ 8.3h 历史窗口）
+    # · 同一次 API 调用，不增加配额（cache_ttl=300s 强制 5min/次不变）
+    # · state.orderbook_depth_history (deque maxlen=100) 承载完整窗口
+    # · 下游 _compute_zone_history_stats 按 ts_sec 截窗为 1h / 8h 双窗口
     data = await cg.fetch_orderbook_heatmap(
         exchange=coin.exchange_primary,
         symbol=coin.symbol_cg_pair,
         interval="5m",
-        limit=12,
+        limit=100,
     )
     if not data or not isinstance(data, list):
         return
@@ -178,7 +185,7 @@ async def poll_spot_orderbook_pressure(
         exchange=coin.exchange_primary,
         symbol=coin.symbol_cg_pair,
         interval="5m",
-        limit=12,
+        limit=100,
     )
     if not data or not isinstance(data, list):
         return

@@ -727,6 +727,11 @@ def _wall_to_book_item(w: WallZone) -> BrainSpotBookItem:
         trust_score=float(getattr(w, "trust_score", 0.0) or 0.0),
         strength_tier=getattr(w, "strength_tier", "C"),
         dominant_role=str(getattr(w, "dominant_role", "ordinary") or "ordinary"),
+        # 档位 2A：长/短窗口对比字段透传
+        max_usd_1h=float(getattr(w, "max_usd_1h", 0.0) or 0.0),
+        max_usd_8h=float(getattr(w, "max_usd_8h", 0.0) or 0.0),
+        persistence_score=float(getattr(w, "persistence_score", 0.0) or 0.0),
+        persistence_score_8h=float(getattr(w, "persistence_score_8h", 0.0) or 0.0),
     )
 
 
@@ -801,6 +806,10 @@ def _wall_to_fut_bin(w: WallZone) -> BrainFutBin:
         sweep_attractiveness=float(getattr(w, "sweep_attractiveness_score", 0.0) or 0.0),
         break_through_risk=float(getattr(w, "break_through_risk", 0.0) or 0.0),
         dominant_role=str(getattr(w, "dominant_role", "ordinary") or "ordinary"),
+        # 档位 2A：长/短窗口对比字段透传
+        max_usd_1h=float(getattr(w, "max_usd_1h", 0.0) or 0.0),
+        max_usd_8h=float(getattr(w, "max_usd_8h", 0.0) or 0.0),
+        persistence_score_8h=float(getattr(w, "persistence_score_8h", 0.0) or 0.0),
     )
 
 
