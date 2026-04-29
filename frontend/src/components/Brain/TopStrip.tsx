@@ -33,6 +33,23 @@ export default function TopStrip({ snap, loading }: Props) {
   if (c.cvd_contract_trend === "rising") cvdTone = "good";
   else if (c.cvd_contract_trend === "declining") cvdTone = "bad";
 
+  // CVD 背离识别：spot 与 futures 方向相反 → 显著市场分歧灯
+  // - 现强合弱 (spot rising + futures declining)：现货吸筹、杠杆退潮，常见底部强信号
+  // - 合强现弱 (spot declining + futures rising)：现货抛压、杠杆追涨，常见顶部虚弱信号
+  const cvdSpot = c.cvd_spot_trend ?? "";
+  const cvdFut = c.cvd_contract_trend ?? "";
+  let divergence: { label: string; tone: "good" | "bad" | "warn" } | null = null;
+  if (cvdSpot === "rising" && cvdFut === "declining") {
+    divergence = { label: "CVD 背离 · 现强合弱", tone: "good" };
+  } else if (cvdSpot === "declining" && cvdFut === "rising") {
+    divergence = { label: "CVD 背离 · 合强现弱", tone: "bad" };
+  } else if (
+    (cvdSpot === "rising" && cvdFut === "rising") ||
+    (cvdSpot === "declining" && cvdFut === "declining")
+  ) {
+    divergence = null; // 同向不报警
+  }
+
   const oiTone =
     c.oi_delta_1h_pct == null
       ? "neutral"
@@ -44,6 +61,19 @@ export default function TopStrip({ snap, loading }: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5">
+      {divergence && (
+        <div
+          className={`flex items-center gap-1.5 rounded-md border-2 px-2.5 py-1 text-[12px] font-semibold shadow-lg ${
+            divergence.tone === "good"
+              ? "border-emerald-500 bg-emerald-950/50 text-emerald-200 shadow-emerald-500/20"
+              : "border-rose-500 bg-rose-950/50 text-rose-200 shadow-rose-500/20"
+          }`}
+          title="CVD 现货 vs 合约 出现方向背离 — 关注市场结构强弱拐点"
+        >
+          <span className={`h-2 w-2 rounded-full ${divergence.tone === "good" ? "bg-emerald-400" : "bg-rose-400"} animate-pulse`} />
+          {divergence.label}
+        </div>
+      )}
       <Chip label="现价" value={formatPrice(snap.last_price, snap.coin)} />
       <Chip label="ATR" value={snap.atr.toFixed(2)} />
       {c.regime && (

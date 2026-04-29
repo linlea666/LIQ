@@ -14,11 +14,12 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
+const VIEW_W = 300;
 const PADDING_TOP = 28;
 const PADDING_BOTTOM = 28;
-const AXIS_X = 90;
-const ZONE_X = 96;
-const ZONE_W = 132;
+const AXIS_X = 110;
+const ZONE_X = 116;
+const ZONE_W = 178;
 
 function chooseStep(range: number, atr: number): number {
   const candidates = [atr * 2, atr, atr * 0.5, range / 8].filter((x) => x > 0);
@@ -62,7 +63,7 @@ export default function PriceAxisMap({
     <div className="h-full overflow-y-auto">
       <svg
         width="100%"
-        viewBox={`0 0 240 ${height}`}
+        viewBox={`0 0 ${VIEW_W} ${height}`}
         preserveAspectRatio="xMinYMin meet"
         className="block"
       >
@@ -85,13 +86,13 @@ export default function PriceAxisMap({
           const y = yOf(t);
           return (
             <g key={t}>
-              <line x1={AXIS_X - 4} y1={y} x2={AXIS_X} y2={y} stroke="#475569" strokeWidth={1} />
+              <line x1={AXIS_X - 5} y1={y} x2={AXIS_X} y2={y} stroke="#475569" strokeWidth={1} />
               <text
-                x={AXIS_X - 8}
-                y={y + 3}
+                x={AXIS_X - 9}
+                y={y + 4}
                 textAnchor="end"
-                fontSize={9}
-                fill="#64748b"
+                fontSize={11}
+                fill="#94a3b8"
                 style={{ fontFamily: "ui-monospace,SFMono-Regular,monospace" }}
               >
                 {Math.round(t).toLocaleString("en-US")}
@@ -135,22 +136,24 @@ export default function PriceAxisMap({
                 rx={3}
               />
               <text
-                x={ZONE_X + 6}
-                y={yMid - 2}
-                fontSize={10}
-                fill="#e2e8f0"
+                x={ZONE_X + 8}
+                y={yMid - 3}
+                fontSize={12}
+                fontWeight={600}
+                fill="#f1f5f9"
                 style={{ fontFamily: "ui-monospace,SFMono-Regular,monospace" }}
               >
                 {formatPrice(z.price_mid, coin)}
               </text>
               <text
-                x={ZONE_X + 6}
-                y={yMid + 10}
-                fontSize={9}
+                x={ZONE_X + 8}
+                y={yMid + 11}
+                fontSize={11}
                 fill={role.hex}
+                fontWeight={500}
               >
                 {role.label}
-                <tspan fill="#64748b">{` · ${z.distance_pct >= 0 ? "+" : ""}${z.distance_pct.toFixed(2)}%`}</tspan>
+                <tspan fill="#94a3b8" fontWeight={400}>{` · ${z.distance_pct >= 0 ? "+" : ""}${z.distance_pct.toFixed(2)}%`}</tspan>
               </text>
             </g>
           );
@@ -163,20 +166,20 @@ export default function PriceAxisMap({
             <g>
               <line
                 x1={0}
-                x2={240}
+                x2={VIEW_W}
                 y1={y}
                 y2={y}
                 stroke="#f43f5e"
-                strokeWidth={1.4}
-                strokeDasharray="4 3"
+                strokeWidth={1.5}
+                strokeDasharray="5 3"
               />
-              <rect x={2} y={y - 9} width={70} height={16} rx={3} fill="#f43f5e" fillOpacity={0.85} />
+              <rect x={2} y={y - 10} width={92} height={20} rx={4} fill="#f43f5e" fillOpacity={0.92} />
               <text
-                x={6}
-                y={y + 3}
-                fontSize={10}
+                x={8}
+                y={y + 4}
+                fontSize={12}
                 fill="#fff"
-                style={{ fontFamily: "ui-monospace,SFMono-Regular,monospace", fontWeight: 600 }}
+                style={{ fontFamily: "ui-monospace,SFMono-Regular,monospace", fontWeight: 700 }}
               >
                 {formatPrice(lastPrice, coin)}
               </text>

@@ -104,7 +104,7 @@ export default function TradingBrainPage() {
 
           <main className="flex flex-1 min-h-0 overflow-hidden">
             <section
-              className={`w-[240px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition ${
+              className={`w-[300px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition ${
                 hoverZoneId ? "ring-1 ring-blue-500/30" : ""
               }`}
             >
