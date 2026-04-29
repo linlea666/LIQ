@@ -46,6 +46,9 @@ function fmtUsd(usd: number): string {
   return formatCnUsd(usd);
 }
 
+// 方案 C：单档机构大单门槛（实测 BTC 4464万 / ETH 2245万 / SOL 1113万 → 100万 适中）
+const INSTITUTION_SINGLE_USD_THRESHOLD = 1_000_000;
+
 function ItemRow({
   item, coin, maxUsd, onSelectZone,
 }: {
@@ -55,26 +58,41 @@ function ItemRow({
   onSelectZone?: (id: string) => void;
 }) {
   const totalPct = maxUsd > 0 ? Math.max(2, (item.total_usd / maxUsd) * 100) : 0;
-  const spotPct = item.total_usd > 0
-    ? Math.max(0, Math.min(100, (item.spot_usd / item.total_usd) * 100))
-    : 0;
   const isAsk = item.side === "ask";
   const sideTone = isAsk ? "text-rose-300" : "text-emerald-300";
   const distTone = isAsk ? "text-rose-200/80" : "text-emerald-200/80";
+
+  // 方案 C：现货双源拆分（Binance 5m 累积 vs Coinbase 瞬时机构 footprint）
+  // 旧后端无双源拆分时回退用 spot_usd 全部归 Binance（向后兼容）
+  const binanceUsd = item.binance_spot_usd ?? Math.max(0, item.spot_usd - (item.coinbase_spot_usd ?? 0));
+  const coinbaseUsd = item.coinbase_spot_usd ?? 0;
+  const cbMaxSingle = item.coinbase_max_single_order_usd ?? 0;
+  const isInstitutional = cbMaxSingle >= INSTITUTION_SINGLE_USD_THRESHOLD;
+  // 厚度条 3 色比例（按 total_usd 归一）
+  const safeTotal = item.total_usd > 0 ? item.total_usd : 1;
+  const binPct = Math.max(0, Math.min(100, (binanceUsd / safeTotal) * 100));
+  const cbPct = Math.max(0, Math.min(100 - binPct, (coinbaseUsd / safeTotal) * 100));
+  const futPct = Math.max(0, 100 - binPct - cbPct);
 
   // 档位 2A：长/短窗口对比
   const max1h = item.max_usd_1h ?? 0;
   const max8h = item.max_usd_8h ?? 0;
   const pers1h = item.persistence_score ?? 0;
   const pers8h = item.persistence_score_8h ?? 0;
-  // 当前显著弱于 1h 峰值（< 70%）→ 提示"1h 内更强"
   const weakerThan1h = max1h > 0 && item.total_usd < max1h * 0.70;
-  // 8h 峰值显著大于 1h 峰值（> 1.3×）→ 提示"8h 历史更厚"
   const stronger8h = max8h > 0 && max1h > 0 && max8h > max1h * 1.30;
 
   const titleText =
     `墙区 · ${item.dominant_role}\n` +
-    `当前 ${fmtUsd(item.total_usd)}（现货 ${fmtUsd(item.spot_usd)} / 合约 ${fmtUsd(item.futures_usd)}）\n` +
+    `当前 ${fmtUsd(item.total_usd)}\n` +
+    `  Binance 现货 ${fmtUsd(binanceUsd)}（5m 累积，散户聚集为主）\n` +
+    (coinbaseUsd > 0
+      ? `  Coinbase 现货 ${fmtUsd(coinbaseUsd)}（瞬时快照，机构 footprint）\n`
+      : "") +
+    (cbMaxSingle > 0
+      ? `  Coinbase 单档最大 ${fmtUsd(cbMaxSingle)}${isInstitutional ? "  ★ 机构级" : ""}\n`
+      : "") +
+    `  合约 ${fmtUsd(item.futures_usd)}\n` +
     (max1h > 0 ? `1h 峰值 ${fmtUsd(max1h)}　持续 ${(pers1h * 100).toFixed(0)}%\n` : "") +
     (max8h > 0 ? `8h 峰值 ${fmtUsd(max8h)}　持续 ${(pers8h * 100).toFixed(0)}%\n` : "") +
     `点击查看墙区详情`;
@@ -84,6 +102,7 @@ function ItemRow({
       className={`group flex cursor-pointer items-center gap-2 rounded border border-slate-800/70 bg-slate-900/40 px-2 py-1.5 transition hover:border-slate-600 hover:bg-slate-800/60 ${
         item.dominant_role === "institutional_footprint" ? "border-l-2 border-l-amber-400" :
         item.dominant_role === "dual_battleground" ? "border-l-2 border-l-fuchsia-400" :
+        isInstitutional ? "border-l-2 border-l-amber-400" :
         ""
       }`}
       onClick={() => item.wall_zone_id && onSelectZone?.(item.wall_zone_id)}
@@ -99,20 +118,38 @@ function ItemRow({
       </div>
 
       <div className="flex-1 min-w-0">
+        {/* 厚度条 · 3 色拆分：Binance 绿 / Coinbase 金 / 合约蓝 */}
         <div className="relative h-3 w-full overflow-hidden rounded bg-slate-800/60">
           <div
             className="absolute inset-y-0 left-0 flex"
             style={{ width: `${totalPct}%` }}
           >
-            <div className="h-full bg-emerald-500/70" style={{ width: `${spotPct}%` }} />
-            <div className="h-full bg-blue-500/55" style={{ width: `${100 - spotPct}%` }} />
+            <div className="h-full bg-emerald-500/70" style={{ width: `${binPct}%` }} />
+            <div className="h-full bg-amber-400/85" style={{ width: `${cbPct}%` }} />
+            <div className="h-full bg-blue-500/55" style={{ width: `${futPct}%` }} />
           </div>
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400">
           <span className="tabular-nums text-slate-300">{fmtUsd(item.total_usd)}</span>
-          <span className="text-emerald-400">现 {Math.round(spotPct)}%</span>
+          {binanceUsd > 0 && (
+            <span className="tabular-nums text-emerald-300/90">
+              Bin {fmtUsd(binanceUsd)}
+            </span>
+          )}
+          {coinbaseUsd > 0 && (
+            <span className="tabular-nums text-amber-300/90" title="Coinbase 现货厚度（机构资金 footprint）">
+              CB {fmtUsd(coinbaseUsd)}
+            </span>
+          )}
+          {isInstitutional && (
+            <span
+              className="rounded bg-amber-500/30 px-1 font-semibold text-amber-200"
+              title="Coinbase 单档机构级孤立大单（≥ 100 万 USD）"
+            >
+              ★ 机构 {fmtUsd(cbMaxSingle)}
+            </span>
+          )}
           {item.is_dual_source && <span className="rounded bg-fuchsia-900/60 px-1 text-fuchsia-200">双源</span>}
-          {item.has_coinbase && <span className="rounded bg-amber-900/60 px-1 text-amber-200">CB</span>}
           {item.strength_tier && item.strength_tier !== "C" && (
             <span className="rounded border border-slate-600 px-1 text-slate-300">{item.strength_tier}</span>
           )}
@@ -237,14 +274,20 @@ export default function SpotOrderBookPanel({ spotBook, coin, onSelectZone }: Pro
       <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/40 px-3 py-1.5">
         <div className="flex items-baseline gap-2">
           <span className="text-[12px] font-semibold text-slate-100">现货订单簿</span>
-          <span className="text-[10px] text-slate-500">墙体厚度 · 含现货 vs 合约拆分</span>
+          <span className="text-[10px] text-slate-500">Binance 5m / Coinbase 瞬时 / 合约</span>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-slate-400">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-3 rounded bg-emerald-500/70" /> 现货
+          <span className="flex items-center gap-1" title="Binance 现货 5m 累积厚度（散户聚集为主）">
+            <span className="inline-block h-2 w-3 rounded bg-emerald-500/70" /> Binance
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" title="Coinbase 现货瞬时厚度（机构 footprint）">
+            <span className="inline-block h-2 w-3 rounded bg-amber-400/85" /> Coinbase
+          </span>
+          <span className="flex items-center gap-1" title="合约挂单">
             <span className="inline-block h-2 w-3 rounded bg-blue-500/55" /> 合约
+          </span>
+          <span className="flex items-center gap-1" title="单档 ≥ 100 万 USD 机构级孤立大单">
+            <span className="font-semibold text-amber-300">★</span> 机构
           </span>
         </div>
       </div>

@@ -703,13 +703,15 @@ def _bracket_of(distance_pct: float) -> Optional[str]:
 def _wall_to_book_item(w: WallZone) -> BrainSpotBookItem:
     """从 WallZone 抽取展示项；不重新计算任何评分字段（铁律）。
 
-    现货厚度 = spot_current_usd（Binance 现货侧 5m 深度共振）
-             + coinbase_spot_usd（Coinbase 现货独立链路）
+    现货拆分（方案 C）：
+      - binance_spot_usd = spot_current_usd（Coinglass 5m 累积，散户聚集为主）
+      - coinbase_spot_usd = coinbase_spot_usd（原生瞬时快照，机构 footprint）
+      - spot_usd = binance + coinbase（合并值，向后兼容）
     合约厚度 = max(current_usd - spot_usd, 0)
     """
-    spot_usd = float(getattr(w, "spot_current_usd", 0.0) or 0.0) + float(
-        getattr(w, "coinbase_spot_usd", 0.0) or 0.0
-    )
+    binance_usd = float(getattr(w, "spot_current_usd", 0.0) or 0.0)
+    coinbase_usd = float(getattr(w, "coinbase_spot_usd", 0.0) or 0.0)
+    spot_usd = binance_usd + coinbase_usd
     total_usd = float(getattr(w, "current_usd", 0.0) or 0.0)
     fut_usd = max(total_usd - spot_usd, 0.0)
     bracket = _bracket_of(w.distance_pct) or "far"
@@ -732,6 +734,12 @@ def _wall_to_book_item(w: WallZone) -> BrainSpotBookItem:
         max_usd_8h=float(getattr(w, "max_usd_8h", 0.0) or 0.0),
         persistence_score=float(getattr(w, "persistence_score", 0.0) or 0.0),
         persistence_score_8h=float(getattr(w, "persistence_score_8h", 0.0) or 0.0),
+        # 方案 C：现货双源拆分（让 UI 区分机构 vs 散户聚集）
+        binance_spot_usd=binance_usd,
+        coinbase_spot_usd=coinbase_usd,
+        coinbase_max_single_order_usd=float(
+            getattr(w, "coinbase_max_single_order_usd", 0.0) or 0.0
+        ),
     )
 
 

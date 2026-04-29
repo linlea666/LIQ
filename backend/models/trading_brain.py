@@ -302,9 +302,20 @@ class BrainSpotBookItem(BaseModel):
     total_usd: float
     """整段墙体当前帧 USD 厚度（含合约+现货融合）。"""
     spot_usd: float
-    """现货侧 USD 厚度 (= spot_current_usd + coinbase_spot_usd)；越高 → 越是真买卖家。"""
+    """现货侧 USD 厚度 (= binance_spot_usd + coinbase_spot_usd)；越高 → 越是真买卖家。
+    保留向后兼容；新前端建议直接用 binance_spot_usd / coinbase_spot_usd 拆分展示。"""
     futures_usd: float
     """合约侧 USD 厚度 (= max(total_usd - spot_usd, 0))。"""
+
+    # ── 现货双源拆分（方案 C）──
+    # 时间颗粒度不同：Binance 来自 Coinglass 5m 累积、Coinbase 来自原生瞬时快照。
+    # 直接展示拆分让用户看到"机构（Coinbase）vs 散户聚集（Binance）"分布。
+    binance_spot_usd: float = 0.0
+    """Binance 现货 5m 累积厚度（spot_current_usd，代表散户聚集为主）。"""
+    coinbase_spot_usd: float = 0.0
+    """Coinbase 现货瞬时厚度（机构 footprint；ETF 链路上的真机构资金）。"""
+    coinbase_max_single_order_usd: float = 0.0
+    """Coinbase 同价区单档最大 USD；≥ 100 万时视为机构级孤立大单（区分散户聚集）。"""
 
     is_dual_source: bool = False
     """合约+现货同价区共振（trust 阶梯加分最强证据）。"""

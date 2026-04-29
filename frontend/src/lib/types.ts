@@ -2383,6 +2383,12 @@ export interface BrainSpotBookItem {
   persistence_score?: number;
   /** 档位 2A：8h 持续性 0–1 */
   persistence_score_8h?: number;
+  /** 方案 C：Binance 现货 5m 累积 USD（散户聚集为主） */
+  binance_spot_usd?: number;
+  /** 方案 C：Coinbase 现货瞬时 USD（机构 footprint） */
+  coinbase_spot_usd?: number;
+  /** 方案 C：Coinbase 单档最大 USD；≥ 100 万视为机构级孤立大单 */
+  coinbase_max_single_order_usd?: number;
 }
 
 export interface BrainSpotBook {

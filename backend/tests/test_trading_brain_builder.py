@@ -823,6 +823,68 @@ def test_long_window_fields_propagate_to_brain_fut_bin():
     assert abs(bin_item.persistence_score_8h - 0.92) < 1e-3
 
 
+def test_spot_book_item_splits_binance_and_coinbase():
+    """方案 C：BrainSpotBookItem 应独立透传 Binance / Coinbase 两路现货厚度
+    + Coinbase 单档最大 USD（机构大单标记用）。"""
+    last = 100_000.0
+    w = _wall(
+        wall_zone_id="w_split", side="bid",
+        price_mid=99_700.0, price_low=99_650.0, price_high=99_750.0,
+        distance_pct=-0.30,
+        current_usd=4_500_000.0,
+        spot_current_usd=1_800_000.0,           # Binance 5m
+        coinbase_spot_usd=900_000.0,            # Coinbase 瞬时
+        coinbase_max_single_order_usd=4_464_000.0,  # 单档机构大单
+        coinbase_spot_confluence=True,
+        dual_source=True,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_below=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    sb = snap.spot_book
+    assert sb is not None
+    item = next(i for i in sb.bids if i.wall_zone_id == "w_split")
+    # 拆分字段独立可读
+    assert abs(item.binance_spot_usd - 1_800_000.0) < 1e-3
+    assert abs(item.coinbase_spot_usd - 900_000.0) < 1e-3
+    assert abs(item.coinbase_max_single_order_usd - 4_464_000.0) < 1e-3
+    # 合并字段保留向后兼容（spot_usd = Binance + Coinbase）
+    assert abs(item.spot_usd - 2_700_000.0) < 1e-3
+    # 合约 = total - spot_usd 不受拆分影响
+    assert abs(item.futures_usd - 1_800_000.0) < 1e-3
+
+
+def test_spot_book_item_split_zero_when_no_coinbase_data():
+    """无 Coinbase 数据时 coinbase_* 字段应为 0，binance_spot_usd 仍可独立读。"""
+    last = 100_000.0
+    w = _wall(
+        wall_zone_id="w_no_cb", side="ask",
+        price_mid=100_300.0, price_low=100_250.0, price_high=100_350.0,
+        distance_pct=0.30,
+        current_usd=2_000_000.0,
+        spot_current_usd=1_500_000.0,
+        # 不传 coinbase_* → WallZone 默认 0
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_above=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    sb = snap.spot_book
+    assert sb is not None
+    item = next(i for i in sb.asks if i.wall_zone_id == "w_no_cb")
+    assert abs(item.binance_spot_usd - 1_500_000.0) < 1e-3
+    assert item.coinbase_spot_usd == 0.0
+    assert item.coinbase_max_single_order_usd == 0.0
+    assert abs(item.spot_usd - 1_500_000.0) < 1e-3
+
+
 def test_long_window_default_zero_when_wall_zone_lacks_fields():
     """旧 WallZone（无 8h 字段）应透传为 0，不破坏序列化。"""
     last = 100_000.0
