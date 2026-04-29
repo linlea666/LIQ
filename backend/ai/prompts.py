@@ -1042,6 +1042,12 @@ def build_user_prompt(snapshot: dict) -> str:
                 "需结合 §9g absorption zones（已成交硬证据）+ §1 CVD 综合判断；"
                 "禁止仅凭墙位作为决策唯一依据。"
             ),
+            (
+                "⚙ 评分性质：「打穿风险」是经验权重风险评分（厚度衰减 + 持续性 + 磁铁邻近 + "
+                "真空跨度 + 主动攻击），**不是统计概率**，未经历史校准；"
+                "仅用于该价位之间的相对风险比较，禁止表述为「有 X% 概率被打穿」。"
+                "trust_score 同理为相对信任评分，不代表「不会被打穿」。"
+            ),
         ])
         if _liq_quality and _liq_quality != "ok":
             _quality_label = {
@@ -1081,7 +1087,7 @@ def build_user_prompt(snapshot: dict) -> str:
                 if _btr >= 0.6:
                     _magnet = w.get("next_magnet_price")
                     _vac = w.get("vacuum_gap_pct")
-                    _risk_part = f" | ⚠打穿风险{_btr*100:.0f}%"
+                    _risk_part = f" | ⚠打穿风险评分{_btr*100:.0f}%"
                     if _magnet is not None:
                         _risk_part += f"，磁铁${_magnet:,.4f}"
                     if _vac is not None:

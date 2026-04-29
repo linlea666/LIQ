@@ -436,9 +436,29 @@ class TestPromptRendering:
             "vacuum_gap_pct": 2.5,
         }]
         text = self._build_user_prompt_section(snap_dict)
-        assert "打穿风险" in text
+        # W1-T3：打穿风险渲染必须明确为"评分"而非概率
+        assert "打穿风险评分" in text
+        # 旧版"打穿风险 X%"不带"评分"二字的渲染应已移除
+        assert "打穿风险75%" not in text  # 既无空格也无"评分"前缀的旧文本
         assert "磁铁" in text
         assert "真空跨度" in text
+
+    def test_section_8d_probability_disclaimer_present(self):
+        """W1-T3：性质提示必须显式声明"打穿风险≠统计概率"，防止 AI 误读。"""
+        snap_dict = self._base_snap_dict()
+        snap_dict["liquidity_walls"] = [{
+            "side": "买墙", "price_mid": 62800.0, "distance_pct": -0.32,
+            "current_usd": 5_000_000.0, "trust_tier": "双源高可信",
+            "trust_score": 0.85, "persistence_min": 45.0,
+            "exchange_count": 3, "break_through_risk": 0.3,
+        }]
+        text = self._build_user_prompt_section(snap_dict)
+        # 必须出现的关键短语（语义判定，不依赖具体措辞）
+        assert "不是统计概率" in text
+        # 强化提示：禁止表述 X% 概率
+        assert "概率被打穿" in text  # "X% 概率被打穿" 子串
+        # trust_score 也要免责
+        assert "不代表" in text and "不会被打穿" in text
 
     def test_section_8d_warming_quality_label(self):
         snap_dict = self._base_snap_dict()

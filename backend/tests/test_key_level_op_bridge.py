@@ -319,9 +319,31 @@ class TestRiskWarnings:
         snap = _make_snapshot(walls_below=[zone])
         _apply_pressure_alignment([sig], snap, atr=300.0)
         msgs = " ".join(sig.warnings)
-        assert "打穿风险" in msgs
+        # W1-T3：必须是"打穿风险评分"（强调评分性质，不是统计概率）
+        assert "打穿风险评分" in msgs
         assert "75%" in msgs
         assert "下方磁铁" in msgs
+
+    def test_warning_uses_score_phrasing_not_probability(self):
+        """W1-T3：所有相关 warning 必须用"评分"措辞，不得出现误导性"概率""可能性"等词。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.4,
+            wall_removal_risk=0.7,         # 触发"撤单风险评分"
+            break_through_risk=0.65,       # 触发"打穿风险评分"
+            next_magnet_price=61500.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        # 正向断言："评分"措辞必现
+        assert "撤单风险评分" in msgs
+        assert "打穿风险评分" in msgs
+        # 反向断言：禁用概率/可能性措辞（仅在 KL warning 范围内）
+        # 注意：磁铁价位描述与"概率"无关，本检查仅针对 zone 风险 warning
+        assert "概率" not in msgs
+        assert "可能性" not in msgs
 
     def test_high_break_through_short_side_uses_above(self):
         sig = _make_short_signal(63000.0)
