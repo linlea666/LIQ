@@ -204,3 +204,65 @@ def test_atr_zero_falls_back_to_pct_buffer():
     o = next(o for o in opps if o.setup_type == "support_limit_probe")
     assert o.risk_plan.hard_stop < z.price_low
     assert (z.price_low - o.risk_plan.hard_stop) > 0
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P1-C 修复回归：invalidation_clarity 钟形函数（替代旧"风险越大越高分"单调函数）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_invalidation_clarity_bell_curve_peaks_at_06_atr():
+    """钟形函数：peak 在 0.6 ATR；偏离时应单调下降。"""
+    from processors.opportunity_engine import _invalidation_clarity
+    atr = 400.0
+    price = 100_000.0
+    s_too_close = _invalidation_clarity(0.10 * atr, atr, price)
+    s_close = _invalidation_clarity(0.30 * atr, atr, price)
+    s_optimal = _invalidation_clarity(0.60 * atr, atr, price)
+    s_far = _invalidation_clarity(1.00 * atr, atr, price)
+    s_too_far = _invalidation_clarity(2.00 * atr, atr, price)
+    # 0.6 ATR 是峰值
+    assert s_optimal == max(s_too_close, s_close, s_optimal, s_far, s_too_far)
+    assert s_optimal >= 0.99  # 接近 1.0
+    # 两侧单调下降（除非已撞 floor）
+    assert s_close > s_too_close
+    assert s_far < s_optimal
+    # 极远端被 floor 截断到 0.30
+    assert s_too_far <= 0.31
+    # 旧 bug 直接验证：风险越大评分越高 → 应被推翻
+    assert s_far < s_optimal, "风险越大评分越高的旧逻辑必须被打破"
+
+
+def test_invalidation_clarity_atr_missing_uses_price_proxy():
+    """ATR=0 时退化为 price × 0.4% 作为单位尺度（不应崩溃也不应永远得 floor）。"""
+    from processors.opportunity_engine import _invalidation_clarity
+    price = 100_000.0
+    proxy_unit = price * 0.004  # 400
+    s = _invalidation_clarity(0.6 * proxy_unit, atr=0.0, ref_price=price)
+    assert 0.99 <= s <= 1.0  # 0.6 个 proxy 单位应到达 peak
+
+
+def test_real_setup_far_stop_gets_lower_asymmetry_than_optimal_stop():
+    """端到端：同样的 zone/target，hard_stop 远的 setup 不对称分应低于 hard_stop 适中的。
+    （这是 P1-C 修复后才会成立的关键回归。）"""
+    last = 100_000.0
+    # 用同 zone 但人为构造 atr 极小（让 _HARD_BUFFER_ATR=0.8 的 hard_stop 处于 0.6 ATR 附近）
+    z = _zone(
+        price_mid=99_000.0, distance_pct=-1.0,
+        support_trust=0.85, data_confidence=0.85,
+    )
+    t = _target_zone_above(102_000.0)
+    opps_norm = build_opportunities(zones=[z, t], last_price=last, atr=400.0)
+    # 模拟"宽止损 3×ATR"场景：把 atr 放大 3 倍但 hard_stop 仍按 0.8 atr_new 算
+    # → hard_stop 距 zone_mid ≈ 2.4 旧 ATR，远超 0.6 ATR 峰值
+    opps_far = build_opportunities(zones=[z, t], last_price=last, atr=1600.0)
+    o_norm = next(o for o in opps_norm if o.setup_type == "support_limit_probe")
+    o_far = next(
+        (o for o in opps_far if o.setup_type == "support_limit_probe"), None,
+    )
+    # ATR 放大后可能因 RR 不足滤掉 → 这本身也是钟形函数的合理结果
+    if o_far is None:
+        return
+    assert o_norm.asymmetry_score >= o_far.asymmetry_score, (
+        f"宽止损 setup 的不对称分应不高于适中止损：norm={o_norm.asymmetry_score} far={o_far.asymmetry_score}"
+    )

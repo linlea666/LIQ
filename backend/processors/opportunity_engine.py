@@ -27,6 +27,7 @@ MVP 支持的 setup 类型（3+1 = 4）
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 from typing import Optional
 
@@ -159,9 +160,48 @@ def _select_targets_for_short(
     return out
 
 
+# ── invalidation clarity（P1-C 修复：钟形函数代替单调"风险越大分越高"）─────
+_IDEAL_RISK_ATR_MU = 0.6     # 理想止损宽度 = 0.6 × ATR（钟形峰值）
+_IDEAL_RISK_ATR_SIGMA = 0.4  # 理想区间宽度
+_INVALIDATION_FLOOR = 0.30   # 评分下限（防整体公式塌零）
+
+
+def _invalidation_clarity(risk: float, atr: float, ref_price: float) -> float:
+    """风险止损宽度的"质量评分"（钟形函数；0.30–1.00）。
+
+    P1-C 根因
+    =========
+    旧公式 `min(1.0, max(0.3, risk / (price × 0.5%)))` 是单调递增：
+    risk 越大评分越高 → 等价于"鼓励远止损"，与"以小搏大"理念违背。
+
+    新公式
+    ======
+    以 ATR 为风险尺度，在"理想风险宽度"附近钟形评分：
+      risk_atr = risk / ATR
+      clarity  = max(floor, exp(-((risk_atr - μ)² / (2 σ²))))
+      μ = 0.6 ATR（最优）；σ = 0.4 ATR；floor = 0.30
+    效果（典型值，ATR-only）：
+      0.10 ATR → 0.46（太近，易被噪声扫）
+      0.30 ATR → 0.76
+      0.60 ATR → 1.00（最优）
+      1.00 ATR → 0.61
+      1.50 ATR → 0.17 → clamp 到 0.30（太远，盈亏比差）
+      2.00 ATR → 0.05 → clamp 到 0.30
+
+    ATR 缺失退化：ref_price * 0.4% 作为 ATR proxy（按 BTC 历史 ATR/price 中值）。
+    """
+    if atr and atr > 0:
+        unit = atr
+    else:
+        unit = max(abs(ref_price) * 0.004, 1e-9)
+    risk_atr = max(risk / unit, 0.0)
+    raw = math.exp(-((risk_atr - _IDEAL_RISK_ATR_MU) ** 2) / (2 * _IDEAL_RISK_ATR_SIGMA ** 2))
+    return max(_INVALIDATION_FLOOR, min(1.0, raw))
+
+
 # ── scores ────────────────────────────────────────────────────────────
 def _asymmetry_score(
-    *, zone: BrainPriceZone, last_price: float, hard_stop: float,
+    *, zone: BrainPriceZone, last_price: float, hard_stop: float, atr: float,
     targets: list[SetupTarget], data_confidence: float, direction: str,
 ) -> float:
     """asymmetry = rr_score × invalidation_clarity × entry_proximity ×
@@ -174,8 +214,7 @@ def _asymmetry_score(
     rr_score = min(1.0, rr_top / 6.0)
 
     risk = abs(zone.price_mid - hard_stop)
-    invalidation_clarity = min(1.0, risk / max(zone.price_mid * 0.005, 1e-9))
-    invalidation_clarity = min(1.0, max(0.3, invalidation_clarity))
+    invalidation_clarity = _invalidation_clarity(risk, atr, zone.price_mid)
 
     proximity = 1.0 - min(abs(zone.distance_pct) / _MAX_DISTANCE_PCT, 1.0)
     proximity = max(0.2, proximity)
@@ -292,7 +331,7 @@ def _build_support_limit_probe(
     )
 
     asym = _asymmetry_score(
-        zone=zone, last_price=last_price, hard_stop=hard,
+        zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
         direction="long",
     )
@@ -392,7 +431,7 @@ def _build_resistance_limit_probe(
     )
 
     asym = _asymmetry_score(
-        zone=zone, last_price=last_price, hard_stop=hard,
+        zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
         direction="short",
     )
@@ -522,7 +561,7 @@ def _build_fake_break_reclaim(
         cancel.insert(0, "[已触发] 数据未就绪/部分源 stale，已降权")
 
     asym = _asymmetry_score(
-        zone=zone, last_price=last_price, hard_stop=hard,
+        zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
         direction=side,
     )
