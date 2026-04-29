@@ -1404,6 +1404,46 @@ def _compute_active_attack_score(
     return round(min(1.0, score), 3)
 
 
+def _liquidity_imbalance_score(
+    zone: WallZone,
+    ask_bids_history: Optional[Sequence],
+    spot_ask_bids_history: Optional[Sequence],
+) -> float:
+    """W2-T2 新增：本侧 vs 对侧供给失衡评分（0-1）。
+
+    逻辑：bid 墙的"对侧"是 ask 供给（卖盘）；ask 墙的"对侧"是 bid 供给（买盘）。
+      - 对侧供给远大于本侧 → 价格更可能朝对侧推进 → 本侧墙易被打穿
+      - 比例 = same_side_usd / opposite_side_usd
+        - ratio ≥ 1.0：无失衡（本侧 ≥ 对侧）→ 0
+        - ratio < 0.5：对侧是本侧的 2x → 0.5
+        - ratio < 0.3：对侧是本侧的 3.3x → 1.0（线性映射）
+        - 中间线性插值
+
+    数据源优先级：现货 aggregated > 合约 aggregated（与 active_attack 一致）。
+    """
+    def _ratio_from_history(history: Optional[Sequence]) -> Optional[float]:
+        if not history:
+            return None
+        latest = history[-1]
+        same = float(getattr(latest, "aggregated_bids_usd", 0) or 0) if zone.side == "bid" \
+            else float(getattr(latest, "aggregated_asks_usd", 0) or 0)
+        opp = float(getattr(latest, "aggregated_asks_usd", 0) or 0) if zone.side == "bid" \
+            else float(getattr(latest, "aggregated_bids_usd", 0) or 0)
+        if same <= 0 or opp <= 0:
+            return None
+        return same / opp
+
+    ratio = _ratio_from_history(spot_ask_bids_history)
+    if ratio is None:
+        ratio = _ratio_from_history(ask_bids_history)
+    if ratio is None or ratio >= 1.0:
+        return 0.0
+    if ratio <= 0.3:
+        return 1.0
+    # 0.3 → 1.0；0.5 → 0.5；线性映射在 [0.3, 1.0] → [1.0, 0.0]
+    return round(max(0.0, min(1.0, (1.0 - ratio) / 0.7)), 3)
+
+
 def _compute_break_through_risk(
     zone: WallZone,
     crowding: Optional[PositionCrowdingSnapshot],
@@ -1416,42 +1456,63 @@ def _compute_break_through_risk(
 ) -> float:
     """0-1 软分：墙是否容易被打穿。
 
-    构成：
-      - thinning（current/max < 0.5）：+0.30
-      - persistence < 0.3：               +0.20
-      - 同向清算磁铁距离 < 0.5%：         +0.20
-      - 真空跨度 ≥ 0.5%：                +0.15
-      - 同向 crowding_risk ≥ 0.6：       +0.10
-      - active_attack_score（Phase A）： × 0.20（最多 +0.20）
+    W2-T2 重构（回应审计 P1）：
+      根因 1：旧 "persistence < 0.3 → +0.20" 单调项陷阱
+        新墙 / 暖机期墙因 persistence 低被误判为"高打穿风险"，但新墙也可能是
+        刚出现的强支撑，不应一刀切惩罚。
+        修正：去掉单调项，改为"thinning AND persistence < 0.3 → +0.10"复合条件
+        （只有当墙变薄 + 短期 时才加分；稳定的新墙不加分）。
+      根因 2：缺失"流动性失衡分"
+        只看单边 thinning，没看"对侧供给是否远大于本侧"。
+        新增：_liquidity_imbalance_score（同侧/对侧 USD 比例 < 0.5 时加分）。
+      根因 3：active_attack 重复计算
+        W2-T1 主流程已把 active_attack_score 写入 zone 字段。优先用 zone 字段，
+        无值时 fallback 重算（保持既有测试调用方兼容）。
 
-    设计思路（Phase A 升级回应 GPT P1-3）：
-      静态因素（前 5 项 ≤ 0.95）+ 动态主动攻击（最多 +0.20）→ cap 1.0
-      注意原 crowding 权重 0.15 → 0.10，留出 0.05 给 active_attack 维持总和不变
+    构成（权重重新分配，总上限 1.0）：
+      - thinning（current/max < 0.5）：             +0.25
+      - thinning AND persistence < 0.3 复合：        +0.10（短期 + 变薄）
+      - 同向清算磁铁距离 < 0.5%：                   +0.20
+      - 真空跨度 ≥ 0.5%：                          +0.15
+      - 同向 crowding_risk ≥ 0.6：                 +0.10
+      - active_attack_score：                        × 0.10（最多 +0.10）
+      - 流动性失衡（对侧供给远大于本侧）：          × 0.10（最多 +0.10）
+      合计上限 1.00（实际峰值场景下 ≈ 0.95）
     """
     score = 0.0
+    is_thinning = False
     if zone.max_usd_1h > 0:
         ratio = zone.current_usd / zone.max_usd_1h
         if ratio < cfg.get("break_through_thinning_threshold",
                            ENGINE_DEFAULTS["break_through_thinning_threshold"]):
-            score += 0.30
-    if zone.persistence_score < 0.3:
-        score += 0.20
+            score += 0.25
+            is_thinning = True
+    # W2-T2：复合条件 — 只有"变薄 + 短期"才加分；稳定新墙不被惩罚
+    if is_thinning and zone.persistence_score < 0.3:
+        score += 0.10
     if sweep is not None and abs(sweep.distance_pct) < 0.5:
         score += 0.20
     if sweep is not None and sweep.vacuum_gap_pct >= 0.5:
         score += 0.15
     if crowding is not None:
-        # bid wall 怕多头拥挤（多头集中爆仓推动下跌）
         risk = crowding.long_crowding_risk if zone.side == "bid" else crowding.short_crowding_risk
         if risk >= 0.6:
             score += 0.10
-    # Phase A+B+：主动攻击因子（taker + cvd_spot + 流动性衰竭，现货优先 fallback 合约）
-    aa = _compute_active_attack_score(
-        zone, taker_flow, cvd_spot, cfg,
-        ask_bids_history=ask_bids_history,
-        spot_ask_bids_history=spot_ask_bids_history,
+    # W2-T2：优先用 zone.active_attack_score 字段（W2-T1 主流程已写入）；
+    # 字段为 0 时 fallback 重算（向后兼容旧测试调用方直接传 taker_flow / cvd_spot）
+    aa = zone.active_attack_score
+    if aa <= 0:
+        aa = _compute_active_attack_score(
+            zone, taker_flow, cvd_spot, cfg,
+            ask_bids_history=ask_bids_history,
+            spot_ask_bids_history=spot_ask_bids_history,
+        )
+    score += 0.10 * aa
+    # W2-T2：新增流动性失衡因子
+    imbalance = _liquidity_imbalance_score(
+        zone, ask_bids_history, spot_ask_bids_history,
     )
-    score += 0.20 * aa
+    score += 0.10 * imbalance
     return round(min(1.0, score), 3)
 
 

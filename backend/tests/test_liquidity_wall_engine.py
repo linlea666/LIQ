@@ -899,28 +899,29 @@ class TestSweepAndBreakThrough:
         assert sweep is None
 
     def test_break_through_risk_thinning(self):
-        # 静态因素满 = 0.30+0.20+0.20+0.15+0.10 = 0.95（Phase A 调整 crowding 0.15 → 0.10）
-        # 加 active_attack 满分 ×0.20 = +0.20 → clamp 1.0
+        """W2-T2 重构后权重：thinning 0.25 + (thinning AND short) 0.10 + magnet 0.20
+           + vacuum 0.15 + crowding 0.10 = 0.80（无 active_attack / 失衡数据）。
+           加 active_attack 满分 ×0.10 = +0.10 → 0.90"""
         z = self._make_zone()
         z.current_usd = 500_000
-        z.max_usd_1h = 2_000_000   # 比例 0.25 < 0.5 → +0.30
-        z.persistence_score = 0.05  # < 0.3 → +0.20
+        z.max_usd_1h = 2_000_000   # 比例 0.25 < 0.5 → +0.25 thinning
+        z.persistence_score = 0.05  # 短期 + thinning → +0.10
         sweep = SweepTarget(direction="below", magnet_price=99_900,
                              magnet_amount_usd=4_000_000,
                              distance_pct=-0.1,    # < 0.5% → +0.20
                              vacuum_gap_pct=0.6)   # ≥ 0.5 → +0.15
         crowding = PositionCrowdingSnapshot(long_crowding_risk=0.7)  # +0.10
-        # 不传 taker_flow / cvd_spot → active_attack=0 → 仅 0.95
         risk_static = _compute_break_through_risk(z, crowding, sweep, ENGINE_DEFAULTS)
-        assert risk_static == pytest.approx(0.95, abs=0.01)
-        # 传入对齐的 taker + cvd → +0.20 → clamp 1.0
+        assert risk_static == pytest.approx(0.80, abs=0.01)
+        # 传入对齐的 taker + cvd → active_attack=0.7（taker 0.40 + cvd 0.30，无衰竭数据）
+        # → +0.10 × 0.7 = +0.07 → 0.87
         taker = SimpleNamespace(buy_volume_usd=1_000_000, sell_volume_usd=4_000_000)
         cvd_spot = SimpleNamespace(trend_1h="strong_down")
         risk_full = _compute_break_through_risk(
             z, crowding, sweep, ENGINE_DEFAULTS,
             taker_flow=taker, cvd_spot=cvd_spot,
         )
-        assert risk_full == pytest.approx(1.0, abs=0.01)
+        assert risk_full == pytest.approx(0.87, abs=0.02)
 
     def test_break_through_risk_low_when_zone_solid(self):
         z = self._make_zone()
@@ -1159,8 +1160,9 @@ class TestMainEntryAndKLIsolation:
             z, crowding=None, sweep=None, cfg=ENGINE_DEFAULTS,
         )
         assert risk_with_attack > risk_static
-        # active 满分 1.0 × 0.20 = +0.20
-        assert risk_with_attack >= risk_static + 0.19
+        # W2-T2 重构后：active_attack 满分 1.0 × 0.10 = +0.10（原 0.20）；
+        # 流动性失衡（bids/asks 0.95）也贡献 +0.007 → 总 +0.10 左右
+        assert risk_with_attack >= risk_static + 0.09
 
     def test_seed_min_usd_by_coin_overrides_default(self):
         """A6：seed_min_usd_by_coin 按币动态覆盖默认 1M。"""
