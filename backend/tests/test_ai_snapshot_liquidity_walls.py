@@ -437,9 +437,12 @@ class TestPromptRendering:
         }]
         text = self._build_user_prompt_section(snap_dict)
         # W1-T3：打穿风险渲染必须明确为"评分"而非概率
+        # W3-T3：评分以 0.XX 浮点展示（不再 X%）
         assert "打穿风险评分" in text
-        # 旧版"打穿风险 X%"不带"评分"二字的渲染应已移除
-        assert "打穿风险75%" not in text  # 既无空格也无"评分"前缀的旧文本
+        assert "打穿风险评分0.75" in text
+        # 反向断言：不应再出现 X% 形式
+        assert "打穿风险评分75%" not in text
+        assert "打穿风险75%" not in text
         assert "磁铁" in text
         assert "真空跨度" in text
 
@@ -476,3 +479,121 @@ class TestPromptRendering:
         snap_dict["liquidity_wall_quality"] = "warming"
         text = self._build_user_prompt_section(snap_dict)
         assert "暖机期" in text or "数据 < 30min" in text
+
+
+# ─────────────────────────────────────────────────────────────────
+# W3-T3 文案统一：prompt §8d 风险评分 X% → 0.XX
+# ─────────────────────────────────────────────────────────────────
+
+class TestW3T3PromptScoreFormat:
+    """W3-T3：prompt §8d 中的风险评分一律以 0.XX 浮点展示。
+
+    动机：与 trust_score / confidence / SR/SA 同口径，避免 AI 把 X% 误读为统计概率。
+    """
+
+    def _build(self, snap_dict: dict) -> str:
+        from ai.prompts import build_user_prompt
+        return build_user_prompt(snap_dict)
+
+    def _wall_dict(self, btr: float = 0.78, **extra) -> dict:
+        base = {
+            "side": "买墙",
+            "price_mid": 62800.0,
+            "distance_pct": -0.32,
+            "current_usd": 5_000_000.0,
+            "trust_tier": "双源高可信",
+            "trust_score": 0.85,
+            "persistence_min": 45.0,
+            "exchange_count": 3,
+            "break_through_risk": btr,
+        }
+        base.update(extra)
+        return base
+
+    def _base_snap(self) -> dict:
+        return {
+            "coin": "BTC", "ts": int(time.time()), "price": 63000.0,
+            "high_24h": 64000.0, "low_24h": 62000.0,
+            "atr_14": 300.0,
+            "market_temperature": 50.0, "pin_risk_level": "low",
+            "cvd_contract_trend": "", "cvd_contract_delta_1h": 0,
+            "cvd_spot_trend": "", "cvd_spot_delta_1h": 0,
+            "cvd_divergence": "",
+            "oi_current_usd": 0, "oi_change_1h_pct": 0,
+            "oi_change_5m_pct": 0, "oi_trend": "",
+            "funding_interpretation": "",
+            "basis_pct": 0,
+            "orderbook_bid_total_usd": 0, "orderbook_ask_total_usd": 0,
+            "orderbook_spread_pct": 0,
+            "recent_liq_24h_long_usd": 0, "recent_liq_24h_short_usd": 0,
+            "volume_profile_poc": 0, "value_area_high": 0,
+            "value_area_low": 0, "vwap": 0,
+            "liq_clusters_above": [], "liq_clusters_below": [],
+            "vacuum_zones": [], "liq_imbalance_ratio": 0,
+            "liquidity_walls": [],
+            "liquidity_wall_events": [],
+            "liquidity_crowding": None,
+            "liquidity_wall_quality": "",
+        }
+
+    def test_risk_score_two_decimal_float_format(self):
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=0.78)]
+        text = self._build(snap)
+        assert "打穿风险评分0.78" in text
+        # 反向断言：禁止 X% 形式
+        assert "打穿风险评分78%" not in text
+        assert "打穿风险78%" not in text
+
+    def test_risk_score_round_value_keeps_two_decimals(self):
+        """0.6 边界 → 0.60（保留两位小数）。"""
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=0.6)]
+        text = self._build(snap)
+        assert "打穿风险评分0.60" in text
+        assert "打穿风险评分60%" not in text
+
+    def test_risk_score_max_value(self):
+        """评分 = 1.0 → 1.00。"""
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=1.0)]
+        text = self._build(snap)
+        assert "打穿风险评分1.00" in text
+        assert "打穿风险评分100%" not in text
+
+    def test_risk_score_below_threshold_no_render(self):
+        """break_through_risk < 0.6 → 不渲染风险段，自然不会有 X% / 0.XX。"""
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=0.3)]
+        text = self._build(snap)
+        # ⚠ 风险段不应出现
+        assert "⚠打穿风险评分" not in text
+
+    def test_disclaimer_mentions_float_format(self):
+        """性质提示明确指出"评分以 0.00–1.00 浮点展示"，统一口径。"""
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=0.3)]
+        text = self._build(snap)
+        # W3-T3 强化：免责声明须显式说明评分采用浮点形式
+        assert "0.00" in text and "1.00" in text  # "0.00–1.00 浮点"
+        assert "浮点" in text
+        # 与 trust_score / confidence 同口径的语义提示
+        assert "同口径" in text or "trust_score" in text or "confidence" in text
+
+    def test_no_score_pct_anywhere_in_section(self):
+        """整个 §8d 段落中：「评分」字样后不得紧跟数字+%。"""
+        import re
+
+        snap = self._base_snap()
+        snap["liquidity_walls"] = [self._wall_dict(btr=0.85)]
+        text = self._build(snap)
+        # 抓出整个 §8d 段
+        m = re.search(r"### 8d\..*?(?=\n### |\Z)", text, re.DOTALL)
+        assert m is not None
+        section = m.group(0)
+        # 风险评分必须以 0.XX 或 1.00 浮点展示
+        assert re.search(r"评分(0\.\d{2}|1\.00)", section)
+        # 禁止 评分\d+% 形式
+        assert not re.search(r"评分\d+(\.\d+)?%", section), (
+            f"§8d 不得出现「评分 X%」形式: {section[:500]}"
+        )

@@ -693,7 +693,7 @@ function ZoneRow({
           </span>
         )}
         {zone.wall_removal_risk >= 0.6 && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300" title={`撤单风险评分 ${Math.round(zone.wall_removal_risk * 100)}%（不等于"假单"）`}>
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300" title={`撤单风险评分 ${zone.wall_removal_risk.toFixed(2)}（0–1 评分，不等于"假单"也不是统计概率）`}>
             ⚠ 撤单风险
           </span>
         )}

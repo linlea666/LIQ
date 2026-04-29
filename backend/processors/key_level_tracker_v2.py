@@ -1223,9 +1223,14 @@ def _apply_pressure_alignment(
       B. warnings（中文短句，前端原样渲染）：
          - "该位墙刚被吃 Nmin 前"      (wall_consumed @ 同价位 30min 内)
          - "该位墙刚撤单 Nmin 前"      (wall_removed @ 同价位 30min 内)
-         - "打穿风险评分 X%；下/上方磁铁 $Y" (break_through_risk >= 0.6 + sweep_target)
+         - "打穿风险评分 0.XX；下/上方磁铁 $Y" (break_through_risk >= 0.6 + sweep_target)
          - "真空跨度 X%（无缓冲）"     (sweep_target.vacuum_gap_pct >= 0.5)
-         - "仅合约挂单 + 撤单风险 X%" (trust_score < 0.55 且 wall_removal_risk >= 0.6)
+         - "仅合约挂单 + 撤单风险评分 0.XX" (trust_score < 0.55 且 wall_removal_risk >= 0.6)
+
+      W3-T3 措辞口径：
+         风险评分一律以 0.XX 浮点形式展示（与 trust_score/confidence 同口径），
+         不再使用 X% 表达，从根本上消除被误读为"统计概率"的路径。
+         "真空跨度" 仍保留 % 单位 — 它是真实的价格区间百分比（非评分）。
 
     匹配规则：
       - 同价位 ≤ 0.5 × ATR（atr 缺失时 fallback 0.3% 价格）
@@ -1344,21 +1349,24 @@ def _append_zone_risk_warnings(
       - 真空跨度大：sweep_target.vacuum_gap_pct >= 0.5
     """
     if zone.trust_score < 0.55 and zone.wall_removal_risk >= 0.6:
-        risk_pct = int(round(zone.wall_removal_risk * 100))
-        sig.warnings.append(f"仅合约挂单+撤单风险评分{risk_pct}%")
+        sig.warnings.append(
+            f"仅合约挂单+撤单风险评分{zone.wall_removal_risk:.2f}"
+        )
 
     if zone.break_through_risk >= 0.6:
-        risk_pct = int(round(zone.break_through_risk * 100))
         magnet = zone.next_magnet_price
         if magnet is None and zone.sweep_target:
             magnet = zone.sweep_target.magnet_price
         if magnet:
             direction = "下方" if long_side else "上方"
             magnet_str = _format_magnet_price(magnet)
-            # W1-T3：明确"打穿风险评分"而非"打穿风险"，避免被误读为概率
-            sig.warnings.append(f"打穿风险评分{risk_pct}%；{direction}磁铁{magnet_str}")
+            sig.warnings.append(
+                f"打穿风险评分{zone.break_through_risk:.2f}；{direction}磁铁{magnet_str}"
+            )
         else:
-            sig.warnings.append(f"打穿风险评分{risk_pct}%")
+            sig.warnings.append(
+                f"打穿风险评分{zone.break_through_risk:.2f}"
+            )
 
     sweep = zone.sweep_target
     if sweep and sweep.vacuum_gap_pct >= 0.5:

@@ -322,8 +322,10 @@ class TestRiskWarnings:
         _apply_pressure_alignment([sig], snap, atr=300.0)
         msgs = " ".join(sig.warnings)
         # W1-T3：必须是"打穿风险评分"（强调评分性质，不是统计概率）
+        # W3-T3：评分以 0.XX 浮点展示（不再用 X%，避免被误读为概率）
         assert "打穿风险评分" in msgs
-        assert "75%" in msgs
+        assert "0.75" in msgs
+        assert "75%" not in msgs  # 反向断言：不应再出现 X% 形式
         assert "下方磁铁" in msgs
 
     def test_warning_uses_score_phrasing_not_probability(self):
@@ -369,7 +371,9 @@ class TestRiskWarnings:
         )
         snap = _make_snapshot(walls_below=[zone])
         _apply_pressure_alignment([sig], snap, atr=300.0)
-        assert any("撤单风险" in w and "70" in w for w in sig.warnings)
+        # W3-T3：评分以 0.XX 浮点展示（不再 X%）
+        assert any("撤单风险评分" in w and "0.70" in w for w in sig.warnings)
+        assert all("70%" not in w for w in sig.warnings)
 
     def test_vacuum_gap_warning(self):
         sig = _make_long_signal(63000.0)
@@ -550,3 +554,133 @@ class TestCoinbaseConfluenceChip:
         _apply_pressure_alignment([sig], snap, atr=300.0)
         assert "ob_coinbase_ask" in sig.confirmations
         assert "ob_dual_source_ask" in sig.confirmations
+
+
+# ─────────────────────────────────────────────────────────────────
+# W3-T3 文案统一：风险评分 X% → 0.XX
+# ─────────────────────────────────────────────────────────────────
+
+class TestW3T3RiskScoreFormat:
+    """W3-T3：风险评分（break_through_risk / wall_removal_risk）展示统一为 0.XX 浮点。
+
+    动机：
+      - X% 形式容易让 AI / 用户误读为"统计概率"
+      - 改为 0.XX 与 trust_score / confidence / SR/SA / active_attack_score 同口径
+      - 反向断言全程禁止 X% 形式
+    """
+
+    def test_break_through_warning_uses_two_decimal_float(self):
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.7,
+            break_through_risk=0.78,
+            next_magnet_price=61500.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        assert "打穿风险评分0.78" in msgs
+        assert "78%" not in msgs
+        assert "78.00%" not in msgs
+
+    def test_break_through_warning_two_decimal_for_round_score(self):
+        """0.6 边界 → 显示 0.60（保留两位小数，不省略尾零）。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.7,
+            break_through_risk=0.6,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        assert "打穿风险评分0.60" in msgs
+        assert "60%" not in msgs
+
+    def test_break_through_warning_handles_max_score(self):
+        """评分 = 1.0 → 显示 1.00。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.7,
+            break_through_risk=1.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        assert "打穿风险评分1.00" in msgs
+        assert "100%" not in msgs
+
+    def test_removal_risk_warning_uses_two_decimal_float(self):
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.4,
+            wall_removal_risk=0.83,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        assert "撤单风险评分0.83" in msgs
+        assert "83%" not in msgs
+
+    def test_both_risks_no_percent_sign_in_score(self):
+        """同时触发两类 warning，断言「评分」字样之后紧跟的是 0.XX 浮点（非 X%）。"""
+        import re
+
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.4,
+            wall_removal_risk=0.7,
+            break_through_risk=0.65,
+            next_magnet_price=61500.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        # 至少各触发一条
+        score_warnings = [w for w in sig.warnings if "评分" in w]
+        assert len(score_warnings) >= 2
+
+        # 关键正则：「评分」后必须紧跟 0.XX 或 1.00（两位小数浮点），禁止 \d+%
+        score_float_pattern = re.compile(r"评分(0\.\d{2}|1\.00)")
+        score_pct_pattern = re.compile(r"评分\d+(\.\d+)?%")
+        for w in score_warnings:
+            assert score_float_pattern.search(w), (
+                f"评分必须以 0.XX 浮点展示，发现非合规 warning: {w!r}"
+            )
+            assert not score_pct_pattern.search(w), (
+                f"评分禁止以 X% 展示，发现: {w!r}"
+            )
+
+    def test_warning_score_and_magnet_combination(self):
+        """评分 + 磁铁价位 同时出现时，评分仍是 0.XX，磁铁仍是 $X。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.7,
+            break_through_risk=0.72,
+            next_magnet_price=61500.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        assert "打穿风险评分0.72" in msgs
+        assert "下方磁铁$61,500" in msgs
+
+    def test_no_probability_phrasing(self):
+        """禁用"概率""可能性""可能 X%"等概率暗示词。"""
+        sig = _make_long_signal(63000.0)
+        zone = _make_zone(
+            "bid", 63000.0,
+            trust_score=0.4,
+            wall_removal_risk=0.7,
+            break_through_risk=0.65,
+            next_magnet_price=61500.0,
+        )
+        snap = _make_snapshot(walls_below=[zone])
+        _apply_pressure_alignment([sig], snap, atr=300.0)
+        msgs = " ".join(sig.warnings)
+        for word in ("概率", "可能性"):
+            assert word not in msgs, f"warning 不得包含概率词「{word}」: {msgs!r}"
