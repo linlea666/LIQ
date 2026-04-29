@@ -60,12 +60,37 @@ export default function ZoneDetailCard({ zone, coin }: Props) {
       </header>
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-2">
-        <ScoreBar label="支撑信任" value={zone.support_trust} />
-        <ScoreBar label="阻力信任" value={zone.resistance_trust} />
+        <ScoreBar label="支撑信任（已校准）" value={zone.support_trust} />
+        <ScoreBar label="阻力信任（已校准）" value={zone.resistance_trust} />
         <ScoreBar label="扫单吸引" value={zone.sweep_attractiveness} />
         <ScoreBar label="打穿风险评分" value={zone.break_through_risk} />
         <ScoreBar label="数据可信度" value={zone.data_confidence} />
       </section>
+
+      {(zone.support_strength != null || zone.resistance_strength != null) && (
+        <section>
+          <h4 className="text-[10px] uppercase tracking-wider text-slate-500">
+            评分透明化（强度 vs 脆性）
+          </h4>
+          <p className="mt-0.5 text-[10px] text-slate-500 leading-snug">
+            校准信任 = 强度 × (1 − 0.5 × 脆性)；脆性来自同区合约层 active_attack / 撤墙风险
+          </p>
+          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2">
+            {(zone.support_strength ?? 0) > 0 && (
+              <>
+                <ScoreBar label="支撑强度（硬证据）" value={zone.support_strength ?? 0} />
+                <ScoreBar label="支撑脆性（攻击信号）" value={zone.support_fragility ?? 0} />
+              </>
+            )}
+            {(zone.resistance_strength ?? 0) > 0 && (
+              <>
+                <ScoreBar label="阻力强度（硬证据）" value={zone.resistance_strength ?? 0} />
+                <ScoreBar label="阻力脆性（攻击信号）" value={zone.resistance_fragility ?? 0} />
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {zone.layer_notes.length > 0 && (
         <section>

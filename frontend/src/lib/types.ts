@@ -2224,8 +2224,16 @@ export interface BrainPriceZone {
   dominant_role: BrainDominantRole;
   wall_zone_ids: string[];
   key_level_prices: number[];
+  /** 已校准的支撑信任 = support_strength × (1 - 0.5 × support_fragility) */
   support_trust: number;
+  /** 已校准的阻力信任 = resistance_strength × (1 - 0.5 × resistance_fragility) */
   resistance_trust: number;
+  /** P1-D：评分透明化拆分 — 硬证据强度（不含扣分） */
+  support_strength?: number;
+  /** P1-D：脆性（同区合约层 active_attack / removal_risk 综合，0=无攻击，1=正在被攻击） */
+  support_fragility?: number;
+  resistance_strength?: number;
+  resistance_fragility?: number;
   sweep_attractiveness: number;
   /** 打穿风险评分（0–1），非支撑/阻力标签 */
   break_through_risk: number;

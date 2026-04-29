@@ -663,3 +663,85 @@ def test_snapshot_json_contains_no_trade_instructions():
     # 概率措辞：只允许"打穿风险评分"，禁止"打穿概率/胜率/probability"
     assert "打穿概率" not in js, "禁止用'打穿概率'，应称'打穿风险评分'"
     assert "胜率" not in js, "MVP 阶段禁止显示胜率（无后验校准）"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P1-D 修复回归：support/resistance 拆 strength + fragility 两层
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_trust_equals_strength_when_no_attack():
+    """无 active_attack / removal_risk 时，trust 应等于 strength（向后兼容）。"""
+    last = 100_000.0
+    w = _wall(
+        price_mid=99_000.0, price_low=98_900.0, price_high=99_100.0,
+        side="bid", source="spot_only", has_spot_confluence=True,
+        support_resistance_trust_score=0.85,
+        active_attack_score=0.0, wall_removal_risk=0.0,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=1, last_price=last, walls_below=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    z = next(z for z in snap.zones if 98_900 <= z.price_mid <= 99_100)
+    assert z.support_strength == 0.85
+    assert z.support_fragility == 0.0
+    assert abs(z.support_trust - 0.85) < 0.001
+
+
+def test_trust_calibrated_down_when_futures_wall_under_attack():
+    """同区合约墙有高 active_attack → support_trust 被打折，但 strength 保持原值。"""
+    last = 100_000.0
+    # 现货支撑墙（提供 strength）
+    w_spot = _wall(
+        wall_zone_id="w_spot", price_mid=99_000.0, price_low=98_950.0,
+        price_high=99_050.0, side="bid", source="spot_only",
+        has_spot_confluence=True, support_resistance_trust_score=0.85,
+        active_attack_score=0.0,
+    )
+    # 同区合约买墙（提供 fragility）
+    w_fut = _wall(
+        wall_zone_id="w_fut", price_mid=99_000.0, price_low=98_950.0,
+        price_high=99_050.0, side="bid", source="depth_only",
+        has_spot_confluence=False, support_resistance_trust_score=0.40,
+        active_attack_score=0.80, wall_removal_risk=0.50,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=1, last_price=last, walls_below=[w_spot, w_fut],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    z = next(z for z in snap.zones if 98_950 <= z.price_mid <= 99_050)
+    # strength 应保留现货墙的 0.85（合约墙 0.40 较低不取）
+    assert z.support_strength >= 0.85 - 1e-3
+    # fragility = 0.6 × 0.80 + 0.4 × 0.50 = 0.68
+    assert abs(z.support_fragility - 0.68) < 0.01
+    # trust = 0.85 × (1 - 0.5 × 0.68) = 0.85 × 0.66 = 0.561
+    assert abs(z.support_trust - 0.561) < 0.01
+    # evidence 应有脆性警示
+    assert any("支撑脆性" in e for e in z.evidence)
+
+
+def test_fragility_only_counts_pure_futures_wall_not_spot():
+    """现货墙自身的 active_attack 不应触发 fragility（语义：现货被买 ≠ 被攻击）。"""
+    last = 100_000.0
+    # 仅一个现货墙，自带高 active_attack（罕见但不应被错误归类）
+    w = _wall(
+        price_mid=99_000.0, price_low=98_950.0, price_high=99_050.0,
+        side="bid", source="spot_only", has_spot_confluence=True,
+        support_resistance_trust_score=0.80,
+        active_attack_score=0.90, wall_removal_risk=0.40,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=1, last_price=last, walls_below=[w],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    z = next(z for z in snap.zones if 98_950 <= z.price_mid <= 99_050)
+    # fragility 应为 0（现货墙的攻击信号不计入支撑脆性）
+    assert z.support_fragility == 0.0
+    assert abs(z.support_trust - 0.80) < 0.001

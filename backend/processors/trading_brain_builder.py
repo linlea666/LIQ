@@ -289,6 +289,11 @@ def _build_zone_from_cluster(
     max_sa = 0.0
     max_btr = 0.0
     dconf_parts: list[float] = []
+    # P1-D：fragility 信号收集（同区合约墙的 active_attack / removal_risk 取 max）
+    max_active_attack_sup = 0.0  # 仅 bid 侧合约墙 → 攻击支撑
+    max_active_attack_res = 0.0  # 仅 ask 侧合约墙 → 攻击阻力
+    max_removal_sup = 0.0
+    max_removal_res = 0.0
 
     for piece in cl.pieces:
         if piece.kind == "wall" and piece.wall:
@@ -313,8 +318,24 @@ def _build_zone_from_cluster(
 
             if w.side == "bid":
                 max_sup = max(max_sup, float(w.support_resistance_trust_score))
+                # 仅纯合约墙（无现货共振）的 active_attack 才计入支撑脆性 — 现货墙
+                # 自身的 active_attack 通常意味"被买"而非"被攻击"，语义需区分
+                if not spot:
+                    max_active_attack_sup = max(
+                        max_active_attack_sup, float(w.active_attack_score or 0.0),
+                    )
+                    max_removal_sup = max(
+                        max_removal_sup, float(w.wall_removal_risk or 0.0),
+                    )
             else:
                 max_res = max(max_res, float(w.support_resistance_trust_score))
+                if not spot:
+                    max_active_attack_res = max(
+                        max_active_attack_res, float(w.active_attack_score or 0.0),
+                    )
+                    max_removal_res = max(
+                        max_removal_res, float(w.wall_removal_risk or 0.0),
+                    )
             max_sa = max(max_sa, float(w.sweep_attractiveness_score))
             max_btr = max(max_btr, float(w.break_through_risk))
             dconf_parts.append(float(w.trust_score))
@@ -359,6 +380,28 @@ def _build_zone_from_cluster(
             dconf_parts.append(0.65)
 
     data_confidence = round(sum(dconf_parts) / max(len(dconf_parts), 1), 3) if dconf_parts else 0.35
+
+    # P1-D：拆 strength + fragility 两层；trust = strength × (1 - 0.5 × fragility)。
+    # fragility = 0.6 × active_attack + 0.4 × removal_risk（同区纯合约墙的最强信号）。
+    # 0.5 上限 = "完全被攻击时，trust 最多腰斩"（保守扣分；不抹零原始 strength 证据）。
+    sup_strength = max_sup
+    res_strength = max_res
+    sup_fragility = round(min(1.0, 0.6 * max_active_attack_sup + 0.4 * max_removal_sup), 3)
+    res_fragility = round(min(1.0, 0.6 * max_active_attack_res + 0.4 * max_removal_res), 3)
+    sup_trust = round(sup_strength * (1.0 - 0.5 * sup_fragility), 3)
+    res_trust = round(res_strength * (1.0 - 0.5 * res_fragility), 3)
+
+    # 当 fragility ≥ 0.30 时追加 evidence 警示，让用户能看到"为什么 trust 被打折"
+    if sup_fragility >= 0.30 and sup_strength > 0:
+        evidence.append(
+            f"[支撑脆性] 同区合约层正受攻击（active_attack {max_active_attack_sup:.2f} / "
+            f"removal_risk {max_removal_sup:.2f}）— 已对支撑信任打折 {int(50 * sup_fragility)}%"
+        )
+    if res_fragility >= 0.30 and res_strength > 0:
+        evidence.append(
+            f"[阻力脆性] 同区合约层正受攻击（active_attack {max_active_attack_res:.2f} / "
+            f"removal_risk {max_removal_res:.2f}）— 已对阻力信任打折 {int(50 * res_fragility)}%"
+        )
 
     # dominant_label
     if roles.liquidation_magnet and not (roles.key_level or roles.spot_supply_wall or roles.futures_liquidity_wall):
@@ -408,8 +451,12 @@ def _build_zone_from_cluster(
         dominant_role=dom_role,
         wall_zone_ids=sorted(set(wall_ids)),
         key_level_prices=sorted(set(kl_prices)),
-        support_trust=round(max_sup, 3),
-        resistance_trust=round(max_res, 3),
+        support_trust=sup_trust,
+        resistance_trust=res_trust,
+        support_strength=round(sup_strength, 3),
+        support_fragility=sup_fragility,
+        resistance_strength=round(res_strength, 3),
+        resistance_fragility=res_fragility,
         sweep_attractiveness=round(max_sa, 3),
         break_through_risk=round(max_btr, 3),
         data_confidence=data_confidence,

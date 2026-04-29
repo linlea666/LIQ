@@ -79,7 +79,22 @@ class BrainPriceZone(BaseModel):
     key_level_prices: list[float] = Field(default_factory=list)
 
     support_trust: float = 0.0
+    """支撑信任（已校准）= support_strength × (1 - 0.5 × support_fragility)。
+    保留为向后兼容门槛字段；新展示请直接读 strength + fragility 两层。"""
     resistance_trust: float = 0.0
+    """阻力信任（已校准）= resistance_strength × (1 - 0.5 × resistance_fragility)。"""
+
+    # P1-D：评分透明化（拆分原 max() 单层）— UI 可同时展示 strength 与 fragility。
+    support_strength: float = 0.0
+    """支撑硬证据强度（max of 同区现货墙 SR / 关键位 final_score）；不含扣分。"""
+    support_fragility: float = 0.0
+    """支撑脆性（同区合约层 active_attack / wall_removal_risk 的综合）；
+    0 = 无攻击信号，1 = 当前正在被攻击。最终 trust 按此扣 50% 上限。"""
+    resistance_strength: float = 0.0
+    """阻力硬证据强度（max of 同区现货墙 SR / 关键位 final_score）；不含扣分。"""
+    resistance_fragility: float = 0.0
+    """阻力脆性。"""
+
     sweep_attractiveness: float = 0.0
     break_through_risk: float = 0.0
     data_confidence: float = 0.0
