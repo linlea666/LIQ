@@ -39,6 +39,28 @@ export default function OpportunityBoard({
         </span>
       </header>
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto p-2">
+        {/* P1-B：全部 0 项时显示解释文案，避免用户误以为系统坏了 */}
+        {opportunities.length === 0 && (
+          <section className="rounded border border-slate-700/50 bg-slate-900/40 p-2.5">
+            <h4 className="text-[11px] font-medium text-slate-300">
+              当前无符合「高盈亏比」门槛的观察机会
+            </h4>
+            <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+              系统已开启严格门槛：T1 RR ≥ 2.0 / 信任分 ≥ 0.7 / 数据置信度 ≥ 0.75。
+              0 项不代表「行情没机会」，而是当前结构未达到值得限价试错或扫破观察的水平。
+            </p>
+            <ul className="mt-2 space-y-0.5 text-[10px] leading-snug text-slate-500">
+              <li>· 距离最近强 zone 的 RR 不够（最近 zone 太近或方向不对）</li>
+              <li>· 信任分未达门槛（缺少现货墙 / 双源 / Coinbase 共振硬证据）</li>
+              <li>· 数据置信度未达门槛（部分数据源 stale 或 missing）</li>
+              <li>· regime 与方向冲突（trend_down 屏蔽做多 / trend_up 屏蔽做空）</li>
+            </ul>
+            <p className="mt-2 text-[10px] leading-snug text-emerald-400/80">
+              建议：等结构形成（关注 ZoneDetailCard 的「硬证据 chip」出现 ★ 机构 / 双源 /
+              Coinbase 共振时再观察）
+            </p>
+          </section>
+        )}
         {cols.map((col) => (
           <section key={col.key} className={`rounded border ${col.tone} bg-slate-900/30 p-1.5`}>
             <div className="mb-1 flex items-baseline justify-between px-0.5">

@@ -2,7 +2,7 @@
 
 覆盖优先级互斥：
   1. dual_battleground（SR ≥ 0.6 AND SA ≥ 0.6，最高优先级）
-  2. institutional_footprint（coinbase_max_single ≥ 100k）
+  2. institutional_footprint（coinbase_max_single ≥ 1M，与前端 ★ 严格对齐）
   3. support_resistance_strong（SR ≥ 0.7 且 SA < 0.4）
   4. magnet_strong（SA ≥ 0.6 且 SR < 0.5）
   5. spoof_suspect（trust < 0.55 且 removal_risk ≥ 0.6）
@@ -82,8 +82,9 @@ class TestEachRoleClassified:
         assert _classify_dominant_role(zone) == "dual_battleground"
 
     def test_institutional_footprint(self):
-        """coinbase_max_single ≥ 100k → institutional_footprint"""
-        zone = _make_zone(coinbase_max_single=150_000)
+        """coinbase_max_single ≥ 1M → institutional_footprint
+        （W4-T1 阶段 P1-A：阈值从 100k 提升到 1M，与前端 ★ 对齐）"""
+        zone = _make_zone(coinbase_max_single=1_500_000)
         assert _classify_dominant_role(zone) == "institutional_footprint"
 
     def test_support_resistance_strong(self):
@@ -120,13 +121,13 @@ class TestEachRoleClassified:
 class TestPriorityOrdering:
     def test_dual_battleground_wins_over_institutional(self):
         """同时满足 dual_battleground 和 institutional → 仅 dual_battleground"""
-        zone = _make_zone(sr=0.7, sa=0.7, coinbase_max_single=200_000)
+        zone = _make_zone(sr=0.7, sa=0.7, coinbase_max_single=2_000_000)
         assert _classify_dominant_role(zone) == "dual_battleground"
 
     def test_institutional_wins_over_sr_strong(self):
-        """SR ≥ 0.7 + SA < 0.4 但 coinbase_max_single ≥ 100k → institutional 优先
+        """SR ≥ 0.7 + SA < 0.4 但 coinbase_max_single ≥ 1M → institutional 优先
            （机构布局信号比"反弹可信"更具体）"""
-        zone = _make_zone(sr=0.85, sa=0.2, coinbase_max_single=150_000)
+        zone = _make_zone(sr=0.85, sa=0.2, coinbase_max_single=1_500_000)
         assert _classify_dominant_role(zone) == "institutional_footprint"
 
     def test_sr_strong_wins_over_magnet_when_sa_low(self):
@@ -164,15 +165,25 @@ class TestBoundaries:
         # SR < 0.7 不进 sr_strong；SA ≥ 0.6 但 SR ≥ 0.5 不进 magnet → ordinary
         assert _classify_dominant_role(zone) == "ordinary"
 
-    def test_institutional_exact_100k(self):
-        """coinbase_max_single = 100_000 边界 → institutional_footprint"""
-        zone = _make_zone(coinbase_max_single=100_000)
+    def test_institutional_exact_1m(self):
+        """coinbase_max_single = 1_000_000 边界 → institutional_footprint
+        （W4-T1 阶段 P1-A：阈值从 100k 提升到 1M，与前端 ★ 严格对齐）"""
+        zone = _make_zone(coinbase_max_single=1_000_000)
         assert _classify_dominant_role(zone) == "institutional_footprint"
 
-    def test_institutional_just_below_100k(self):
-        """coinbase_max_single = 99_999 → 不算"""
-        zone = _make_zone(coinbase_max_single=99_999)
+    def test_institutional_just_below_1m(self):
+        """coinbase_max_single = 999_999 → 不算（避免标签语义稀释）"""
+        zone = _make_zone(coinbase_max_single=999_999)
         assert _classify_dominant_role(zone) == "ordinary"
+
+    def test_institutional_at_old_100k_no_longer_triggers(self):
+        """W4-T1 阶段 P1-A 回归保障：100k 单档不再被误标为 institutional_footprint。
+        修复用户截图实测 bug：CB 单档 44.6 万被误标 institutional_footprint，
+        但前端无 ★（前端阈值 1M），导致标签语义稀释。"""
+        zone = _make_zone(coinbase_max_single=446_000)  # 截图实测值
+        assert _classify_dominant_role(zone) == "ordinary"
+        zone2 = _make_zone(coinbase_max_single=100_000)
+        assert _classify_dominant_role(zone2) == "ordinary"
 
     def test_sr_strong_sa_exactly_04(self):
         """SR=0.7 且 SA=0.4 → 不进 sr_strong（SA < 0.4 是严格 <）"""

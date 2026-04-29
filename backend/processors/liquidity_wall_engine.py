@@ -100,6 +100,11 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "sr_bonus_large_single_500k": 0.06,        # ≥ 500k 中型机构挂单
     "sr_bonus_large_single_1m": 0.10,          # ≥ 1M 机构级（与前端 ★ 对齐）
     "sr_bonus_large_single_5m": 0.13,          # ≥ 5M 大型机构（封顶，避免单维度主导）
+    # W4-T1 阶段 P1-A：dominant_role institutional_footprint 阈值
+    # 旧：100k → 与前端 SpotOrderBookPanel ★ (1M) 不一致，导致 44 万单档也被标
+    # institutional_footprint 但前端无 ★，标签语义稀释
+    # 新：1M（与前端 ★ + SR ladder "机构级" 档对齐）→ 真正机构级才标
+    "dominant_role_institutional_threshold": 1_000_000,
 
     # M1：persistence / trend
     "warming_seconds": 1800,               # 30min 暖机期内不出 persistence/magnet
@@ -1204,8 +1209,9 @@ def _classify_dominant_role(zone: WallZone) -> DominantRole:
       1. dual_battleground         双向博弈热点 — SR ≥ 0.6 AND SA ≥ 0.6
                                     SR 与 SA 同时高，需结合 §1 CVD / §9g absorption
                                     综合判断方向（W2-T1 核心洞察）
-      2. institutional_footprint   机构 footprint — coinbase_max_single_order_usd ≥ 100k
-                                    Coinbase 单笔订单 ≥ 10 万 USD/笔（机构挂单 vs 散户聚集）
+      2. institutional_footprint   机构 footprint — coinbase_max_single_order_usd ≥ 1M
+                                    Coinbase 单笔订单 ≥ 100 万 USD/笔（与前端 SpotOrderBookPanel
+                                    ★ 阈值 + SR ladder "机构级" 档严格对齐，避免标签语义稀释）
       3. support_resistance_strong 强支撑/阻力 — SR ≥ 0.7 且 SA < 0.4
                                     干净的强反弹墙（双源 + 持续 + 已被验证承接过）
       4. magnet_strong             强清算磁铁 — SA ≥ 0.6 且 SR < 0.5
@@ -1227,7 +1233,10 @@ def _classify_dominant_role(zone: WallZone) -> DominantRole:
 
     if sr >= 0.6 and sa >= 0.6:
         return "dual_battleground"
-    if zone.coinbase_max_single_order_usd >= 100_000:
+    # W4-T1 阶段 P1-A：阈值与前端 SpotOrderBookPanel ★ + SR ladder "机构级" 档严格对齐
+    if zone.coinbase_max_single_order_usd >= ENGINE_DEFAULTS[
+        "dominant_role_institutional_threshold"
+    ]:
         return "institutional_footprint"
     if sr >= 0.7 and sa < 0.4:
         return "support_resistance_strong"
