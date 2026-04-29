@@ -1815,6 +1815,26 @@ def _detect_zone_lifecycle_events(
                 wall_zone_id=zid,
             ))
 
+        # W2-T5：第 7 类复合事件 — 同帧既消耗又撤单（试盘 + 撤退 footprint）
+        # 触发条件：ended_with_exec 与 ended_no_exec 都非空
+        # 语义：机构试探流动性后撤退；比单一 consumed / removed 都更可疑
+        # confidence 0.75 高于单一事件（联合证据强）
+        if ended_with_exec and ended_no_exec:
+            total_executed = sum(lo.executed_usd_value for lo in ended_with_exec)
+            events.append(WallEvent(
+                ts_sec=now, side=z.side, price_mid=z.price_mid,
+                event_type="wall_consumed_and_removed",
+                size_before_usd=z.max_usd_1h,
+                size_after_usd=z.current_usd,
+                executed_usd_value=total_executed,
+                confidence=0.75,
+                explain=(
+                    f"试盘后撤退：吃单 {total_executed/1e6:.1f}M USD + 撤单 "
+                    f"{len(ended_no_exec)} 笔（机构 footprint，比纯 spoof 更可疑）"
+                ),
+                wall_zone_id=zid,
+            ))
+
         # reloaded：在 reload_window_seconds 内出现新挂单（end_time + window > now，且新 id 落在同价位）
         win = cfg.get("reload_window_seconds", ENGINE_DEFAULTS["reload_window_seconds"])
         tol = cfg.get("reload_price_tol_pct", ENGINE_DEFAULTS["reload_price_tol_pct"])

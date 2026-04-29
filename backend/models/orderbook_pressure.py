@@ -213,7 +213,7 @@ WallZoneSource = Literal[
 # 趋势（M1）
 WallZoneTrend = Literal["new", "strengthening", "weakening", "stable"]
 
-# WallEvent 类型（M2）
+# WallEvent 类型（M2 + W2-T5）
 WallEventType = Literal[
     "wall_appeared",
     "wall_strengthened",
@@ -221,6 +221,11 @@ WallEventType = Literal[
     "wall_removed",
     "wall_consumed",
     "wall_reloaded",
+    # W2-T5：第 7 类复合事件 — 同一 zone 在同一帧既被部分吃单又被部分撤单
+    # 语义："试盘 + 撤退" footprint —— 机构挂大单试探流动性，部分被吃后撤掉剩余
+    # 比单纯 consumed 或 removed 都更可疑（既不是真支撑，也不是纯 spoof）
+    # 同帧仍会独立发 wall_consumed + wall_removed（向后兼容）；本事件作"复合解读"
+    "wall_consumed_and_removed",
 ]
 
 # 拥挤度推断状态（M2）
