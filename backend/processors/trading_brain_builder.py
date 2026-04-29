@@ -1,0 +1,581 @@
+"""交易大脑聚合构建器：把关键位 / 流动性墙 / 清算数据合并为 PriceZone。
+
+根因：
+    现有仪表盘各 tab 独立，缺少「同一条价格轴」上的统一解释；本模块仅做只读聚合，
+    不引入新打分公式（遵守铁律）。
+
+复用：
+    - KeyLevelSnapshotV2 / OrderbookPressureSnapshot / LiquidationMap 已是权威输出
+    - 评分字段：wall 侧直接读 SR/SA/break_through_risk；KL 侧用 final_score 与 cascade_risk 做展示映射
+"""
+from __future__ import annotations
+
+import hashlib
+import time
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from models.key_level import KeyLevelSnapshotV2, KeyLevelV2, LiqMagnetLevel
+from models.liquidation import LiqCluster, LiquidationMap
+from models.orderbook_pressure import (
+    OrderbookPressureSnapshot,
+    SweepTarget,
+    WallEvent,
+    WallZone,
+)
+from models.trading_brain import (
+    BrainContextChips,
+    BrainDataQuality,
+    BrainEvent,
+    BrainPriceZone,
+    BrainRankings,
+    BrainScenario,
+    BrainZoneRoles,
+    TradingBrainSnapshot,
+)
+
+
+@dataclass
+class _RawPiece:
+    anchor: float
+    p_lo: float
+    p_hi: float
+    kind: str  # "wall" | "level" | "liq_cluster" | "magnet"
+    wall: Optional[WallZone] = None
+    level: Optional[KeyLevelV2] = None
+    liq: Optional[LiqCluster] = None
+    magnet: Optional[LiqMagnetLevel] = None
+
+
+@dataclass
+class _Cluster:
+    pieces: list[_RawPiece] = field(default_factory=list)
+
+    @property
+    def p_lo(self) -> float:
+        return min(p.p_lo for p in self.pieces)
+
+    @property
+    def p_hi(self) -> float:
+        return max(p.p_hi for p in self.pieces)
+
+    @property
+    def anchor_mid(self) -> float:
+        return (self.p_lo + self.p_hi) / 2.0
+
+
+def merge_tolerance(last_price: float, atr: float) -> float:
+    """Q2=A：max(0.5×ATR, 0.3%×价)。ATR 缺失时只用 0.3%。"""
+    pct = abs(last_price) * 0.003
+    if atr and atr > 0:
+        return max(0.5 * atr, pct)
+    return pct
+
+
+def _fmt_usd_short(usd: float) -> str:
+    if usd >= 1e9:
+        return f"{usd / 1e9:.2f}B"
+    if usd >= 1e6:
+        return f"{usd / 1e6:.1f}M"
+    if usd >= 1e3:
+        return f"{usd / 1e3:.0f}K"
+    return f"{usd:.0f}"
+
+
+def _kl_to_score_01(lv: KeyLevelV2, *, support_side: bool) -> tuple[float, float]:
+    """(support_trust, resistance_trust) 展示映射；不修改原字段。"""
+    fs = max(0.0, min(1.0, float(lv.final_score) / 100.0))
+    if lv.side == "support" and support_side:
+        return fs, 0.0
+    if lv.side == "resistance" and not support_side:
+        return 0.0, fs
+    return 0.0, 0.0
+
+
+def _wall_spot_supply(w: WallZone) -> bool:
+    return bool(
+        w.source in ("spot_only", "spot+depth")
+        or w.has_spot_confluence
+        or w.coinbase_spot_confluence
+    )
+
+
+def _wall_futures_liquidity(w: WallZone) -> bool:
+    return bool(
+        w.source in ("depth_only", "depth+large_order", "large_order_only", "spot+depth")
+    )
+
+
+def _collect_pieces(
+    *,
+    walls_above: list[WallZone],
+    walls_below: list[WallZone],
+    levels: list[KeyLevelV2],
+    liq_above: list[LiqCluster],
+    liq_below: list[LiqCluster],
+    magnets: list[LiqMagnetLevel],
+    merge_tol: float,
+    last_price: float,
+) -> list[_RawPiece]:
+    pieces: list[_RawPiece] = []
+
+    for w in list(walls_above) + list(walls_below):
+        pieces.append(_RawPiece(
+            anchor=w.price_mid,
+            p_lo=w.price_low,
+            p_hi=w.price_high,
+            kind="wall",
+            wall=w,
+        ))
+
+    half = max(merge_tol * 0.5, last_price * 0.0002)
+    for lv in levels:
+        p = float(lv.price)
+        pieces.append(_RawPiece(
+            anchor=p,
+            p_lo=p - half,
+            p_hi=p + half,
+            kind="level",
+            level=lv,
+        ))
+
+    for c in list(liq_above) + list(liq_below):
+        pieces.append(_RawPiece(
+            anchor=float(c.price_center),
+            p_lo=float(c.price_from),
+            p_hi=float(c.price_to),
+            kind="liq_cluster",
+            liq=c,
+        ))
+
+    band = max(merge_tol * 0.35, last_price * 0.00015)
+    for m in magnets:
+        p = float(m.price)
+        pieces.append(_RawPiece(
+            anchor=p,
+            p_lo=p - band,
+            p_hi=p + band,
+            kind="magnet",
+            magnet=m,
+        ))
+
+    return pieces
+
+
+def _cluster_pieces(pieces: list[_RawPiece], tol: float) -> list[_Cluster]:
+    if not pieces:
+        return []
+    ordered = sorted(pieces, key=lambda x: x.anchor)
+    clusters: list[_Cluster] = []
+    for p in ordered:
+        placed = False
+        for cl in clusters:
+            if abs(p.anchor - cl.anchor_mid) <= tol:
+                cl.pieces.append(p)
+                placed = True
+                break
+        if not placed:
+            clusters.append(_Cluster(pieces=[p]))
+    return clusters
+
+
+def _liq_sweep_score(c: LiqCluster) -> float:
+    """清算簇 → 扫单吸引力 proxy（0–1），仅展示用。"""
+    u = max(0.0, float(c.total_usd))
+    raw = u / (200_000_000.0 + u)
+    if c.exchange_count >= 3:
+        raw = min(1.0, raw + 0.08)
+    return round(min(1.0, raw), 3)
+
+
+def _build_zone_from_cluster(
+    cl: _Cluster,
+    *,
+    coin: str,
+    last_price: float,
+    idx: int,
+) -> BrainPriceZone:
+    z_lo, z_hi = cl.p_lo, cl.p_hi
+    z_mid = (z_lo + z_hi) / 2.0
+    dist = (z_mid - last_price) / max(last_price, 1e-9) * 100.0
+
+    digest = hashlib.sha1(
+        f"{coin}|{z_lo:.2f}|{z_hi:.2f}|{idx}".encode()
+    ).hexdigest()[:12]
+    zone_id = f"{coin}_{digest}"
+
+    roles = BrainZoneRoles()
+    evidence: list[str] = []
+    layer_notes: list[str] = []
+
+    wall_ids: list[str] = []
+    kl_prices: list[float] = []
+
+    max_sup = 0.0
+    max_res = 0.0
+    max_sa = 0.0
+    max_btr = 0.0
+    dconf_parts: list[float] = []
+
+    for piece in cl.pieces:
+        if piece.kind == "wall" and piece.wall:
+            w = piece.wall
+            if w.wall_zone_id:
+                wall_ids.append(w.wall_zone_id)
+            spot = _wall_spot_supply(w)
+            fut = _wall_futures_liquidity(w)
+            roles.spot_supply_wall = roles.spot_supply_wall or spot
+            roles.futures_liquidity_wall = roles.futures_liquidity_wall or fut
+            roles.coinbase_confluence = roles.coinbase_confluence or w.coinbase_spot_confluence
+
+            side_cn = "买墙（下方支撑候选的流动性证据）" if w.side == "bid" else "卖墙（上方阻力候选的流动性证据）"
+            layer = "现货供需层" if spot and not fut else ("双源（现货+合约）层" if w.source == "spot+depth" else "合约流动性层")
+            layer_notes.append(f"{layer}：{side_cn}")
+
+            ev = (
+                f"[{layer}] 厚度约 {_fmt_usd_short(w.current_usd)} USD · "
+                f"信任评分 {w.trust_score:.2f} · 打穿风险评分 {w.break_through_risk:.2f}"
+            )
+            evidence.append(ev)
+
+            if w.side == "bid":
+                max_sup = max(max_sup, float(w.support_resistance_trust_score))
+            else:
+                max_res = max(max_res, float(w.support_resistance_trust_score))
+            max_sa = max(max_sa, float(w.sweep_attractiveness_score))
+            max_btr = max(max_btr, float(w.break_through_risk))
+            dconf_parts.append(float(w.trust_score))
+
+        elif piece.kind == "level" and piece.level:
+            lv = piece.level
+            kl_prices.append(float(lv.price))
+            roles.key_level = True
+            tier = lv.strength_tier
+            sup_s, res_s = _kl_to_score_01(lv, support_side=(lv.side == "support"))
+            max_sup = max(max_sup, sup_s)
+            max_res = max(max_res, res_s)
+            max_btr = max(max_btr, float(lv.cascade_risk))
+            dconf_parts.append(max(0.0, min(1.0, float(lv.confluence_score) / 100.0)))
+
+            evidence.append(
+                f"[关键位] {tier}级{('支撑' if lv.side == 'support' else '阻力')} · "
+                f"共振分 {lv.confluence_score:.0f} · 数据来自关键位引擎（未改分）"
+            )
+            if lv.note:
+                evidence.append(f"[关键位说明] {lv.note}")
+
+        elif piece.kind == "liq_cluster" and piece.liq:
+            c = piece.liq
+            roles.liquidation_magnet = True
+            side_cn = "多头" if c.side == "long" else "空头"
+            evidence.append(
+                f"[清算磁铁] {side_cn}清算密集区 · 约 {_fmt_usd_short(c.total_usd)} USD · "
+                f"属扫单/磁吸目标，不作为支撑或阻力"
+            )
+            max_sa = max(max_sa, _liq_sweep_score(c))
+            dconf_parts.append(0.75 if c.exchange_count >= 3 else 0.55)
+
+        elif piece.kind == "magnet" and piece.magnet:
+            m = piece.magnet
+            roles.liquidation_magnet = True
+            evidence.append(
+                f"[清算磁铁] {m.note or m.magnet_role} · "
+                f"约 {_fmt_usd_short(m.usd)} USD（{m.source}）"
+            )
+            max_sa = max(max_sa, min(1.0, float(m.usd) / (150_000_000.0 + float(m.usd))))
+            dconf_parts.append(0.65)
+
+    data_confidence = round(sum(dconf_parts) / max(len(dconf_parts), 1), 3) if dconf_parts else 0.35
+
+    # dominant_label
+    if roles.liquidation_magnet and not (roles.key_level or roles.spot_supply_wall or roles.futures_liquidity_wall):
+        dom = "清算磁铁（磁吸/扫单目标位）"
+    elif roles.spot_supply_wall and roles.futures_liquidity_wall:
+        dom = "多源争夺区（现货供需 + 合约流动性）"
+    elif roles.key_level and (roles.spot_supply_wall or roles.futures_liquidity_wall):
+        dom = "关键位 + 流动性共振区"
+    elif roles.key_level:
+        dom = "关键价位区"
+    elif roles.spot_supply_wall:
+        dom = "现货供需墙区（支撑/阻力候选）"
+    elif roles.futures_liquidity_wall:
+        dom = "合约流动性墙区"
+    else:
+        dom = "价格关注区"
+
+    scen = BrainScenario(
+        if_hold="关注该区是否出现成交吸收、墙厚度是否维持、现货/合约 CVD 是否同向走弱。",
+        if_break="关注邻近清算磁铁、打穿风险评分与流动性真空；不作为交易指令。",
+        invalidates_if="以关键位失效条件或更高周期收盘结构为准（若本区含关键位，详见关键位卡片）。",
+    )
+
+    return BrainPriceZone(
+        zone_id=zone_id,
+        coin=coin,
+        price_low=round(z_lo, 4),
+        price_high=round(z_hi, 4),
+        price_mid=round(z_mid, 4),
+        distance_pct=round(dist, 3),
+        roles=roles,
+        dominant_label=dom,
+        wall_zone_ids=sorted(set(wall_ids)),
+        key_level_prices=sorted(set(kl_prices)),
+        support_trust=round(max_sup, 3),
+        resistance_trust=round(max_res, 3),
+        sweep_attractiveness=round(max_sa, 3),
+        break_through_risk=round(max_btr, 3),
+        data_confidence=data_confidence,
+        evidence=evidence[:12],
+        scenario=scen,
+        layer_notes=layer_notes[:8],
+    )
+
+
+def _build_summary(zones: list[BrainPriceZone], last_price: float) -> str:
+    below = [z for z in zones if z.price_mid < last_price]
+    above = [z for z in zones if z.price_mid > last_price]
+    below.sort(key=lambda z: abs(z.distance_pct))
+    above.sort(key=lambda z: abs(z.distance_pct))
+
+    parts: list[str] = []
+    if below:
+        b0 = below[0]
+        if b0.roles.spot_supply_wall and b0.roles.key_level:
+            parts.append(
+                f"下方约 {b0.price_mid:,.0f} 出现现货供需墙与关键位证据叠加"
+            )
+        elif b0.roles.liquidation_magnet:
+            parts.append(
+                f"下方约 {b0.price_mid:,.0f} 存在清算磁铁/密集区（磁吸目标，非纯粹支撑）"
+            )
+        elif b0.roles.key_level:
+            parts.append(f"下方约 {b0.price_mid:,.0f} 有关键位证据")
+    if above:
+        a0 = above[0]
+        if a0.roles.liquidation_magnet:
+            parts.append(
+                f"上方约 {a0.price_mid:,.0f} 存在清算相关磁吸区"
+            )
+    if not parts:
+        return "当前价附近暂无强聚合证据，请留意数据质量与更新时间。"
+    return "；".join(parts) + "。本页为结构与流动性辅助视图，不含交易指令。"
+
+
+def _iter_sweep_targets(op: OrderbookPressureSnapshot) -> list[SweepTarget]:
+    """聚合扫单磁铁参照：顶层 top_sweep_targets（若将来写入）+ 各墙区 sweep_target。"""
+    out: list[SweepTarget] = []
+    seen: set[tuple[float, str]] = set()
+    for t in list(getattr(op, "top_sweep_targets", None) or []):
+        if not isinstance(t, SweepTarget):
+            continue
+        key = (float(t.magnet_price), str(t.direction))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    for w in list(op.walls_above or []) + list(op.walls_below or []):
+        st = getattr(w, "sweep_target", None)
+        if st is None:
+            continue
+        key = (float(st.magnet_price), str(st.direction))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(st)
+    return out
+
+
+def _wall_event_message(ev: WallEvent) -> str:
+    mapping = {
+        "wall_appeared": "墙区新出现",
+        "wall_strengthened": "墙增厚",
+        "wall_weakened": "墙减薄",
+        "wall_removed": "墙撤单/结束（未成交部分）",
+        "wall_consumed": "墙被成交消耗",
+        "wall_reloaded": "同价区疑似重挂",
+        "wall_consumed_and_removed": "同帧内既消耗又撤单（结构变化）",
+    }
+    base = mapping.get(str(ev.event_type), str(ev.event_type))
+    side = "买侧" if ev.side == "bid" else "卖侧"
+    return f"{side}{base}"
+
+
+def _build_events(
+    op: Optional[OrderbookPressureSnapshot],
+    *,
+    now_sec: int,
+    wall_layer: str = "futures",
+) -> list[BrainEvent]:
+    if not op or not op.wall_events:
+        return []
+    out: list[BrainEvent] = []
+    for ev in op.wall_events:
+        ts = int(ev.ts_sec or 0)
+        if ts <= 0 or now_sec - ts > 1800:
+            continue
+        layer: Any = "spot" if wall_layer == "spot" else "futures"
+        out.append(BrainEvent(
+            ts=ts,
+            layer=layer,
+            price_mid=float(ev.price_mid),
+            zone_id=str(ev.wall_zone_id or ""),
+            message=_wall_event_message(ev),
+            source="liquidity_wall_engine",
+        ))
+    out.sort(key=lambda e: e.ts, reverse=True)
+    return out[:40]
+
+
+def _rankings(zones: list[BrainPriceZone]) -> BrainRankings:
+    sup_ids = [
+        z.zone_id for z in sorted(
+            [x for x in zones if x.support_trust >= 0.05 and (x.roles.key_level or x.roles.spot_supply_wall)],
+            key=lambda z: (-z.support_trust, abs(z.distance_pct)),
+        )[:8]
+    ]
+    res_ids = [
+        z.zone_id for z in sorted(
+            [x for x in zones if x.resistance_trust >= 0.05 and (x.roles.key_level or x.roles.spot_supply_wall)],
+            key=lambda z: (-z.resistance_trust, abs(z.distance_pct)),
+        )[:8]
+    ]
+    sweep_ids = [
+        z.zone_id for z in sorted(
+            [
+                x for x in zones
+                if x.roles.liquidation_magnet
+                or x.sweep_attractiveness >= 0.45
+                or (x.roles.futures_liquidity_wall and x.sweep_attractiveness >= 0.35)
+            ],
+            key=lambda z: (-z.sweep_attractiveness, abs(z.distance_pct)),
+        )[:8]
+    ]
+    btr_ids = [
+        z.zone_id for z in sorted(
+            [x for x in zones if x.break_through_risk >= 0.2],
+            key=lambda z: (-z.break_through_risk, abs(z.distance_pct)),
+        )[:8]
+    ]
+
+    return BrainRankings(
+        support_trust=sup_ids,
+        resistance_trust=res_ids,
+        sweep_targets=sweep_ids,
+        break_through_risk=btr_ids,
+    )
+
+
+def build_trading_brain_snapshot(
+    *,
+    coin: str,
+    last_price: float,
+    atr: float,
+    kl: Optional[KeyLevelSnapshotV2],
+    op: Optional[OrderbookPressureSnapshot],
+    liq: Optional[LiquidationMap],
+    cvd_contract_trend: str = "",
+    cvd_spot_trend: str = "",
+    oi_delta_1h_pct: Optional[float] = None,
+    funding_interpretation: str = "",
+    max_zones: int = 24,
+) -> TradingBrainSnapshot:
+    """纯函数：由调用方从 CoinState 抽出字段后传入。"""
+    now_sec = int(time.time())
+    tol = merge_tolerance(last_price, atr)
+
+    walls_above = list(op.walls_above) if op else []
+    walls_below = list(op.walls_below) if op else []
+    levels = list(kl.levels) if kl else []
+    liq_a = list(liq.clusters_above) if liq else []
+    liq_b = list(liq.clusters_below) if liq else []
+    magnets = list(kl.magnet_levels) if kl else []
+
+    pieces = _collect_pieces(
+        walls_above=walls_above,
+        walls_below=walls_below,
+        levels=levels,
+        liq_above=liq_a,
+        liq_below=liq_b,
+        magnets=magnets,
+        merge_tol=tol,
+        last_price=last_price,
+    )
+    clusters = _cluster_pieces(pieces, tol)
+    zones = [
+        _build_zone_from_cluster(c, coin=coin, last_price=last_price, idx=i)
+        for i, c in enumerate(clusters)
+    ]
+    zones.sort(key=lambda z: abs(z.distance_pct))
+    if max_zones > 0:
+        zones = zones[:max_zones]
+
+    summary = _build_summary(zones, last_price)
+    rankings = _rankings(zones)
+    events = _build_events(op, now_sec=now_sec)
+
+    # 数据质量
+    dq_notes: list[str] = []
+    lq = op.data_quality if op else ""
+    if not op:
+        dq_notes.append("挂单压力/流动性墙快照暂不可用")
+    if not kl:
+        dq_notes.append("关键位 V2 快照暂不可用")
+    if not liq:
+        dq_notes.append("清算地图暂不可用")
+
+    freshness_score = None
+    stale: list[str] = []
+    missing: list[str] = []
+    if kl and kl.data_freshness:
+        freshness_score = kl.data_freshness.overall_freshness_score
+        stale = list(kl.data_freshness.stale_sources or [])
+        missing = list(kl.data_freshness.missing_sources or [])
+
+    # 最近磁铁价位 — 自 crowding / sweep targets
+    mag_above: Optional[float] = None
+    mag_below: Optional[float] = None
+    if op:
+        for t in _iter_sweep_targets(op):
+            try:
+                mp = float(t.magnet_price)
+                if t.direction == "below" and last_price > mp:
+                    if mag_below is None or mp > mag_below:
+                        mag_below = mp
+                if t.direction == "above" and last_price < mp:
+                    if mag_above is None or mp < mag_above:
+                        mag_above = mp
+            except (TypeError, ValueError):
+                continue
+
+    ctx = BrainContextChips(
+        regime=kl.regime if kl else "",
+        regime_description=kl.regime_description if kl else "",
+        oi_delta_1h_pct=oi_delta_1h_pct,
+        funding_interpretation=funding_interpretation[:120] if funding_interpretation else "",
+        cvd_contract_trend=cvd_contract_trend or "",
+        cvd_spot_trend=cvd_spot_trend or "",
+        nearest_magnet_above=mag_above,
+        nearest_magnet_below=mag_below,
+    )
+
+    ts = int(op.ts_sec) if op and op.ts_sec else (int(kl.ts) if kl and kl.ts else now_sec)
+
+    return TradingBrainSnapshot(
+        coin=coin.upper(),
+        ts=ts,
+        last_price=last_price,
+        atr=round(atr, 4),
+        summary=summary,
+        context=ctx,
+        zones=zones,
+        rankings=rankings,
+        events=events,
+        data_quality=BrainDataQuality(
+            liquidity_wall_quality=lq or "",
+            usd_usdt_basis_pct=op.usd_usdt_basis_pct if op else None,
+            overall_freshness_score=freshness_score,
+            stale_sources=stale,
+            missing_sources=missing,
+            notes=dq_notes,
+        ),
+    )

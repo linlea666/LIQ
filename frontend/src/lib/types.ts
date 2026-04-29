@@ -2187,3 +2187,89 @@ export interface MAAEvalResponse {
   summary?: MAAEvalSummary;
   error?: string;
 }
+
+/** GET /api/trading-brain/{coin} — 交易大脑大屏（只读聚合） */
+export interface BrainZoneRoles {
+  key_level: boolean;
+  spot_supply_wall: boolean;
+  futures_liquidity_wall: boolean;
+  liquidation_magnet: boolean;
+  coinbase_confluence: boolean;
+}
+
+export interface BrainScenario {
+  if_hold: string;
+  if_break: string;
+  invalidates_if: string;
+}
+
+export interface BrainPriceZone {
+  zone_id: string;
+  coin: string;
+  price_low: number;
+  price_high: number;
+  price_mid: number;
+  distance_pct: number;
+  roles: BrainZoneRoles;
+  dominant_label: string;
+  wall_zone_ids: string[];
+  key_level_prices: number[];
+  support_trust: number;
+  resistance_trust: number;
+  sweep_attractiveness: number;
+  /** 打穿风险评分（0–1），非支撑/阻力标签 */
+  break_through_risk: number;
+  data_confidence: number;
+  evidence: string[];
+  scenario: BrainScenario;
+  layer_notes: string[];
+}
+
+export interface BrainRankings {
+  support_trust: string[];
+  resistance_trust: string[];
+  sweep_targets: string[];
+  break_through_risk: string[];
+}
+
+export interface BrainEvent {
+  ts: number;
+  layer: "spot" | "futures" | "liquidation" | "key_level" | "system";
+  price_mid: number;
+  zone_id: string;
+  message: string;
+  source: string;
+}
+
+export interface BrainDataQuality {
+  liquidity_wall_quality: string;
+  usd_usdt_basis_pct: number | null;
+  overall_freshness_score: number | null;
+  stale_sources: string[];
+  missing_sources: string[];
+  notes: string[];
+}
+
+export interface BrainContextChips {
+  regime: string;
+  regime_description: string;
+  oi_delta_1h_pct: number | null;
+  funding_interpretation: string;
+  cvd_contract_trend: string;
+  cvd_spot_trend: string;
+  nearest_magnet_above: number | null;
+  nearest_magnet_below: number | null;
+}
+
+export interface TradingBrainSnapshot {
+  coin: string;
+  ts: number;
+  last_price: number;
+  atr: number;
+  summary: string;
+  context: BrainContextChips;
+  zones: BrainPriceZone[];
+  rankings: BrainRankings;
+  events: BrainEvent[];
+  data_quality: BrainDataQuality;
+}

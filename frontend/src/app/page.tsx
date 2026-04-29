@@ -15,7 +15,7 @@ import LiveFeed from "@/components/SidePanel/LiveFeed";
 import StatusFooter from "@/components/common/StatusFooter";
 import { useMarketStore } from "@/stores/marketStore";
 import { useRollStore } from "@/stores/rollStore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE } from "@/lib/constants";
 
 export default function Dashboard() {
@@ -144,6 +144,7 @@ function ModeSelector() {
 function ToolsMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const coin = useMarketStore((s) => s.coin);
 
   // 滚仓状态：用于在按钮上显示徽章
   const positions = useRollStore((s) => s.positions);
@@ -177,22 +178,37 @@ function ToolsMenu() {
     icon: string;
     desc: string;
     badge?: { text: string; tone: string };
-  }> = [
-    { href: "/news-brief", label: "简报", icon: "📰", desc: "AI 24h 滚动记忆锚" },
-    { href: "/replay", label: "回放", icon: "📼", desc: "历史快照逐 tick 回放" },
-    {
-      href: "/roll",
-      label: "滚仓",
-      icon: "📊",
-      desc: "加减仓信号管家 · 提醒模式",
-      badge:
-        urgentCount > 0
-          ? { text: `${urgentCount} URGENT`, tone: "bg-rose-900/60 text-rose-200 border-rose-700/60" }
-          : activeCount > 0
-          ? { text: `${activeCount} 持仓`, tone: "bg-emerald-900/40 text-emerald-300 border-emerald-700/40" }
-          : undefined,
-    },
-  ];
+  }> = useMemo(
+    () => [
+      { href: "/news-brief", label: "简报", icon: "📰", desc: "AI 24h 滚动记忆锚" },
+      { href: "/replay", label: "回放", icon: "📼", desc: "历史快照逐 tick 回放" },
+      {
+        href: `/brain/${coin}`,
+        label: "交易大脑",
+        icon: "🧠",
+        desc: "价格区统一视图 · 证据链 · 无指令",
+      },
+      {
+        href: "/roll",
+        label: "滚仓",
+        icon: "📊",
+        desc: "加减仓信号管家 · 提醒模式",
+        badge:
+          urgentCount > 0
+            ? {
+                text: `${urgentCount} URGENT`,
+                tone: "bg-rose-900/60 text-rose-200 border-rose-700/60",
+              }
+            : activeCount > 0
+              ? {
+                  text: `${activeCount} 持仓`,
+                  tone: "bg-emerald-900/40 text-emerald-300 border-emerald-700/40",
+                }
+              : undefined,
+      },
+    ],
+    [coin, urgentCount, activeCount],
+  );
 
   return (
     <div ref={ref} className="relative">

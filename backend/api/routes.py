@@ -747,6 +747,65 @@ async def get_key_levels_v2(coin: str):
     return state.key_level_snapshot_v2.model_dump()
 
 
+@router.get("/trading-brain/{coin}")
+async def get_trading_brain(
+    coin: str,
+    max_zones: int = Query(24, ge=1, le=64),
+):
+    """交易大脑大屏：统一 PriceZone 聚合（只读；无交易指令）。
+
+    无关键位/清算/挂单墙时仍返回 200，依赖 data_quality.notes 说明缺口；
+    仅行情 ticker 不可用时 503。
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin_u = coin.upper()
+    if coin_u not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin_u}")
+    state = _engine._states.get(coin_u)
+    if not state or not state.ticker or not state.ticker.last or state.ticker.last <= 0:
+        raise HTTPException(503, f"No ticker for {coin_u}")
+
+    from processors.trading_brain_builder import build_trading_brain_snapshot
+
+    last = float(state.ticker.last)
+    atr = float(state.atr or 0.0)
+    kl = state.key_level_snapshot_v2
+    op = state.orderbook_pressure_snapshot
+    liq = None
+    maps = getattr(state, "liq_maps", None) or {}
+    if maps:
+        liq = maps.get("1d") or maps.get("7d") or maps.get("30d")
+
+    cvd_c = ""
+    cvd_s = ""
+    if state.cvd_contract:
+        cvd_c = state.cvd_contract.trend_1h or ""
+    if state.cvd_spot:
+        cvd_s = state.cvd_spot.trend_1h or ""
+    oi_d1h = None
+    if state.oi is not None:
+        oi_d1h = state.oi.change_1h_pct
+    fund_txt = ""
+    if state.funding and state.funding.interpretation:
+        fund_txt = state.funding.interpretation
+
+    snap = build_trading_brain_snapshot(
+        coin=coin_u,
+        last_price=last,
+        atr=atr,
+        kl=kl,
+        op=op,
+        liq=liq,
+        cvd_contract_trend=cvd_c,
+        cvd_spot_trend=cvd_s,
+        oi_delta_1h_pct=oi_d1h,
+        funding_interpretation=fund_txt,
+        max_zones=max_zones,
+    )
+    return snap.model_dump()
+
+
 @router.get("/execution-plan/{coin}")
 async def get_execution_plan(coin: str):
     """数学引擎 L4 输出：ExecutionPlan（action / 仓位 / 红绿灯 / 分数 / 贡献源）

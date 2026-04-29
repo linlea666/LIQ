@@ -6,6 +6,7 @@ import type {
   MarketUpdate,
   SourceHealth,
   TEAIInterpretation,
+  TradingBrainSnapshot,
 } from "@/lib/types";
 import { API_BASE } from "@/lib/constants";
 import type { CoinType } from "@/lib/constants";
@@ -64,6 +65,14 @@ interface MarketStore {
   maaEvalByCoin: Record<string, MAAEvalSummary>;
   maaEvalLoadingByCoin: Record<string, boolean>;
   loadMAAEval: (coin: string, opts?: { refresh?: boolean; window_days?: number }) => Promise<void>;
+
+  tradingBrainByCoin: Record<string, TradingBrainSnapshot>;
+  tradingBrainLoadingByCoin: Record<string, boolean>;
+  tradingBrainErrorByCoin: Record<string, string | null>;
+  setTradingBrain: (snap: TradingBrainSnapshot) => void;
+  setTradingBrainLoading: (coin: string, loading: boolean) => void;
+  setTradingBrainError: (coin: string, err: string | null) => void;
+  loadTradingBrain: (coin: string, maxZones?: number) => Promise<void>;
 }
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
@@ -284,6 +293,60 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
       set((state) => ({
         maaEvalLoadingByCoin: { ...state.maaEvalLoadingByCoin, [c]: false },
       }));
+    }
+  },
+
+  tradingBrainByCoin: {},
+  tradingBrainLoadingByCoin: {},
+  tradingBrainErrorByCoin: {},
+  setTradingBrain: (snap) =>
+    set((state) => {
+      const c = (snap.coin || "").toUpperCase();
+      if (!c) return {};
+      return {
+        tradingBrainByCoin: { ...state.tradingBrainByCoin, [c]: snap },
+        tradingBrainLoadingByCoin: { ...state.tradingBrainLoadingByCoin, [c]: false },
+        tradingBrainErrorByCoin: { ...state.tradingBrainErrorByCoin, [c]: null },
+      };
+    }),
+  setTradingBrainLoading: (coin, loading) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        tradingBrainLoadingByCoin: { ...state.tradingBrainLoadingByCoin, [c]: loading },
+        tradingBrainErrorByCoin: loading
+          ? { ...state.tradingBrainErrorByCoin, [c]: null }
+          : state.tradingBrainErrorByCoin,
+      };
+    }),
+  setTradingBrainError: (coin, err) =>
+    set((state) => {
+      const c = coin.toUpperCase();
+      return {
+        tradingBrainErrorByCoin: { ...state.tradingBrainErrorByCoin, [c]: err },
+        tradingBrainLoadingByCoin: { ...state.tradingBrainLoadingByCoin, [c]: false },
+      };
+    }),
+  loadTradingBrain: async (coin, maxZones = 24) => {
+    const c = coin.toUpperCase();
+    get().setTradingBrainLoading(c, true);
+    try {
+      const q = new URLSearchParams({ max_zones: String(maxZones) });
+      const resp = await fetch(
+        `${API_BASE}/api/trading-brain/${encodeURIComponent(c)}?${q}`,
+      );
+      if (!resp.ok) {
+        get().setTradingBrainError(c, `HTTP ${resp.status}`);
+        return;
+      }
+      const data = (await resp.json()) as TradingBrainSnapshot;
+      if (data?.coin) {
+        get().setTradingBrain(data);
+      }
+    } catch (e) {
+      get().setTradingBrainError(c, e instanceof Error ? e.message : String(e));
+    } finally {
+      get().setTradingBrainLoading(c, false);
     }
   },
 
