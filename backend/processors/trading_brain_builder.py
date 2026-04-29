@@ -665,6 +665,21 @@ def build_trading_brain_snapshot(
         zones=zones, last_price=last_price, atr=atr, ctx=ctx, dq=dq,
     )
 
+    # Phase 4：事件驱动状态机推进（首屏即给准确状态分布）
+    if opportunities:
+        from processors.opportunity_state_machine import (
+            StateTickContext,
+            advance_all,
+        )
+        wall_evts = list(op.wall_events) if op else []
+        advance_all(opportunities, StateTickContext(
+            last_price=last_price,
+            now_sec=now_sec,
+            wall_events=wall_evts,
+            ctx=ctx,
+            dq=dq,
+        ))
+
     return TradingBrainSnapshot(
         coin=coin.upper(),
         ts=ts,
