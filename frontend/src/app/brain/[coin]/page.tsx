@@ -7,6 +7,8 @@ import { useMarketStore } from "@/stores/marketStore";
 import TopStrip from "@/components/Brain/TopStrip";
 import PriceAxisMap from "@/components/Brain/PriceAxisMap";
 import ZoneDetailCard from "@/components/Brain/ZoneDetailCard";
+import OpportunityBoard from "@/components/Brain/OpportunityBoard";
+import EventTimeline from "@/components/Brain/EventTimeline";
 import { ROLE_COLORS } from "@/components/Brain/types";
 
 export default function TradingBrainPage() {
@@ -19,6 +21,7 @@ export default function TradingBrainPage() {
   const loadTradingBrain = useMarketStore((s) => s.loadTradingBrain);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoverZoneId, setHoverZoneId] = useState<string | null>(null);
 
   useEffect(() => {
     loadTradingBrain(coinParam).catch(() => undefined);
@@ -100,47 +103,40 @@ export default function TradingBrainPage() {
           </div>
 
           <main className="flex flex-1 min-h-0 overflow-hidden">
-            {/* 左：价格轴 */}
-            <section className="w-[240px] shrink-0 border-r border-slate-800 bg-slate-900/30">
+            <section
+              className={`w-[240px] shrink-0 border-r border-slate-800 bg-slate-900/30 transition ${
+                hoverZoneId ? "ring-1 ring-blue-500/30" : ""
+              }`}
+            >
               <PriceAxisMap
                 zones={snap.zones}
                 lastPrice={snap.last_price}
                 atr={snap.atr}
                 coin={snap.coin}
-                selectedId={selectedId}
+                selectedId={hoverZoneId ?? selectedId}
                 onSelect={setSelectedId}
               />
             </section>
 
-            {/* 中：Zone Detail */}
             <section className="flex-1 min-w-0 border-r border-slate-800">
               <ZoneDetailCard zone={selectedZone} coin={snap.coin} />
             </section>
 
-            {/* 右：机会雷达 placeholder（Phase 3b 接入） */}
-            <section className="w-[360px] shrink-0 bg-slate-900/30 p-3">
-              <h3 className="text-[10px] uppercase tracking-wider text-slate-500">
-                机会雷达 · {snap.opportunities.length} 项观察区
-              </h3>
-              <p className="mt-2 text-[11px] text-slate-600">
-                Phase 3b 即将接入：等待触发 / 已触发 / 失效冷却 三列 Kanban
-              </p>
-              <ul className="mt-2 space-y-1 text-[11px] text-slate-400">
-                {snap.opportunities.slice(0, 6).map((o) => (
-                  <li
-                    key={o.setup_id}
-                    className="truncate rounded border border-slate-800 px-2 py-1"
-                  >
-                    [{o.setup_type}] {o.coin} · 机会评分 {o.opportunity_score.toFixed(2)}
-                  </li>
-                ))}
-              </ul>
+            <section className="w-[360px] shrink-0 bg-slate-900/30">
+              <OpportunityBoard
+                opportunities={snap.opportunities}
+                coin={snap.coin}
+                onSelectZone={setSelectedId}
+              />
             </section>
           </main>
 
-          {/* 底部 timeline placeholder（Phase 3b 接入） */}
-          <footer className="shrink-0 border-t border-slate-800 bg-slate-900/30 px-3 py-1 text-[10px] text-slate-600">
-            事件流 · {snap.events.length} 条 · Phase 3b 接入横向 timeline
+          <footer className="h-[120px] shrink-0 border-t border-slate-800 bg-slate-900/30">
+            <EventTimeline
+              events={snap.events}
+              hoverZoneId={hoverZoneId}
+              onHoverZone={setHoverZoneId}
+            />
           </footer>
         </>
       )}
