@@ -134,6 +134,7 @@ function TraceCard({ entry, idx }: { entry: SweepWatchTraceEntry; idx: number })
 // ─────────────────────────────────────────────────────────────────────
 export default function SweepWatchTracePanel({ open, onClose, sweepWatch }: Props) {
   const [activeSide, setActiveSide] = useState<SweepSide | "all">("all");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "ok" | "fail">("idle");
 
   if (!open) return null;
 
@@ -145,13 +146,53 @@ export default function SweepWatchTracePanel({ open, onClose, sweepWatch }: Prop
   const belowCount = traces.filter((e) => e.side === "below").length;
   const aboveCount = traces.filter((e) => e.side === "above").length;
 
-  const handleCopyJson = () => {
+  // 复制完整 sweep_watch JSON 到剪贴板。
+  // 兼容 3 种环境：
+  //   1. HTTPS / localhost：navigator.clipboard.writeText（异步 Promise，必须 await）
+  //   2. HTTP IP / 旧浏览器：fallback 到 document.execCommand('copy') + 临时 textarea
+  //   3. 全部失败：状态 fail（按钮短暂变红，让用户感知）
+  const handleCopyJson = async () => {
+    const text = JSON.stringify(sweepWatch, null, 2);
+    let ok = false;
     try {
-      navigator.clipboard.writeText(JSON.stringify(sweepWatch, null, 2));
+      if (
+        typeof window !== "undefined"
+        && window.isSecureContext
+        && navigator.clipboard?.writeText
+      ) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } else {
+        // 非安全上下文（HTTP/IP）→ legacy fallback
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "-9999px";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
     } catch {
-      // ignore
+      ok = false;
     }
+    setCopyStatus(ok ? "ok" : "fail");
+    window.setTimeout(() => setCopyStatus("idle"), 1800);
   };
+
+  const copyLabel =
+    copyStatus === "ok" ? "已复制 ✓"
+    : copyStatus === "fail" ? "复制失败"
+    : "复制 JSON";
+  const copyCls =
+    copyStatus === "ok"
+      ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+    : copyStatus === "fail"
+      ? "border-rose-600 bg-rose-950/40 text-rose-300"
+    : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-sky-700 hover:text-sky-300";
 
   return (
     <>
@@ -174,10 +215,10 @@ export default function SweepWatchTracePanel({ open, onClose, sweepWatch }: Prop
             <button
               type="button"
               onClick={handleCopyJson}
-              className="rounded border border-slate-700 bg-slate-800/60 px-2 py-1 text-[10px] text-slate-300 hover:border-sky-700 hover:text-sky-300"
+              className={`rounded border px-2 py-1 text-[10px] transition-colors ${copyCls}`}
               title="复制完整 sweep_watch JSON 到剪贴板（含 trace）"
             >
-              复制 JSON
+              {copyLabel}
             </button>
             <button
               type="button"
