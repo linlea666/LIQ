@@ -137,17 +137,39 @@ def test_coinbase_augment_low_usd_no_confluence():
     assert zone.coinbase_num_orders == 5
 
 
-def test_coinbase_augment_low_num_orders_no_confluence():
-    """USD 量级合格但 num_orders < 3 → 单大单 spoof 嫌疑，不算共振。"""
+def test_coinbase_augment_lone_institutional_above_1m_marks_confluence():
+    """W4-T1 阶段 1.3：单档 ≥ 1M USD 即使 num_orders < 3 也视为 confluence。
+
+    机构挂单的典型形态是"1 笔 4464 万孤立大单"，比"3 笔散户拼凑"更可信。
+    旧逻辑会把这种判为 spoof 嫌疑，与现实机构博弈直觉相反。
+    """
     zone = _make_zone()
     cfg = dict(ENGINE_DEFAULTS)
-    # 1 笔订单 × 大 USD —— 典型的"鲸鱼挂单可能撤单"
     frame = _make_cb_frame(bids=[(100_000.0, 20.0, 1)])  # $2M / 1 笔
+    _augment_zones_with_coinbase([zone], frame, cfg)
+
+    # 孤立机构大单豁免 3 笔约束
+    assert zone.coinbase_spot_confluence is True
+    assert zone.coinbase_num_orders == 1
+    assert zone.coinbase_spot_usd > 1_000_000
+    assert zone.coinbase_max_single_order_usd >= 1_000_000
+
+
+def test_coinbase_augment_lone_below_1m_still_blocked_as_spoof_suspect():
+    """W4-T1 阶段 1.3：单档 < 1M USD 且 num_orders < 3 → 仍视为 spoof 嫌疑。
+
+    保留小额孤立大单的拦截能力，避免 200k / 1 笔这种"散户钓鱼单"误判为机构。
+    """
+    zone = _make_zone()
+    cfg = dict(ENGINE_DEFAULTS)
+    # $200k / 1 笔 —— USD 通过 30% wall_min 门槛，但单档不到机构级 1M
+    frame = _make_cb_frame(bids=[(100_000.0, 2.0, 1)])
     _augment_zones_with_coinbase([zone], frame, cfg)
 
     assert zone.coinbase_spot_confluence is False
     assert zone.coinbase_num_orders == 1
-    assert zone.coinbase_spot_usd > 1_000_000          # USD 通过但 num_orders 拦截
+    assert zone.coinbase_spot_usd >= 200_000
+    assert zone.coinbase_max_single_order_usd < 1_000_000
 
 
 def test_coinbase_augment_side_match_bid_only_uses_bids():

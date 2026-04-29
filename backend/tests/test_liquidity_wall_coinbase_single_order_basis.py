@@ -8,9 +8,11 @@
     - 仅 overlap >= 0.5 的 level 参与统计（边缘 level 不污染）
     - num_orders=0 视为 1 笔（避免 div-by-zero）
 
-  SR 加分：
-    - coinbase_max_single_order_usd ≥ 100k → SR +0.05（机构 footprint 硬证据）
+  SR 加分（W4-T1 阶段 1.1 阶梯化升级）：
+    - coinbase_max_single_order_usd ≥ 100k → SR +0.03 (大额订单)
+    - coinbase_max_single_order_usd ≥ 1M  → SR +0.10 (机构级，与前端 ★ 对齐)
     - < 100k → SR 不加分（散户级别）
+    - 取最高匹配档加分一次，不叠加
 
   USD/USDT basis：
     - coinbase_mid > ticker_last → 正值（USD 比 USDT 贵）
@@ -139,17 +141,31 @@ class TestCoinbaseMaxSingleOrder:
 # ─────────────────────────────────────────────────────────────────
 
 class TestSRInstitutionalFootprint:
-    def test_high_single_order_adds_005_to_sr(self):
-        """≥ 100k USD/笔 → SR +0.05（机构资金 footprint 硬证据）。"""
+    def test_100k_tier_adds_003_to_sr(self):
+        """≥ 100k USD/笔 → SR +0.03（W4-T1 阶段 1.1 阶梯化：大额订单档）。"""
         zone_no_inst = _make_zone()
         zone_no_inst.coinbase_max_single_order_usd = 50_000  # 散户级
         zone_inst = _make_zone()
-        zone_inst.coinbase_max_single_order_usd = 150_000  # 机构级
+        zone_inst.coinbase_max_single_order_usd = 150_000
 
         sr_no = _compute_support_resistance_trust_score(zone_no_inst, ENGINE_DEFAULTS)
         sr_yes = _compute_support_resistance_trust_score(zone_inst, ENGINE_DEFAULTS)
-        # 差异恰好 +0.05
-        assert sr_yes - sr_no == pytest.approx(0.05, abs=0.001)
+        assert sr_yes - sr_no == pytest.approx(0.03, abs=0.001)
+
+    def test_1m_institutional_tier_adds_010_to_sr(self):
+        """≥ 1M USD/笔 → SR +0.10（W4-T1 阶段 1.1 阶梯化：机构级，与前端 ★ 对齐）。
+
+        旧逻辑 100k 一刀切 +0.05 → 100k 单和 4464 万单完全等同。
+        新阶梯让"机构级"信号在 ZoneDetailCard 的 support_trust 上有可感知差异。
+        """
+        zone_no_inst = _make_zone()
+        zone_no_inst.coinbase_max_single_order_usd = 50_000
+        zone_inst = _make_zone()
+        zone_inst.coinbase_max_single_order_usd = 2_000_000
+
+        sr_no = _compute_support_resistance_trust_score(zone_no_inst, ENGINE_DEFAULTS)
+        sr_yes = _compute_support_resistance_trust_score(zone_inst, ENGINE_DEFAULTS)
+        assert sr_yes - sr_no == pytest.approx(0.10, abs=0.001)
 
     def test_below_100k_no_bonus(self):
         """< 100k USD/笔 → 不加分。"""

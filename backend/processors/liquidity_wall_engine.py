@@ -88,8 +88,18 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     # Phase C：Coinbase 现货原生 API（机构资金独立验证维度）
     "trust_bonus_coinbase_confluence": 0.10,   # Coinbase 同价位有 ≥ ratio×wall_min 厚度时加分
     "coinbase_min_usd_ratio": 0.30,            # Coinbase USD 至少为 wall_min_usd 的 30%（兼顾 USD/USDT 价差）
-    "coinbase_min_num_orders": 3,              # 至少 3 笔订单聚集（< 3 视为单大单 spoof 嫌疑）
+    "coinbase_min_num_orders": 3,              # 至少 3 笔订单聚集（< 3 默认视为 spoof 嫌疑）
     "coinbase_match_tol_pct": 0.0010,          # 价位匹配容差 10 bp（吸收 USD/USDT spread）
+    # W4-T1 阶段 1.3：孤立机构大单豁免 —— Coinbase 单笔 ≥ 1M USD 即使 num_orders < 3
+    # 也视为 confluence（机构挂单的典型形态，比 3 笔散户拼凑更可信；与前端 ★ 阈值对齐）
+    "coinbase_lone_institutional_threshold": 1_000_000,
+    # W4-T1 阶段 1.1：SR 公式机构 footprint 阶梯加分（取最高匹配档，不叠加）
+    # 旧：≥ 100k 一刀切 +0.05 → 100k 单和 4464 万单完全等同，未反映机构级权重梯度
+    # 新：阶梯化，与 SpotOrderBookPanel ★ (1M) 阈值对齐
+    "sr_bonus_large_single_100k": 0.03,        # ≥ 100k 大额订单（含散户中户聚集）
+    "sr_bonus_large_single_500k": 0.06,        # ≥ 500k 中型机构挂单
+    "sr_bonus_large_single_1m": 0.10,          # ≥ 1M 机构级（与前端 ★ 对齐）
+    "sr_bonus_large_single_5m": 0.13,          # ≥ 5M 大型机构（封顶，避免单维度主导）
 
     # M1：persistence / trend
     "warming_seconds": 1800,               # 30min 暖机期内不出 persistence/magnet
@@ -926,6 +936,8 @@ def _augment_zones_with_coinbase(
                         ENGINE_DEFAULTS["coinbase_min_usd_ratio"])
     min_orders = cfg.get("coinbase_min_num_orders",
                          ENGINE_DEFAULTS["coinbase_min_num_orders"])
+    lone_threshold = cfg.get("coinbase_lone_institutional_threshold",
+                             ENGINE_DEFAULTS["coinbase_lone_institutional_threshold"])
     tol_pct = cfg.get("coinbase_match_tol_pct",
                       ENGINE_DEFAULTS["coinbase_match_tol_pct"])
     tol_usd_min = cfg.get("augment_match_tol_usd_min",
@@ -972,7 +984,14 @@ def _augment_zones_with_coinbase(
         z.coinbase_spot_usd = round(cb_usd, 2)
         z.coinbase_num_orders = cb_orders
         z.coinbase_max_single_order_usd = round(max_single_usd, 2)
-        if cb_usd >= threshold_usd and cb_orders >= min_orders:
+        # W4-T1 阶段 1.3：confluence 判定改为 OR 双通道
+        #   通道 A 散户/中户聚集：cb_usd 达 30% wall_min AND num_orders ≥ 3
+        #   通道 B 孤立机构大单：cb_usd 达 30% wall_min AND 单档 ≥ 1M USD（豁免 3 笔约束）
+        # 修复隐性 bug：原逻辑会把"1 笔 4464 万机构挂单"判为 spoof 嫌疑，
+        # 反而比"3 笔散户拼凑"更不可信，与现实机构博弈直觉相反
+        if cb_usd >= threshold_usd and (
+            cb_orders >= min_orders or max_single_usd >= lone_threshold
+        ):
             z.coinbase_spot_confluence = True
 
 
@@ -1068,8 +1087,11 @@ def _compute_support_resistance_trust_score(zone: WallZone, cfg: dict) -> float:
       +0.10 coinbase_spot_confluence
       +0.10 persistence ≥ 0.7
       +0.10 wall_consumed_confidence ≥ 0.6（已被验证承接过卖盘 → 强支撑/阻力硬证据）
-      +0.05 W2-T4 机构 footprint：coinbase_max_single_order_usd ≥ 100k USD/笔
-            （区分"散户 N 单聚集"vs"机构孤立巨单"，两者都是真买卖家但意图不同）
+      +0.03 / +0.06 / +0.10 / +0.13 单档大单阶梯（W4-T1 阶段 1.1）
+            旧：≥ 100k 一刀切 +0.05 → 100k 单和 4464 万单评分完全等同
+            新：100k=+0.03 大额 / 500k=+0.06 中型 / 1M=+0.10 机构级（与前端 ★ 对齐）
+                / 5M=+0.13 大型机构（封顶，避免单维度主导）
+            取最高匹配档加分一次，不叠加
       −0.30 × wall_removal_risk（容易消失的墙不可信）
     """
     sr = 0.30
@@ -1083,10 +1105,35 @@ def _compute_support_resistance_trust_score(zone: WallZone, cfg: dict) -> float:
         sr += 0.10
     if zone.wall_consumed_confidence >= 0.6:
         sr += 0.10
-    if zone.coinbase_max_single_order_usd >= 100_000:
-        sr += 0.05
+    sr += _large_single_order_bonus(zone, cfg)
     sr -= 0.30 * max(0.0, min(1.0, zone.wall_removal_risk))
     return round(max(0.0, min(1.0, sr)), 3)
+
+
+def _large_single_order_bonus(zone: WallZone, cfg: dict) -> float:
+    """W4-T1 阶段 1.1：单档大单阶梯加分（取最高匹配档，不叠加）。
+
+    与原 100k 一刀切 +0.05 相比，机构级（≥1M）信号被显著加权：
+      - 旧：100k 单和 4464 万单都 +0.05（无差异）
+      - 新：100k +0.03 / 500k +0.06 / 1M +0.10 / 5M +0.13
+
+    阈值与前端 SpotOrderBookPanel `INSTITUTION_SINGLE_USD_THRESHOLD = 1_000_000`
+    （★ 机构标记）严格对齐，确保前后端语义一致。
+    """
+    single = zone.coinbase_max_single_order_usd
+    if single >= 5_000_000:
+        return cfg.get("sr_bonus_large_single_5m",
+                       ENGINE_DEFAULTS["sr_bonus_large_single_5m"])
+    if single >= 1_000_000:
+        return cfg.get("sr_bonus_large_single_1m",
+                       ENGINE_DEFAULTS["sr_bonus_large_single_1m"])
+    if single >= 500_000:
+        return cfg.get("sr_bonus_large_single_500k",
+                       ENGINE_DEFAULTS["sr_bonus_large_single_500k"])
+    if single >= 100_000:
+        return cfg.get("sr_bonus_large_single_100k",
+                       ENGINE_DEFAULTS["sr_bonus_large_single_100k"])
+    return 0.0
 
 
 def _compute_sweep_attractiveness_score(

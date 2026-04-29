@@ -64,6 +64,7 @@ def _make_zone(
     max_usd_1h: float = 2_000_000.0,
     sweep_target: SweepTarget | None = None,
     exchange_count: int = 1,
+    coinbase_max_single: float = 0.0,
 ) -> WallZone:
     return WallZone(
         side=side,
@@ -74,6 +75,7 @@ def _make_zone(
         seen_count=10, visible_minutes=40, persistence_score=persistence,
         dual_source=dual_source, has_spot_confluence=has_spot_confluence,
         coinbase_spot_confluence=coinbase_confluence,
+        coinbase_max_single_order_usd=coinbase_max_single,
         exchange_count=exchange_count,
         wall_consumed_confidence=consumed_conf,
         wall_removal_risk=removal_risk,
@@ -190,6 +192,76 @@ class TestSupportResistanceTrust:
         zone = _make_zone(removal_risk=1.0)
         sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
         assert sr >= 0.0
+
+
+class TestSRLargeSingleOrderLadder:
+    """W4-T1 阶段 1.1：单档大单阶梯加分（取最高匹配档，不叠加）。
+
+    阈值与前端 SpotOrderBookPanel ★ (1M) 严格对齐。
+    旧逻辑 100k 一刀切 +0.05 → 100k 单和 4464 万单完全等同。
+    """
+
+    def test_below_100k_no_bonus(self):
+        """单档 < 100k → 不加分。"""
+        zone = _make_zone(coinbase_max_single=80_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        # 仅 base 0.30
+        assert sr == pytest.approx(0.30, abs=0.01)
+
+    def test_100k_tier_adds_003(self):
+        """≥ 100k 大额订单 → +0.03。"""
+        zone = _make_zone(coinbase_max_single=200_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        assert sr == pytest.approx(0.33, abs=0.01)
+
+    def test_500k_tier_adds_006(self):
+        """≥ 500k 中型机构挂单 → +0.06。"""
+        zone = _make_zone(coinbase_max_single=600_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        assert sr == pytest.approx(0.36, abs=0.01)
+
+    def test_1m_tier_adds_010_aligned_with_frontend_star(self):
+        """≥ 1M 机构级（与前端 ★ 阈值对齐）→ +0.10。"""
+        zone = _make_zone(coinbase_max_single=2_000_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        assert sr == pytest.approx(0.40, abs=0.01)
+
+    def test_5m_tier_adds_013_capped(self):
+        """≥ 5M 大型机构（封顶，避免单维度主导）→ +0.13。"""
+        zone = _make_zone(coinbase_max_single=10_000_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        assert sr == pytest.approx(0.43, abs=0.01)
+
+    def test_ladder_takes_highest_match_not_cumulative(self):
+        """6M 单档应只取 5M 档 (+0.13)，不叠加 100k+500k+1M+5M。"""
+        zone = _make_zone(coinbase_max_single=6_000_000)
+        sr = _compute_support_resistance_trust_score(zone, ENGINE_DEFAULTS)
+        # base 0.30 + 0.13 = 0.43，而不是 0.30 + (0.03+0.06+0.10+0.13) = 0.62
+        assert sr == pytest.approx(0.43, abs=0.01)
+        assert sr < 0.50
+
+    def test_lone_institutional_order_meaningfully_lifts_sr(self):
+        """关键回归：1M 机构级单档 vs 100k 大额订单，SR 必有可感知差异。
+
+        旧逻辑两者都 +0.05 完全等同 → 用户在 ZoneDetailCard 看不出"机构级 footprint"。
+        新逻辑 1M=+0.10 vs 100k=+0.03，差距 0.07（可感知）。
+        """
+        zone_100k = _make_zone(coinbase_max_single=200_000)
+        zone_1m = _make_zone(coinbase_max_single=2_000_000)
+        sr_100k = _compute_support_resistance_trust_score(zone_100k, ENGINE_DEFAULTS)
+        sr_1m = _compute_support_resistance_trust_score(zone_1m, ENGINE_DEFAULTS)
+        assert sr_1m - sr_100k == pytest.approx(0.07, abs=0.01)
+
+    def test_ladder_disabled_when_cfg_overrides_to_zero(self):
+        """配置可关闭阶梯（回归向后兼容）。"""
+        cfg = dict(ENGINE_DEFAULTS)
+        cfg["sr_bonus_large_single_100k"] = 0.0
+        cfg["sr_bonus_large_single_500k"] = 0.0
+        cfg["sr_bonus_large_single_1m"] = 0.0
+        cfg["sr_bonus_large_single_5m"] = 0.0
+        zone = _make_zone(coinbase_max_single=10_000_000)
+        sr = _compute_support_resistance_trust_score(zone, cfg)
+        assert sr == pytest.approx(0.30, abs=0.01)
 
 
 # ─────────────────────────────────────────────────────────────────
