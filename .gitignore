@@ -26,6 +26,8 @@ backend/data/replay/
 backend/data/roll/
 # W1-T2 · 流动性墙引擎历史落盘（90 天保留，运行时生成）
 backend/data/liquidity_wall_history/
+# W4-T1 · 流动性墙后验报告输出（CLI 生成）
+backend/data/liquidity_wall_postmortem/
 # 本地 Cursor MCP 配置（机器相关绝对路径）
 .cursor/mcp.json
 # P0 · TrendExhaustion 影子日志 / 日报（运行时生成，不进仓）
