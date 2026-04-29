@@ -142,6 +142,7 @@ class _BuildOutputs(NamedTuple):
     warming: bool
     window_min: int
     history_size: int
+    usd_usdt_basis_pct: Optional[float] = None  # W2-T4：Coinbase USD vs futures USDT 基差
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -753,6 +754,35 @@ def _augment_zones_with_spot_large_orders(
             z.has_spot_confluence = True
 
 
+def _compute_usd_usdt_basis_pct(
+    coinbase_frame: Any, ticker_last: Optional[float],
+) -> Optional[float]:
+    """W2-T4：USD/USDT 基差（pct） = (coinbase_mid - ticker_last) / ticker_last × 100。
+
+    设计：
+      - coinbase_mid = (best_bid + best_ask) / 2，best 是 levels 列表中最接近现价的档
+        bids 升序时 best_bid = bids[-1]；asks 升序时 best_ask = asks[0]
+      - ticker_last 缺失或 ≤ 0 → None
+      - coinbase_frame 无 bids/asks → None
+      - 正常 BTC < 5bp（0.05%），> 30bp 表示明显基差异常（前端可高亮）
+    """
+    if coinbase_frame is None or ticker_last is None or ticker_last <= 0:
+        return None
+    bids = list(getattr(coinbase_frame, "bids", []) or [])
+    asks = list(getattr(coinbase_frame, "asks", []) or [])
+    if not bids or not asks:
+        return None
+    try:
+        best_bid = bids[-1].price
+        best_ask = asks[0].price
+        if best_bid <= 0 or best_ask <= 0 or best_ask < best_bid:
+            return None
+        coinbase_mid = (best_bid + best_ask) / 2.0
+        return round((coinbase_mid - ticker_last) / ticker_last * 100.0, 4)
+    except (AttributeError, TypeError, ValueError, IndexError):
+        return None
+
+
 def _augment_zones_with_coinbase(
     zones: list[WallZone],
     coinbase_frame: Any,
@@ -819,16 +849,24 @@ def _augment_zones_with_coinbase(
 
         cb_usd = 0.0
         cb_orders = 0
+        # W2-T4：追踪 zone 内最大的"单笔订单 USD"
+        # 定义：max(level.usd_value / level.num_orders)，仅在 overlap >= 0.5
+        # （主重叠）的 level 上统计；num_orders=0 视为 1 笔避免 div-by-zero
+        max_single_usd = 0.0
         for lv in levels:
             ratio = _bin_overlap_ratio(lv.price, half, lo_bound, hi_bound)
             if ratio > 0:
                 cb_usd += lv.usd_value * ratio
-                # num_orders 离散整数：overlap > 0.5 才计入（防止边缘 level 加法漂移）
                 if ratio >= 0.5:
                     cb_orders += lv.num_orders
+                    n = lv.num_orders if lv.num_orders > 0 else 1
+                    single = lv.usd_value / n
+                    if single > max_single_usd:
+                        max_single_usd = single
 
         z.coinbase_spot_usd = round(cb_usd, 2)
         z.coinbase_num_orders = cb_orders
+        z.coinbase_max_single_order_usd = round(max_single_usd, 2)
         if cb_usd >= threshold_usd and cb_orders >= min_orders:
             z.coinbase_spot_confluence = True
 
@@ -925,6 +963,8 @@ def _compute_support_resistance_trust_score(zone: WallZone, cfg: dict) -> float:
       +0.10 coinbase_spot_confluence
       +0.10 persistence ≥ 0.7
       +0.10 wall_consumed_confidence ≥ 0.6（已被验证承接过卖盘 → 强支撑/阻力硬证据）
+      +0.05 W2-T4 机构 footprint：coinbase_max_single_order_usd ≥ 100k USD/笔
+            （区分"散户 N 单聚集"vs"机构孤立巨单"，两者都是真买卖家但意图不同）
       −0.30 × wall_removal_risk（容易消失的墙不可信）
     """
     sr = 0.30
@@ -938,6 +978,8 @@ def _compute_support_resistance_trust_score(zone: WallZone, cfg: dict) -> float:
         sr += 0.10
     if zone.wall_consumed_confidence >= 0.6:
         sr += 0.10
+    if zone.coinbase_max_single_order_usd >= 100_000:
+        sr += 0.05
     sr -= 0.30 * max(0.0, min(1.0, zone.wall_removal_risk))
     return round(max(0.0, min(1.0, sr)), 3)
 
@@ -1937,6 +1979,9 @@ def build_liquidity_wall_outputs(
         _augment_zones_with_coinbase(walls_above, coinbase_frame, cfg)
         _augment_zones_with_coinbase(walls_below, coinbase_frame, cfg)
 
+    # W2-T4：USD/USDT basis（暖机期或缺数据时为 None；正常 < 5bp）
+    usd_usdt_basis_pct = _compute_usd_usdt_basis_pct(coinbase_frame, last_price)
+
     # 强度等级
     _attach_strength_tier(walls_above, cfg)
     _attach_strength_tier(walls_below, cfg)
@@ -2087,4 +2132,5 @@ def build_liquidity_wall_outputs(
         window_min=cfg.get("history_window_minutes",
                            ENGINE_DEFAULTS["history_window_minutes"]),
         history_size=history_size,
+        usd_usdt_basis_pct=usd_usdt_basis_pct,
     )

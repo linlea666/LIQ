@@ -630,6 +630,7 @@ def compute_pressure_snapshot(
         snap.crowding_global = wall_out.crowding
         snap.history_window_minutes = wall_out.window_min
         snap.sample_count_depth_history = wall_out.history_size
+        snap.usd_usdt_basis_pct = wall_out.usd_usdt_basis_pct  # W2-T4
         if wall_out.warming and snap.data_quality not in ("stale", "missing"):
             # warming 优先级 < stale/missing；高于 ok/partial（前端展示"暖机中"）
             snap.data_quality = "warming"

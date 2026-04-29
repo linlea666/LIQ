@@ -385,6 +385,10 @@ class WallZone(BaseModel):
     coinbase_spot_confluence: bool = False
     coinbase_spot_usd: float = 0.0              # Coinbase 同价区当前帧 USD 厚度
     coinbase_num_orders: int = 0                # Coinbase 同价区累计订单笔数（≥3 才算共振）
+    # W2-T4：Coinbase 单笔大单分支 — 机构资金 footprint 独立硬证据
+    # = max(level.usd_value / level.num_orders) over levels overlapping this zone
+    # ≥ 100k USD/笔 视为"机构级孤立大单"，SR +0.05（区分散户聚集 vs 机构布局）
+    coinbase_max_single_order_usd: float = 0.0
 
     # ── 行为评估（M2）──
     status: WallZoneStatus = "active"
@@ -453,6 +457,12 @@ class OrderbookPressureSnapshot(BaseModel):
     # ── M2 新字段：事件 + 全局拥挤度 ──
     wall_events: list[WallEvent] = Field(default_factory=list)  # 最近 100 条滚动
     crowding_global: Optional[PositionCrowdingSnapshot] = None  # 全局拥挤度（也分发到每个 zone）
+
+    # ── W2-T4 顶层字段：USD/USDT 基差（前端 / AI 展示用）──
+    # = (coinbase_last - ticker_last) / ticker_last × 100  (单位 %)
+    # 例：BTC-USD 76300, BTCUSDT 76250 → basis = +0.066%（USD 比 USDT 贵 6.6bp）
+    # 暖机期 / 缺数据时为 None；正常 < 5bp，> 30bp 表示明显基差异常
+    usd_usdt_basis_pct: Optional[float] = None
 
     # ── 元数据 ──
     history_window_minutes: int = 60            # 滚动历史窗口（M1 默认 1h）
