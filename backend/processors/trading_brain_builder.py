@@ -78,13 +78,29 @@ def merge_tolerance(last_price: float, atr: float) -> float:
 
 
 def _fmt_usd_short(usd: float) -> str:
-    if usd >= 1e9:
-        return f"{usd / 1e9:.2f}B"
-    if usd >= 1e6:
-        return f"{usd / 1e6:.1f}M"
-    if usd >= 1e3:
-        return f"{usd / 1e3:.0f}K"
-    return f"{usd:.0f}"
+    """中文金额格式化（与前端 formatCnUsd 同步口径）。
+
+    亿+万 两档：
+      ≥ 1 亿       → "X.XX亿"
+      ≥ 100 万     → "X,XXX万"  千分位整数
+      ≥ 1 万       → "X.X万"    保留 1 位
+      < 1 万       → 千分位整数
+    """
+    try:
+        v = float(usd)
+    except (TypeError, ValueError):
+        return "0"
+    if v == 0:
+        return "0"
+    sign = "-" if v < 0 else ""
+    a = abs(v)
+    if a >= 1e8:
+        return f"{sign}{a / 1e8:.2f}亿"
+    if a >= 1e6:
+        return f"{sign}{round(a / 1e4):,}万"
+    if a >= 1e4:
+        return f"{sign}{a / 1e4:.1f}万"
+    return f"{sign}{round(a):,}"
 
 
 def _kl_to_score_01(lv: KeyLevelV2, *, support_side: bool) -> tuple[float, float]:

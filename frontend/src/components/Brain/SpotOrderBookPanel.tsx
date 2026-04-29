@@ -21,7 +21,7 @@
  */
 import { useMemo, useState } from "react";
 import type { BrainSpotBook, BrainSpotBookItem } from "@/lib/types";
-import { formatPrice } from "@/lib/format";
+import { formatPrice, formatCnUsd } from "@/lib/format";
 
 interface Props {
   spotBook: BrainSpotBook | null;
@@ -43,10 +43,7 @@ const BRACKET_HINT: Record<string, string> = {
 
 function fmtUsd(usd: number): string {
   if (!usd || usd <= 0) return "—";
-  if (usd >= 1e9) return `${(usd / 1e9).toFixed(2)}B`;
-  if (usd >= 1e6) return `${(usd / 1e6).toFixed(1)}M`;
-  if (usd >= 1e3) return `${(usd / 1e3).toFixed(0)}k`;
-  return usd.toFixed(0);
+  return formatCnUsd(usd);
 }
 
 function ItemRow({

@@ -22,7 +22,7 @@ import type { LiqBand, LiqCluster, LiquidationMap } from "@/lib/types";
  *   ④ VacuumZones       清算真空区（瞬间穿越点）
  *   ⑤ HoverDetailCard   悬浮密度图时的详细弹层（保留旧体验作加强）
  *
- * 单位：金额一律用 formatCnUsd（"几亿/千万/百万/万"），不用 M/K。
+ * 单位：金额一律用 formatCnUsd（"亿/万" 两档，雪球/东财风格），不用 M/K。
  * ══════════════════════════════════════════════════════════════════ */
 
 type LiqBandRow = { price: number; usd: number; lev: string };

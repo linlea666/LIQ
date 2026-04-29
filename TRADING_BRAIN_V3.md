@@ -494,7 +494,7 @@ body:has(.brain-page) {        /* ← brain 页面注册到白名单 */
 | 状态机只看 wall_events | 价格剧烈插针未必有 wall_event | M5：补充 1m/5m K 线刺破检测 |
 | Opportunity 无历史回测 | 无法显示 setup 历史命中率 | P2：接入 plan_pnl_replay 同源样本，统计 cancel→invalidate→missed→confirmed 的分布 |
 | AI 解读未接入 | 大屏纯结构化展示，无自然语言 | P3：复用 te_interpreter 模板生成"本帧大脑结论" |
-| 单位仍为英文 B/M/k | 中文用户阅读节奏割裂 | **本轮待确认方案后替换为「亿/万」两档** |
+| ~~单位仍为英文 B/M/k~~ ✅ 已完成 | – | 已统一到 `formatCnUsd`（亿+万 两档），全 6 个页面同步生效 |
 
 ---
 
@@ -517,7 +517,7 @@ body:has(.brain-page) {        /* ← brain 页面注册到白名单 */
 |---|---|---|
 | spot_book 数据 | **直接复用** WallZone | walls_above/below 已有现货厚度字段，新建会重复 |
 | fut_book 数据 | **直接复用** WallZone + LiquidationMap | 合约侧 = current − spot，磁铁来自 clusters，零新数据源 |
-| 单位格式化 fmtUsd | **提取复用**（待执行） | 当前后端 `_fmt_usd_short` + 前端两处 `fmtUsd` 三处重复，应提到 `frontend/src/lib/format.ts` |
+| 单位格式化 fmtUsd | **扩展复用** ✅ | 复用既有 `frontend/src/lib/format.ts::formatCnUsd`（升级为亿+万 两档），brain 三处局部 fmtUsd 全部委托；后端 `_fmt_usd_short` 同步口径 |
 | body 滚动白名单 | **扩展复用** :has() 模式 | 与 ai/levels/range/news-brief/roll 完全同模式 |
 | MAA JSON 解析容错 | **同步口径** | MAA 与 TE 两条独立链路同步改 strict=False，避免一条修一条漏 |
 
