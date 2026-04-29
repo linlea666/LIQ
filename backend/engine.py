@@ -1501,6 +1501,19 @@ class Engine:
                     )
                 except Exception:
                     pass
+                # W1-T2：历史落盘（best-effort，推到 thread pool 避免阻塞 event loop）
+                try:
+                    from processors.liquidity_wall_archiver import get_archiver
+                    from processors.liquidity_wall_metrics import get_metrics as _gm
+                    archiver = get_archiver()
+                    snapshot_ref = state.orderbook_pressure_snapshot
+                    source_age = _gm().source_age_by_endpoint()
+                    loop = asyncio.get_running_loop()
+                    loop.run_in_executor(
+                        None, archiver.append, snapshot_ref, source_age,
+                    )
+                except Exception:
+                    logger.debug("[OP] archiver dispatch failed", exc_info=True)
         except Exception:
             logger.debug("[OP] compute_pressure_snapshot failed", exc_info=True)
 
