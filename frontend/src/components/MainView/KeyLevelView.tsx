@@ -622,8 +622,8 @@ const CONFIRMATION_LABELS: Record<string, string> = {
   pattern_engulfing: "吞没形态",
   pattern_doji: "十字星",
   // M3 桥接：挂单压力多档信任 chip（互斥，最强优先）
-  ob_strong_bid: "强买墙共振",
-  ob_strong_ask: "强卖墙共振",
+  // W3-T4-a：旧 ob_strong_bid/ask 已删除（旧 PressureWall 仅看厚度档，与新 trust_score
+  // 路径口径冲突且会把 spoof 嫌疑墙也标成"强墙"，废弃后由下面 6 类 chip 取代）
   ob_dual_source_bid: "💎 双源高可信支撑",
   ob_dual_source_ask: "💎 双源高可信阻力",
   ob_spot_only_bid: "💰 仅现货支撑",

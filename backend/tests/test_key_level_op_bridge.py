@@ -2,12 +2,14 @@
 Key Level Tracker V2 · M3 桥接（_apply_pressure_alignment 升级版）单元测试
 
 覆盖：
-1. 旧路径（PressureWall S/A 级共振 → ob_strong_bid/ask）未被破坏
-2. wall_zones 多档 chip：dual_source > spot_only > spot_confluence > trusted（互斥）
-3. wall_events 衔接：wall_consumed / wall_removed / wall_strengthened（同价位 30min 内）
-4. 风险 warnings：break_through_risk / vacuum_gap_pct / 低 trust + 高 removal
-5. 铁律守护：仅追加 confirmations / warnings，不改 score 之外的字段
-6. 侧向匹配：多向 ↔ bid，空向 ↔ ask；wait_* 信号忽略
+1. wall_zones 多档 chip：dual_source > spot_only > spot_confluence > trusted（互斥）
+2. wall_events 衔接：wall_consumed / wall_removed / wall_strengthened（同价位 30min 内）
+3. 风险 warnings：break_through_risk / vacuum_gap_pct / 低 trust + 高 removal
+4. 铁律守护：仅追加 confirmations / warnings，不改 score 之外的字段
+5. 侧向匹配：多向 ↔ bid，空向 ↔ ask；wait_* 信号忽略
+
+W3-T4-a：删除旧 PressureWall S/A 级 → ob_strong_bid/ask 路径相关测试
+（与新 6 类 chip 口径冲突且会把 spoof 嫌疑墙也标成"强墙"）。
 
 新增 chip key（前端 CONFIRMATION_LABELS 已映射）：
   ob_dual_source_{bid,ask} / ob_spot_only_{bid,ask} /
@@ -20,7 +22,6 @@ import time
 from models.key_level import KeyLevelSignal
 from models.orderbook_pressure import (
     OrderbookPressureSnapshot,
-    PressureWall,
     SweepTarget,
     WallEvent,
     WallZone,
@@ -92,23 +93,8 @@ def _make_zone(
     )
 
 
-def _make_pressure_wall(side: str, price_mid: float, tier: str = "S") -> PressureWall:
-    return PressureWall(
-        side=side,  # type: ignore[arg-type]
-        price_lo=price_mid * 0.998,
-        price_hi=price_mid * 1.002,
-        price_mid=price_mid,
-        distance_pct=0.0,
-        size_usd=20_000_000.0,
-        size_base=300.0,
-        strength_score=15_000_000.0,
-        strength_tier=tier,  # type: ignore[arg-type]
-    )
-
-
 def _make_snapshot(
     *,
-    walls: list[PressureWall] | None = None,
     walls_above: list[WallZone] | None = None,
     walls_below: list[WallZone] | None = None,
     events: list[WallEvent] | None = None,
@@ -119,7 +105,7 @@ def _make_snapshot(
         ts_sec=ts_sec if ts_sec is not None else int(time.time()),
         last_price=63000.0,
         atr=300.0,
-        walls=walls or [],
+        walls=[],
         walls_above=walls_above or [],
         walls_below=walls_below or [],
         wall_events=events or [],
@@ -127,38 +113,35 @@ def _make_snapshot(
 
 
 # ─────────────────────────────────────────────────────────────────
-# 1. 旧路径（PressureWall S/A 级 → ob_strong_bid/ask）未被破坏
+# W3-T4-a 守护：旧 ob_strong_* 路径已被删除，PressureWall.walls 不再产 chip
 # ─────────────────────────────────────────────────────────────────
 
-class TestLegacyPathPreserved:
-    def test_long_signal_with_sa_bid_wall_yields_ob_strong_bid(self):
-        sig = _make_long_signal(63000.0)
-        snap = _make_snapshot(walls=[_make_pressure_wall("bid", 63000.0, "S")])
-        _apply_pressure_alignment([sig], snap, atr=300.0)
-        assert "ob_strong_bid" in sig.confirmations
+class TestLegacyPathRemoved:
+    """W3-T4-a：保证 pressure_snapshot.walls（PressureWall list）即使非空，
+    也不再为 KL 信号追加 ob_strong_bid/ask chip — 完全由 wall_zones 新路径替代。
+    """
 
-    def test_short_signal_with_sa_ask_wall_yields_ob_strong_ask(self):
-        sig = _make_short_signal(63000.0)
-        snap = _make_snapshot(walls=[_make_pressure_wall("ask", 63000.0, "A")])
-        _apply_pressure_alignment([sig], snap, atr=300.0)
-        assert "ob_strong_ask" in sig.confirmations
-
-    def test_b_tier_wall_does_not_trigger_legacy(self):
+    def test_legacy_chip_keys_never_emitted(self):
+        """即使 walls_below 为空，新路径不产 chip 时也不会回退到 ob_strong_*。"""
         sig = _make_long_signal(63000.0)
-        snap = _make_snapshot(walls=[_make_pressure_wall("bid", 63000.0, "B")])
+        zone = _make_zone("bid", 63000.0, trust_score=0.5)  # 低 trust，新路径不加 chip
+        snap = _make_snapshot(walls_below=[zone])
         _apply_pressure_alignment([sig], snap, atr=300.0)
         assert "ob_strong_bid" not in sig.confirmations
+        assert "ob_strong_ask" not in sig.confirmations
 
-    def test_legacy_and_new_path_coexist(self):
-        """旧 ob_strong_bid + 新 ob_dual_source_bid 同时出现（不互斥）。"""
+    def test_pressure_walls_field_no_longer_consumed(self):
+        """pressure_snapshot.walls 不应再被 _apply_pressure_alignment 消费。
+
+        构造 only walls=[] + 高 trust zone 时，新路径正常加 chip；
+        反向证明：高 trust zone 不存在时，即使 walls 字段保留默认空，
+        函数也安全 early-return（不会因为缺 strong_asks/strong_bids 报错）。
+        """
         sig = _make_long_signal(63000.0)
-        snap = _make_snapshot(
-            walls=[_make_pressure_wall("bid", 63000.0, "S")],
-            walls_below=[_make_zone("bid", 63000.0, dual_source=True, trust_score=0.9)],
-        )
+        snap = _make_snapshot()  # walls=[], walls_below=[], events=[]
         _apply_pressure_alignment([sig], snap, atr=300.0)
-        assert "ob_strong_bid" in sig.confirmations
-        assert "ob_dual_source_bid" in sig.confirmations
+        assert sig.confirmations == []
+        assert sig.warnings == []
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -208,7 +191,7 @@ class TestZoneTrustChips:
         assert "ob_trusted_bid" in sig.confirmations
 
     def test_low_trust_no_special_chip(self):
-        """trust_score < 0.65 且无现货 → 不加新档 chip（旧 ob_strong_* 路径处理）。"""
+        """trust_score < 0.65 且无现货 → 不加 chip（W3-T4-a 后这类墙不再贡献 chip）。"""
         sig = _make_long_signal(63000.0)
         zone = _make_zone("bid", 63000.0, trust_score=0.5)
         snap = _make_snapshot(walls_below=[zone])

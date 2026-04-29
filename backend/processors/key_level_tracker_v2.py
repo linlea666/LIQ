@@ -1202,15 +1202,17 @@ def _apply_pressure_alignment(
     """挂单压力监测器对 KL 信号的 confirmation/warning 叠加（M3 桥接）。
 
     设计演进：
-      - 旧路径（2026-04 重构）：仅 S/A 级 PressureWall 共振 → ob_strong_bid/ask
-      - 新路径（M3 桥接）：读 wall_zones / wall_events / break_through_risk /
+      - 早期（2026-04 重构）：仅 S/A 级 PressureWall 共振 → ob_strong_bid/ask
+      - M3 桥接（当前）：读 wall_zones / wall_events / break_through_risk /
         sweep_target / vacuum_gap_pct，产出更精细的多档 chip + 风险 warning
+      - W3-T4-a（2026-04）：删除旧 ob_strong_* 路径——它仅看 strength_tier（厚度档），
+        无法识别"厚但低 trust 的 spoof 嫌疑墙"，与新 6 类 chip（按 trust/源/Coinbase
+        细分）口径冲突且冗余。删除后这类墙不再贡献 chip，避免误导 AI/前端。
 
-    旧路径仍然保留向后兼容（不替换，仅追加），新路径追加额外的 confirmation key
-    与 warning 字符串。所有改动**仅追加** confirmations / warnings，不动
-    final_score / strength_tier / cascade_risk（V3 铁律）。
+    所有改动**仅追加** confirmations / warnings，不动 final_score /
+    strength_tier / cascade_risk（V3 铁律）。
 
-    新路径输出（按优先级互斥 + Coinbase 叠加）：
+    输出（按优先级互斥 + Coinbase 叠加）：
       A. confirmations（key 化，前端 CONFIRMATION_LABELS 映射）：
          - ob_dual_source_bid/ask     双源高可信墙（dual_source=True）
          - ob_spot_only_bid/ask       仅现货墙（source="spot_only"）
@@ -1239,22 +1241,13 @@ def _apply_pressure_alignment(
     """
     same_tol = max(atr * 0.5, 1e-9) if atr > 0 else 0.0
 
-    # ── 旧路径数据预备：S/A 级 PressureWall ──
-    if pressure_snapshot.walls:
-        strong_asks = [w for w in pressure_snapshot.walls
-                       if w.side == "ask" and w.strength_tier in ("S", "A")]
-        strong_bids = [w for w in pressure_snapshot.walls
-                       if w.side == "bid" and w.strength_tier in ("S", "A")]
-    else:
-        strong_asks, strong_bids = [], []
-
-    # ── 新路径数据预备：wall_zones + wall_events ──
+    # ── 数据预备：wall_zones + wall_events（W3-T4-a：移除旧 PressureWall 路径）──
     zones_above = pressure_snapshot.walls_above or []
     zones_below = pressure_snapshot.walls_below or []
     events = pressure_snapshot.wall_events or []
     snap_ts = pressure_snapshot.ts_sec or 0
 
-    if not (strong_asks or strong_bids or zones_above or zones_below or events):
+    if not (zones_above or zones_below or events):
         return
 
     for sig in signals:
@@ -1266,13 +1259,7 @@ def _apply_pressure_alignment(
         lvl_price = sig.level_price
         local_same = same_tol if same_tol > 0 else lvl_price * 0.003
 
-        # ── 旧路径：S/A 级 PressureWall 同价位 → ob_strong_bid/ask ──
-        if long_side and any(abs(w.price_mid - lvl_price) <= local_same for w in strong_bids):
-            sig.confirmations.append("ob_strong_bid")
-        elif short_side and any(abs(w.price_mid - lvl_price) <= local_same for w in strong_asks):
-            sig.confirmations.append("ob_strong_ask")
-
-        # ── 新路径：wall_zones 同价位 → 多档 chip + 风险 warning ──
+        # ── wall_zones 同价位 → 多档 chip + 风险 warning ──
         if long_side:
             matched_zones = [z for z in zones_below
                              if abs(z.price_mid - lvl_price) <= local_same]
@@ -1317,7 +1304,11 @@ def _append_zone_trust_chip(
     """根据 zone 信任档位在 sig.confirmations 加 chip key。
 
     互斥优先级（从高到低）：
-      双源 > 仅现货 > 现货共振 > 可信合约 > （普通合约不加 chip，已由旧 ob_strong_* 路径覆盖）
+      双源 > 仅现货 > 现货共振 > 可信合约 > （普通合约不加 chip）
+
+    W3-T4-a：trust_score < 0.65 且非现货/双源的墙不再加 chip——这类"厚但低 trust"
+    的墙过去由旧 ob_strong_* 路径覆盖，但实证发现它包含较多合约 spoof 嫌疑墙，
+    给 AI 加 chip 反而是噪声。如需观察这类墙，请直接查看 §8d wall 列表。
 
     W3-T1 叠加（与互斥优先级正交）：
       - ob_coinbase_<side>：当 coinbase_spot_confluence=True 时**额外**追加，
