@@ -252,6 +252,90 @@ def test_spot_book_none_when_no_orderbook():
     assert snap.spot_book is None
 
 
+def test_fut_book_bins_and_magnets_overlay():
+    """Phase C: fut_book 应含合约侧 bin（按距离分桶）+ 清算磁铁叠加，
+    且磁铁同价区的 bin 应被标记为 is_attached_magnet。"""
+    last = 100_000.0
+    near_ask = _wall(
+        wall_zone_id="ask_near", side="ask",
+        price_mid=100_300.0, price_low=100_250.0, price_high=100_350.0,
+        peak_price=100_300.0, distance_pct=0.30,
+        current_usd=2_000_000.0,
+        spot_current_usd=400_000.0, coinbase_spot_usd=100_000.0,
+        sweep_attractiveness_score=0.55, persistence_score=0.6,
+        break_through_risk=0.40,
+    )
+    mid_bid = _wall(
+        wall_zone_id="bid_mid", side="bid",
+        price_mid=98_500.0, price_low=98_400.0, price_high=98_600.0,
+        peak_price=98_500.0, distance_pct=-1.50,
+        current_usd=1_200_000.0,
+        spot_current_usd=0.0, coinbase_spot_usd=0.0,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_above=[near_ask], walls_below=[mid_bid],
+    )
+    liq = LiquidationMap(
+        coin="BTC", ts=1, cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50", short_bands=[], long_bands=[])],
+        clusters_above=[
+            LiqCluster(price_center=100_310.0, price_from=100_280, price_to=100_340,
+                       total_usd=30_000_000.0, side="short", exchange_count=4,
+                       dominant_leverage="50"),
+        ],
+        clusters_below=[
+            LiqCluster(price_center=95_000.0, price_from=94_900, price_to=95_100,
+                       total_usd=50_000_000.0, side="long", exchange_count=3),
+        ],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=liq,
+    )
+    fb = snap.fut_book
+    assert fb is not None
+    near = next((b for b in fb.bins_above if b.wall_zone_id == "ask_near"), None)
+    assert near is not None
+    assert near.futures_usd == max(2_000_000.0 - 500_000.0, 0.0)
+    assert near.is_attached_magnet is True
+    full = next((b for b in fb.bins_below if b.wall_zone_id == "bid_mid"), None)
+    assert full is not None
+    assert full.futures_usd == 1_200_000.0
+    assert any(m.magnet_kind == "liq_cluster" and m.side == "above" for m in fb.magnets)
+    assert any(m.magnet_kind == "liq_cluster" and m.side == "below" for m in fb.magnets)
+    far_below = next((m for m in fb.magnets if m.price == 95_000.0), None)
+    assert far_below is not None
+    assert far_below.distance_pct == round((95_000.0 - last) / last * 100.0, 4)
+
+
+def test_fut_book_only_magnets_without_orderbook():
+    """无 OrderbookPressureSnapshot 但有清算簇时，仍应输出 fut_book（只含 magnets）。"""
+    last = 100_000.0
+    liq = LiquidationMap(
+        coin="BTC", ts=1, cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50", short_bands=[], long_bands=[])],
+        clusters_below=[
+            LiqCluster(price_center=99_300.0, price_from=99_200, price_to=99_400,
+                       total_usd=20_000_000.0, side="long", exchange_count=2),
+        ],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=None, liq=liq,
+    )
+    fb = snap.fut_book
+    assert fb is not None
+    assert fb.bins_above == [] and fb.bins_below == []
+    assert any(m.price == 99_300.0 for m in fb.magnets)
+
+
+def test_fut_book_none_when_no_data():
+    """无 op 也无 liq 时 fut_book 应为 None。"""
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=100_000.0, atr=400.0, kl=None, op=None, liq=None,
+    )
+    assert snap.fut_book is None
+
+
 def test_dominant_role_pure_liquidation_magnet():
     """只有清算簇 → liquidation_magnet。"""
     last = 100_000.0

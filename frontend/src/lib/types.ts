@@ -2378,6 +2378,42 @@ export interface BrainSpotBook {
   notes: string[];
 }
 
+export interface BrainFutBin {
+  wall_zone_id: string;
+  side: "bid" | "ask";
+  price: number;
+  distance_pct: number;
+  bracket: BrainSpotBookBracket;
+  /** 合约侧 USD（current_usd - spot_usd，最低 0）；热力柱长度来源 */
+  futures_usd: number;
+  total_usd: number;
+  persistence_score: number;
+  sweep_attractiveness: number;
+  break_through_risk: number;
+  dominant_role: string;
+  /** 与磁铁/清算簇同价区共振（前端高亮"扫单目标墙"） */
+  is_attached_magnet: boolean;
+}
+
+export interface BrainFutMagnet {
+  price: number;
+  /** 带符号；正=上方、负=下方 */
+  distance_pct: number;
+  side: "above" | "below";
+  magnet_kind: "liq_cluster" | "max_pain_long" | "max_pain_short" | "leverage_magnet" | "other";
+  usd: number;
+  leverage_hint: string;
+  note: string;
+}
+
+export interface BrainFutBook {
+  bins_above: BrainFutBin[];
+  bins_below: BrainFutBin[];
+  magnets: BrainFutMagnet[];
+  bracket_caps: { near: number; mid: number; far: number };
+  notes: string[];
+}
+
 export interface TradingBrainSnapshot {
   coin: string;
   ts: number;
@@ -2393,4 +2429,6 @@ export interface TradingBrainSnapshot {
   opportunities: TradeSetupCandidate[];
   /** Phase B：现货订单簿模块（按距离分层） */
   spot_book: BrainSpotBook | null;
+  /** Phase C：合约流动性堆积模块（合约侧热力柱 + 清算磁铁叠加） */
+  fut_book: BrainFutBook | null;
 }

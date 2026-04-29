@@ -27,6 +27,9 @@ from models.trading_brain import (
     BrainContextChips,
     BrainDataQuality,
     BrainEvent,
+    BrainFutBin,
+    BrainFutBook,
+    BrainFutMagnet,
     BrainPriceZone,
     BrainRankings,
     BrainScenario,
@@ -641,6 +644,157 @@ def _build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainS
     )
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Phase C：合约流动性堆积模块（合约侧厚度 + 磁铁叠加；不重新评分）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _wall_to_fut_bin(w: WallZone) -> BrainFutBin:
+    """从 WallZone 抽取合约侧 bin。
+
+    合约侧厚度 = current_usd - spot_usd（max 0），其中 spot_usd 来自 dual_source/
+    coinbase_spot 字段；纯合约墙（无现货共振）→ futures_usd = current_usd。
+    """
+    spot_usd = float(getattr(w, "spot_current_usd", 0.0) or 0.0) + float(
+        getattr(w, "coinbase_spot_usd", 0.0) or 0.0
+    )
+    total_usd = float(getattr(w, "current_usd", 0.0) or 0.0)
+    fut_usd = max(total_usd - spot_usd, 0.0)
+    bracket = _bracket_of(w.distance_pct) or "far"
+    return BrainFutBin(
+        wall_zone_id=w.wall_zone_id or "",
+        side="bid" if w.side == "bid" else "ask",
+        price=float(w.peak_price or w.price_mid),
+        distance_pct=float(w.distance_pct),
+        bracket=bracket,  # type: ignore[arg-type]
+        futures_usd=fut_usd,
+        total_usd=total_usd,
+        persistence_score=float(getattr(w, "persistence_score", 0.0) or 0.0),
+        sweep_attractiveness=float(getattr(w, "sweep_attractiveness_score", 0.0) or 0.0),
+        break_through_risk=float(getattr(w, "break_through_risk", 0.0) or 0.0),
+        dominant_role=str(getattr(w, "dominant_role", "ordinary") or "ordinary"),
+    )
+
+
+def _trim_fut_brackets(items: list[BrainFutBin]) -> list[BrainFutBin]:
+    """各档位按 |distance_pct| 升序排序后截断，串接成最终列表。"""
+    grouped: dict[str, list[BrainFutBin]] = {"near": [], "mid": [], "far": []}
+    for it in items:
+        grouped.setdefault(it.bracket, []).append(it)
+    for k, lst in grouped.items():
+        lst.sort(key=lambda x: abs(x.distance_pct))
+        cap = _BRACKET_CAP.get(k, 8)
+        grouped[k] = lst[:cap]
+    return grouped["near"] + grouped["mid"] + grouped["far"]
+
+
+def _collect_fut_magnets(
+    *,
+    liq: Optional[LiquidationMap],
+    kl: Optional[KeyLevelSnapshotV2],
+    last_price: float,
+) -> list[BrainFutMagnet]:
+    """从 LiquidationMap.clusters_* 与 KeyLevel.magnet_levels 抽磁铁标记。
+
+    仅保留 |distance_pct| ≤ 5%（与 spot/fut bin 同一展示窗口），按距离排序去重。
+    """
+    out: list[BrainFutMagnet] = []
+    seen: set[tuple[str, int]] = set()  # (kind, price_bucket) 用于去重
+
+    def _push(price: float, side: str, kind: str, usd: float, leverage: str = "", note: str = "") -> None:
+        if not price or last_price <= 0:
+            return
+        dist = (price - last_price) / last_price * 100.0
+        if abs(dist) > _BRACKET_FAR:
+            return
+        # 价格分桶去重：±0.05% 内视为同一磁铁
+        bucket = int(price / max(last_price * 0.0005, 1.0))
+        key = (kind, bucket)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(BrainFutMagnet(
+            price=float(price),
+            distance_pct=round(dist, 4),
+            side="above" if dist > 0 else "below",  # type: ignore[arg-type]
+            magnet_kind=kind,  # type: ignore[arg-type]
+            usd=float(usd or 0.0),
+            leverage_hint=leverage or "",
+            note=note or "",
+        ))
+
+    if liq:
+        for c in list(getattr(liq, "clusters_above", None) or []):
+            _push(c.price_center, "above", "liq_cluster", c.total_usd,
+                  leverage=getattr(c, "dominant_leverage", "") or "")
+        for c in list(getattr(liq, "clusters_below", None) or []):
+            _push(c.price_center, "below", "liq_cluster", c.total_usd,
+                  leverage=getattr(c, "dominant_leverage", "") or "")
+    if kl:
+        for m in list(getattr(kl, "magnet_levels", None) or []):
+            kind = getattr(m, "source", "other") or "other"
+            kind_norm = kind if kind in (
+                "max_pain_long", "max_pain_short", "leverage_magnet"
+            ) else "other"
+            _push(
+                m.price,
+                "above" if (m.price - last_price) > 0 else "below",
+                kind_norm,
+                getattr(m, "usd", 0.0) or 0.0,
+                leverage=getattr(m, "leverage_hint", "") or "",
+                note=getattr(m, "note", "") or "",
+            )
+    out.sort(key=lambda x: abs(x.distance_pct))
+    return out
+
+
+def _build_fut_book(
+    *,
+    op: Optional[OrderbookPressureSnapshot],
+    liq: Optional[LiquidationMap],
+    kl: Optional[KeyLevelSnapshotV2],
+    last_price: float,
+) -> Optional[BrainFutBook]:
+    """合约堆积视图：bin = 合约侧厚度，磁铁 = 清算簇 + max_pain。
+
+    仅 op 缺失且无任何磁铁数据时返回 None；只有磁铁也允许显示（前端可视化磁铁层）。
+    """
+    bins_above: list[BrainFutBin] = []
+    bins_below: list[BrainFutBin] = []
+    if op:
+        for w in list(getattr(op, "walls_above", None) or []):
+            if _bracket_of(getattr(w, "distance_pct", 0.0)) is None:
+                continue
+            bins_above.append(_wall_to_fut_bin(w))
+        for w in list(getattr(op, "walls_below", None) or []):
+            if _bracket_of(getattr(w, "distance_pct", 0.0)) is None:
+                continue
+            bins_below.append(_wall_to_fut_bin(w))
+
+    magnets = _collect_fut_magnets(liq=liq, kl=kl, last_price=last_price)
+
+    # 标记 bin 是否与磁铁同价区共振（用于前端高亮"扫单目标墙"）
+    if magnets and (bins_above or bins_below):
+        atr_pct = max(0.10, abs(last_price) * 0.0005 / max(last_price, 1.0) * 100.0)
+        for b in bins_above + bins_below:
+            for m in magnets:
+                if abs(b.distance_pct - m.distance_pct) <= atr_pct:
+                    b.is_attached_magnet = True
+                    break
+
+    bins_above = _trim_fut_brackets(bins_above)
+    bins_below = _trim_fut_brackets(bins_below)
+
+    if not bins_above and not bins_below and not magnets:
+        return None
+    return BrainFutBook(
+        bins_above=bins_above,
+        bins_below=bins_below,
+        magnets=magnets,
+        bracket_caps=dict(_BRACKET_CAP),
+    )
+
+
 def build_trading_brain_snapshot(
     *,
     coin: str,
@@ -780,6 +934,7 @@ def build_trading_brain_snapshot(
         ))
 
     spot_book = _build_spot_book(op)
+    fut_book = _build_fut_book(op=op, liq=liq, kl=kl, last_price=last_price)
 
     return TradingBrainSnapshot(
         coin=coin.upper(),
@@ -794,4 +949,5 @@ def build_trading_brain_snapshot(
         data_quality=dq,
         opportunities=opportunities,
         spot_book=spot_book,
+        fut_book=fut_book,
     )

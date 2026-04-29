@@ -312,6 +312,72 @@ class BrainSpotBook(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Phase C：合约流动性堆积模块
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class BrainFutBin(BaseModel):
+    """合约堆积单 bin（来源：WallZone 合约侧厚度，按距离分桶）。
+
+    合约侧厚度 = current_usd - spot_usd（max 0）；spot_usd = spot_current_usd
+    + coinbase_spot_usd。无 spot 共振的纯合约墙将自动以全额 current_usd 计入合约侧。
+    """
+
+    wall_zone_id: str
+    side: Literal["bid", "ask"]
+    price: float
+    distance_pct: float
+    bracket: SpotBookBracket
+    futures_usd: float
+    """合约侧 USD 厚度（即热力柱长度的来源）。"""
+    total_usd: float
+    """整段墙体总 USD（含现货）；用于 tooltip 透明度参考。"""
+    persistence_score: float = 0.0
+    """0–1；越高越是"挂着不动"的真合约墙。"""
+    sweep_attractiveness: float = 0.0
+    """SA：作为扫单磁铁被打穿的可吸引度（合约侧关键风险指标）。"""
+    break_through_risk: float = 0.0
+    """合约侧打穿风险评分（沿用 WallZone.break_through_risk）。"""
+    dominant_role: str = "ordinary"
+    is_attached_magnet: bool = False
+    """是否与 LiqCluster / LiqMagnet 同价区共振（前端叠加磁铁标记）。"""
+
+
+class BrainFutMagnet(BaseModel):
+    """合约磁铁标记（叠加在热力柱图上的清算/磁铁层）。
+
+    数据来自 LiquidationMap.clusters_above/below 与 KeyLevel.magnet_levels。
+    """
+
+    price: float
+    distance_pct: float
+    """带符号；正=上方、负=下方。"""
+    side: Literal["above", "below"]
+    """与现价的相对方向；前端按此叠到对应 bin 列。"""
+    magnet_kind: Literal["liq_cluster", "max_pain_long", "max_pain_short", "leverage_magnet", "other"]
+    usd: float = 0.0
+    """涉及的清算/磁铁 USD。"""
+    leverage_hint: str = ""
+    """主导杠杆（如 "50x"）；仅展示。"""
+    note: str = ""
+
+
+class BrainFutBook(BaseModel):
+    """合约流动性堆积模块输出（堆积视图 + 磁铁叠加）。"""
+
+    bins_above: list[BrainFutBin] = Field(default_factory=list)
+    """上方堆积（升序，先近后远）。"""
+    bins_below: list[BrainFutBin] = Field(default_factory=list)
+    """下方堆积（升序绝对值，先近后远）。"""
+    magnets: list[BrainFutMagnet] = Field(default_factory=list)
+    """叠加在堆积图上的磁铁/清算簇标记。"""
+    bracket_caps: dict[str, int] = Field(
+        default_factory=lambda: {"near": 8, "mid": 8, "far": 6}
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 class TradingBrainSnapshot(BaseModel):
     """单币交易大脑聚合快照（GET /api/trading-brain/{coin}）。"""
 
@@ -332,3 +398,6 @@ class TradingBrainSnapshot(BaseModel):
 
     spot_book: Optional[BrainSpotBook] = None
     """Phase B：现货订单簿模块（按近/中/远分层；不重打分，仅视图整理）。"""
+
+    fut_book: Optional[BrainFutBook] = None
+    """Phase C：合约流动性堆积模块（合约侧热力柱 + 清算磁铁叠加）。"""

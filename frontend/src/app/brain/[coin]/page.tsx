@@ -10,6 +10,7 @@ import ZoneDetailCard from "@/components/Brain/ZoneDetailCard";
 import OpportunityBoard from "@/components/Brain/OpportunityBoard";
 import EventTimeline from "@/components/Brain/EventTimeline";
 import SpotOrderBookPanel from "@/components/Brain/SpotOrderBookPanel";
+import FuturesHeatmap from "@/components/Brain/FuturesHeatmap";
 import { ROLE_COLORS } from "@/components/Brain/types";
 
 export default function TradingBrainPage() {
@@ -132,11 +133,18 @@ export default function TradingBrainPage() {
             </section>
           </main>
 
-          {/* Phase B：现货订单簿模块（Phase C 将在右半区并入合约堆积模块） */}
+          {/* Phase B + C：第三排 50/50 双卡（现货订单簿 / 合约堆积） */}
           <section className="flex flex-[2] min-h-0 shrink-0 overflow-hidden border-t border-slate-800 bg-slate-900/30">
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 border-r border-slate-800">
               <SpotOrderBookPanel
                 spotBook={snap.spot_book}
+                coin={snap.coin}
+                onSelectZone={setSelectedId}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <FuturesHeatmap
+                futBook={snap.fut_book}
                 coin={snap.coin}
                 onSelectZone={setSelectedId}
               />
