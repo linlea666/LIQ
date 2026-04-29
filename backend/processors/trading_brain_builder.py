@@ -884,8 +884,16 @@ def build_trading_brain_snapshot(
     oi_delta_1h_pct: Optional[float] = None,
     funding_interpretation: str = "",
     max_zones: int = 24,
+    prev_setup_states: Optional[dict[str, "Any"]] = None,
 ) -> TradingBrainSnapshot:
-    """纯函数：由调用方从 CoinState 抽出字段后传入。"""
+    """纯函数：由调用方从 CoinState 抽出字段后传入。
+
+    prev_setup_states (P1-A 修复)：
+        上一帧 build 出的 {setup_id: SetupState} 字典；本次 build 完 opportunities
+        后，会用 prev_setup_states[setup_id] 覆盖刚 init 的初始态（forming/waiting），
+        然后再调 advance_all 推进。这样 confirmed/cooldown/missed 才能跨帧抵达。
+        调用方需在 build 完后从返回的 snap.opportunities 重新抽出最新 state 写回。
+    """
     now_sec = int(time.time())
     tol = merge_tolerance(last_price, atr)
 
@@ -1003,11 +1011,18 @@ def build_trading_brain_snapshot(
     )
 
     # Phase 4：事件驱动状态机推进（首屏即给准确状态分布）
+    # P1-A 修复：在 advance 前用 prev_setup_states 注入跨帧状态，否则状态机
+    # 永远从 opportunity_engine 的 forming/waiting 起步，confirmed/cooldown 永远到不了。
     if opportunities:
         from processors.opportunity_state_machine import (
             StateTickContext,
             advance_all,
         )
+        if prev_setup_states:
+            for s in opportunities:
+                prev = prev_setup_states.get(s.setup_id)
+                if prev is not None:
+                    s.state = prev
         wall_evts = list(op.wall_events) if op else []
         advance_all(opportunities, StateTickContext(
             last_price=last_price,

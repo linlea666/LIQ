@@ -258,6 +258,13 @@ class CoinState:
         self.ls_top_acct_change_24h: Optional[float] = None
         self.oi_change_24h_pct: Optional[float] = None
         self.fear_greed_prev: Optional[int] = None
+        # Trading Brain v3：高盈亏比观察区状态机持久化（修复 P1-A 伪状态机）
+        # key=setup_id, value=SetupState；由 GET /api/trading-brain/{coin} 写回。
+        # zone_id 已在 P1-B 改为 price-bucket+role_group 稳定哈希，
+        # setup_id (= sha1(coin|zone_id|setup_type)) 也跨帧稳定，可作字典 key。
+        # 写回时按"当帧仍存在的 setup_id"做 GC，避免字典无限增长。
+        from models.trading_brain import SetupState as _BrainSetupState
+        self.brain_setup_states: dict[str, _BrainSetupState] = {}
 
 
 class Engine:

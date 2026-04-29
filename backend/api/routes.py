@@ -790,6 +790,10 @@ async def get_trading_brain(
     if state.funding and state.funding.interpretation:
         fund_txt = state.funding.interpretation
 
+    # P1-A 修复：跨帧持久化 setup state，让状态机能真正抵达 confirmed/cooldown/missed
+    # （而非每次 build 都被 opportunity_engine 重置为 forming/waiting）。
+    # 字典自然按"当帧仍存在的 setup_id"做 GC——本帧聚合不出的 setup 自动清退。
+    prev_states = dict(getattr(state, "brain_setup_states", {}) or {})
     snap = build_trading_brain_snapshot(
         coin=coin_u,
         last_price=last,
@@ -802,7 +806,9 @@ async def get_trading_brain(
         oi_delta_1h_pct=oi_d1h,
         funding_interpretation=fund_txt,
         max_zones=max_zones,
+        prev_setup_states=prev_states,
     )
+    state.brain_setup_states = {s.setup_id: s.state for s in snap.opportunities}
     return snap.model_dump()
 
 

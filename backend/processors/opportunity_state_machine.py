@@ -77,9 +77,24 @@ _COOLDOWN_AGE_SEC = 60 * 30  # invalidated/cancelled 后 30 分钟内为 cooldow
 def _push_history(
     state: SetupState, *, src: SetupStateName, dst: SetupStateName, reason: str, ts: int,
 ) -> list[dict]:
-    item = {"ts": ts, "from": src, "to": dst, "reason": reason}
-    new_hist = (list(state.history) + [item])[-_HISTORY_LIMIT:]
-    return new_hist
+    """追加状态变迁历史，并对短期内重复的同一 transition 做 dedup。
+
+    P1-A 持久化后，同 setup 跨多次 API 请求若在同一秒内连发（多客户端打开同一币种），
+    advance_setup_state 可能 push 多条 (from→to) 完全相同的 history。Dedup 规则：
+    最后一条 history 的 (from, to) 与新条目相同且时间差 ≤ 5s 时合并为一条（更新 ts）。
+    """
+    new_item = {"ts": ts, "from": src, "to": dst, "reason": reason}
+    hist = list(state.history)
+    if hist:
+        last = hist[-1]
+        if (
+            str(last.get("from")) == str(src)
+            and str(last.get("to")) == str(dst)
+            and abs(int(last.get("ts") or 0) - ts) <= 5
+        ):
+            hist[-1] = new_item
+            return hist[-_HISTORY_LIMIT:]
+    return (hist + [new_item])[-_HISTORY_LIMIT:]
 
 
 def _new_state(

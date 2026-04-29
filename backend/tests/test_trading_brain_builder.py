@@ -525,3 +525,141 @@ def test_zone_id_changes_when_role_group_changes():
     )
     z_tgt = next(z for z in s_tgt.zones if z.dominant_role == "liquidation_magnet")
     assert z_def.zone_id != z_tgt.zone_id, "防御簇与磁铁簇即使同价区也必须有不同 zone_id"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P1-A 修复回归：setup state 跨 build 持久化（修复"伪状态机"）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _build_strong_long_setup_snapshot(prev_states=None):
+    """构造一个能稳定生成 support_limit_probe 的快照（distance ~ -1%、双源墙 + S 级关键位）。"""
+    last = 100_000.0
+    w = _wall(
+        price_mid=99_000.0, price_low=98_900.0, price_high=99_100.0,
+        side="bid", source="spot+depth", has_spot_confluence=True,
+        coinbase_spot_confluence=True,
+        support_resistance_trust_score=0.85,
+        sweep_attractiveness_score=0.30, break_through_risk=0.20,
+        trust_score=0.85, spot_current_usd=1_500_000.0,
+        coinbase_spot_usd=400_000.0, current_usd=2_500_000.0,
+        distance_pct=-1.0,
+    )
+    w_tgt = _wall(
+        wall_zone_id="w_target", price_mid=101_500.0, price_low=101_400.0,
+        price_high=101_600.0, side="ask", source="spot+depth",
+        has_spot_confluence=True, support_resistance_trust_score=0.78,
+        trust_score=0.78, distance_pct=1.5,
+    )
+    lv = KeyLevelV2(
+        price=99_050.0, side="support", strength_tier="S",
+        confluence_score=82.0, final_score=88.0,
+    )
+    kl = KeyLevelSnapshotV2(ts=int(time.time()), levels=[lv])
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last,
+        walls_above=[w_tgt], walls_below=[w],
+    )
+    return build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=kl, op=op, liq=None,
+        prev_setup_states=prev_states,
+    )
+
+
+def test_setup_state_persists_across_builds():
+    """注入 prev_setup_states 后，状态机能从上一帧的 triggered 推进到 confirmation_pending
+    （而不是被 opportunity_engine 重置回 forming/waiting）。"""
+    snap1 = _build_strong_long_setup_snapshot()
+    long_setups = [
+        s for s in snap1.opportunities
+        if s.setup_type == "support_limit_probe"
+    ]
+    assert long_setups, "首帧应能生成 support_limit_probe（用于回归 setup_id 链路）"
+    sid = long_setups[0].setup_id
+
+    # 模拟"上一帧"已推进到 triggered（在生产里这会由 advance_all 在前一帧达成）
+    from models.trading_brain import SetupState
+    prev_states = {sid: SetupState(name="triggered", since_ts=int(time.time()) - 60)}
+
+    snap2 = _build_strong_long_setup_snapshot(prev_states=prev_states)
+    same = next(s for s in snap2.opportunities if s.setup_id == sid)
+    # 关键：第二帧不能再被重置回 forming/waiting；至少应保留 triggered 或推进
+    assert same.state.name in (
+        "triggered", "confirmation_pending", "confirmed", "invalidated",
+        "cancelled", "missed", "cooldown",
+    ), f"prev=triggered 注入后不应回退到 forming/waiting，got {same.state.name}"
+
+
+def test_setup_id_stable_across_rebuild_enables_persistence():
+    """setup_id 必须跨 build 稳定（依赖 P1-B zone_id 稳定 + setup_type 不变）。
+    否则 prev_setup_states 字典 key 永远找不到。"""
+    s1 = _build_strong_long_setup_snapshot()
+    s2 = _build_strong_long_setup_snapshot()
+    ids1 = {s.setup_id for s in s1.opportunities}
+    ids2 = {s.setup_id for s in s2.opportunities}
+    assert ids1 and ids1 == ids2, f"setup_id 集合必须跨 build 一致；s1={ids1} s2={ids2}"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Mutation guard：铁律强制单测（防回归）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_does_not_mutate_keylevel_or_wall_score_fields():
+    """Trading Brain 必须只读消费 KL/Wall，不能改它们的评分字段。
+    回归 hash 对比：build 前后 final_score / strength_tier / cascade_risk /
+    support_resistance_trust_score / sweep_attractiveness_score /
+    break_through_risk / trust_score 完全不变。"""
+    last = 100_000.0
+    lv = KeyLevelV2(
+        price=99_050.0, side="support", strength_tier="A",
+        confluence_score=72.0, final_score=78.0, cascade_risk=0.18,
+    )
+    w = _wall(
+        price_mid=99_000.0, price_low=98_900.0, price_high=99_100.0,
+        side="bid", source="spot_only", has_spot_confluence=True,
+        support_resistance_trust_score=0.85, sweep_attractiveness_score=0.30,
+        break_through_risk=0.22, trust_score=0.78,
+    )
+    kl = KeyLevelSnapshotV2(ts=1, levels=[lv])
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=1, last_price=last, walls_below=[w],
+    )
+
+    before = {
+        "kl": (lv.final_score, lv.strength_tier, lv.cascade_risk, lv.confluence_score),
+        "w": (
+            w.support_resistance_trust_score,
+            w.sweep_attractiveness_score,
+            w.break_through_risk,
+            w.trust_score,
+            w.strength_tier,
+        ),
+    }
+    build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=kl, op=op, liq=None,
+    )
+    after = {
+        "kl": (lv.final_score, lv.strength_tier, lv.cascade_risk, lv.confluence_score),
+        "w": (
+            w.support_resistance_trust_score,
+            w.sweep_attractiveness_score,
+            w.break_through_risk,
+            w.trust_score,
+            w.strength_tier,
+        ),
+    }
+    assert before == after, f"铁律违反：上游评分字段被修改\nbefore={before}\nafter={after}"
+
+
+def test_snapshot_json_contains_no_trade_instructions():
+    """Trading Brain 严禁输出"买入/卖出/开多/开空/入场信号/概率"等交易指令措辞。"""
+    snap = _build_strong_long_setup_snapshot()
+    js = snap.model_dump_json()
+    BANNED = ["买入信号", "卖出信号", "开多信号", "开空信号", "入场信号",
+              "立即买入", "立即卖出", "马上做多", "马上做空"]
+    for kw in BANNED:
+        assert kw not in js, f"发现违规交易指令措辞：{kw}"
+    # 概率措辞：只允许"打穿风险评分"，禁止"打穿概率/胜率/probability"
+    assert "打穿概率" not in js, "禁止用'打穿概率'，应称'打穿风险评分'"
+    assert "胜率" not in js, "MVP 阶段禁止显示胜率（无后验校准）"
