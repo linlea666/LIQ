@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Sequence
@@ -264,6 +265,100 @@ def _frame_has_wall_seed(
         if raw.price_low <= b.price <= raw.price_high and b.usd_value >= seed_min_usd:
             return True
     return False
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# W1-T4：稳定 wall_zone_id + spot/coinbase bin 区间 overlap 加权
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _build_wall_zone_id(
+    coin: str, side: str, peak_price: float, atr: Optional[float],
+) -> str:
+    """生成稳定 wall_zone_id（同一物理墙跨帧不变）。
+
+    bucket_size 选择（关键：避免 peak×0.0015 与 atr×0.5 同时取 max 时的"平台效应"）：
+      - ATR 已知：bucket = max(atr × 0.5, 0.5)
+        高波动币 bucket 大（BTC ATR 200 → bucket 100）；低波动小币 bucket 小。
+      - ATR 缺失：bucket = max(peak × 0.0015, 0.5)
+        按价格 0.15% 比例兜底。仅在 ATR 缺失时启用，不参与 max（否则会被
+        peak 等比例放大，让相距数百 USD 的 peak 仍同桶）。
+      - 0.5 USD 绝对兜底：极低价币（< 1 USD）不致桶为 0。
+
+    bucket_idx = floor(peak_price / bucket_size)
+    id = sha1(f"{coin}|{side}|{bucket_idx}").hexdigest()[:12]
+
+    设计要点：
+      - 不放 source / dual_source：source 切换（spot_only ↔ spot+depth）不应改 ID
+      - 不放 ts_sec：必须跨帧稳定
+      - 不直接放 peak_price：浮点抖动会破坏稳定性，用桶号离散化
+      - 12 hex chars = 48 bit ≈ 2.8e14 空间，单币单侧不会冲突
+
+    边界说明：peak 刚好在桶边界附近（如 76400 / 76500，bucket=100）时小漂移
+    可能跨桶 → 不同 ID。这是离散化的必然代价；生产实际数据中 peak 跨帧漂移
+    通常 < 1/4 bucket（~25 USD），同桶概率极高。
+    """
+    side_norm = "ask" if side == "ask" else "bid"
+    coin_norm = (coin or "").upper()
+    peak = float(peak_price or 0)
+    if peak <= 0:
+        return ""
+    atr_val = float(atr) if atr else 0
+    if atr_val > 0:
+        bucket_size = max(atr_val * 0.5, 0.5)
+    else:
+        bucket_size = max(peak * 0.0015, 0.5)
+    bucket_idx = int(peak // bucket_size)
+    raw = f"{coin_norm}|{side_norm}|{bucket_idx}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _estimate_bin_step(bins: Sequence[Any]) -> float:
+    """从 bins 推导间距（中位数，鲁棒）。
+
+    spot heatmap 间距通常固定（BTC ≈ 100 USD / ETH ≈ 5 USD），但偶有缺位。
+    取所有相邻 price 差的中位数 → 抗稀疏 bin 干扰。
+    返回 0 表示无法估算（bins 不足 2 个或都是同价）。
+    """
+    if len(bins) < 2:
+        return 0.0
+    diffs: list[float] = []
+    sorted_bins = sorted(bins, key=lambda b: b.price)
+    for i in range(len(sorted_bins) - 1):
+        d = abs(sorted_bins[i + 1].price - sorted_bins[i].price)
+        if d > 0:
+            diffs.append(d)
+    if not diffs:
+        return 0.0
+    diffs.sort()
+    return diffs[len(diffs) // 2]
+
+
+def _bin_overlap_ratio(
+    bin_price: float, bin_half_width: float,
+    zone_lo: float, zone_hi: float,
+) -> float:
+    """spot/coinbase bin（视为 [bin_price-h, bin_price+h] 区间）与 zone [lo, hi]
+    的重叠比例 ∈ [0, 1]。
+
+    背景：spot heatmap bin 间距 100 USD（BTC），但 zone 跨度 30-50 USD。
+      - 旧实现 `if z.lo <= b.price <= z.hi` 点匹配会让 zone 漏算 bin 厚度
+        （bin price=76050 实际代表 [76000,76100] 的累积，zone [76020,76080]
+        应分到 60/100=0.6 比例的 USD，旧实现漏算或全算都失真）。
+      - 区间 overlap 加权按物理意义分配：zone 占多少 bin 区间，就拿多少 USD。
+      - 当 bin 同时跨越两个相邻 zone 时，每个 zone 只拿自己那部分（不会
+        让一个 spot bin 同时给多个 zone 全额加 dual_source）。
+
+    bin_half_width 为 0 时退化为点匹配（保留旧行为，向后兼容）。
+    """
+    if bin_half_width <= 0:
+        return 1.0 if zone_lo <= bin_price <= zone_hi else 0.0
+    bin_lo = bin_price - bin_half_width
+    bin_hi = bin_price + bin_half_width
+    overlap = min(bin_hi, zone_hi) - max(bin_lo, zone_lo)
+    if overlap <= 0:
+        return 0.0
+    bin_width = max(bin_hi - bin_lo, 1e-9)
+    return min(1.0, overlap / bin_width)
 
 
 def _compute_zone_history_stats(
@@ -532,9 +627,15 @@ def _augment_zones_with_spot_depth(
         1. 合约 zone 已用合约 ATR-aware merge_pct 决定了"墙"边界（更高粒度，bin 5-10 USD）
         2. 现货 bin 间距 100 USD，价区分辨率粗，不适合主导 zone 边界
         3. 主路径"合约锚点 + 现货验证"语义更清晰
-      仅在合约 zone 价区 [price_low, price_high] 内累加现货 USD：
-        - spot_current_usd = 现货最新帧该价区 USD
-        - spot_max_usd_1h  = 现货 history 各帧该价区 USD 的 max
+
+    W1-T4 升级：用区间 overlap 加权代替点匹配
+      旧实现：`if z.lo <= b.price <= z.hi` → 粗 bin 误差大（bin 间距 100 USD，
+        zone 跨度 30-50 USD 时漏算/误扩散）。
+      新实现：把 spot bin 视为 [b.price ± bin_step/2] 的区间，按与 zone 的
+        overlap 比例加权 USD。bin 跨越两个相邻 zone 时，每个 zone 只拿自己
+        那部分，不会同时给多个 zone 全额加 dual_source。
+      bin_step 不可估算时（bins < 2 或同价），退化为点匹配（向后兼容）。
+
       当 spot_current_usd ≥ wall_min_usd 且 spot_max_usd_1h ≥ wall_min_usd
         → 标 dual_source=True + source="spot+depth"
 
@@ -545,19 +646,27 @@ def _augment_zones_with_spot_depth(
     wall_min = cfg.get("wall_min_usd", ENGINE_DEFAULTS["wall_min_usd"])
     latest_spot = spot_history[-1]
 
+    def _frame_zone_usd(bins: list, zone_lo: float, zone_hi: float) -> float:
+        if not bins:
+            return 0.0
+        bin_step = _estimate_bin_step(bins)
+        half = bin_step / 2.0 if bin_step > 0 else 0.0
+        total = 0.0
+        for b in bins:
+            ratio = _bin_overlap_ratio(b.price, half, zone_lo, zone_hi)
+            if ratio > 0:
+                total += b.usd_value * ratio
+        return total
+
     for z in zones:
         bins_latest = latest_spot.bids if z.side == "bid" else latest_spot.asks
-        cur_usd = sum(b.usd_value for b in bins_latest
-                       if z.price_low <= b.price <= z.price_high) if bins_latest else 0.0
+        cur_usd = _frame_zone_usd(bins_latest, z.price_low, z.price_high)
         frame_totals: list[float] = []
         for frame in spot_history:
             bins = frame.bids if z.side == "bid" else frame.asks
             if not bins:
                 continue
-            frame_totals.append(
-                sum(b.usd_value for b in bins
-                    if z.price_low <= b.price <= z.price_high)
-            )
+            frame_totals.append(_frame_zone_usd(bins, z.price_low, z.price_high))
         max_usd = max(frame_totals) if frame_totals else cur_usd
 
         z.spot_current_usd = round(cur_usd, 2)
@@ -688,6 +797,14 @@ def _augment_zones_with_coinbase(
                           ENGINE_DEFAULTS.get("augment_match_tol_usd_min", 5.0))
     threshold_usd = wall_min * usd_ratio
 
+    # W1-T4：Coinbase aggregated frame 的 levels 已被聚合为 0.5%/level（看
+    # coinbase_native.py），bin_step 通常较细（< 5 USD），但在远价位也可能稀疏。
+    # 用 overlap 加权同样适用：
+    #   - levels 间距小时退化为近似点匹配（半宽 < zone 跨度，overlap=1.0）
+    #   - levels 间距大时按比例分配（防止单个聚合 level 同时给多个 zone 加共振）
+    bid_step = _estimate_bin_step(bids)
+    ask_step = _estimate_bin_step(asks)
+
     for z in zones:
         levels = bids if z.side == "bid" else asks
         if not levels:
@@ -695,13 +812,20 @@ def _augment_zones_with_coinbase(
         tol = max(z.peak_price * tol_pct, tol_usd_min)
         lo_bound = z.price_low - tol
         hi_bound = z.price_high + tol
+        # 仍然保留 tol 容差用于"扩展 zone 边界吸收 USD/USDT spread"；
+        # overlap 在扩展后的边界 [lo_bound, hi_bound] 上计算
+        bin_step = bid_step if z.side == "bid" else ask_step
+        half = bin_step / 2.0 if bin_step > 0 else 0.0
 
         cb_usd = 0.0
         cb_orders = 0
         for lv in levels:
-            if lo_bound <= lv.price <= hi_bound:
-                cb_usd += lv.usd_value
-                cb_orders += lv.num_orders
+            ratio = _bin_overlap_ratio(lv.price, half, lo_bound, hi_bound)
+            if ratio > 0:
+                cb_usd += lv.usd_value * ratio
+                # num_orders 离散整数：overlap > 0.5 才计入（防止边缘 level 加法漂移）
+                if ratio >= 0.5:
+                    cb_orders += lv.num_orders
 
         z.coinbase_spot_usd = round(cb_usd, 2)
         z.coinbase_num_orders = cb_orders
@@ -1317,6 +1441,9 @@ def _detect_zone_lifecycle_events(
 
     # 按 zone 收集 large_orders 子集
     for z in zones:
+        # W1-T4：所有事件统一带上 zone 的 wall_zone_id（已由主流程预先赋值）
+        zid = z.wall_zone_id or ""
+
         if not z.large_order_ids:
             # 仅 trend 派生事件
             if z.trend == "new":
@@ -1325,6 +1452,7 @@ def _detect_zone_lifecycle_events(
                     event_type="wall_appeared",
                     size_after_usd=z.current_usd, confidence=0.5,
                     explain=f"{('上方卖' if z.side == 'ask' else '下方买')}墙首次出现",
+                    wall_zone_id=zid,
                 ))
             elif z.trend == "strengthening":
                 events.append(WallEvent(
@@ -1333,6 +1461,7 @@ def _detect_zone_lifecycle_events(
                     size_before_usd=z.avg_usd_1h, size_after_usd=z.current_usd,
                     confidence=0.6,
                     explain=f"墙增厚 {(z.current_usd/max(z.avg_usd_1h,1)-1)*100:.0f}%",
+                    wall_zone_id=zid,
                 ))
             elif z.trend == "weakening":
                 events.append(WallEvent(
@@ -1341,6 +1470,7 @@ def _detect_zone_lifecycle_events(
                     size_before_usd=z.avg_usd_1h, size_after_usd=z.current_usd,
                     confidence=0.6,
                     explain=f"墙减薄 {(1-z.current_usd/max(z.avg_usd_1h,1))*100:.0f}%",
+                    wall_zone_id=zid,
                 ))
             continue
 
@@ -1367,6 +1497,7 @@ def _detect_zone_lifecycle_events(
                 executed_usd_value=total_executed,
                 confidence=conf,
                 explain=f"已有大额限价单成交消耗 {total_executed/1e6:.1f}M USD",
+                wall_zone_id=zid,
             ))
 
         # removed
@@ -1378,6 +1509,7 @@ def _detect_zone_lifecycle_events(
                 size_after_usd=z.current_usd,
                 confidence=0.7,
                 explain=f"{len(ended_no_exec)} 笔大单未成交结束(撤单风险)",
+                wall_zone_id=zid,
             ))
 
         # reloaded：在 reload_window_seconds 内出现新挂单（end_time + window > now，且新 id 落在同价位）
@@ -1398,6 +1530,7 @@ def _detect_zone_lifecycle_events(
                 size_after_usd=sum(lo.current_usd_value for lo in new_holdings),
                 confidence=0.65,
                 explain=f"撤后 {win}s 内同价位重挂 {len(new_holdings)} 笔",
+                wall_zone_id=zid,
             ))
 
         # appeared/strengthened/weakened（trend 派生）
@@ -1407,6 +1540,7 @@ def _detect_zone_lifecycle_events(
                 event_type="wall_appeared",
                 size_after_usd=z.current_usd, confidence=0.5,
                 explain=f"{('上方卖' if z.side == 'ask' else '下方买')}墙首次出现",
+                wall_zone_id=zid,
             ))
         elif z.trend == "strengthening":
             events.append(WallEvent(
@@ -1415,6 +1549,7 @@ def _detect_zone_lifecycle_events(
                 size_before_usd=z.avg_usd_1h, size_after_usd=z.current_usd,
                 confidence=0.6,
                 explain=f"墙增厚 {(z.current_usd/max(z.avg_usd_1h,1)-1)*100:.0f}%",
+                wall_zone_id=zid,
             ))
         elif z.trend == "weakening":
             events.append(WallEvent(
@@ -1423,6 +1558,7 @@ def _detect_zone_lifecycle_events(
                 size_before_usd=z.avg_usd_1h, size_after_usd=z.current_usd,
                 confidence=0.6,
                 explain=f"墙减薄 {(1-z.current_usd/max(z.avg_usd_1h,1))*100:.0f}%",
+                wall_zone_id=zid,
             ))
 
     return events
@@ -1543,6 +1679,13 @@ def build_liquidity_wall_outputs(
     # 强度等级
     _attach_strength_tier(walls_above, cfg)
     _attach_strength_tier(walls_below, cfg)
+
+    # W1-T4：稳定 wall_zone_id（必须在 _detect_zone_lifecycle_events 之前赋值，
+    # 否则事件无法关联到 zone）。同一物理墙跨帧 ID 不变 → 后验脚本据此串联生命周期。
+    for z in walls_above:
+        z.wall_zone_id = _build_wall_zone_id(coin, "ask", z.peak_price, atr)
+    for z in walls_below:
+        z.wall_zone_id = _build_wall_zone_id(coin, "bid", z.peak_price, atr)
 
     # M2.5：trust_score（必须在 spot augment + tier 之后；用 has_spot_confluence /
     # exchange_count / persistence_score 综合）

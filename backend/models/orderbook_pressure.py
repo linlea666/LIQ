@@ -313,6 +313,8 @@ class WallEvent(BaseModel):
     executed_usd_value: Optional[float] = None  # consumed 才有
     confidence: float = 0.0                     # GPT 加权公式（0-1）
     explain: str = ""                           # 前端 chip 文字
+    # W1-T4：关联的 wall_zone_id（同 ID 同一物理墙；后验脚本据此串联事件链）
+    wall_zone_id: str = ""
 
 
 class WallZone(BaseModel):
@@ -320,6 +322,15 @@ class WallZone(BaseModel):
 
     取代单点 PressureWall 视角，回答"上方哪里有卖墙、下方哪里有买墙"。
     """
+    # ── W1-T4：稳定 zone ID（跨帧匹配）──
+    # 由 (coin, side, peak_price 桶号) 生成 SHA1 短摘要：
+    #   bucket_size = max(atr × 0.5, peak_price × 0.0015, 0.5)
+    #   bucket_idx  = floor(peak_price / bucket_size)
+    #   id          = sha1(f"{coin}|{side}|{bucket_idx}").hexdigest()[:12]
+    # 同一物理墙 ±0.5 ATR 漂移内 ID 不变，方便 wall_events / 后验脚本串联生命周期。
+    # 不依赖 source（dual_source / spot_only 切换不影响 ID）。
+    wall_zone_id: str = ""
+
     # ── 区间定位（M1）──
     side: WallSide                              # bid 下方买墙 / ask 上方卖墙
     price_low: float
