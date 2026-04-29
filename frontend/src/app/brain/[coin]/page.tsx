@@ -125,7 +125,12 @@ export default function TradingBrainPage() {
             </section>
 
             <section className="flex-1 min-w-[300px] border-r border-slate-800">
-              <ZoneDetailCard zone={selectedZone} coin={snap.coin} />
+              <ZoneDetailCard
+                zone={selectedZone}
+                coin={snap.coin}
+                spotBook={snap.spot_book}
+                futBook={snap.fut_book}
+              />
             </section>
 
             <section className="w-[320px] shrink-0 bg-slate-900/30 xl:w-[360px] 2xl:w-[400px]">
