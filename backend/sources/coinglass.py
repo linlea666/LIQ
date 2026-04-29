@@ -39,6 +39,7 @@ class FixedIntervalLimiter:
         async with self._lock:
             now = time.monotonic()
             elapsed = now - self._last_request
+            wait = 0.0
             if elapsed < self._min_interval:
                 wait = self._min_interval - elapsed
                 logger.debug("Rate limiter: spacing %.1fs", wait)
@@ -49,6 +50,14 @@ class FixedIntervalLimiter:
             if time.time() - self._daily_reset_ts > 86400:
                 self._daily_count = 0
                 self._daily_reset_ts = time.time()
+
+            # W1-T1：上报排队等待（best-effort，绝不影响主路径）
+            if wait > 0:
+                try:
+                    from processors.liquidity_wall_metrics import get_metrics
+                    get_metrics().record_coinglass_queue_wait(wait * 1000.0)
+                except Exception:
+                    pass
 
     @property
     def daily_count(self) -> int:
@@ -180,12 +189,21 @@ class CoinglassSource(DataSource):
         session = await self.get_session()
         t0 = time.time()
 
+        # W1-T1：在所有出口（成功/失败/429）统一上报 endpoint 计数
+        def _record_metric(ok: bool) -> None:
+            try:
+                from processors.liquidity_wall_metrics import get_metrics
+                get_metrics().record_coinglass_call(path, ok)
+            except Exception:
+                pass
+
         try:
             async with session.get(url, params=params, headers=self._headers) as resp:
                 latency = (time.time() - t0) * 1000
                 if resp.status == 429:
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
                     self._mark_failure()
+                    _record_metric(ok=False)
                     await asyncio.sleep(15)
                     return None
                 resp.raise_for_status()
@@ -196,6 +214,7 @@ class CoinglassSource(DataSource):
                 if code not in (None, "0", 0, "20000", 20000):
                     logger.warning("Coinglass API error | path=%s code=%s msg=%s",
                                    path, code, data.get("msg", ""))
+                    _record_metric(ok=False)
                     return None
 
                 if raw_response:
@@ -206,13 +225,16 @@ class CoinglassSource(DataSource):
                     self._cache[self._cache_key(path, params)] = (
                         time.time() + cache_ttl, result,
                     )
+                _record_metric(ok=True)
                 return result
         except aiohttp.ClientResponseError as e:
             self._mark_failure()
+            _record_metric(ok=False)
             logger.error("Coinglass HTTP %d | path=%s | %s", e.status, path, str(e))
             return None
         except Exception:
             self._mark_failure()
+            _record_metric(ok=False)
             logger.error("Coinglass request failed | path=%s", path, exc_info=True)
             return None
 

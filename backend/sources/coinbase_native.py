@@ -101,34 +101,49 @@ class CoinbaseNativeSource(DataSource):
 
         session = await self.get_session()
         t0 = time.time()
+
+        # W1-T1：所有出口统一上报（best-effort）
+        def _record_metric(latency_ms: float, ok: bool) -> None:
+            try:
+                from processors.liquidity_wall_metrics import get_metrics
+                get_metrics().record_coinbase_call(latency_ms, ok)
+            except Exception:
+                pass
+
         try:
             async with session.get(url, params=params) as resp:
                 latency = (time.time() - t0) * 1000
                 if resp.status == 429:
                     logger.warning("Coinbase 429 rate limited | product=%s", product_id)
                     self._mark_failure()
+                    _record_metric(latency, ok=False)
                     await asyncio.sleep(5)
                     return None
                 if resp.status == 404:
                     # product 不存在（如 SUI-USD 不存在）→ 静默返回 None，由调用方决定
                     logger.warning("Coinbase product not found | product=%s", product_id)
                     self._mark_failure()
+                    _record_metric(latency, ok=False)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
                 self._mark_success(latency)
+                _record_metric(latency, ok=True)
                 return data
         except asyncio.TimeoutError:
             self._mark_failure()
+            _record_metric((time.time() - t0) * 1000, ok=False)
             logger.warning("Coinbase timeout | product=%s timeout=%ss",
                            product_id, self.timeout_sec)
             return None
         except aiohttp.ClientResponseError as e:
             self._mark_failure()
+            _record_metric((time.time() - t0) * 1000, ok=False)
             logger.error("Coinbase HTTP %d | product=%s | %s", e.status, product_id, str(e))
             return None
         except Exception as e:
             self._mark_failure()
+            _record_metric((time.time() - t0) * 1000, ok=False)
             logger.error("Coinbase request failed | product=%s | %s",
                          product_id, str(e), exc_info=True)
             return None

@@ -1491,6 +1491,16 @@ class Engine:
             state.orderbook_pressure_snapshot = compute_pressure_snapshot(
                 state, cfg_overrides=op_cfg or None,
             )
+            # W1-T1：上报 data_quality 给监控（best-effort）
+            if state.orderbook_pressure_snapshot is not None:
+                try:
+                    from processors.liquidity_wall_metrics import get_metrics
+                    get_metrics().record_data_quality(
+                        ccy,
+                        state.orderbook_pressure_snapshot.data_quality or "",
+                    )
+                except Exception:
+                    pass
         except Exception:
             logger.debug("[OP] compute_pressure_snapshot failed", exc_info=True)
 

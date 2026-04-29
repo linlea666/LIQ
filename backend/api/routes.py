@@ -787,6 +787,33 @@ async def get_signal_bus_stats():
         raise HTTPException(500, f"signal_bus unavailable: {e}")
 
 
+@router.get("/liquidity-wall/metrics")
+async def get_liquidity_wall_metrics(coin: Optional[str] = Query(None)):
+    """流动性墙引擎运行时监控指标（W1-T1）。
+
+    暴露：
+      - Coinglass 限速器排队 p50/p95（ms）+ 各端点调用次数 + 各端点错误次数
+      - 各端点最近成功距今秒数（source_age）
+      - Coinbase 原生 API 延迟 p50/p95 + 30min 错误率
+      - 各币 orderbook_pressure 30min stale_ratio + 最近 data_quality 标签
+
+    用途：
+      - 上线观察期判定限速器是否在排队（queue_wait_p95 > 8000ms 即不健康）
+      - 判定数据是否陈旧（stale_ratio > 0.2 触发降权）
+      - 判定 Coinbase 是否可用（error_rate > 0.05 阻塞 trust_score Coinbase 加分）
+
+    参数：
+      - coin: 可选。传入则同时返回该币的 stale_ratio + latest data_quality；
+              不传则返回 by_coin 字典。
+    """
+    try:
+        from processors.liquidity_wall_metrics import get_metrics
+        return get_metrics().snapshot(coin)
+    except Exception as e:
+        logger.warning("liquidity_wall_metrics snapshot failed: %s", e)
+        raise HTTPException(500, f"metrics unavailable: {e}")
+
+
 @router.get("/ai-trader-report/{coin}")
 async def get_ai_trader_report(coin: str):
     """D14：AI 引擎 L7 输出 —— AITraderReport。
