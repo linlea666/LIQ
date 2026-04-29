@@ -209,21 +209,73 @@ def _liq_sweep_score(c: LiqCluster) -> float:
     return round(min(1.0, raw), 3)
 
 
+def _role_group(dom_role: str) -> str:
+    """把 6 类 dominant_role 折叠成 4 类 role_group，作为 zone_id 哈希输入。
+
+    折叠目的：让 zone_id 对"角色微变"也保持稳定。
+    例如同一价格区在 contested 与 spot_defense 之间偶尔切换（共振临界点），
+    若直接用全 dom_role 字符串做哈希，会导致 zone_id 频繁跳动。
+
+    映射：
+      spot_defense / contested        → "defense"   （结构防御簇）
+      futures_target / liquidation_magnet → "target"  （目标/磁铁簇）
+      key_level_only                  → "key_level" （单一关键位）
+      other                           → "mixed"     （弱聚合）
+    """
+    if dom_role in ("spot_defense", "contested"):
+        return "defense"
+    if dom_role in ("futures_target", "liquidation_magnet"):
+        return "target"
+    if dom_role == "key_level_only":
+        return "key_level"
+    return "mixed"
+
+
+def _stable_zone_id(
+    coin: str, price_mid: float, atr: float, role_group: str,
+    *, ref_price: float = 0.0,
+) -> str:
+    """跨帧稳定的 zone_id（修复 P1-B 伪稳定 bug）。
+
+    旧实现 `f"{coin}|{z_lo:.2f}|{z_hi:.2f}|{idx}"`：
+      - z_lo/z_hi 随 piece 集合微动（一个 piece 进出 cluster 即变）
+      - idx 随当帧聚类排序漂移
+      → 同一价格区跨帧 zone_id 不一致，导致：
+        ① 前端 selectedId 跳动；② setup_id 跨帧错配；③ 状态机持久化失效
+
+    新实现：基于 ATR 自适应价格桶 + role_group 联合哈希
+      bucket_width = max(0.25 × ATR, 1.0)；ATR 缺失退化到 0.15% × ref_price
+      bucket_mid   = round(price_mid / bucket_width) × bucket_width
+
+    关键约束：bucket_width 必须独立于 price_mid，否则 price_mid 跨帧微动会
+    传导到 width 再到 bucket → 自我抵消失败。同币种同帧内 ATR 是恒定参考量，
+    所以 width 在帧内严格稳定，跨帧也仅以 ATR 自身的更新速率漂移（远低于 zone 微动）。
+
+    role_group 折叠为 4 类（见 _role_group），容忍 dominant_role 在
+    contested↔spot_defense 等临界点的微抖。
+    """
+    if atr and atr > 0:
+        width = max(0.25 * atr, 1.0)
+    else:
+        ref = abs(ref_price or price_mid)
+        width = max(ref * 0.0015, 1.0)
+    bucket_mid = round(price_mid / width) * width
+    digest = hashlib.sha1(
+        f"{coin}|{bucket_mid:.4f}|{role_group}".encode()
+    ).hexdigest()[:12]
+    return f"{coin}_{digest}"
+
+
 def _build_zone_from_cluster(
     cl: _Cluster,
     *,
     coin: str,
     last_price: float,
-    idx: int,
+    atr: float,
 ) -> BrainPriceZone:
     z_lo, z_hi = cl.p_lo, cl.p_hi
     z_mid = (z_lo + z_hi) / 2.0
     dist = (z_mid - last_price) / max(last_price, 1e-9) * 100.0
-
-    digest = hashlib.sha1(
-        f"{coin}|{z_lo:.2f}|{z_hi:.2f}|{idx}".encode()
-    ).hexdigest()[:12]
-    zone_id = f"{coin}_{digest}"
 
     roles = BrainZoneRoles()
     evidence: list[str] = []
@@ -328,6 +380,14 @@ def _build_zone_from_cluster(
         roles=roles,
         max_sup=max_sup,
         max_res=max_res,
+    )
+
+    # P1-B 修复：zone_id 必须在 dom_role 已定后再算（依赖 role_group）。
+    # 注意此处使用 z_mid 而非 (z_lo, z_hi) — 桶哈希对窄幅微动天然稳健，
+    # 不依赖 _Cluster 的边界，是 zone_id 跨帧稳定的关键。
+    # ref_price=last_price：ATR 缺失时也能给出稳定的 width 参考量。
+    zone_id = _stable_zone_id(
+        coin, z_mid, atr, _role_group(dom_role), ref_price=last_price,
     )
 
     scen = BrainScenario(
@@ -848,9 +908,17 @@ def build_trading_brain_snapshot(
     )
     clusters = _cluster_pieces(pieces, tol)
     zones = [
-        _build_zone_from_cluster(c, coin=coin, last_price=last_price, idx=i)
-        for i, c in enumerate(clusters)
+        _build_zone_from_cluster(c, coin=coin, last_price=last_price, atr=atr)
+        for c in clusters
     ]
+    # P1-B：zone_id 已基于价格桶稳定哈希；同桶若被聚类拆出多个 _Cluster
+    # （罕见，但理论上会发生），需保留唯一一个（取距现价最近的）。
+    _by_id: dict[str, BrainPriceZone] = {}
+    for z in zones:
+        prev = _by_id.get(z.zone_id)
+        if prev is None or abs(z.distance_pct) < abs(prev.distance_pct):
+            _by_id[z.zone_id] = z
+    zones = list(_by_id.values())
     zones.sort(key=lambda z: abs(z.distance_pct))
     if max_zones > 0:
         zones = zones[:max_zones]

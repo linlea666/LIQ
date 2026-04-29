@@ -434,3 +434,94 @@ def test_summary_nonempty_with_zones():
     op = OrderbookPressureSnapshot(coin="BTC", ts_sec=1, last_price=last, walls_below=[w])
     snap = build_trading_brain_snapshot(coin="BTC", last_price=last, atr=600.0, kl=kl, op=op, liq=None)
     assert "关键位" in snap.summary or "现货" in snap.summary or "支撑" in snap.summary
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P1-B 修复回归：zone_id 必须跨帧稳定（否则状态机 / selectedId / setup_id 全错配）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _build_btc_snapshot(*, last=100_000.0, atr=400.0, w_mid=99_000.0,
+                         w_lo=98_800.0, w_hi=99_200.0, w_usd=2_000_000.0,
+                         lv_price=99_050.0):
+    """复用：构造一个含 spot 买墙 + 支撑关键位 的 BTC 快照。"""
+    w = _wall(
+        price_mid=w_mid, price_low=w_lo, price_high=w_hi, side="bid",
+        source="spot_only", has_spot_confluence=True, current_usd=w_usd,
+    )
+    lv = KeyLevelV2(
+        price=lv_price, side="support", strength_tier="A",
+        confluence_score=72.0, final_score=78.0,
+    )
+    kl = KeyLevelSnapshotV2(ts=1, levels=[lv])
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last, walls_below=[w],
+    )
+    return build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=atr, kl=kl, op=op, liq=None,
+    )
+
+
+def test_zone_id_stable_across_identical_rebuild():
+    """两次完全相同的输入应产出一致的 zone_id 集合。"""
+    s1 = _build_btc_snapshot()
+    s2 = _build_btc_snapshot()
+    ids1 = sorted(z.zone_id for z in s1.zones)
+    ids2 = sorted(z.zone_id for z in s2.zones)
+    assert ids1 == ids2 and ids1, "zone_id 集合在相同输入下必须一致"
+
+
+def test_zone_id_stable_under_minor_wall_thickness_perturbation():
+    """墙厚度 ±5% 微动 → 同一价格区的 zone_id 不变（修复前会变）。"""
+    s1 = _build_btc_snapshot(w_usd=2_000_000.0)
+    s2 = _build_btc_snapshot(w_usd=2_100_000.0)  # +5%
+    s3 = _build_btc_snapshot(w_usd=1_900_000.0)  # -5%
+    z1 = next(z for z in s1.zones if 98_800 <= z.price_mid <= 99_200)
+    z2 = next(z for z in s2.zones if 98_800 <= z.price_mid <= 99_200)
+    z3 = next(z for z in s3.zones if 98_800 <= z.price_mid <= 99_200)
+    assert z1.zone_id == z2.zone_id == z3.zone_id
+
+
+def test_zone_id_stable_under_minor_price_drift_within_bucket():
+    """价格在桶宽内漂移（< 0.25 ATR）→ zone_id 不变。"""
+    s1 = _build_btc_snapshot(w_mid=99_000.0, lv_price=99_050.0, atr=400.0)
+    # 漂移 50 USD = 0.125 ATR，远小于桶宽 max(100, 150)=150
+    s2 = _build_btc_snapshot(w_mid=99_050.0, lv_price=99_100.0, atr=400.0)
+    z1 = next(z for z in s1.zones if 98_900 <= z.price_mid <= 99_200)
+    z2 = next(z for z in s2.zones if 98_900 <= z.price_mid <= 99_200)
+    assert z1.zone_id == z2.zone_id
+
+
+def test_zone_id_changes_when_role_group_changes():
+    """role_group 切换时（defense ↔ target）zone_id 必须变化，
+    避免不同语义的价格区被合并到同一 id 上。"""
+    last = 100_000.0
+    # 同价格区，第一帧是 spot 买墙（defense），第二帧切成纯清算磁铁（target）
+    w = _wall(
+        price_mid=99_000.0, price_low=98_900.0, price_high=99_100.0,
+        side="bid", source="spot_only", has_spot_confluence=True,
+    )
+    op_def = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=int(time.time()), last_price=last, walls_below=[w],
+    )
+    s_def = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op_def, liq=None,
+    )
+    z_def = next(
+        z for z in s_def.zones if z.dominant_role in ("spot_defense", "contested")
+    )
+
+    cluster = LiqCluster(
+        side="long", price_from=98_900.0, price_to=99_100.0, price_center=99_000.0,
+        total_usd=80_000_000.0, exchange_count=3,
+    )
+    liq = LiquidationMap(
+        coin="BTC", ts=int(time.time()), cycle="1d",
+        leverage_groups=[LiqLeverageGroup(leverage="50")],
+        clusters_above=[], clusters_below=[cluster],
+    )
+    s_tgt = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=None, liq=liq,
+    )
+    z_tgt = next(z for z in s_tgt.zones if z.dominant_role == "liquidation_magnet")
+    assert z_def.zone_id != z_tgt.zone_id, "防御簇与磁铁簇即使同价区也必须有不同 zone_id"
