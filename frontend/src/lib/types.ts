@@ -2279,6 +2279,72 @@ export interface BrainContextChips {
   nearest_magnet_below: number | null;
 }
 
+export type SetupType =
+  | "support_limit_probe"
+  | "resistance_limit_probe"
+  | "fake_break_reclaim_long"
+  | "fake_break_reclaim_short";
+
+export type SetupDirection = "long" | "short" | "neutral";
+
+export type SetupStateName =
+  | "forming"
+  | "waiting_for_trigger"
+  | "triggered"
+  | "confirmation_pending"
+  | "confirmed"
+  | "invalidated"
+  | "cancelled"
+  | "missed"
+  | "cooldown";
+
+export interface SetupEntryStyle {
+  style: "aggressive" | "conservative";
+  entry_zone: [number, number];
+  requires: string[];
+  risk_note: string;
+}
+
+export interface SetupTarget {
+  price: number;
+  type: string;
+  rr: number;
+  note: string;
+}
+
+export interface SetupRiskPlan {
+  soft_invalidation: number;
+  hard_stop: number;
+  structural_invalidation: string;
+  stop_logic: string[];
+}
+
+export interface SetupState {
+  name: SetupStateName;
+  since_ts: number;
+  pending_reason: string;
+  history: { ts: number; from: SetupStateName; to: SetupStateName; reason: string }[];
+}
+
+export interface TradeSetupCandidate {
+  setup_id: string;
+  coin: string;
+  zone_id: string;
+  setup_type: SetupType;
+  /** UI 必须转译：long→「做多观察」, short→「做空观察」, neutral→「等待」 */
+  direction: SetupDirection;
+  entry_styles: SetupEntryStyle[];
+  risk_plan: SetupRiskPlan;
+  targets: SetupTarget[];
+  asymmetry_score: number;
+  opportunity_score: number;
+  data_confidence: number;
+  state: SetupState;
+  cancel_conditions: string[];
+  evidence: string[];
+  notes: string[];
+}
+
 export interface TradingBrainSnapshot {
   coin: string;
   ts: number;
@@ -2290,4 +2356,6 @@ export interface TradingBrainSnapshot {
   rankings: BrainRankings;
   events: BrainEvent[];
   data_quality: BrainDataQuality;
+  /** Phase 2：高盈亏比观察区候选（前端机会雷达消费） */
+  opportunities: TradeSetupCandidate[];
 }

@@ -647,6 +647,24 @@ def build_trading_brain_snapshot(
 
     ts = int(op.ts_sec) if op and op.ts_sec else (int(kl.ts) if kl and kl.ts else now_sec)
 
+    dq = BrainDataQuality(
+        liquidity_wall_quality=lq or "",
+        usd_usdt_basis_pct=op.usd_usdt_basis_pct if op else None,
+        overall_freshness_score=freshness_score,
+        stale_sources=stale,
+        missing_sources=missing,
+        notes=dq_notes,
+        is_partial_ready=is_partial_ready,
+        ready_count=ready_count,
+        total_count=total_count,
+    )
+
+    # Phase 2：从 zones 派生 TradeSetupCandidate（不输出交易指令）
+    from processors.opportunity_engine import build_opportunities
+    opportunities = build_opportunities(
+        zones=zones, last_price=last_price, atr=atr, ctx=ctx, dq=dq,
+    )
+
     return TradingBrainSnapshot(
         coin=coin.upper(),
         ts=ts,
@@ -657,15 +675,6 @@ def build_trading_brain_snapshot(
         zones=zones,
         rankings=rankings,
         events=events,
-        data_quality=BrainDataQuality(
-            liquidity_wall_quality=lq or "",
-            usd_usdt_basis_pct=op.usd_usdt_basis_pct if op else None,
-            overall_freshness_score=freshness_score,
-            stale_sources=stale,
-            missing_sources=missing,
-            notes=dq_notes,
-            is_partial_ready=is_partial_ready,
-            ready_count=ready_count,
-            total_count=total_count,
-        ),
+        data_quality=dq,
+        opportunities=opportunities,
     )

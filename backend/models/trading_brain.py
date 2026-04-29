@@ -149,6 +149,112 @@ class BrainContextChips(BaseModel):
     nearest_magnet_below: Optional[float] = None
 
 
+SetupType = Literal[
+    "support_limit_probe",
+    "resistance_limit_probe",
+    "fake_break_reclaim_long",
+    "fake_break_reclaim_short",
+]
+"""支持的 setup 类型（MVP，禁喊单；UI 用"做多/做空观察 / 等待"措辞）：
+
+- support_limit_probe       ：防守位限价试错（做多观察）
+- resistance_limit_probe    ：阻力位限价试错（做空观察）
+- fake_break_reclaim_long   ：扫破支撑后收回（做多观察）
+- fake_break_reclaim_short  ：扫破阻力后收回（做空观察）
+"""
+
+SetupDirection = Literal["long", "short", "neutral"]
+"""后端方向（UI 必须转译为「做多观察 / 做空观察 / 等待」）。"""
+
+SetupStateName = Literal[
+    "forming",
+    "waiting_for_trigger",
+    "triggered",
+    "confirmation_pending",
+    "confirmed",
+    "invalidated",
+    "cancelled",
+    "missed",
+    "cooldown",
+]
+
+
+class SetupEntryStyle(BaseModel):
+    """入场方案（不含交易指令；只是观察区间）。"""
+
+    style: Literal["aggressive", "conservative"]
+    entry_zone: tuple[float, float]
+    """[low, high]，价格落入即视为触达；UI 显示为观察区间。"""
+    requires: list[str] = Field(default_factory=list)
+    """触发前需满足的前置条件（中文白话）。"""
+    risk_note: str = ""
+    """风格的风险提示（"易被扫"/"可能错过"等）。"""
+
+
+class SetupTarget(BaseModel):
+    """目标观察位。"""
+
+    price: float
+    type: str
+    """目标性质："nearest_resistance" / "spot_wall" / "short_liq_magnet" 等。"""
+    rr: float
+    """相对硬止损的盈亏比（仅展示）。"""
+    note: str = ""
+
+
+class SetupRiskPlan(BaseModel):
+    """失效结构：软失效 + 硬止损（无下单指令）。"""
+
+    soft_invalidation: float
+    """软失效价：跌破/突破但允许快速收回；不立即判死。"""
+    hard_stop: float
+    """硬止损价：结构失败的明确价位。"""
+    structural_invalidation: str = ""
+    """结构性失效条件（如「1h 收盘跌破 X 且无法收回」）。"""
+    stop_logic: list[str] = Field(default_factory=list)
+
+
+class SetupState(BaseModel):
+    """状态机当前态 + 简短历史。"""
+
+    name: SetupStateName = "forming"
+    since_ts: int = 0
+    pending_reason: str = ""
+    """当处于 forming/waiting 时，说明「在等什么」。"""
+    history: list[dict] = Field(default_factory=list)
+    """最近 5 条状态变迁：[{ts, from, to, reason}]。"""
+
+
+class TradeSetupCandidate(BaseModel):
+    """高盈亏比观察区候选（不输出交易指令；UI 严格用观察措辞）。"""
+
+    setup_id: str
+    coin: str
+    zone_id: str
+    """关联的 BrainPriceZone.zone_id。"""
+    setup_type: SetupType
+    direction: SetupDirection
+    """后端方向；UI 必须转译："long"→「做多观察」, "short"→「做空观察」, "neutral"→「等待」。"""
+
+    entry_styles: list[SetupEntryStyle] = Field(default_factory=list)
+    risk_plan: SetupRiskPlan
+    targets: list[SetupTarget] = Field(default_factory=list)
+
+    asymmetry_score: float = 0.0
+    """不对称评分（0–1，亏少赚多）。"""
+    opportunity_score: float = 0.0
+    """机会综合评分（0–1）。"""
+    data_confidence: float = 0.0
+    """承袭自 zone.data_confidence。"""
+
+    state: SetupState = Field(default_factory=SetupState)
+    cancel_conditions: list[str] = Field(default_factory=list)
+    """挂单/观察取消条件（中文白话；前端必须展示）。"""
+
+    evidence: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class TradingBrainSnapshot(BaseModel):
     """单币交易大脑聚合快照（GET /api/trading-brain/{coin}）。"""
 
@@ -164,3 +270,5 @@ class TradingBrainSnapshot(BaseModel):
     rankings: BrainRankings = Field(default_factory=BrainRankings)
     events: list[BrainEvent] = Field(default_factory=list)
     data_quality: BrainDataQuality = Field(default_factory=BrainDataQuality)
+    opportunities: list[TradeSetupCandidate] = Field(default_factory=list)
+    """Phase 2：从 zones 派生的高盈亏比观察区候选；前端右侧机会雷达消费。"""
