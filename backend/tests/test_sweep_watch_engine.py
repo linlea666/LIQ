@@ -145,9 +145,77 @@ class TestSelectRepresentative:
         _select_representative("below", zones, trace)
         entry = next(e for e in trace.entries if e.step == "select_representative")
         assert entry.side == "below"
-        assert entry.rule_hit == "closest_strong_role_zone"
+        # 缺口 1：rule_hit 改为按桶式排序的语义化命名
+        assert entry.rule_hit in {
+            "near_bucket_high_attractiveness",
+            "mid_bucket_closest_distance",
+            "far_bucket_closest_distance",
+        }
+        # |d|=0.5 ≤ 1.5 → 必然落入近桶
+        assert entry.rule_hit == "near_bucket_high_attractiveness"
         assert entry.output is not None
         assert entry.output["zone_id"] == "z1"
+        # 缺口 1：trace output 新增 sweep_attractiveness 字段（透明化）
+        assert "sweep_attractiveness" in entry.output
+
+    def test_near_bucket_picks_high_sa_over_closer_low_sa(self):
+        """缺口 1：近桶（|d|≤1.5%）内，SA 高的赢距离更近的。
+
+        修复前：strong.sort(key=|distance|) → 选 closer_low_sa（距离 0.3）
+        修复后：近桶 SA 优先 → 选 farther_high_sa（SA 0.9）
+        """
+        trace = _TraceRecorder("below")
+        zones = [
+            _zone(
+                zone_id="closer_low_sa", distance_pct=-0.3,
+                dominant_role="spot_defense", sweep_attractiveness=0.10,
+            ),
+            _zone(
+                zone_id="farther_high_sa", distance_pct=-1.2,
+                dominant_role="spot_defense", sweep_attractiveness=0.90,
+            ),
+        ]
+        picked = _select_representative("below", zones, trace)
+        assert picked is not None
+        assert picked.zone_id == "farther_high_sa"
+
+    def test_far_bucket_still_picks_closest_distance(self):
+        """缺口 1：中/远桶（|d|>1.5%）仍按距离升序，SA 不抢镜。
+
+        防止"远端 SA 极高的 zone 抢走代表位"导致代表区跳出 approaching 阈值。
+        """
+        trace = _TraceRecorder("below")
+        zones = [
+            _zone(
+                zone_id="farther_high_sa", distance_pct=-3.0,
+                dominant_role="spot_defense", sweep_attractiveness=0.95,
+            ),
+            _zone(
+                zone_id="closer_low_sa", distance_pct=-2.0,
+                dominant_role="spot_defense", sweep_attractiveness=0.10,
+            ),
+        ]
+        picked = _select_representative("below", zones, trace)
+        assert picked is not None
+        assert picked.zone_id == "closer_low_sa"
+
+    def test_bucket_boundary_at_1_5_pct(self):
+        """缺口 1 边界：|d|==1.5% 应归近桶（≤ 阈值），SA 优先生效。"""
+        trace = _TraceRecorder("below")
+        zones = [
+            _zone(
+                zone_id="boundary_high_sa", distance_pct=-1.5,
+                dominant_role="spot_defense", sweep_attractiveness=0.80,
+            ),
+            _zone(
+                zone_id="just_outside_low_sa", distance_pct=-1.6,
+                dominant_role="spot_defense", sweep_attractiveness=0.10,
+            ),
+        ]
+        picked = _select_representative("below", zones, trace)
+        assert picked is not None
+        # boundary 在近桶（SA 优先）→ 它必赢
+        assert picked.zone_id == "boundary_high_sa"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -396,6 +464,53 @@ class TestBuildSweepWatchIntegration:
         assert sw.below is not None
         assert len(sw.below.triggers) <= 3
         assert len(sw.below.invalidations) <= 2
+
+    def test_waiting_template_differs_from_approaching(self):
+        """缺口 5：waiting (距 > 1.5%) 的触发模板讲"会不会接近"，
+        而 approaching (距 ≤ 1.5%) 讲"扫到怎样"。两者不应共用模板。
+        """
+        # waiting：距离 -2.5%，price 在区间外 + 远
+        z_wait = _zone(zone_id="zw", price_mid=75_000, distance_pct=-2.5,
+                       dominant_role="spot_defense")
+        sw_wait = build_sweep_watch(
+            coin="BTC", last_price=77_000, zones=[z_wait], events=[],
+            ctx=None, now_sec=1_000_000,
+        )
+        assert sw_wait.below is not None
+        assert sw_wait.below.sweep_phase == "waiting"
+        wait_triggers = sw_wait.below.triggers
+
+        # approaching：距离 -1.0%，靠近但未触发
+        z_app = _zone(zone_id="za", price_mid=75_000, distance_pct=-1.0,
+                      dominant_role="spot_defense")
+        sw_app = build_sweep_watch(
+            coin="BTC", last_price=75_500, zones=[z_app], events=[],
+            ctx=None, now_sec=1_000_000,
+        )
+        assert sw_app.below is not None
+        assert sw_app.below.sweep_phase == "approaching"
+        app_triggers = sw_app.below.triggers
+
+        # 两套模板不应相同（waiting 讲"靠近"，approaching 讲"5min 收回"）
+        assert wait_triggers != app_triggers
+        # waiting 模板第一条应包含"靠近"语义
+        assert any("靠近" in t for t in wait_triggers)
+        # approaching 模板第一条应包含"5min" 时间窗口语义
+        assert any("5min" in t for t in app_triggers)
+
+    def test_above_waiting_template_differs_from_approaching(self):
+        """缺口 5：上方侧同样需要 waiting 与 approaching 模板分化。"""
+        z_wait = _zone(zone_id="zw", price_mid=75_000, distance_pct=2.5,
+                       dominant_role="spot_defense", resistance_strength=0.7)
+        sw_wait = build_sweep_watch(
+            coin="BTC", last_price=73_000, zones=[z_wait], events=[],
+            ctx=None, now_sec=1_000_000,
+        )
+        assert sw_wait.above is not None
+        assert sw_wait.above.sweep_phase == "waiting"
+        # waiting 模板讲"靠近"，不讲"5min 跌回"
+        assert any("靠近" in t for t in sw_wait.above.triggers)
+        assert not any("跌回" in t for t in sw_wait.above.triggers)
 
     def test_phase_swept_reclaiming_end_to_end(self):
         zones = [_zone(zone_id="zb", price_mid=75_000, distance_pct=-0.3,

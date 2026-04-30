@@ -136,14 +136,57 @@ def _select_representative(
     zones: list[BrainPriceZone],
     trace: _TraceRecorder,
 ) -> Optional[BrainPriceZone]:
-    """选最近的强角色 zone（按 |distance_pct| 升序）。"""
+    """选该侧的代表 zone（桶式排序）。
+
+    缺口 1 修复（P1-A）：原实现只按 |distance_pct| 升序，会让"次近但更招扫"的
+    zone 被距离更近但 SA 很低的 zone 屏蔽。修复后采用三桶排序：
+
+      桶 0  |d| ≤ 1.5%（approaching 范围）：SA 优先 → 距离次之
+            理由：用户最关心"近端最招扫的那条带"；同距离段内 SA 才决定先后。
+      桶 1  1.5% < |d| ≤ 3.0%：距离优先 → SA 次之
+            理由：中距离仍以"哪个先被扫到"为主，SA 仅作 tie-breaker。
+      桶 2  |d| > 3.0%：距离优先 → SA 次之
+            同桶 1，远端始终保持"近的赢"。
+
+    保留"代表 = 当前最相关的那条带"语义：远端 SA 极高的 zone 不会抢走近端
+    桶 0 的代表位（避免代表区跳到 ≥ 3% 之外失去过程态意义）。
+    """
     if side == "below":
         candidates = [z for z in zones if z.distance_pct < 0]
     else:
         candidates = [z for z in zones if z.distance_pct > 0]
     strong = [z for z in candidates if z.dominant_role in _STRONG_ROLES_FOR_REPRESENTATIVE]
-    strong.sort(key=lambda z: abs(z.distance_pct))
+
+    def _bucket_sort_key(z: BrainPriceZone) -> tuple[int, float, float]:
+        d = abs(z.distance_pct)
+        sa = z.sweep_attractiveness or 0.0
+        if d <= _APPROACHING_THRESHOLD_PCT:
+            return (0, -sa, d)
+        if d <= 3.0:
+            return (1, d, -sa)
+        return (2, d, -sa)
+
+    strong.sort(key=_bucket_sort_key)
     repr_zone = strong[0] if strong else None
+
+    if repr_zone is None:
+        rule_hit = "no_strong_zone"
+        notes = "该侧无强角色 zone，将返回 None（前端隐藏该栏）"
+    else:
+        d_abs = abs(repr_zone.distance_pct)
+        if d_abs <= _APPROACHING_THRESHOLD_PCT:
+            rule_hit = "near_bucket_high_attractiveness"
+            notes = (
+                f"近桶（|d|≤{_APPROACHING_THRESHOLD_PCT}%）：SA 优先 → 命中 {repr_zone.zone_id}"
+                f" (SA={repr_zone.sweep_attractiveness:.2f})"
+            )
+        elif d_abs <= 3.0:
+            rule_hit = "mid_bucket_closest_distance"
+            notes = f"中桶（1.5%<|d|≤3%）：距离优先 → 命中 {repr_zone.zone_id}"
+        else:
+            rule_hit = "far_bucket_closest_distance"
+            notes = f"远桶（|d|>3%）：距离优先 → 命中 {repr_zone.zone_id}"
+
     trace.emit(
         step="select_representative",
         inputs={
@@ -151,23 +194,23 @@ def _select_representative(
             "candidate_count": len(candidates),
             "strong_role_count": len(strong),
             "strong_role_filter": sorted(_STRONG_ROLES_FOR_REPRESENTATIVE),
+            "approaching_threshold_pct": _APPROACHING_THRESHOLD_PCT,
+            "near_bucket_priority": "sweep_attractiveness DESC, distance ASC",
+            "far_bucket_priority": "distance ASC, sweep_attractiveness DESC",
         },
         output=(
             {
                 "zone_id": repr_zone.zone_id,
                 "dominant_role": repr_zone.dominant_role,
                 "distance_pct": round(repr_zone.distance_pct, 3),
+                "sweep_attractiveness": round(repr_zone.sweep_attractiveness, 3),
                 "label": repr_zone.dominant_label,
             }
             if repr_zone
             else None
         ),
-        rule_hit="closest_strong_role_zone" if repr_zone else "no_strong_zone",
-        notes=(
-            f"选最近的强角色 zone (|distance| 升序)；命中 {repr_zone.zone_id}"
-            if repr_zone
-            else "该侧无强角色 zone，将返回 None（前端隐藏该栏）"
-        ),
+        rule_hit=rule_hit,
+        notes=notes,
     )
     return repr_zone
 
@@ -384,7 +427,18 @@ def _build_triggers_invalidations(
     band_hi = round(zone.price_high, 2)
 
     if side == "below":
-        if phase in ("waiting", "approaching"):
+        if phase == "waiting":
+            # 缺口 5：waiting 距 > 1.5%，关注的是"会不会接近"，不是"扫到怎样"
+            triggers = [
+                f"价格是否向 {band_lo}-{band_hi} 区间持续靠近",
+                "下方清算磁铁(下) 距离是否缩短（顶栏磁铁）",
+                "现货 CVD 是否持续走弱（顶栏现货 CVD 创新低）",
+            ]
+            invalidations = [
+                "下方清算磁铁完全失守（穿到磁铁之下，扫单目标转移）",
+                "现货 CVD 持续走强 + OI 1H 转负（下扫动机消失）",
+            ]
+        elif phase == "approaching":
             triggers = [
                 f"价格跌破 {band_lo} 后 5min 内是否快速收回",
                 "现货买墙是否未撤（关注 ZoneDetailCard 双源 / Coinbase 共振 chip）",
@@ -425,7 +479,18 @@ def _build_triggers_invalidations(
                 "无新支撑 zone 形成 → 进入下一级搜寻",
             ]
     else:  # above
-        if phase in ("waiting", "approaching"):
+        if phase == "waiting":
+            # 缺口 5：waiting 距 > 1.5%，关注的是"会不会接近"，不是"突破怎样"
+            triggers = [
+                f"价格是否向 {band_lo}-{band_hi} 区间持续靠近",
+                "上方清算磁铁(上) 距离是否缩短（顶栏磁铁）",
+                "现货 CVD 是否持续走强（顶栏现货 CVD 创新高）",
+            ]
+            invalidations = [
+                "上方清算磁铁完全突破（穿到磁铁之上，扫单目标转移）",
+                "现货 CVD 持续走弱 + OI 1H 转负（上扫动机消失）",
+            ]
+        elif phase == "approaching":
             triggers = [
                 f"价格突破 {band_hi} 后 5min 内是否快速跌回",
                 "现货卖墙是否未撤（关注 ZoneDetailCard 双源 / Coinbase 共振 chip）",

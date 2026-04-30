@@ -86,6 +86,91 @@ const PHASE_META: Record<SweepPhase, {
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// 白话总结派生（A 项：前端纯展示派生，不依赖后端字段）
+//
+// 输出格式：「{phase 中文} · {RP/CR 失衡} → {行动建议}」
+// 设计原则：1 行 ≤ 60 字；不出现交易指令性词汇；只描述"现状 + 关注什么"
+// ─────────────────────────────────────────────────────────────────────
+const RP_CR_BALANCED_DELTA = 0.15;
+/** RP / CR 差距 < 此阈值 视为对称（balanced），不偏向反弹/延续。 */
+
+const RP_CR_DOMINANT_DELTA = 0.3;
+/** RP / CR 差距 ≥ 此阈值 用 ≫ 强符号；介于 balanced 和此之间用 > 弱符号。 */
+
+const SA_HOT_TAG = 0.7;
+const SA_COLD_TAG = 0.3;
+
+function scoreCompare(rp: number, cr: number): {
+  bias: "rebound" | "continuation" | "balanced";
+  text: string;
+} {
+  const delta = rp - cr;
+  if (Math.abs(delta) < RP_CR_BALANCED_DELTA) {
+    return { bias: "balanced", text: `反弹 ${rp.toFixed(2)} ≈ 延续 ${cr.toFixed(2)}` };
+  }
+  if (delta > 0) {
+    const op = delta >= RP_CR_DOMINANT_DELTA ? "≫" : ">";
+    return { bias: "rebound", text: `反弹 ${rp.toFixed(2)} ${op} 延续 ${cr.toFixed(2)}` };
+  }
+  const op = -delta >= RP_CR_DOMINANT_DELTA ? "≫" : ">";
+  return { bias: "continuation", text: `延续 ${cr.toFixed(2)} ${op} 反弹 ${rp.toFixed(2)}` };
+}
+
+function saTag(sa: number): string {
+  if (sa >= SA_HOT_TAG) return "高招扫";
+  if (sa < SA_COLD_TAG) return "低招扫，价格未必到";
+  return "";
+}
+
+function actionAdvice(
+  phase: SweepPhase,
+  bias: "rebound" | "continuation" | "balanced",
+  isBelow: boolean,
+): string {
+  if (phase === "waiting") return "远端观察，无需立即动作";
+  if (phase === "approaching") {
+    if (bias === "rebound") {
+      return isBelow
+        ? "扫到大概率假摔反弹，关注 5min 速回 + 现货买墙不撤"
+        : "突破多半被压回，关注 5min 速回 + 现货卖墙不撤";
+    }
+    if (bias === "continuation") {
+      return isBelow
+        ? "扫到大概率继续杀，不建议提前接"
+        : "突破多半延续上行，等下一档阻力";
+    }
+    return "反弹/延续概率相当，等扫单触发再判断";
+  }
+  if (phase === "in_sweep") {
+    return isBelow
+      ? "正在被扫，等 5min 内能否收回区间 + 现货买墙是否撤"
+      : "正在被突破，等 5min 内能否跌回区间 + 现货卖墙是否撤";
+  }
+  if (phase === "swept_reclaiming") {
+    return isBelow
+      ? "已收回区间，反转候选；关注能否站稳 ≥ 10min"
+      : "已跌回区间，反转候选；关注能否站稳 ≥ 10min";
+  }
+  if (phase === "swept_continuing") {
+    return isBelow
+      ? "未收回 + CVD 同向，等下一档支撑或 CVD 衰竭"
+      : "未跌回 + CVD 同向，等下一档阻力或 CVD 衰竭";
+  }
+  return "";
+}
+
+function buildNarrative(side: SweepWatchSide): string {
+  const phaseLabel = PHASE_META[side.sweep_phase].label;
+  const { bias, text: scoreText } = scoreCompare(
+    side.reversal_potential ?? 0,
+    side.continuation_risk ?? 0,
+  );
+  const tag = saTag(side.sweep_attractiveness ?? 0);
+  const action = actionAdvice(side.sweep_phase, bias, side.direction === "below");
+  return `${phaseLabel} · ${scoreText}${tag ? `（${tag}）` : ""} → ${action}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // ScoreBar（复刻 ZoneDetailCard 风格；独立写以保持组件独立）
 // ─────────────────────────────────────────────────────────────────────
 type ScoreKind = "trust" | "risk";
@@ -255,6 +340,19 @@ function SideCard({
           </ul>
         </div>
       )}
+
+      {/* 白话总结：现状一句话 + 行动建议（A 项） */}
+      <div
+        className="mt-1 rounded border-l-2 border-sky-700/60 bg-slate-950/40 px-2 py-1.5"
+        title="基于 phase + 反转潜力/延续风险/扫单吸引 派生的人类可读总结，不构成交易指令"
+      >
+        <div className="mb-0.5 text-[9px] uppercase tracking-wider text-slate-500">
+          一句话
+        </div>
+        <div className="text-[11px] leading-relaxed text-slate-200">
+          {buildNarrative(side)}
+        </div>
+      </div>
     </div>
   );
 }
