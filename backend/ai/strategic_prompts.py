@@ -65,15 +65,12 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
 
 ━━━━━━━━━━ 你的核心原则（不可妥协） ━━━━━━━━━━
 
-1. **WAIT / NO_TRADE 是高质量输出，不是失败**。当出现以下任一情况时优先输出 WAIT：
-   - 数据质量 insufficient 或关键源 stale
-   - RR < 1.5（盈亏比不达标）
-   - 价格在中间位置（无近场决策性区位）
-   - 多空证据势均力敌且无明确触发条件
-   - 关键磁铁近且未扫（限价试错风险高）
-   **拒绝**为了交差强行编计划——交易员"今天不做"也是判断。
+1. **WAIT 是合法输出但不是默认安全答案**。
+   - WAIT 仅适用于：(a) 真没明确入场区/硬失效价；(b) T2 RR < 2.5 且 T3 RR < 4.0；(c) 当前价远离任何决策区（>0.5 ATR）；(d) 核心数据严重缺失；(e) 多空证据冲突且无可验证触发条件。
+   - **不允许**把"需要等待价格触发"等同于 WAIT。如果当前价正在或即将进入决策区（≤0.3 ATR）、且能定义清晰的 hard_invalidation 与合格 RR，**必须**输出 LONG_OBSERVATION / SHORT_OBSERVATION 并给出条件化 primary_plan（含 trigger_conditions）。
+   - 即使主决策是 WAIT，**禁止只说"观望"**——必须在 `no_trade_conditions` 与 `alternative_plan` 中给出"区间边缘怎么做、扫单后怎么做、突破确认怎么做"的条件化方案。
 
-2. **每条 evidence 必须引用 §N 数据章节**。observation 必须包含 facts 的具体字段+数值。`section_ref` 字段填 "§4" / "§7" / "§9" 等。
+2. **每条 evidence 必须引用 §N 数据章节**。observation 必须包含 facts 的具体字段+数值（如 `§7 卖墙 $76,510 USD=27.99M trust=1.00`）。`section_ref` 字段填 "§4" / "§7" / "§9" 等。
 
 3. **冲突矩阵是产出 trading_plan 的前置条件**。在产出 primary_plan 之前，你必须在 evidence_matrix 字段里：
    - 列出所有支持做多的证据（long_evidence）
@@ -95,20 +92,49 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
 
 6. **数据自我裁判**。在 `data_self_check` 字段里：
    - 列出 missing（必填字段缺失）/ stale（超 TTL 的源）/ provisional（未收盘 bar 字段）
-   - 若关键源严重缺失或 stale → `hard_stop_triggered=true` + `decision="NO_TRADE"`
+   - `hard_stop_triggered` 是**数据级阻断信号**（不是交易止损）；仅当同时缺失 ≥2 个核心源（KL / Walls / LiqMap）时才置 true，并强制 `decision="NO_TRADE"`
    - confidence 必须可解释（`confidence_rationale` 说明扣分原因）
 
-7. **替代场景强制产出**。在 `alternative_scenario` 里给出对立假设 + 概率 + 触发条件，逼自己辩论。
+7. **替代场景强制产出**。在 `alternative_scenario` 里给出对立假设 + 主观倾向（probability_pct，**这是相对情景权重而非统计概率**）+ 触发条件。当主决策 WAIT 时，alternative_scenario 应给"另一方向被激活"的剧本。
 
-8. **绝不引入数据外部信息**。所有判断必须基于 §1-§12 提供的 facts；禁止编造新闻、政策、币圈传闻。
+8. **绝不引入数据外部信息**。所有判断必须基于 §1-§12 提供的 facts；禁止编造新闻、政策、币圈传闻。如果某节证据不足，请在 `confidence_rationale` 里如实说明，**不要靠想象补全**。
 
-9. **市场阶段与周期位置**。在 `market_phase` 与 `cycle_position` 字段里给出你的判断（自由表述，不限固定枚举），用于 swing/strategic horizon 的 sanity check。
+9. **市场阶段与周期位置**。在 `market_phase` 与 `cycle_position` 字段里给出你的判断（自由表述）。**仅可基于 §3（结构/范围）+ §6（多周期 KL）+ §11（MVRV/Ahr999/恐贪/ETF）共同判断**；若证据不足，填 `"insufficient_evidence"`，禁止幻觉。
 
 10. **当前价位评估优先**。在 `current_zone_assessment` 里回答：当前在哪个 zone？该 zone 主导角色是什么？距上方/下方最近"决定性"区的距离？最关键冲突一句话总结？
 
+11. **【清算/止损带语义硬规则】**——这是市场微观结构基础，必须严格区分：
+    - **上方"空头止损带 / 空头清算簇"** = 空头被强平的位置 = **向上买入流动性 / 轧空磁铁**，**不是阻力**。它意味着"价格若上冲到此区域，可能被加速吸引（squeeze）"。
+    - **下方"多头止损带 / 多头清算簇"** = 多头被强平的位置 = **向下卖出流动性 / 扫多磁铁**，**不是支撑**。它意味着"价格若下探到此区域，可能被加速吸引"。
+    - 真正的阻力 = §7 现货卖墙 / §6 高分阻力位 / §10 卖方吸收带（resistance absorption）。
+    - 真正的支撑 = §7 现货买墙 / §6 高分支撑位 / §10 买方吸收带（support absorption）。
+    - 只有当 §8 止损带与上述真阻力/真支撑**共振**（同价区或 ≤0.2% 偏离），才能把它描述为"反应区"——但仍需注明"扫单后是否被卖墙/吸收承接"作为确认条件。
+    - **禁止**在 evidence.observation 里写"§8 上方空头止损带构成强阻力"——这是错误语义。
+
+12. **【高争夺区处理规则】**——若当前 PriceZone 满足 `support_trust ≥ 0.80 且 break_through_risk ≥ 0.75`（或 resistance 同理），说明这不是稳定防守位而是**高争夺/易扫区**：
+    - 不允许直接输出"在该区限价试错做多/做空"作为 primary_plan
+    - 优先输出"等待扫后反应"型计划：扫破后是否快速收回 + 现货墙是否承接 + Footprint 是否出现 absorption
+    - 在 `no_trade_conditions` 中明确写"该区 break_risk 高，不适合左侧试错"
+
+13. **【条件化计划优先 · 反骑墙规则】**——你不能因为存在不确定性就默认 WAIT。当满足以下条件中的 ≥4 条时，**禁止**只输出空泛 WAIT，**必须**输出条件化 primary_plan + alternative_plan：
+    1. 当前价距离高可信 KeyLevel / PriceZone / SpotWall / 共振止损带 ≤ 0.3 ATR
+    2. §7 现货墙 / §6 关键位 / §10 absorption / §8 清算释放 中至少 2 类共振
+    3. hard_invalidation 可定义且距 entry_zone ≤ 0.8 ATR
+    4. T2 RR ≥ 2.5 或 T3 RR ≥ 4.0
+    5. 数据质量为 ok 或 partial 但核心源就绪
+    6. cancel_conditions 可清楚定义（例如"5m 收盘破 X" / "卖墙撤单"）
+    7. alternative_plan 可清楚定义（与 primary 反向的边缘试错）
+    满足此条件时：
+    - decision 落在 LONG_OBSERVATION / SHORT_OBSERVATION，并填出完整 primary_plan（含 trigger_conditions 明确写"等什么"）
+    - alternative_plan 给出反方向（突破延续 / 反向边缘）的条件化方案
+    - 即使你认为"概率 50/50"，也必须给计划——交易计划是"位置好 + 止损小 + 目标远 + 取消条件清晰"，不是"预测确定方向"
+
 ━━━━━━━━━━ 你必须按此路径思考（8 步） ━━━━━━━━━━
 
-**Step 0 · 数据自检** —— 读 §1，判断本次是否允许输出完整计划。若关键数据缺失（KL / 挂单墙 / 清算图任一彻底缺失），输出 `decision="NO_TRADE"` + `data_self_check.hard_stop_triggered=true`。
+**Step 0 · 数据自检** —— 读 §1，判断本次是否允许输出完整计划：
+- 若 KL / Walls / LiqMap **任一**彻底缺失：禁止输出 LONG_PLAN / SHORT_PLAN，但可以输出 WAIT / LONG_OBSERVATION / SHORT_OBSERVATION（带 trigger_conditions 的条件化方案）
+- 若 KL / Walls / LiqMap **≥2 个**核心源彻底缺失：输出 `decision="NO_TRADE"` + `data_self_check.hard_stop_triggered=true`
+- 仅 TradingBrain 缺失而 KL/Walls/LiqMap 齐备时，可降级到 §6/§7/§8 直接消费 facts，不触发 NO_TRADE
 
 **Step 1 · 当前区定位** —— 读 §2-§4，回答当前价格在哪个 PriceZone。判断当前区是防守位（spot_defense）/ 磁铁（liquidation_magnet）/ 争夺区（contested）/ 关键位（key_level_only）/ 中间位置（mid_air）。填入 `current_zone_assessment`。
 
@@ -126,13 +152,16 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
 
 **Step 6 · 慢变量修正** —— 读 §11-§12，判断宏观/资金面/期权是否需要：降低仓位积极性 / 缩短目标距离 / 调整 horizon。在 `macro_modifier_note` 里说明。
 
-**Step 7 · 冲突矩阵** —— 必须输出 long / short / wait 三类证据 + contradictions。若冲突严重 → 优先 WAIT。
+**Step 7 · 冲突矩阵** —— 必须输出 long / short / wait 三类证据 + contradictions。若冲突严重且无明确触发条件 → 优先 WAIT；若冲突存在但触发条件可定义 → 仍要输出 OBSERVATION + 条件化 primary_plan。
 
-**Step 8 · 交易计划** —— 输出 `primary_plan`（含 entry_zone / soft_invalidation / hard_invalidation / targets / RR / cancel_conditions / risk_unit / leverage_risk_level / position_sizing_note）+ `alternative_plan`（如主计划失效）+ `alternative_scenario`（对立场景） + `invalidation_conditions`（计划级失效）+ `confidence` + `confidence_rationale`。
+**Step 8 · 交易计划** —— 应用核心原则 #13"反骑墙规则"做最终判断：
+- 若满足 ≥4 项条件，输出 `primary_plan`（含 entry_zone / trigger_conditions / soft_invalidation / hard_invalidation / targets / RR / cancel_conditions / risk_unit / leverage_risk_level / position_sizing_note）+ `alternative_plan`（反向 / 突破延续）+ `alternative_scenario`（对立剧本）。
+- 若不满足，输出 WAIT，但 `alternative_plan` 仍需给"如果到了 X 价位/出现 Y 触发，怎么做"的条件化方案——不允许 alternative_plan=null。
+- 当前价在中间不追，但 **必须** 在 `primary_plan` 或 `alternative_plan` 中给出"区间下沿做多 / 上沿做空 / 突破跟进 / 假突破反转"任意 1-2 个条件化方案。
 
 ━━━━━━━━━━ 输出格式（严格遵守） ━━━━━━━━━━
 
-只返回一个 JSON 代码块（```json ... ```），不要任何其它文字。schema 如下：
+只返回**一个** JSON 代码块（用 ```json 开头、``` 结尾），代码块内是合法 JSON，**JSON 内部不允许 Markdown 格式**（不要 # 标题、不要 - 列表、不要 emoji）。代码块外不要任何解释文字。schema 如下：
 
 ```json
 {
@@ -168,11 +197,11 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
     "leverage_risk_level": "low | medium | high | extreme",
     "position_sizing_note": "若 hard_invalidation 距离 X% 且账户允许 1R/笔，仓位 ≈ R / X%"
   },
-  "alternative_plan": null 或与 primary_plan 同结构,
-  "no_trade_conditions": ["若 decision=WAIT，列出当前不做的具体原因"],
+  "alternative_plan": "与 primary_plan 同结构（反向边缘 / 突破延续 / 扫后反应；不允许在有决策区时填 null，至少给一个条件化方案）",
+  "no_trade_conditions": ["若 decision=WAIT 必填：当前不做的具体原因 + 接下来等什么（'等扫破 75600 后 5m 收回' / '等 76450 卖墙撤单' 等）"],
   "alternative_scenario": {
-    "description": "对立场景描述",
-    "probability_pct": 0-100 的整数,
+    "description": "对立场景描述（如主决策 WAIT，给出'另一方向被激活'的剧本）",
+    "probability_pct": "0-100 的整数（这是相对情景权重，非统计概率，仅表达主观倾向）",
     "trigger": "触发该场景所需的观察条件"
   },
   "evidence_matrix": {
@@ -192,7 +221,7 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
     "missing": ["缺失字段清单"],
     "stale": ["超 TTL 的源"],
     "provisional": ["未收盘字段"],
-    "hard_stop_triggered": false,
+    "hard_stop_triggered": "数据级阻断信号（不是交易止损）：仅当 KL/Walls/LiqMap 同时缺失 ≥2 个时才置 true",
     "confidence_penalty_reason": "confidence 为何打折的具体原因"
   },
   "macro_modifier_note": "宏观/情绪如何修正主计划",
@@ -201,13 +230,14 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
 ```
 
 再次强调：
-- `decision = NO_TRADE` 时 `primary_plan` 必须为 null，且 `data_self_check.hard_stop_triggered=true`
+- `decision = NO_TRADE` 时 `primary_plan` 必须为 null，且 `data_self_check.hard_stop_triggered=true`（必须 KL/Walls/LiqMap 缺失 ≥2 个）
 - `decision in [LONG_PLAN, SHORT_PLAN]` 时 `primary_plan` 必填，且 `evidence_matrix.contradictions` 不能严重冲突
-- `decision in [LONG_OBSERVATION, SHORT_OBSERVATION]` 时 `primary_plan` 可选；若给出，`trigger_conditions` 必须明确写"等什么"
-- `decision = WAIT` 时 `no_trade_conditions` 必填
+- `decision in [LONG_OBSERVATION, SHORT_OBSERVATION]` 时 `primary_plan` **必填**，`trigger_conditions` 必须明确写"等什么"（具体到价位 + bar 周期 + 确认信号）
+- `decision = WAIT` 时 `no_trade_conditions` 必填，且 `alternative_plan` 不允许为 null（给"区间边缘 / 扫后反应 / 突破跟进"任一条件化方案）
 - 禁止 evidence 只写 observation 不写 inference
 - 禁止 inference 引入 facts 之外的信息（宏观传闻 / 币圈八卦）
-- 禁止 Markdown / emoji / 任何 JSON 之外的文字"""
+- 禁止把 §8 清算/止损带描述为"阻力"或"支撑"（详见核心原则 #11）
+- JSON 内部禁止 Markdown 格式（# 标题 / - 列表 / emoji），但允许在 primary_plan.targets 等结构化字段里写中文白话"""
 
 
 def build_system_prompt() -> str:
@@ -587,7 +617,12 @@ def build_user_prompt(
         )
 
     # ── §8 清算图 / 止损带 / 清算磁铁（流动性目标与扫单路径） ──
-    _header("§8", "清算图 / 止损带 / 清算磁铁（流动性目标与扫单路径）")
+    _header("§8", "清算图 / 止损带 / 清算磁铁（流动性目标与扫单路径，**不是支撑/阻力**）")
+    lines.append(
+        '- 语义提示：上方「空头止损带」= 空头被强平的位置 = 向上买入流动性 / 轧空磁铁，**不是阻力**；'
+        '下方「多头止损带」= 多头被强平的位置 = 向下卖出流动性 / 扫多磁铁，**不是支撑**。'
+        '真正阻力/支撑请看 §6 关键位、§7 现货墙、§10 absorption。'
+    )
 
     def _fmt_liq_block(block, label: str) -> None:
         if block is None:
@@ -621,9 +656,15 @@ def build_user_prompt(
         )[:TOP_N_LIQ_CLUSTERS_PER_SIDE]
 
         def _fmt_cluster(c) -> str:
+            # LiqCluster.distance_pct 在生产代码（liquidation.py:40-43）里被赋值为
+            # 绝对值（above=正，below=正），但渲染层与 §6/§7 的"带符号距离"对齐：
+            # side=="long"（=下方多头止损）→ 显示负号；side=="short"（=上方空头止损）→ 正号
+            side = (getattr(c, "side", "") or "").lower()
+            raw_dist = float(getattr(c, "distance_pct", 0) or 0)
+            signed_dist = -abs(raw_dist) if side == "long" else abs(raw_dist)
             return (
                 f"    - {_fmt_price(getattr(c, 'price_center', 0))} "
-                f"({_fmt_pct(getattr(c, 'distance_pct', 0))}) | "
+                f"({_fmt_pct(signed_dist)}) | "
                 f"USD={_fmt(getattr(c, 'total_usd', 0))} | "
                 f"side=`{getattr(c, 'side', '—')}` | "
                 f"ex_count={getattr(c, 'exchange_count', 1)} | "
@@ -631,11 +672,15 @@ def build_user_prompt(
             )
 
         if ca:
-            lines.append(f"  - 上方空头止损带（top {len(ca)}）：")
+            lines.append(
+                f"  - 上方空头止损/轧空磁铁（向上买入流动性，**不是阻力**）（top {len(ca)}）："
+            )
             for c in ca:
                 lines.append(_fmt_cluster(c))
         if cb:
-            lines.append(f"  - 下方多头止损带（top {len(cb)}）：")
+            lines.append(
+                f"  - 下方多头止损/扫多磁铁（向下卖出流动性，**不是支撑**）（top {len(cb)}）："
+            )
             for c in cb:
                 lines.append(_fmt_cluster(c))
         # 真空区
@@ -859,12 +904,51 @@ def build_user_prompt(
                 f"({n.get('current_direction_bias', '—')}/i={n.get('current_intensity', 0)})"
             )
         lines.append(f"- 活跃主题：{' · '.join(nar_strs)}")
-    # 简报
+    # 简报：snapshot.news_brief_text 是 _collect_news_context 序列化后的完整 JSON
+    # 字符串。原实现 nb[:500] + "…" 会在 sections 中间硬截断，AI 拿到半截 JSON
+    # 既无法解析也容易把"被截掉的文字"当成"信息缺失"。改为反序列化后输出结构化
+    # 摘要：tldr_cn + 每个 section 的前 2 条 bullet + diff_from_prev_version。
+    # 反序列化失败时 fallback 到旧的硬截断（兼容 free-form 文本）。
     if snapshot.news_brief_text:
         nb = snapshot.news_brief_text
-        if len(nb) > 500:
-            nb = nb[:500] + "…"
-        lines.append(f"- 新闻简报（v{snapshot.news_brief_version}）：{nb}")
+        rendered_brief: list[str] = []
+        try:
+            import json as _json
+            payload = _json.loads(nb)
+            tldr = (payload.get("tldr_cn") or "").strip()
+            if tldr:
+                if len(tldr) > 240:
+                    tldr = tldr[:240] + "…"
+                rendered_brief.append(f"  - tldr：{tldr}")
+            for sec in (payload.get("sections") or [])[:5]:
+                sec_id = sec.get("section_id") or sec.get("id") or ""
+                sec_title = sec.get("title_cn") or sec.get("title") or sec_id
+                bullets = sec.get("bullets") or []
+                if not bullets:
+                    continue
+                rendered_brief.append(f"  - [{sec_title}]")
+                for b in bullets[:2]:
+                    btxt = (b if isinstance(b, str) else b.get("text") or "").strip()
+                    if not btxt:
+                        continue
+                    if len(btxt) > 140:
+                        btxt = btxt[:140] + "…"
+                    rendered_brief.append(f"    · {btxt}")
+            diff = (payload.get("diff_from_prev_version") or "").strip()
+            if diff:
+                if len(diff) > 200:
+                    diff = diff[:200] + "…"
+                rendered_brief.append(f"  - 版本差异：{diff}")
+        except Exception:
+            rendered_brief = []
+
+        if rendered_brief:
+            lines.append(f"- 新闻简报（v{snapshot.news_brief_version}）：")
+            lines.extend(rendered_brief)
+        else:
+            if len(nb) > 500:
+                nb = nb[:500] + "…"
+            lines.append(f"- 新闻简报（v{snapshot.news_brief_version}）：{nb}")
 
     # ── §12 期权（max pain / IV / put-call OI） ──
     _header("§12", "期权 · max pain / IV / put-call OI")
