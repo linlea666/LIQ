@@ -2424,8 +2424,8 @@ class Engine:
             return build_ai_snapshot(
                 coin=ccy,
                 price=float(state.ticker.last),
-                high_24h=state.ticker.high24 or 0,
-                low_24h=state.ticker.low24 or 0,
+                high_24h=state.ticker.high_24h or 0,
+                low_24h=state.ticker.low_24h or 0,
                 atr=atr_val,
                 market_temp_score=float(temp_score),
                 pin_risk_level=pin_lv,
