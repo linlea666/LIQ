@@ -222,7 +222,8 @@ class AIStrategicReport(BaseModel):
       7. 数据自检：data_self_check
       8. 失效条件：invalidation_conditions（计划级失效；plan 内有自己的
          soft/hard_invalidation）
-      9. 元数据：data_quality / stale_minutes / prompt_debug
+      9. 元数据：data_quality / prompt_debug
+         （新鲜度由 REST 路由层根据 timestamp 实时计算 stale_sec 返回）
 
     使用约定（与 MAA 风格一致）：
       - 调用方应在 LLM 返回非法 JSON 时构造一个 `decision="NO_TRADE"` +
@@ -286,6 +287,6 @@ class AIStrategicReport(BaseModel):
 
     # ── 元数据 ──
     data_quality: DataQuality = "ok"
-    stale_minutes: int = 0
-    """距上次成功 AI 调用的分钟数（若为降级结果）"""
     prompt_debug: Optional[PromptDebug] = None
+    # 新鲜度（stale_sec）由 routes_strategic._staleness_sec 在 API 层动态计算注入
+    # 不持久化在 schema 里，避免 arbiter 写入与 REST 计算两套真相

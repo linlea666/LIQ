@@ -31,14 +31,14 @@ export default function AIAnalysis() {
   const strategicHistory = useMarketStore((s) => s.strategicHistory);
   const coin = useMarketStore((s) => s.coin);
   const loadStrategicHistory = useMarketStore((s) => s.loadStrategicHistory);
-  const loadStrategicReport = useMarketStore((s) => s.loadStrategicReport);
 
+  // 当前报告已由 useWebSocket 在连接 / 切币时统一拉取（loadStrategicReport），
+  // 这里只补拉历史列表，避免冗余请求
   useEffect(() => {
     if (aiPanelOpen) {
       void loadStrategicHistory(coin);
-      void loadStrategicReport(coin);
     }
-  }, [aiPanelOpen, coin, loadStrategicHistory, loadStrategicReport]);
+  }, [aiPanelOpen, coin, loadStrategicHistory]);
 
   if (!aiPanelOpen) return null;
 

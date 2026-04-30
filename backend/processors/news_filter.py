@@ -164,7 +164,6 @@ def filter_news_layer1(
     stats.kept_count = len(kept)
     stats.top_drop_reasons = drop_reasons.most_common(3)
 
-    _mark_d08(stats)
     return kept, tier_map, stats
 
 
@@ -324,8 +323,3 @@ def _tally_tier(stats: FilterStats, tier: NewsTier) -> None:
         stats.minor += 1
     else:
         stats.normal += 1
-
-
-def _mark_d08(stats: FilterStats) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

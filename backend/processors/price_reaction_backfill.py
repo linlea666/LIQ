@@ -61,7 +61,6 @@ def backfill_price_reactions(
         "price_history_size": len(price_history) if price_history else 0,
     }
     if not events:
-        _mark_d04bf(stats)
         return [], stats
 
     if not price_history:
@@ -69,7 +68,6 @@ def backfill_price_reactions(
         out = [e.model_copy(deep=True) for e in events]
         stats["processed"] = len(out)
         stats["still_pending"] = len(out)
-        _mark_d04bf(stats)
         return out, stats
 
     tolerance_sec = max(0, int(forward_fill_tolerance_min)) * 60
@@ -169,7 +167,6 @@ def backfill_price_reactions(
 
         out.append(new_ev)
 
-    _mark_d04bf(stats)
     return out, stats
 
 
@@ -263,12 +260,3 @@ def _check_direction_match(direction: str, delta_pct_1h: Optional[float]) -> Opt
         return delta_pct_1h < 0
     # neutral / potential_reversal → 不参与命中率统计
     return None
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Decision Tracker
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _mark_d04bf(stats: dict) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

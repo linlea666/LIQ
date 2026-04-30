@@ -79,7 +79,6 @@ async def structure_news_layer2(
       - JSON 解析失败：尝试宽松提取；仍失败则跳过
     """
     if not items:
-        _mark_d08_layer2(input_=0, structured=0, tokens=0, latency_ms=0, fallbacks=0)
         return []
 
     news_cfg = get_settings().ai.news_agent
@@ -135,14 +134,6 @@ async def structure_news_layer2(
         if sig is not None:
             ordered.append(sig)
 
-    elapsed = int((time.time() - t0) * 1000)
-    _mark_d08_layer2(
-        input_=len(items),
-        structured=len(ordered),
-        tokens=total_tokens,
-        latency_ms=elapsed,
-        fallbacks=fallbacks,
-    )
     return ordered
 
 
@@ -514,14 +505,3 @@ def _sentiment_score_from_title(text: str) -> int:
     if any(n in t for n in neg):
         score -= 2
     return score
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 日志落实
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _mark_d08_layer2(
-    *, input_: int, structured: int, tokens: int, latency_ms: int, fallbacks: int,
-) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳避免上游调用失败。"""
-    return

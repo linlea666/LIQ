@@ -113,7 +113,6 @@ async def generate_brief(
         empty.char_count = _text_len(empty)
         empty.token_estimate = max(1, int(empty.char_count / 2.5))
         empty.diff_from_prev_version = _diff_briefs(prev_brief, empty) if prev_brief else ""
-        _mark_d09(empty)
         return empty
 
     is_incremental = (
@@ -199,7 +198,6 @@ async def generate_brief(
     brief.token_estimate = max(1, int(brief.char_count / 2.5))
     brief.diff_from_prev_version = _diff_briefs(prev_brief, brief) if prev_brief else ""
 
-    _mark_d09(brief)
     return brief
 
 
@@ -666,10 +664,6 @@ def ensure_bootstrap_brief() -> NewsBrief:
         with _CURRENT_LOCK:
             global _CURRENT
             _CURRENT = latest
-        try:
-            _mark_d09(latest)
-        except Exception:
-            logger.debug("[D09] mark restored brief failed", exc_info=True)
         logger.info(
             "[D09] restored brief from history | version=%d age=%ds",
             latest.version, max(0, int(time.time()) - int(latest.updated_at or 0)),
@@ -688,10 +682,6 @@ def ensure_bootstrap_brief() -> NewsBrief:
         update_trigger="scheduled",
     )
     set_current_brief(seed, persist=False)  # bootstrap 不落历史，等真 v1 覆盖
-    try:
-        _mark_d09(seed)
-    except Exception:
-        logger.debug("[D09] mark bootstrap failed", exc_info=True)
     logger.info("[D09] bootstrap brief seeded | version=%d", seed.version)
     return seed
 
@@ -723,8 +713,3 @@ def _derive_d09_status(brief: NewsBrief, bullet_total: int) -> tuple[str, str]:
     if bullet_total > 0 or brief.tldr_cn:
         return "ok", ""
     return "warn", "unexpected_empty"
-
-
-def _mark_d09(brief: NewsBrief) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

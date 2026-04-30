@@ -79,7 +79,6 @@ class NewsChatAnalyzer:
             effective_base or "(default)", bool(effective_key),
             self._client is not None,
         )
-        self._mark_init_locked()
 
     # ── 属性 ──
     @property
@@ -178,22 +177,11 @@ class NewsChatAnalyzer:
             self._total_latency_ms += int(latency_ms)
             self._last_error = ""
             self._last_success_ts = int(time.time())
-        self._mark_running("ok")
 
     def _tally_failure(self, err: Optional[Exception]) -> None:
         with self._lock:
             self._fail_streak += 1
             self._last_error = f"{type(err).__name__}: {str(err)[:200]}" if err else "unknown"
-            fail_streak = self._fail_streak
-        self._mark_running("warn" if fail_streak >= 3 else "ok")
-
-    def _mark_init_locked(self) -> None:
-        """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-        return
-
-    def _mark_running(self, status: str) -> None:
-        """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-        return
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

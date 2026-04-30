@@ -27,7 +27,6 @@ from models.flow import (
 )
 from models.key_level import KeyLevelSnapshotV2
 from models.market_structure import MarketStructure
-from models.levels import LevelAnalysis
 from models.liquidation import (
     HeatmapData, LiqHistoryData, LiqMaxPainData, LiqMaxPainItem,
     LiquidationMap, LiquidationStats,
@@ -92,7 +91,8 @@ class CoinState:
         self.atr: float = 0
         self.temperature: Optional[MarketTemperature] = None
         self.waterfall: Optional[WaterfallData] = None
-        self.levels: Optional[LevelAnalysis] = None
+        # PR-3 · self.levels 已下线（数学引擎 calculate_levels 删除，前端走 KeyLevelV3）。
+        # 历史 _recompute / /api/snapshot 中的 levels 路径全部移除
         self.liq_stats: Optional[LiquidationStats] = None
         self.candle_prices: list[float] = []
         self.candle_ts: list[int] = []
@@ -1421,10 +1421,6 @@ class Engine:
         if state.key_level_snapshot_v2:
             kl_signals = state.key_level_snapshot_v2.signals or None
 
-        # PR-3 · calculate_levels（数学引擎 L4）已下线。
-        # state.levels 永久为 None，前端 /api/snapshot 回退至 KeyLevelV3。
-        state.levels = None
-
         self._recompute_range_signal(ccy)
 
         # ── D01 L2 MarketRegime 识别（轻量，不依赖 AISnapshot）──
@@ -1747,8 +1743,6 @@ class Engine:
             payload["temperature"] = state.temperature.model_dump()
         if state.waterfall:
             payload["waterfall"] = state.waterfall.model_dump()
-        if state.levels:
-            payload["levels"] = state.levels.model_dump()
         if state.cvd_contract:
             payload["cvd_contract"] = {
                 "trend": state.cvd_contract.trend_1h,
@@ -1790,10 +1784,6 @@ class Engine:
             payload["global_liq"] = state.global_liq.model_dump()
         if state.market_index:
             payload["market_index"] = state.market_index.model_dump()
-        if state.levels and state.levels.sniper_entries:
-            payload["sniper_entries"] = [se.model_dump() for se in state.levels.sniper_entries[:4]]
-        if state.levels and state.levels.ladder_plans:
-            payload["ladder_plans"] = [lp.model_dump() for lp in state.levels.ladder_plans]
         if state.range_signal:
             payload["range_signal"] = state.range_signal.model_dump()
         if state.key_level_snapshot_v2 and state.key_level_snapshot_v2.levels:
@@ -1858,8 +1848,6 @@ class Engine:
             result["ticker"] = state.ticker.model_dump()
         if state.temperature:
             result["temperature"] = state.temperature.model_dump()
-        if state.levels:
-            result["levels"] = state.levels.model_dump()
         liq = state.liq_maps.get("1d") or state.liq_maps.get("24h")
         if liq:
             result["liquidation_1d"] = liq.model_dump()
@@ -1867,9 +1855,6 @@ class Engine:
 
     def get_temperature(self, ccy: str) -> Optional[MarketTemperature]:
         return self._states.get(ccy, CoinState(ccy)).temperature
-
-    def get_levels(self, ccy: str) -> Optional[LevelAnalysis]:
-        return self._states.get(ccy, CoinState(ccy)).levels
 
     def get_liquidation_map(self, ccy: str, cycle: str) -> Optional[LiquidationMap]:
         return self._states.get(ccy, CoinState(ccy)).liq_maps.get(cycle)

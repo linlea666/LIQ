@@ -32,7 +32,6 @@ _TRENDING_DIRECTIONS = ("bullish", "bearish", "potential_reversal")
 # 生命周期窗口（秒）
 _ACTIVE_WINDOW_SEC = 24 * 3600        # 24h 内有事件 → active
 _FADING_WINDOW_SEC = 48 * 3600        # 24-48h → fading
-_WARN_FLIP_FLOP_THRESHOLD = 2
 
 
 class NarrativeTracker:
@@ -123,9 +122,6 @@ class NarrativeTracker:
 
             # LRU 维护
             self._evict_if_over_capacity_locked(now)
-
-            if theme.flip_flop_count_24h >= _WARN_FLIP_FLOP_THRESHOLD:
-                _mark_d10_warn(theme)
 
             return theme
 
@@ -418,8 +414,3 @@ def _derive_category(event: MarketEventSignal) -> str:
     if target.startswith("sector:"):
         return "sector"
     return "macro_policy" if event.target == "macro" else "asset"
-
-
-def _mark_d10_warn(theme: NarrativeTheme) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

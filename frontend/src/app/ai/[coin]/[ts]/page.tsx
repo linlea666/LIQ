@@ -27,6 +27,18 @@ function formatFullTime(ts: number): string {
   });
 }
 
+function formatStaleSec(sec: number): string {
+  if (sec < 0) return "—";
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  if (sec < 86400) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    return m > 0 ? `${h}h${m}m` : `${h}h`;
+  }
+  return `${Math.floor(sec / 86400)}d`;
+}
+
 function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(text);
@@ -101,7 +113,7 @@ export default function StrategicDetailPage() {
               <div className="text-xs text-slate-500 mt-0.5">
                 {formatFullTime(data.timestamp)}
                 {data.stale_sec != null && data.stale_sec >= 0 && (
-                  <span> · 数据龄 {data.stale_sec}s</span>
+                  <span> · 数据龄 {formatStaleSec(data.stale_sec)}</span>
                 )}
               </div>
             </div>
@@ -137,9 +149,6 @@ export default function StrategicDetailPage() {
           <span>horizon: <span className="text-slate-300">{data.horizon}</span></span>
           <span>bias: <span className="text-slate-300">{data.bias}</span></span>
           <span>data_quality: <span className="text-slate-300">{data.data_quality}</span></span>
-          {data.stale_minutes > 0 && (
-            <span>stale_minutes: <span className="text-amber-400">{data.stale_minutes}</span></span>
-          )}
         </div>
 
         {(data.confidence_rationale || "").trim() && (
@@ -167,11 +176,7 @@ export default function StrategicDetailPage() {
 
         {data.current_zone_assessment &&
           Object.values(data.current_zone_assessment).some((v) => v !== "" && v != null) && (
-          <Card title="当前区位">
-            <pre className="text-xs whitespace-pre-wrap text-slate-400">
-              {JSON.stringify(data.current_zone_assessment, null, 2)}
-            </pre>
-          </Card>
+          <CurrentZoneCard zone={data.current_zone_assessment} />
         )}
 
         {(["structure_analysis", "flow_analysis", "macro_context"] as const).map((key) => {
@@ -244,11 +249,7 @@ export default function StrategicDetailPage() {
         )}
 
         {data.data_self_check && (
-          <Card title="数据自检">
-            <pre className="text-xs whitespace-pre-wrap text-slate-400">
-              {JSON.stringify(data.data_self_check, null, 2)}
-            </pre>
-          </Card>
+          <DataSelfCheckCard check={data.data_self_check} />
         )}
 
         {(data.macro_modifier_note || "").trim() && (
@@ -326,6 +327,128 @@ function TradingPlanCard({ title, plan }: { title: string; plan: StrategicTradin
         )}
       </div>
     </Card>
+  );
+}
+
+type CurrentZoneAssessment = NonNullable<StrategicReport["current_zone_assessment"]>;
+type DataSelfCheck = NonNullable<StrategicReport["data_self_check"]>;
+
+const ZONE_ROLE_CN: Record<string, string> = {
+  spot_defense: "现货防守位",
+  futures_target: "合约目标位",
+  liquidation_magnet: "清算磁铁",
+  contested: "争夺区",
+  key_level_only: "关键位",
+  mid_air: "中间位置",
+  other: "其它",
+};
+
+function CurrentZoneCard({ zone }: { zone: CurrentZoneAssessment }) {
+  const roleLabel = zone.role ? (ZONE_ROLE_CN[zone.role] ?? zone.role) : "—";
+  const above = zone.nearest_critical_above_pct;
+  const below = zone.nearest_critical_below_pct;
+  return (
+    <Card title="当前区位">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        {zone.zone_id && (
+          <div>
+            <span className="text-slate-500 text-xs">Zone ID</span>
+            <p className="text-white font-mono mt-0.5 text-xs">{zone.zone_id}</p>
+          </div>
+        )}
+        {zone.role && (
+          <div>
+            <span className="text-slate-500 text-xs">主导角色</span>
+            <p className="text-white mt-0.5">{roleLabel}</p>
+          </div>
+        )}
+        {above != null && (
+          <div>
+            <span className="text-slate-500 text-xs">距上方关键区</span>
+            <p className="text-white font-mono mt-0.5">{above.toFixed(2)}%</p>
+          </div>
+        )}
+        {below != null && (
+          <div>
+            <span className="text-slate-500 text-xs">距下方关键区</span>
+            <p className="text-white font-mono mt-0.5">{below.toFixed(2)}%</p>
+          </div>
+        )}
+      </div>
+      {zone.key_conflict && (
+        <div className="mt-4 pt-3 border-t border-slate-800/50">
+          <span className="text-slate-500 text-xs">关键冲突</span>
+          <p className="text-amber-300/90 mt-1">{zone.key_conflict}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DataSelfCheckCard({ check }: { check: DataSelfCheck }) {
+  const missing = check.missing ?? [];
+  const stale = check.stale ?? [];
+  const provisional = check.provisional ?? [];
+  return (
+    <Card title="数据自检">
+      <div className="space-y-3">
+        {check.hard_stop_triggered && (
+          <div className="px-3 py-2 bg-red-950/40 border border-red-800/50 rounded text-red-300 text-xs">
+            ⚠ hard_stop_triggered = true · 数据严重不可信，已强制 NO_TRADE
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <ChipList label="missing" items={missing} tone="rose" />
+          <ChipList label="stale" items={stale} tone="amber" />
+          <ChipList label="provisional" items={provisional} tone="slate" />
+        </div>
+        {check.confidence_penalty_reason && (
+          <div className="pt-3 border-t border-slate-800/50">
+            <span className="text-slate-500 text-xs">置信打折原因</span>
+            <p className="text-amber-300/90 text-xs mt-1 whitespace-pre-wrap">
+              {check.confidence_penalty_reason}
+            </p>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ChipList({
+  label,
+  items,
+  tone,
+}: {
+  label: string;
+  items: string[];
+  tone: "rose" | "amber" | "slate";
+}) {
+  const toneCls = {
+    rose: "bg-rose-950/30 border-rose-800/40 text-rose-300/90",
+    amber: "bg-amber-950/30 border-amber-800/40 text-amber-300/90",
+    slate: "bg-slate-800/40 border-slate-700/40 text-slate-300/80",
+  }[tone];
+  return (
+    <div>
+      <div className="text-slate-500 mb-1.5">
+        {label}（{items.length}）
+      </div>
+      {items.length === 0 ? (
+        <span className="text-slate-600">—</span>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {items.map((it, i) => (
+            <span
+              key={i}
+              className={`inline-block px-2 py-0.5 rounded border text-[10px] font-mono ${toneCls}`}
+            >
+              {it}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

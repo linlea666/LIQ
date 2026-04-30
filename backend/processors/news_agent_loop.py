@@ -289,7 +289,6 @@ async def run_news_tick(
         stats.error = str(e)[:200]
 
     stats.duration_ms = int((time.time() - t0) * 1000)
-    _mark_d13(stats)
     return stats
 
 
@@ -372,12 +371,3 @@ async def run_forever(get_context: Callable[[], dict]) -> None:
         except Exception:  # noqa: BLE001
             logger.warning("[D13] news_agent_loop outer exception", exc_info=True)
             await asyncio.sleep(30)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Decision Tracker 集成
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _mark_d13(stats: NewsTickStats) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

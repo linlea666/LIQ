@@ -180,7 +180,6 @@ class GeoRiskTracker:
                     is_blackswan=(level_after >= 5) or (level_before <= 1 and level_after >= 4),
                     summary_cn=(event.summary_cn or "")[:60],
                 )
-                _mark_d11_warn(state, severity)
                 return geo_event
             else:
                 return None
@@ -475,8 +474,3 @@ def _deep_copy_templates(src: dict) -> dict:
             for r in src.get("delta_keywords", [])
         ],
     }
-
-
-def _mark_d11_warn(state: GeoRiskState, severity: str) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

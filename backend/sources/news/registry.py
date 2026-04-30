@@ -98,8 +98,6 @@ async def fetch_all(since_ts: Optional[int] = None) -> list[RawNewsItem]:
     """
     sources = get_all()
     if not sources:
-        _mark_d07(status="warn", items=0, dedupe_dropped=0, errors=0,
-                  sources_registered=0, reason="no_sources_registered", log=False)
         return []
 
     tasks = [asyncio.create_task(_safe_fetch(s, since_ts)) for s in sources]
@@ -117,18 +115,8 @@ async def fetch_all(since_ts: Optional[int] = None) -> list[RawNewsItem]:
         per_source[src.name] = len(fresh)
         all_items.extend(fresh)
 
-    unique, dropped = deduplicate_cross_source(all_items)
+    unique, _dropped = deduplicate_cross_source(all_items)
     unique.sort(key=lambda it: it.publish_time)
-
-    _mark_d07(
-        status="ok" if errors == 0 else ("warn" if errors < len(sources) else "failed"),
-        items=len(unique),
-        dedupe_dropped=dropped,
-        errors=errors,
-        sources_registered=len(sources),
-        per_source=per_source,
-        log=True,
-    )
     return unique
 
 
@@ -273,31 +261,4 @@ def load_from_yaml(path: Optional[str] = None) -> int:
         register("okx_kol", create_kol_source())
         count = 2
 
-    _mark_d07(
-        status="ok",
-        items=0,
-        dedupe_dropped=0,
-        errors=0,
-        sources_registered=count,
-        log=True,
-    )
     return count
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Decision Tracker 封装
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _mark_d07(
-    *,
-    status: str,
-    items: int,
-    dedupe_dropped: int,
-    errors: int,
-    sources_registered: int,
-    per_source: Optional[dict] = None,
-    reason: str = "",
-    log: bool = False,
-) -> None:
-    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
-    return

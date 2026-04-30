@@ -76,8 +76,8 @@ export interface StrategicReport {
   };
   macro_modifier_note: string;
   data_quality: string;
-  stale_minutes: number;
   prompt_debug?: Record<string, unknown> | null;
+  /** 由 routes_strategic._staleness_sec 在 API 层动态计算注入（不在 schema 里持久化） */
   stale_sec?: number;
 }
 

@@ -30,11 +30,9 @@ const STRATEGIC_DECISION_CN: Record<string, string> = {
 };
 
 function StrategicReportCard({ coin }: { coin: string }) {
+  // 报告由 useWebSocket 在连接 / 切币时统一拉取（loadStrategicReport），
+  // 此处只读 store 即可，避免与其它组件并发重复请求
   const report = useMarketStore((s) => s.strategicReport);
-  const loadStrategicReport = useMarketStore((s) => s.loadStrategicReport);
-  useEffect(() => {
-    void loadStrategicReport(coin);
-  }, [coin, loadStrategicReport]);
 
   const c = coin.toUpperCase();
   const r: StrategicReport | null =
