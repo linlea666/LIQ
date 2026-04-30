@@ -726,23 +726,5 @@ def _derive_d09_status(brief: NewsBrief, bullet_total: int) -> tuple[str, str]:
 
 
 def _mark_d09(brief: NewsBrief) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        bullet_total = sum(len(s.bullets) for s in brief.sections)
-        status, note = _derive_d09_status(brief, bullet_total)
-        get_tracker().mark(
-            D.D09_NEWS_BRIEF,
-            status=status,
-            log=True,
-            version=brief.version,
-            char_count=brief.char_count,
-            based_on_events=brief.based_on_events_count,
-            update_trigger=brief.update_trigger,
-            bullet_total=bullet_total,
-            tracked_themes=len(brief.tracked_themes),
-            generation_cost_ms=brief.generation_cost_ms,
-            model_used=brief.model_used,
-            note=note,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D09] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

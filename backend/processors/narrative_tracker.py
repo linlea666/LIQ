@@ -421,16 +421,5 @@ def _derive_category(event: MarketEventSignal) -> str:
 
 
 def _mark_d10_warn(theme: NarrativeTheme) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        get_tracker().mark(
-            D.D10_FLIP_FLOP,
-            status="warn",
-            log=False,
-            theme_id=theme.theme_id,
-            flip_flop_count_24h=theme.flip_flop_count_24h,
-            flip_flop_count_7d=theme.flip_flop_count_7d,
-            current_direction_bias=theme.current_direction_bias,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D10] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

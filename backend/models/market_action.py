@@ -502,31 +502,15 @@ class TradingImplications(BaseModel):
     # 50-100 字交易员直觉："如果我是机构交易员，此刻我会……"
 
 
-class PromptSection(BaseModel):
-    """Prompt 中的章节锚点，供前端生成 TOC"""
-    anchor: str                       # "§1" / "§2" 等
-    title: str                        # "当前行情速览"
-    level: int = 2                    # markdown 标题级别（2=##, 3=###）
-
-
-class PromptDebug(BaseModel):
-    """AI 调用透明度 · 供前端"本轮喂给 AI 的完整数据"卡片展示"""
-    system: str                       # system prompt 原文
-    user: str                         # user prompt 原文（含 facts + 规则）
-    chars: int                        # user prompt 字符数
-    sections: list[PromptSection] = Field(default_factory=list)
-    model: str                        # e.g. "deepseek-v4-flash"
-    tokens_prompt: Optional[int] = None
-    tokens_completion: Optional[int] = None
-    tokens_reasoning: Optional[int] = None
-    latency_ms: int = 0
-    generated_at: int = 0             # 秒级 unix
-    ai_raw_response: Optional[str] = None  # AI 返回的原始文本（调试/复盘用）
-    ai_reasoning_content: Optional[str] = None
-    # 历史字段：R1/reasoner 时代的 Chain-of-Thought 原文。v4-flash 非思考模式恒为空，
-    # 保留以兼容旧快照 + 未来重启思考模式时平滑接入。
-    parse_ok: bool = True
-    parse_error: Optional[str] = None
+# PromptSection / PromptDebug 已提取到 `models/common_prompt_debug.py`
+# 让 MAA + Strategic AI 共享同一份 schema。
+#
+# 此处保留 re-export，旧 import 路径（`from models.market_action import PromptDebug`
+# / `from models.market_action import PromptSection`）继续可用：
+# - 生产代码：`ai/market_action_arbiter.py` 等无须改 import
+# - 历史持久化：`market_action_history.json` 的 `MarketActionReport(**item)`
+#   反序列化按字段名匹配，与类 module path 无关 → 完全兼容
+from models.common_prompt_debug import PromptDebug, PromptSection  # noqa: F401
 
 
 StabilityOverrideReason = Literal[

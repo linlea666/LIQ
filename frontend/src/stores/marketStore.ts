@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import type {
-  AIAnalysisResult,
   MAAEvalSummary,
   MarketActionReport,
   MarketUpdate,
   SourceHealth,
+  StrategicReport,
   TEAIInterpretation,
   TradingBrainSnapshot,
 } from "@/lib/types";
@@ -18,16 +18,17 @@ interface MarketStore {
   data: Record<string, MarketUpdate>;
   updateMarketData: (update: MarketUpdate) => void;
 
-  aiResult: AIAnalysisResult | null;
-  aiLoading: boolean;
-  aiError: string | null;
-  aiHistory: AIAnalysisResult[];
-  aiAvailable: boolean;
-  setAIResult: (result: AIAnalysisResult) => void;
-  setAILoading: (loading: boolean) => void;
-  setAIError: (error: string | null) => void;
-  setAIAvailable: (available: boolean) => void;
-  loadAIHistory: (coin: string) => Promise<void>;
+  strategicReport: StrategicReport | null;
+  strategicLoading: boolean;
+  strategicError: string | null;
+  strategicHistory: StrategicReport[];
+  strategicAvailable: boolean;
+  setStrategicReport: (result: StrategicReport) => void;
+  setStrategicLoading: (loading: boolean) => void;
+  setStrategicError: (error: string | null) => void;
+  setStrategicAvailable: (available: boolean) => void;
+  loadStrategicHistory: (coin: string) => Promise<void>;
+  loadStrategicReport: (coin: string) => Promise<void>;
 
   sourceHealth: SourceHealth[];
   setSourceHealth: (health: SourceHealth[]) => void;
@@ -77,7 +78,14 @@ interface MarketStore {
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
   coin: "BTC",
-  setCoin: (coin) => set({ coin, aiResult: null, aiError: null, aiLoading: false }),
+  setCoin: (coin) =>
+    set({
+      coin,
+      strategicReport: null,
+      strategicError: null,
+      strategicLoading: false,
+      strategicHistory: [],
+    }),
 
   data: {},
   updateMarketData: (update) =>
@@ -88,38 +96,73 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
       },
     })),
 
-  aiResult: null,
-  aiLoading: false,
-  aiError: null,
-  aiHistory: [],
-  aiAvailable: false,
-  setAIResult: (result) =>
+  strategicReport: null,
+  strategicLoading: false,
+  strategicError: null,
+  strategicHistory: [],
+  strategicAvailable: false,
+  setStrategicReport: (result) =>
     set((state) => {
-      const exists = state.aiHistory.some((h) => h.ts === result.ts);
+      // 严格按当前 coin 过滤——避免 WS 串频或多 tab 共享 store 时把别的币
+      // 的报告塞到当前 history 里污染 UI
+      if (
+        !result?.coin ||
+        result.coin.toUpperCase() !== state.coin.toUpperCase()
+      ) {
+        return {};
+      }
+      const ts = result.timestamp;
+      const exists = state.strategicHistory.some((h) => h.timestamp === ts);
       const history = exists
-        ? state.aiHistory
-        : [result, ...state.aiHistory].slice(0, 5);
-      return { aiResult: result, aiLoading: false, aiError: null, aiHistory: history };
+        ? state.strategicHistory
+        : [result, ...state.strategicHistory].slice(0, 5);
+      return {
+        strategicReport: result,
+        strategicLoading: false,
+        strategicError: null,
+        strategicHistory: history,
+      };
     }),
-  setAILoading: (loading) => set({ aiLoading: loading, aiError: null }),
-  setAIError: (error) => set({ aiError: error, aiLoading: false }),
-  setAIAvailable: (available) => set({ aiAvailable: available }),
-  loadAIHistory: async (coin) => {
+  setStrategicLoading: (loading) =>
+    set({ strategicLoading: loading, strategicError: null }),
+  setStrategicError: (error) =>
+    set({ strategicError: error, strategicLoading: false }),
+  setStrategicAvailable: (available) => set({ strategicAvailable: available }),
+  loadStrategicReport: async (coin) => {
+    const c = coin.toUpperCase();
     try {
-      const resp = await fetch(`${API_BASE}/api/ai/history/${coin}?limit=5`);
+      const resp = await fetch(
+        `${API_BASE}/api/strategic/report?coin=${encodeURIComponent(c)}&slim=1`,
+      );
+      if (!resp.ok) return;
+      const data = (await resp.json()) as StrategicReport;
+      if (data?.coin && data.timestamp) {
+        get().setStrategicReport(data);
+      }
+    } catch {
+      // silently ignore
+    }
+  },
+  loadStrategicHistory: async (coin) => {
+    try {
+      const resp = await fetch(
+        `${API_BASE}/api/strategic/report/history?coin=${encodeURIComponent(
+          coin,
+        )}&limit=5&slim=1`,
+      );
       if (!resp.ok) return;
       const data = await resp.json();
-      const analyses: AIAnalysisResult[] = data.analyses ?? [];
-      if (analyses.length > 0) {
+      const items: StrategicReport[] = Array.isArray(data.items) ? data.items : [];
+      if (items.length > 0) {
         set((state) => {
-          const merged = [...analyses];
-          for (const existing of state.aiHistory) {
-            if (!merged.some((m) => m.ts === existing.ts)) {
+          const merged = [...items];
+          for (const existing of state.strategicHistory) {
+            if (!merged.some((m) => m.timestamp === existing.timestamp)) {
               merged.push(existing);
             }
           }
-          merged.sort((a, b) => b.ts - a.ts);
-          return { aiHistory: merged.slice(0, 5) };
+          merged.sort((a, b) => b.timestamp - a.timestamp);
+          return { strategicHistory: merged.slice(0, 5) };
         });
       }
     } catch {

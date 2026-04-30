@@ -299,18 +299,5 @@ def _mark_d07(
     reason: str = "",
     log: bool = False,
 ) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        get_tracker().mark(
-            D.D07_NEWS_SOURCES,
-            status=status,
-            log=log,
-            items=items,
-            dedupe_dropped=dedupe_dropped,
-            errors=errors,
-            sources_registered=sources_registered,
-            per_source=per_source or {},
-            reason=reason,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D07] tracker mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

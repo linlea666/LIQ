@@ -21,7 +21,7 @@
     - state.coinbase_orderbook 注入 → walls 含 coinbase_spot_confluence
     - 仍向后兼容：state 无 coinbase_orderbook → zone.coinbase_spot_confluence=False
   AI snapshot
-    - _build_liquidity_wall_block 把 coinbase_confluence 字段写入 wall_dict
+    - build_ai_snapshot 透传 WallZone（含 coinbase_spot_*）给 Strategic prompt
 """
 
 from __future__ import annotations
@@ -412,14 +412,14 @@ def test_build_outputs_without_coinbase_orderbook_unchanged():
 
 
 # ──────────────────────────────────────────────────────────────────────
-# AI snapshot _build_liquidity_wall_block
+# PR-5 · AISnapshot 强类型墙：build_ai_snapshot 直接透传 WallZone（无 dict 中转层）
 # ──────────────────────────────────────────────────────────────────────
-def test_ai_snapshot_includes_coinbase_fields():
-    """墙含 coinbase_spot_confluence → AI dict 含 coinbase_confluence/usd/num_orders。"""
-    from ai.snapshot import _build_liquidity_wall_block
+def test_build_ai_snapshot_passes_wall_zones_with_coinbase():
+    """高可信墙经 pressure_snapshot 进入 AISnapshot.wall_zones_*，Coinbase 字段保留。"""
+    from ai.snapshot import build_ai_snapshot
 
     z = _make_zone(side="bid")
-    z.dual_source = True            # 让墙通过严格筛选
+    z.dual_source = True
     z.trust_score = 0.90
     z.distance_pct = -0.5
     z.coinbase_spot_confluence = True
@@ -431,24 +431,29 @@ def test_ai_snapshot_includes_coinbase_fields():
         walls_above=[],
         walls_below=[z],
     )
-    out = _build_liquidity_wall_block(pressure, last_price=100_000.0)
+    snap = build_ai_snapshot(
+        coin="BTC",
+        price=100_000.0,
+        high_24h=101_000.0,
+        low_24h=99_000.0,
+        atr=200.0,
+        market_temp_score=50.0,
+        pin_risk_level="low",
+        pressure_snapshot=pressure,
+    )
+    assert len(snap.wall_zones_below) == 1
+    wz = snap.wall_zones_below[0]
+    assert wz.coinbase_spot_confluence is True
+    assert wz.coinbase_spot_usd == 1_500_000.0
+    assert wz.coinbase_num_orders == 7
 
-    assert len(out["walls"]) == 1
-    w = out["walls"][0]
-    assert w.get("coinbase_confluence") is True
-    assert w.get("coinbase_spot_usd") == 1_500_000
-    assert w.get("coinbase_num_orders") == 7
 
-
-def test_ai_snapshot_skips_coinbase_fields_when_no_confluence():
-    """墙 coinbase_spot_confluence=False → AI dict 不带 coinbase_* keys（保持紧凑）。"""
-    from ai.snapshot import _build_liquidity_wall_block
-
+def test_build_ai_snapshot_wall_zone_without_coinbase_confluence():
     z = _make_zone(side="ask")
     z.dual_source = True
     z.trust_score = 0.90
     z.coinbase_spot_confluence = False
-    z.coinbase_spot_usd = 50_000.0          # 有数据但未 confluence
+    z.coinbase_spot_usd = 50_000.0
     z.coinbase_num_orders = 1
 
     pressure = OrderbookPressureSnapshot(
@@ -456,10 +461,18 @@ def test_ai_snapshot_skips_coinbase_fields_when_no_confluence():
         walls_above=[z],
         walls_below=[],
     )
-    out = _build_liquidity_wall_block(pressure, last_price=100_000.0)
+    from ai.snapshot import build_ai_snapshot
 
-    assert len(out["walls"]) == 1
-    w = out["walls"][0]
-    assert "coinbase_confluence" not in w   # 节省 prompt token
-    assert "coinbase_spot_usd" not in w
-    assert "coinbase_num_orders" not in w
+    snap = build_ai_snapshot(
+        coin="BTC",
+        price=100_000.0,
+        high_24h=101_000.0,
+        low_24h=99_000.0,
+        atr=200.0,
+        market_temp_score=50.0,
+        pin_risk_level="low",
+        pressure_snapshot=pressure,
+    )
+    assert len(snap.wall_zones_above) == 1
+    wz = snap.wall_zones_above[0]
+    assert wz.coinbase_spot_confluence is False

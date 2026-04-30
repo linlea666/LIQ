@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from models.news_event import EnrichedNewsEvent, MarketEventSignal, RawNewsItem
-from utils.decision_tracker import D, get_tracker
+# PR-3 · utils.decision_tracker 已下线
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +113,8 @@ async def run_news_tick(
         if ledger is None:
             from processors.news_ledger import get_ledger
             ledger = get_ledger()
-        if bus is None:
-            from processors.signal_bus import get_bus
-            bus = get_bus()
+        # PR-3 · signal_bus 已下线，新闻事件不再投放到 SignalBus
+        bus = None  # noqa: F841 (kept to preserve downstream None-checks)
 
         # ── Step 1: 拉取 ──
         items: list[RawNewsItem] = []
@@ -203,20 +202,9 @@ async def run_news_tick(
         stats.extra["ledger_added"] = added
         stats.extra["ledger_updated"] = updated
 
-        # ── Step 6: 推送到 SignalBus（news_event + geo_risk）──
-        try:
-            from processors.signal_bus import adapt_news_event, adapt_geo_risk_event
-            for sig in structured:
-                for cs in adapt_news_event(sig, target_coins=target_coins):
-                    if bus.ingest(cs):
-                        stats.signals_pushed_news += 1
-            for ge in geo_events:
-                for cs in adapt_geo_risk_event(ge, target_coins=target_coins):
-                    if bus.ingest(cs):
-                        stats.signals_pushed_geo += 1
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[D13] signal_bus push failed: %s", e)
-            stats.extra["bus_error"] = str(e)[:120]
+        # PR-3 · signal_bus 已下线（数学引擎链路被 Strategic AI 取代），
+        # 新闻事件不再投放到 SignalBus，narrative_tracker / geo_tracker
+        # 仍保留状态用于宏观慢变量章节。
 
         # ── Step 7: 回填价格反应 ──
         if do_backfill and price_history:
@@ -391,28 +379,5 @@ async def run_forever(get_context: Callable[[], dict]) -> None:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _mark_d13(stats: NewsTickStats) -> None:
-    try:
-        status = "ok"
-        if stats.error:
-            status = "error"
-        elif stats.fetched == 0 and not stats.brief_triggered:
-            status = "idle"
-
-        get_tracker().mark(
-            D.D13_NEWS_AGENT,
-            status=status,
-            log=False,
-            fetched=stats.fetched,
-            kept=stats.kept_after_filter,
-            structured=stats.structured,
-            news_sig=stats.signals_pushed_news,
-            geo_sig=stats.signals_pushed_geo,
-            blackswan=stats.blackswan_hit,
-            brief_triggered=stats.brief_triggered,
-            brief_version=stats.brief_version_after,
-            backfill_processed=stats.backfill_processed,
-            backfill_complete=stats.backfill_complete,
-            duration_ms=stats.duration_ms,
-        )
-    except Exception:
-        logger.debug("[D13] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

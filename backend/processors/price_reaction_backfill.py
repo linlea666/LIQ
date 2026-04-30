@@ -270,18 +270,5 @@ def _check_direction_match(direction: str, delta_pct_1h: Optional[float]) -> Opt
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _mark_d04bf(stats: dict) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        status = "ok" if stats.get("processed", 0) > 0 else "idle"
-        get_tracker().mark(
-            D.D04_BACKTEST_LOOP,
-            status=status,
-            log=False,
-            news_reaction_processed=int(stats.get("processed", 0)),
-            news_reaction_newly_complete=int(stats.get("newly_complete", 0)),
-            news_reaction_newly_partial=int(stats.get("newly_partial", 0)),
-            news_reaction_still_pending=int(stats.get("still_pending", 0)),
-            narrative_reactions_recorded=int(stats.get("narrative_reactions_recorded", 0)),
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D04BF] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

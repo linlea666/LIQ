@@ -231,47 +231,8 @@ def run_tracker_v2(
 
 
 def _report_cascade_health(snapshot: KeyLevelSnapshotV2, cfg: dict) -> None:
-    """D05：采样当前 tracker 产出中 A 级信号的 cascade_risk 分布并上报。
-
-    目的：
-      修复前（双重计数）：几乎所有 A 级信号 cascade_risk>60% 概率 >60%
-      修复后（移除 barrier 贡献）：同一数据下 A 级信号占比会降低，
-                                    且剩下的 A 级 cascade>60% 占比应显著下降
-    失败不影响主流程（tracker 内部已兜底）。
-    """
-    try:
-        from utils.decision_tracker import D, get_tracker
-
-        a_signals = [s for s in snapshot.signals if s.confidence == "A"]
-        a_total = len(a_signals)
-        a_cascade_gt60 = 0
-        if a_total > 0:
-            # 信号本身不带 cascade_risk，需从 levels 反查
-            price_to_lv = {lv.price: lv for lv in snapshot.levels}
-            for s in a_signals:
-                lv = price_to_lv.get(s.level_price)
-                if lv and lv.cascade_risk >= 0.6:
-                    a_cascade_gt60 += 1
-
-        barrier_max = max((lv.barrier_score for lv in snapshot.levels), default=0.0)
-        cfg_cascade_norm = float(cfg.get("cascade_norm", 120.0))
-        user_override = cfg_cascade_norm != 120.0
-
-        # 关键位 snapshot 每 2-5s 一次，log=False 避免刷屏；
-        # runtime 状态仍可通过 /api/decisions/summary 或 D1-D17 看板查询
-        get_tracker().mark(
-            D.D05_CASCADE_FIX,
-            status="ok",
-            log=False,
-            cfg_cascade_norm=cfg_cascade_norm,
-            user_override=user_override,
-            a_tier_count=a_total,
-            a_tier_cascade_gt60=a_cascade_gt60,
-            a_tier_cascade_gt60_pct=(a_cascade_gt60 / a_total) if a_total else 0.0,
-            barrier_max=barrier_max,
-        )
-    except Exception as e:  # noqa: BLE001 — tracker 不影响主流程
-        logger.debug("D05 cascade health report failed: %s", e)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return
 
 
 def _calc_atr_factor(atr: float, price: float) -> float:

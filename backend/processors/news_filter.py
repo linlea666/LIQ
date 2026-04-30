@@ -327,20 +327,5 @@ def _tally_tier(stats: FilterStats, tier: NewsTier) -> None:
 
 
 def _mark_d08(stats: FilterStats) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        get_tracker().mark(
-            D.D08_NEWS_PIPELINE,
-            status="ok" if stats.input_count == 0 or stats.kept_count > 0 else "warn",
-            log=False,
-            input=stats.input_count,
-            kept=stats.kept_count,
-            pass_rate=stats.pass_rate,
-            blackswan=stats.blackswan,
-            major=stats.major,
-            normal=stats.normal,
-            minor=stats.minor,
-            top_drop=[{"reason": r, "count": c} for r, c in stats.top_drop_reasons[:3]],
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D08] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

@@ -296,14 +296,9 @@ server:
     - "http://8.217.240.76:8801"
     - "http://8.217.240.76"
 
-# ── NOFX 外部 AI 决策接口（/api/nofx/*） ──
-# 目的：为 NOFX 项目（3 分钟一次决策）提供"完整原始行情快照"，仅返回原始/统计
-#       类数据，已剔除本项目所有加工层（trend_exhaustion / market_structure /
-#       direction_vote / temperature / execution_plan / ai_trader_report …）
-# 关键约束：
-#   1. JSON 返回，字段命名稳定，向后兼容（仅允许加字段）
-#   2. 纯读内存，不触发外部请求，对现有系统零侵入
-#   3. 30s 响应缓存 + IP 令牌桶限频，防呆并保护 CPU
+# PR-3 · NOFX 外部 AI 决策接口（/api/nofx/*）已下线。
+# Strategic AI 全程决策官（/api/strategic/*）取代旧 NOFX 数据快照接口。
+
 # ── Market Action Analyzer (MAA) · AI Arbiter 节 ──
 # 独立于主 AI（后者输出长文 markdown 交易计划），MAA 只做"基于真实市场动作的
 # 场景结构识别"，复用 ai 段的 DeepSeek 配置（model / api_key / timeout / retries）。
@@ -313,15 +308,3 @@ market_action:
   auto_interval_sec: 600      # 10 分钟一次；v4-flash 非思考单次 ~5-20s，3 币交错无压力
   max_history: 200            # per-coin 历史保留条数（~33h @ 10min）
   include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
-
-nofx:
-  enabled: true
-  cache_ttl_sec: 30           # 响应字节级缓存（远小于 NOFX 3min 节奏，业务透明）
-  rate_limit_per_min: 60      # 单 IP 上限；NOFX 3min/次 = 20/h，远低于此
-  allow_coins: ["BTC", "ETH", "SOL"]
-  candle_limit:               # 每个时间框返回最近 N 根（按 state 实际可用容量）
-    "15m": 96                 # 最近 24h
-    "1h":  168                # 最近 7d
-    "4h":  120                # 最近 20d
-    "1d":  90                 # 最近 3 个月
-    "1w":  60                 # 最近 ~1.2 年

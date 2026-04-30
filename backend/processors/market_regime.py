@@ -146,25 +146,7 @@ def compute_regime(
         stable_duration_sec=stable_duration_sec,
     )
 
-    # 5. D01 上报（最多一行，不炸日志）
-    try:
-        from utils.decision_tracker import D, get_tracker
-        switched = prev_regime is not None and prev_regime != regime_label
-        get_tracker().mark(
-            D.D01_REGIME,
-            status="ok" if snapshot is not None else "warn",
-            log=False,  # _recompute 高频调用；由 summary loop 体现
-            coin=coin,
-            regime=regime_label,
-            confidence=round(confidence, 3),
-            switched=bool(switched),
-            atr_pct=round(features.atr_pct, 3),
-            bbw=round(features.bbw, 3),
-            structure=features.structure_alignment or "unknown",
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D01] decision_tracker mark failed", exc_info=True)
-
+    # PR-3 · D01 decision_tracker 已下线
     return snap
 
 
@@ -245,24 +227,7 @@ def compute_regime_from_state(
         stable_duration_sec=stable_duration_sec,
     )
 
-    try:
-        from utils.decision_tracker import D, get_tracker
-        switched = prev_regime is not None and prev_regime != regime_label
-        get_tracker().mark(
-            D.D01_REGIME,
-            status="ok" if price > 0 else "warn",
-            log=False,
-            coin=coin,
-            regime=regime_label,
-            confidence=round(confidence, 3),
-            switched=bool(switched),
-            atr_pct=round(feat.atr_pct, 3),
-            bbw=round(feat.bbw, 3),
-            structure=feat.structure_alignment or "unknown",
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D01] tracker mark(from_state) failed", exc_info=True)
-
+    # PR-3 · D01 decision_tracker 已下线
     return snap
 
 
@@ -294,13 +259,15 @@ def _extract_features(
         if snapshot.btc_hist_vol is not None:
             feat.hist_vol_pct = float(snapshot.btc_hist_vol)
 
-        # CVD 方向持续性（粗粒度：同向为 1，反向为 0）
-        if snapshot.cvd_contract_trend:
-            trend = snapshot.cvd_contract_trend.lower()
+        # CVD 方向持续性：优先读 MAA facts（PR-5 AISnapshot 已移除顶层 cvd_*）
+        fcc = getattr(snapshot, "facts_cvd_contract", None)
+        if fcc is not None:
+            trend = (getattr(fcc, "trend_1h", "") or "").lower()
+            delta = float(getattr(fcc, "delta_1h", None) or 0)
             if trend in ("bullish", "up", "long"):
-                feat.cvd_persistence = 1.0 if (snapshot.cvd_contract_delta_1h or 0) > 0 else 0.5
+                feat.cvd_persistence = 1.0 if delta > 0 else 0.5
             elif trend in ("bearish", "down", "short"):
-                feat.cvd_persistence = 1.0 if (snapshot.cvd_contract_delta_1h or 0) < 0 else 0.5
+                feat.cvd_persistence = 1.0 if delta < 0 else 0.5
             else:
                 feat.cvd_persistence = 0.3
 
@@ -310,16 +277,9 @@ def _extract_features(
             # 没有 7d 均值接口时用保守近似：> 1e9 USD 视为放量
             feat.liq_24h_vs_7d_avg = 1.0 + min(liq_24h / 1e9, 5.0)
 
-    # 结构对齐
+    # 结构对齐（仅显式 structure；AISnapshot 不再带 market_structure dict）
     if structure is not None:
         feat.structure_alignment = structure.direction
-    elif snapshot is not None and snapshot.market_structure:
-        try:
-            feat.structure_alignment = str(
-                snapshot.market_structure.get("direction", "")
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
     # EMA 斜率（粗估：price vs ema20）
     if snapshot is not None and snapshot.ema20 and snapshot.price:

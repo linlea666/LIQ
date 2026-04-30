@@ -5,8 +5,6 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import PriceBar from "@/components/TopBar/PriceBar";
 import CoinSelector from "@/components/TopBar/CoinSelector";
 import StatusBadges from "@/components/TopBar/StatusBadges";
-import DecisionHealthStrip from "@/components/TopBar/DecisionHealthStrip";
-import AlertBell from "@/components/TopBar/AlertBell";
 import AIButton from "@/components/TopBar/AIButton";
 import CoreFactors from "@/components/FactorCards/CoreFactors";
 import TabContainer from "@/components/MainView/TabContainer";
@@ -23,7 +21,7 @@ export default function Dashboard() {
 
   const displayMode = useMarketStore((s) => s.displayMode);
   const setSourceHealth = useMarketStore((s) => s.setSourceHealth);
-  const setAIAvailable = useMarketStore((s) => s.setAIAvailable);
+  const setStrategicAvailable = useMarketStore((s) => s.setStrategicAvailable);
   // 让 ⋮工具 下拉中的滚仓徽章在 Dashboard 上也能显示数量
   const loadRollPositions = useRollStore((s) => s.loadPositions);
 
@@ -34,14 +32,16 @@ export default function Dashboard() {
         if (res.ok) {
           const data = await res.json();
           if (data.sources) setSourceHealth(data.sources);
-          if (data.ai_available !== undefined) setAIAvailable(data.ai_available);
+          if (data.strategic_available !== undefined) {
+            setStrategicAvailable(data.strategic_available);
+          }
         }
       } catch { /* silent */ }
     };
     fetchHealth();
     const timer = setInterval(fetchHealth, 10000);
     return () => clearInterval(timer);
-  }, [setSourceHealth, setAIAvailable]);
+  }, [setSourceHealth, setStrategicAvailable]);
 
   // 仅刷新滚仓 active 持仓列表用于徽章；signals 由 /roll 页内部的 WS 维持
   useEffect(() => {
@@ -69,8 +69,6 @@ export default function Dashboard() {
           <div className="flex items-center gap-4">
             <StatusBadges />
             <ModeSelector />
-            <DecisionHealthStrip />
-            <AlertBell />
             <ToolsMenu />
             <AIButton />
           </div>
@@ -134,7 +132,7 @@ function ModeSelector() {
 }
 
 /**
- * 顶栏次级入口下拉：简报 / 回放 / 滚仓
+ * 顶栏次级入口下拉：简报 / 滚仓
  *
  * 设计：
  *   - 收纳次要路由，避免顶栏堆按钮
@@ -181,7 +179,6 @@ function ToolsMenu() {
   }> = useMemo(
     () => [
       { href: "/news-brief", label: "简报", icon: "📰", desc: "AI 24h 滚动记忆锚" },
-      { href: "/replay", label: "回放", icon: "📼", desc: "历史快照逐 tick 回放" },
       {
         href: `/brain/${coin}`,
         label: "交易大脑",

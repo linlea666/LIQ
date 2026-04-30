@@ -35,9 +35,7 @@ def _resolve_ahr999(mi_ahr: float | None, cycle_ahr: float | None) -> float | No
     snap = build_ai_snapshot(
         coin="BTC",
         price=75000.0, high_24h=76000.0, low_24h=74000.0,
-        liq_map=None, cvd_contract=None, cvd_spot=None,
-        oi=None, funding=None, basis=None, orderbook=None,
-        liq_stats=None, vp=None, atr=0.0,
+        atr=0.0,
         market_temp_score=50.0, pin_risk_level="low",
         market_index=_make_mi(mi_ahr),
         cycle_position=_make_cycle(cycle_ahr),

@@ -1,22 +1,18 @@
-"""数据快照组装：将所有维度数据汇总为 AISnapshot"""
+"""数据快照组装：汇总为 Strategic AI 消费的 AISnapshot（PR-5 瘦身版）"""
 
 from __future__ import annotations
 
 import time
 from typing import Optional
 
-from models.flow import (
-    BasisData, CVDData, CyclePositionData, ETFFlowData, FundingRateData,
-    GlobalLiquidationData, LongShortRatioData, MarketIndexData,
-    MultiFundingRateData, OIData, RangeSignalData, TakerFlowData,
-)
+from models.flow import CyclePositionData, ETFFlowData, GlobalLiquidationData, MarketIndexData, RangeSignalData
 from models.key_level import KeyLevelSnapshotV2
-from models.levels import LevelAnalysis
-from models.liquidation import HeatmapData, LiqMaxPainItem, LiquidationMap, LiquidationStats
-from models.market import OrderBookAnalysis, VolumeProfileData
-from models.market_structure import MarketStructure
+from models.liquidation import LiqMaxPainItem, LiquidationMap
+from models.market import VolumeProfileData
+from models.market_action import MarketActionFacts
 from models.orderbook_pressure import OrderbookPressureSnapshot
-from models.snapshot import AISnapshot
+from models.snapshot import AISnapshot, LiquidationMapBlock
+from models.trading_brain import TradingBrainSnapshot
 
 
 def _macro_change_pct(
@@ -24,7 +20,6 @@ def _macro_change_pct(
     resolved_value: Optional[float],
     key_substrings: tuple[str, ...],
 ) -> Optional[float]:
-    """在 raw_items 中匹配已解析的数值或 key 子串，取涨跌幅。"""
     if not raw_items:
         return None
     if resolved_value is not None:
@@ -47,141 +42,102 @@ def build_ai_snapshot(
     price: float,
     high_24h: float,
     low_24h: float,
-    liq_map: Optional[LiquidationMap],
-    cvd_contract: Optional[CVDData],
-    cvd_spot: Optional[CVDData],
-    oi: Optional[OIData],
-    funding: Optional[FundingRateData],
-    basis: Optional[BasisData],
-    orderbook: Optional[OrderBookAnalysis],
-    liq_stats: Optional[LiquidationStats],
-    vp: Optional[VolumeProfileData],
     atr: float,
     market_temp_score: float,
     pin_risk_level: str,
-    multi_funding: Optional[MultiFundingRateData] = None,
-    ls_ratio: Optional[LongShortRatioData] = None,
-    etf_flow: Optional[ETFFlowData] = None,
-    global_liq: Optional[GlobalLiquidationData] = None,
-    market_index: Optional[MarketIndexData] = None,
-    taker_flow: Optional[TakerFlowData] = None,
-    levels: Optional[LevelAnalysis] = None,
+    *,
+    liq_map: Optional[LiquidationMap] = None,
     liq_map_7d: Optional[LiquidationMap] = None,
-    cycle_position: Optional[CyclePositionData] = None,
-    liq_sweep_events: list[dict] | None = None,
-    range_signal: Optional[RangeSignalData] = None,
-    key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None,
     liq_map_30d: Optional[LiquidationMap] = None,
+    liq_max_pain_24h: Optional[LiqMaxPainItem] = None,
+    vp: Optional[VolumeProfileData] = None,
+    pressure_snapshot: Optional[OrderbookPressureSnapshot] = None,
+    key_level_snapshot_v2: Optional[KeyLevelSnapshotV2] = None,
+    trading_brain: Optional[TradingBrainSnapshot] = None,
+    market_action_facts: Optional[MarketActionFacts] = None,
+    global_liq: Optional[GlobalLiquidationData] = None,
+    liq_sweep_events: list[dict] | None = None,
+    market_index: Optional[MarketIndexData] = None,
+    etf_flow: Optional[ETFFlowData] = None,
+    cycle_position: Optional[CyclePositionData] = None,
+    range_signal: Optional[RangeSignalData] = None,
     rsi_14: Optional[float] = None,
-    macd_data: Optional[dict] = None,
     boll_data: Optional[dict] = None,
     ema20: Optional[float] = None,
-    ma60_daily: Optional[float] = None,
-    ma120_daily: Optional[float] = None,
+    btc_hist_vol: Optional[float] = None,
     option_max_pain_price: Optional[float] = None,
     option_nearest_expiry: str = "",
-    option_call_oi: Optional[float] = None,
-    option_put_oi: Optional[float] = None,
-    ls_ratio_top_account: Optional[float] = None,
-    ls_ratio_top_position: Optional[float] = None,
-    ls_ratio_long_pct: Optional[float] = None,
-    ls_ratio_short_pct: Optional[float] = None,
-    ls_ratio_change_24h: Optional[float] = None,
-    ls_top_acct_long_pct: Optional[float] = None,
-    ls_top_acct_short_pct: Optional[float] = None,
-    ls_top_acct_change_24h: Optional[float] = None,
-    oi_change_24h_pct: Optional[float] = None,
-    fear_greed_prev: Optional[int] = None,
-    whale_hl_alerts_count: int = 0,
-    whale_transfers_count: int = 0,
-    whale_net_direction: str = "",
-    whale_hl_positions: list[dict] | None = None,
-    whale_transfer_inflow_usd: float = 0,
-    whale_transfer_outflow_usd: float = 0,
-    whale_transfer_net_usd: float = 0,
-    whale_top_transfers: list[dict] | None = None,
+    btc_implied_vol: Optional[float] = None,
+    btc_put_call_oi: Optional[float] = None,
+    poll_failures: dict[str, str] | None = None,
     coinbase_premium: float = 0,
     coinbase_premium_trend: str = "",
     stablecoin_total_mcap: float = 0,
     stablecoin_7d_change_pct: float = 0,
-    oi_exchange_rank: list[dict] | None = None,
-    candles_4h: list | None = None,
-    net_position_latest: Optional[float] = None,
-    net_position_trend: str = "",
-    net_position_change_24h: Optional[float] = None,
-    futures_coin_netflow_1h: Optional[float] = None,
-    futures_coin_netflow_trend: str = "",
-    td_sequential_count: Optional[int] = None,
-    td_sequential_direction: str = "",
-    liq_heatmap: Optional[HeatmapData] = None,
-    liq_max_pain_24h: Optional[LiqMaxPainItem] = None,
-    poll_failures: dict[str, str] | None = None,
-    market_structure: Optional[MarketStructure] = None,
-    market_structure_1d: Optional[MarketStructure] = None,
-    market_structure_1w: Optional[MarketStructure] = None,
-    trend_exhaustion: Optional[dict] = None,
-    direction_vote: Optional[dict] = None,
-    pressure_snapshot: Optional[OrderbookPressureSnapshot] = None,
+    whale_net_direction: str = "",
+    whale_transfers_count: int = 0,
+    whale_transfer_net_usd: float = 0,
 ) -> AISnapshot:
-    """组装所有维度数据为 AI 可消费的快照"""
+    """组装 Strategic AISnapshot。仅保留 prompt 与数据自检所需字段。"""
 
-    clusters_above = []
-    clusters_below = []
-    vacuum_zones = []
-    imbalance = 0.0
+    liq_block_1d = _build_liq_map_block(liq_map, "1d", max_pain=liq_max_pain_24h)
+    liq_block_7d = _build_liq_map_block(liq_map_7d, "7d")
+    liq_block_30d = _build_liq_map_block(liq_map_30d, "30d")
 
-    if liq_map:
-        clusters_above = [c.model_dump() for c in liq_map.clusters_above[:8]]
-        clusters_below = [c.model_dump() for c in liq_map.clusters_below[:8]]
-        vacuum_zones = [v.model_dump() for v in liq_map.vacuum_zones[:5]]
-        imbalance = liq_map.imbalance_ratio
+    wall_zones_above: list = []
+    wall_zones_below: list = []
+    wall_events_v2: list = []
+    crowding_global = None
+    usd_usdt_basis_v2: Optional[float] = None
+    if pressure_snapshot:
+        wall_zones_above = list(pressure_snapshot.walls_above[:12])
+        wall_zones_below = list(pressure_snapshot.walls_below[:12])
+        wall_events_v2 = list(pressure_snapshot.wall_events[:20])
+        crowding_global = pressure_snapshot.crowding_global
+        usd_usdt_basis_v2 = pressure_snapshot.usd_usdt_basis_pct
 
-    clusters_above_7d: list[dict] = []
-    clusters_below_7d: list[dict] = []
-    vacuum_zones_7d: list[dict] = []
-    imbalance_7d = 0.0
-    if liq_map_7d:
-        clusters_above_7d = [c.model_dump() for c in liq_map_7d.clusters_above[:8]]
-        clusters_below_7d = [c.model_dump() for c in liq_map_7d.clusters_below[:8]]
-        vacuum_zones_7d = [v.model_dump() for v in liq_map_7d.vacuum_zones[:5]]
-        imbalance_7d = liq_map_7d.imbalance_ratio
+    facts_oi_v2 = facts_funding_v2 = None
+    facts_cvd_contract_v2 = facts_cvd_spot_v2 = None
+    facts_basis_v2 = facts_orderbook_v2 = None
+    facts_liq_clusters_v2 = facts_liq_sweep_v2 = None
+    facts_price_ctx_v2 = facts_footprint_v2 = facts_absorption_v2 = None
+    facts_taker_v2 = facts_options_v2 = None
+    facts_dq = ""
+    facts_missing_list: list[str] = []
+    facts_has_prov = False
+    facts_prov_fields: list[str] = []
+    facts_sources_used_list: list[str] = []
+    if market_action_facts:
+        facts_oi_v2 = market_action_facts.oi
+        facts_funding_v2 = market_action_facts.funding
+        facts_cvd_contract_v2 = market_action_facts.cvd_contract
+        facts_cvd_spot_v2 = market_action_facts.cvd_spot
+        facts_basis_v2 = market_action_facts.basis
+        facts_orderbook_v2 = market_action_facts.orderbook
+        facts_liq_clusters_v2 = market_action_facts.liq_map_clusters
+        facts_liq_sweep_v2 = market_action_facts.liq_sweep_recent
+        facts_price_ctx_v2 = market_action_facts.price_context
+        facts_footprint_v2 = market_action_facts.footprint
+        facts_absorption_v2 = market_action_facts.absorption
+        facts_taker_v2 = market_action_facts.taker_flow_5m
+        facts_options_v2 = market_action_facts.options
+        facts_dq = market_action_facts.data_quality or ""
+        facts_missing_list = list(market_action_facts.missing or [])
+        meta = market_action_facts.data_meta
+        facts_has_prov = bool(meta.has_provisional_bars)
+        facts_prov_fields = list(meta.provisional_fields or [])
+        facts_sources_used_list = list(meta.sources_used or [])
 
-    clusters_above_30d: list[dict] = []
-    clusters_below_30d: list[dict] = []
-    imbalance_30d = 0.0
-    if liq_map_30d:
-        clusters_above_30d = [c.model_dump() for c in liq_map_30d.clusters_above[:10]]
-        clusters_below_30d = [c.model_dump() for c in liq_map_30d.clusters_below[:10]]
-        imbalance_30d = liq_map_30d.imbalance_ratio
-
-    # 订单墙（bid_walls/ask_walls）已不再喂给 AI：挂单是"意图"软信号，
-    # 可撤可假；其支撑/阻力角色由 MAA 的 absorption 维度（已成交硬证据）承担。
-    # orderbook 的聚合深度总额仍保留给 AI 作参考（bid_total / ask_total / spread）。
-    #
-    # M4 例外（2026-04）：流动性墙引擎产出的"高可信墙"重新喂 AI，但走严格筛选路径
-    # （见 _build_liquidity_wall_block）。挂单原始 Top10 仍不喂；只喂经过
-    # dual_source / trust_score >= 0.65 过滤后的硬证据层 + 行为事件 + 拥挤度。
-    liquidity_block = _build_liquidity_wall_block(pressure_snapshot, price)
-
-    funding_exchanges = []
-    funding_avg_7d = None
-    if multi_funding:
-        funding_exchanges = [e.model_dump() for e in multi_funding.exchanges]
-        funding_avg_7d = multi_funding.avg_7d
-
-    # MI 字段现在由 BBX 数据源填充（DXY/纳指/黄金/MVRV/波动率等）
     mi = market_index
     mi_nasdaq = mi.nasdaq if mi else None
     mi_nasdaq_chg = mi.nasdaq_change_pct if mi else None
     mi_gold = mi.gold if mi else None
     mi_gold_chg = mi.gold_change_pct if mi else None
-    mi_sp500 = mi.sp500 if mi else None
-    mi_sp500_chg = mi.sp500_change_pct if mi else None
     mi_exchange_btc_total = None
     mi_exchange_btc_change_pct = None
     if mi:
         bal_parts = [b for b in (mi.binance_btc_balance, mi.okx_btc_balance,
-                                  mi.bitfinex_btc_balance, mi.coinbase_btc_balance)
+                                 mi.bitfinex_btc_balance, mi.coinbase_btc_balance)
                      if b is not None]
         if bal_parts:
             mi_exchange_btc_total = sum(bal_parts)
@@ -191,53 +147,15 @@ def build_ai_snapshot(
                 if prev > 0:
                     mi_exchange_btc_change_pct = round(chg / prev * 100, 2)
 
-    ob_bid_total = 0.0
-    ob_ask_total = 0.0
-    ob_spread = 0.0
-    if orderbook:
-        ob_bid_total = orderbook.bid_total_usd
-        ob_ask_total = orderbook.ask_total_usd
-        ob_spread = orderbook.spread_pct
+    if mi and mi.raw_items:
+        if mi_nasdaq_chg is None:
+            mi_nasdaq_chg = _macro_change_pct(mi.raw_items, mi_nasdaq, ("nasdaq", "ndx"))
+        if mi_gold_chg is None:
+            mi_gold_chg = _macro_change_pct(mi.raw_items, mi_gold, ("gold", "xau"))
 
-    # 规则引擎预计算结果
-    rule_supports = []
-    rule_resistances = []
-    rule_stop_loss = []
-    sniper_entries = []
-    ladder_plans = []
-    if levels:
-        rule_supports = [{"price": s.price, "sources": s.sources, "strength": s.strength}
-                         for s in levels.supports[:5]]
-        rule_resistances = [{"price": r.price, "sources": r.sources, "strength": r.strength}
-                            for r in levels.resistances[:5]]
-        rule_stop_loss = [sl.model_dump() for sl in levels.stop_loss_zones]
-        sniper_entries = [se.model_dump() for se in levels.sniper_entries[:6]]
-        ladder_plans = [lp.model_dump() for lp in levels.ladder_plans]
-
-    # 清算热力图摘要：提取 Top-5 密度峰值
-    heatmap_hotspots: list[dict] = []
-    if liq_heatmap and liq_heatmap.data:
-        pts = sorted(liq_heatmap.data, key=lambda p: p.value, reverse=True)
-        for pt in pts[:5]:
-            pct = ((pt.price - price) / price * 100) if price > 0 else 0
-            heatmap_hotspots.append({
-                "price": pt.price,
-                "total_usd": pt.value,
-                "pct_above": round(pct, 2),
-            })
-
-    # K 线形态检测（最近 4H K 线）
-    pattern_name = ""
-    pattern_side = ""
-    pattern_strength = 0.0
-    if candles_4h and len(candles_4h) >= 2:
-        from processors.candlestick_patterns import detect_reversal_pattern
-        for _side in ("support", "resistance"):
-            pr = detect_reversal_pattern(candles_4h, _side)
-            if pr.found and pr.strength > pattern_strength:
-                pattern_name = pr.name
-                pattern_side = _side
-                pattern_strength = pr.strength
+    ev_sweeps = list(liq_sweep_events or [])
+    above_sum = sum(e.get("usd", 0) for e in ev_sweeps if e.get("side") == "above")
+    below_sum = sum(e.get("usd", 0) for e in ev_sweeps if e.get("side") == "below")
 
     return AISnapshot(
         coin=coin,
@@ -245,342 +163,142 @@ def build_ai_snapshot(
         price=price,
         high_24h=high_24h,
         low_24h=low_24h,
-        liq_clusters_above=clusters_above,
-        liq_clusters_below=clusters_below,
-        vacuum_zones=vacuum_zones,
-        liq_imbalance_ratio=imbalance,
-        liq_clusters_above_7d=clusters_above_7d,
-        liq_clusters_below_7d=clusters_below_7d,
-        vacuum_zones_7d=vacuum_zones_7d,
-        liq_imbalance_ratio_7d=imbalance_7d,
-        cvd_contract_trend=cvd_contract.trend_1h if cvd_contract else "",
-        cvd_contract_delta_1h=cvd_contract.delta_1h if cvd_contract else 0,
-        cvd_spot_trend=cvd_spot.trend_1h if cvd_spot else "",
-        cvd_spot_delta_1h=cvd_spot.delta_1h if cvd_spot else 0,
-        cvd_divergence=cvd_contract.divergence_note if cvd_contract else "",
-        oi_current_usd=oi.current_usd if oi else 0,
-        oi_change_1h_pct=oi.change_1h_pct if oi else 0,
-        oi_change_5m_pct=oi.change_5m_pct if oi else 0,
-        oi_trend=oi.trend if oi else "",
-        funding_rate_okx=funding.okx_rate if funding else None,
-        funding_rate_binance=funding.binance_rate if funding else None,
-        funding_interpretation=funding.interpretation if funding else "",
-        funding_avg_7d=funding_avg_7d,
-        funding_exchanges=funding_exchanges,
-        basis_pct=basis.basis_pct if basis else 0,
-        orderbook_bid_total_usd=ob_bid_total,
-        orderbook_ask_total_usd=ob_ask_total,
-        orderbook_spread_pct=ob_spread,
-        recent_liq_24h_long_usd=liq_stats.long_total_usd if liq_stats else 0,
-        recent_liq_24h_short_usd=liq_stats.short_total_usd if liq_stats else 0,
+        atr_14=atr,
+        rsi_14=rsi_14,
         volume_profile_poc=vp.poc_price if vp else 0,
         value_area_high=vp.value_area_high if vp else 0,
         value_area_low=vp.value_area_low if vp else 0,
         vwap=vp.vwap if vp else 0,
-        atr_14=atr,
         market_temperature=market_temp_score,
         pin_risk_level=pin_risk_level,
-        ls_ratio=ls_ratio.avg_ratio if ls_ratio else None,
-        ls_ratio_interpretation=ls_ratio.interpretation if ls_ratio else "",
-        fear_greed_index=market_index.fear_greed if market_index else None,
-        etf_net_3d=etf_flow.net_3d if etf_flow else None,
-        etf_trend=etf_flow.trend if etf_flow else "",
-        etf_recent_days=[d.model_dump() for d in etf_flow.recent_days[:5]] if etf_flow else [],
+        range_signal=range_signal.model_dump() if range_signal else None,
+        boll_upper=boll_data.get("upper") if boll_data else None,
+        boll_middle=boll_data.get("middle") if boll_data else None,
+        boll_lower=boll_data.get("lower") if boll_data else None,
+        ema20=ema20,
+        btc_hist_vol=btc_hist_vol if btc_hist_vol is not None else (mi.btc_hist_vol if mi else None),
+        poll_failures=poll_failures or {},
         global_liq_long_24h=global_liq.long_24h_usd if global_liq else 0,
         global_liq_short_24h=global_liq.short_24h_usd if global_liq else 0,
-        global_liq_long_1h=global_liq.long_1h_usd if global_liq else 0,
-        global_liq_short_1h=global_liq.short_1h_usd if global_liq else 0,
         global_liq_ratio_24h=global_liq.ratio_24h if global_liq else 1.0,
-        global_liq_largest_single=global_liq.largest_single_usd if global_liq else 0,
-        btc_max_pain=mi.btc_max_pain if mi else None,
-        btc_dvol=mi.btc_dvol if mi else None,
+        liq_sweep_above_usd_1h=above_sum,
+        liq_sweep_below_usd_1h=below_sum,
+        liq_sweep_events=ev_sweeps,
         dxy=mi.dxy if mi else None,
         dxy_change_pct=mi.dxy_change_pct if mi else None,
         btc_dominance=mi.btc_dominance if mi else None,
-        taker_buy_ratio=taker_flow.buy_ratio if taker_flow else None,
-        taker_dominant=taker_flow.dominant if taker_flow else "",
+        us_10y_yield=mi.us_10y_yield if mi else None,
+        fed_rate=mi.fed_rate if mi else None,
         nasdaq=mi_nasdaq,
         nasdaq_change_pct=mi_nasdaq_chg,
         gold=mi_gold,
         gold_change_pct=mi_gold_chg,
-        sp500=mi_sp500,
-        sp500_change_pct=mi_sp500_chg,
-        btc_mvrv=mi.btc_mvrv if mi else None,
-        btc_hist_vol=mi.btc_hist_vol if mi else None,
-        btc_implied_vol=mi.btc_implied_vol if mi else None,
-        btc_iv_skew_1m=mi.btc_iv_skew_1m if mi else None,
-        exchange_btc_total=mi_exchange_btc_total,
-        exchange_btc_change_24h=mi.exchange_btc_change_24h if mi else None,
-        exchange_btc_change_pct=mi_exchange_btc_change_pct,
-        # P0.1 · Ahr999 单一事实源：Coinglass（与 §9e CPS 贡献分同源，保证 §9c / §9e 展示一致）优先；BBX 仅作失败兜底
-        # 背景：BBX i2api 聚合值与 Coinglass 官方值在特定窗口可差 40%（如 0.6247 vs 0.4407），
-        # 若 §9c 取 BBX、§9e 取 Coinglass 会让 AI 在同一报告内读到两个 Ahr999 方向相反的解读（"适合定投" vs "适合抄底"）。
+        fear_greed_index=mi.fear_greed if mi else None,
         ahr999=(
             cycle_position.ahr999_value
             if cycle_position and cycle_position.ahr999_value and cycle_position.ahr999_value > 0
             else (mi.ahr999 if mi and mi.ahr999 and mi.ahr999 > 0 else None)
         ),
-        stablecoin_dominance=mi.stablecoin_dominance if mi else None,
-        coinbase_btc_premium=mi.coinbase_btc_premium if mi else None,
-        usdt_otc_premium=mi.usdt_otc_premium if mi else None,
-        us_10y_yield=mi.us_10y_yield if mi else None,
-        fed_rate=mi.fed_rate if mi else None,
-        btc_put_call_oi=mi.btc_put_call_oi if mi else None,
-        usdt_market_cap=mi.usdt_market_cap if mi else None,
-        btc_hashrate=mi.btc_hashrate if mi else None,
-        okx_ls_ratio_btc=mi.okx_ls_ratio_btc if mi else None,
-        binance_ls_ratio_btc=mi.binance_ls_ratio_btc if mi else None,
-        cycle_position=cycle_position.model_dump() if cycle_position else None,
-        liq_sweep_above_usd_1h=sum(
-            e.get("usd", 0) for e in (liq_sweep_events or []) if e.get("side") == "above"
-        ),
-        liq_sweep_below_usd_1h=sum(
-            e.get("usd", 0) for e in (liq_sweep_events or []) if e.get("side") == "below"
-        ),
-        liq_sweep_events=liq_sweep_events or [],
-        range_signal=range_signal.model_dump() if range_signal else None,
-        key_levels=key_level_snapshot_v2.model_dump() if key_level_snapshot_v2 else None,
-        market_structure=market_structure.model_dump() if market_structure else None,
-        market_structure_1d=market_structure_1d.model_dump() if market_structure_1d else None,
-        market_structure_1w=market_structure_1w.model_dump() if market_structure_1w else None,
-        trend_exhaustion=trend_exhaustion,
-        direction_vote=direction_vote,
-        liq_clusters_above_30d=clusters_above_30d,
-        liq_clusters_below_30d=clusters_below_30d,
-        liq_imbalance_ratio_30d=imbalance_30d,
-        rsi_14=rsi_14,
-        macd_histogram=macd_data.get("histogram") if macd_data else None,
-        macd_above_zero=macd_data.get("above_zero") if macd_data else None,
-        boll_upper=boll_data.get("upper") if boll_data else None,
-        boll_middle=boll_data.get("middle") if boll_data else None,
-        boll_lower=boll_data.get("lower") if boll_data else None,
-        ema20=ema20,
-        ma60_daily=ma60_daily,
-        ma120_daily=ma120_daily,
-        option_max_pain_price=option_max_pain_price,
-        option_nearest_expiry=option_nearest_expiry,
-        option_call_oi=option_call_oi,
-        option_put_oi=option_put_oi,
-        ls_ratio_top_account=ls_ratio_top_account,
-        ls_ratio_top_position=ls_ratio_top_position,
-        ls_ratio_long_pct=ls_ratio_long_pct,
-        ls_ratio_short_pct=ls_ratio_short_pct,
-        ls_ratio_change_24h=ls_ratio_change_24h,
-        ls_top_acct_long_pct=ls_top_acct_long_pct,
-        ls_top_acct_short_pct=ls_top_acct_short_pct,
-        ls_top_acct_change_24h=ls_top_acct_change_24h,
-        oi_change_24h_pct=oi_change_24h_pct,
-        fear_greed_prev=fear_greed_prev,
-        whale_hl_alerts_count=whale_hl_alerts_count,
-        whale_transfers_count=whale_transfers_count,
-        whale_net_direction=whale_net_direction,
-        whale_hl_positions=whale_hl_positions or [],
-        whale_transfer_inflow_usd=whale_transfer_inflow_usd,
-        whale_transfer_outflow_usd=whale_transfer_outflow_usd,
-        whale_transfer_net_usd=whale_transfer_net_usd,
-        whale_top_transfers=whale_top_transfers or [],
-        coinbase_premium=coinbase_premium,
-        coinbase_premium_trend=coinbase_premium_trend,
+        btc_mvrv=mi.btc_mvrv if mi else None,
+        etf_net_3d=etf_flow.net_3d if etf_flow else None,
+        etf_trend=etf_flow.trend if etf_flow else "",
         stablecoin_total_mcap=stablecoin_total_mcap,
         stablecoin_7d_change_pct=stablecoin_7d_change_pct,
-        oi_exchange_rank=oi_exchange_rank or [],
-        liq_heatmap_hotspots=heatmap_hotspots,
-        liq_max_pain_long_price=(liq_max_pain_24h.long_pain_price if liq_max_pain_24h else None),
-        liq_max_pain_long_usd=(liq_max_pain_24h.long_pain_usd if liq_max_pain_24h else None),
-        liq_max_pain_short_price=(liq_max_pain_24h.short_pain_price if liq_max_pain_24h else None),
-        liq_max_pain_short_usd=(liq_max_pain_24h.short_pain_usd if liq_max_pain_24h else None),
-        candlestick_pattern_name=pattern_name,
-        candlestick_pattern_side=pattern_side,
-        candlestick_pattern_strength=pattern_strength,
-        net_position_latest=net_position_latest,
-        net_position_trend=net_position_trend,
-        net_position_change_24h=net_position_change_24h,
-        futures_coin_netflow_1h=futures_coin_netflow_1h,
-        futures_coin_netflow_trend=futures_coin_netflow_trend,
-        td_sequential_count=td_sequential_count,
-        td_sequential_direction=td_sequential_direction,
-        poll_failures=poll_failures or {},
-        rule_supports=rule_supports,
-        rule_resistances=rule_resistances,
-        rule_stop_loss=rule_stop_loss,
-        sniper_entries=sniper_entries,
-        ladder_plans=ladder_plans,
-        liquidity_walls=liquidity_block.get("walls", []),
-        liquidity_wall_events=liquidity_block.get("events", []),
-        liquidity_crowding=liquidity_block.get("crowding"),
-        liquidity_wall_quality=liquidity_block.get("quality", ""),
+        coinbase_premium=coinbase_premium,
+        coinbase_premium_trend=coinbase_premium_trend,
+        whale_net_direction=whale_net_direction,
+        whale_transfers_count=whale_transfers_count,
+        whale_transfer_net_usd=whale_transfer_net_usd,
+        exchange_btc_total=mi_exchange_btc_total,
+        exchange_btc_change_pct=mi_exchange_btc_change_pct,
+        option_max_pain_price=option_max_pain_price,
+        option_nearest_expiry=option_nearest_expiry,
+        btc_implied_vol=btc_implied_vol if btc_implied_vol is not None else (mi.btc_implied_vol if mi else None),
+        btc_put_call_oi=btc_put_call_oi if btc_put_call_oi is not None else (mi.btc_put_call_oi if mi else None),
+        trading_brain=trading_brain,
+        key_level_snapshot=key_level_snapshot_v2,
+        liq_map_block_1d=liq_block_1d,
+        liq_map_block_7d=liq_block_7d,
+        liq_map_block_30d=liq_block_30d,
+        wall_zones_above=wall_zones_above,
+        wall_zones_below=wall_zones_below,
+        wall_events_v2=wall_events_v2,
+        crowding_global=crowding_global,
+        usd_usdt_basis_pct=usd_usdt_basis_v2,
+        facts_oi=facts_oi_v2,
+        facts_funding=facts_funding_v2,
+        facts_cvd_contract=facts_cvd_contract_v2,
+        facts_cvd_spot=facts_cvd_spot_v2,
+        facts_basis=facts_basis_v2,
+        facts_orderbook=facts_orderbook_v2,
+        facts_liq_clusters=facts_liq_clusters_v2,
+        facts_liq_sweep=facts_liq_sweep_v2,
+        facts_price_context=facts_price_ctx_v2,
+        facts_footprint=facts_footprint_v2,
+        facts_absorption=facts_absorption_v2,
+        facts_taker_flow=facts_taker_v2,
+        facts_options=facts_options_v2,
+        facts_data_quality=facts_dq,
+        facts_missing=facts_missing_list,
+        facts_has_provisional_bars=facts_has_prov,
+        facts_provisional_fields=facts_prov_fields,
+        facts_sources_used=facts_sources_used_list,
         **_collect_news_context(),
     )
 
 
-# ─────────────────────────────────────────────────────────────────
-# M4 · 流动性墙引擎 → AI 摘要构建器
-# ─────────────────────────────────────────────────────────────────
-# 设计原则（与历史"orderbook walls 不喂 AI"决策的差异）：
-#   旧路径（已废弃）直接喂"原始挂单 Top10"，AI 容易把可被 spoof 的意图当硬证据。
-#   M4 升级后只喂"高可信筛选层"——必须满足以下任一硬条件才进入 AI：
-#     (a) dual_source=True：合约+现货 5m 热力图同价区双重确认
-#     (b) trust_score >= 0.65：综合可信度（含持续性 + 多所 + 行为 + 现货大单）
-#   且配合：
-#     - 仅取顶 5 条，限制 prompt 体积
-#     - 仅取最近 30min 三类事件（被吃/增厚/撤单），其他事件不喂
-#     - 暖机期 (warming) 不报"已确认"，仅传 quality 标识让 AI 自行降级
-#     - prompt 模板配套必须强调"挂单为意图层信号，需结合 absorption / cvd 综合"
-#
-# 兜底：pressure_snapshot 缺失或空时，所有字段降级为空 list / None / ""，AI prompt
-# §8d 段落自动跳过，不阻断主快照构建。
-# ─────────────────────────────────────────────────────────────────
+def _build_liq_map_block(
+    liq_map: Optional[LiquidationMap],
+    cycle: str,
+    max_pain: Optional[LiqMaxPainItem] = None,
+) -> Optional[LiquidationMapBlock]:
+    if liq_map is None:
+        return None
 
-
-def _build_liquidity_wall_block(
-    pressure_snapshot: Optional[OrderbookPressureSnapshot],
-    last_price: float,
-) -> dict:
-    """从 OrderbookPressureSnapshot 提炼"高可信墙 + 行为事件 + 拥挤度"摘要给 AI。
-
-    返回 dict 含 4 个键：
-      walls / events / crowding / quality
-
-    若 pressure_snapshot 为 None 或所有字段都空 → 返回空 dict（前端 prompt 自动跳过）。
-    """
-    out = {
-        "walls": [],
-        "events": [],
-        "crowding": None,
-        "quality": "",
-    }
-    if pressure_snapshot is None:
-        return out
-
-    out["quality"] = pressure_snapshot.data_quality or ""
-
-    # 1) 高可信墙摘要：dual_source 或 trust_score >= 0.65，顶 5
-    walls_above = pressure_snapshot.walls_above or []
-    walls_below = pressure_snapshot.walls_below or []
-    candidates = []
-    for z in walls_above + walls_below:
-        if not (z.dual_source or z.trust_score >= 0.65):
-            continue
-        candidates.append(z)
-    candidates.sort(key=lambda z: z.trust_score, reverse=True)
-    candidates = candidates[:5]
-
-    for z in candidates:
-        # 信任档位标签（与 KL chip 同源，AI 看到的与 KL 卡片一致）
-        if z.dual_source:
-            tier = "双源高可信"
-        elif z.source == "spot_only":
-            tier = "仅现货"
-        elif z.has_spot_confluence:
-            tier = "现货大单共振"
-        else:
-            tier = "较可信合约"
-
-        wall_dict = {
-            "side": "卖墙" if z.side == "ask" else "买墙",
-            "price_mid": round(z.price_mid, 4),
-            "distance_pct": round(z.distance_pct, 3),
-            "current_usd": round(z.current_usd, 0),
-            "max_usd_1h": round(z.max_usd_1h, 0),
-            "trust_tier": tier,
-            "trust_score": round(z.trust_score, 3),
-            "persistence_min": round(z.visible_minutes, 1),
-            "exchange_count": z.exchange_count,
-            "break_through_risk": round(z.break_through_risk, 3),
-        }
-        # Phase C：Coinbase 现货共振维度（机构资金独立验证）
-        if z.coinbase_spot_confluence:
-            wall_dict["coinbase_confluence"] = True
-            wall_dict["coinbase_spot_usd"] = round(z.coinbase_spot_usd, 0)
-            wall_dict["coinbase_num_orders"] = z.coinbase_num_orders
-        if z.next_magnet_price is not None:
-            wall_dict["next_magnet_price"] = round(z.next_magnet_price, 4)
-        if z.sweep_target and z.sweep_target.vacuum_gap_pct >= 0.5:
-            wall_dict["vacuum_gap_pct"] = round(z.sweep_target.vacuum_gap_pct, 2)
-        out["walls"].append(wall_dict)
-
-    # 2) wall_events 最近 30min：仅 wall_consumed / wall_strengthened / wall_removed
-    events = pressure_snapshot.wall_events or []
-    snap_ts = pressure_snapshot.ts_sec or 0
-    if snap_ts:
-        EVENT_KIND_LABEL = {
-            "wall_consumed": "被吃",
-            "wall_strengthened": "增厚",
-            "wall_removed": "撤单",
-        }
-        # 远价位过滤：相对当前价 5% 以外的事件不喂（信噪比低）
-        for ev in events:
-            if ev.event_type not in EVENT_KIND_LABEL:
+    by_ex_summary: list[dict] = []
+    by_exchange = liq_map.by_exchange
+    if isinstance(by_exchange, dict) and by_exchange:
+        ex_totals: list[tuple[str, float]] = []
+        for ex_name, price_dict in by_exchange.items():
+            if not isinstance(price_dict, dict):
                 continue
-            ev_age_sec = max(0, snap_ts - ev.ts_sec)
-            if ev_age_sec > 1800:
-                continue
-            if last_price > 0:
-                dist_pct = abs(ev.price_mid - last_price) / last_price * 100
-                if dist_pct > 5.0:
-                    continue
-            ev_min = max(1, int(ev_age_sec // 60))
-            ev_dict = {
-                "kind": EVENT_KIND_LABEL[ev.event_type],
-                "side": "卖墙" if ev.side == "ask" else "买墙",
-                "price_mid": round(ev.price_mid, 4),
-                "min_ago": ev_min,
-                "confidence": round(ev.confidence, 3),
-            }
-            if ev.size_before_usd is not None:
-                ev_dict["size_before_usd"] = round(ev.size_before_usd, 0)
-            if ev.size_after_usd is not None:
-                ev_dict["size_after_usd"] = round(ev.size_after_usd, 0)
-            if ev.executed_usd_value is not None:
-                ev_dict["executed_usd_value"] = round(ev.executed_usd_value, 0)
-            out["events"].append(ev_dict)
-        # 最近事件优先（按 min_ago 升序）
-        out["events"].sort(key=lambda e: e["min_ago"])
-        out["events"] = out["events"][:8]  # 限制最多 8 条
+            total = sum(float(v or 0) for v in price_dict.values())
+            if total > 0:
+                ex_totals.append((ex_name, total))
+        total_all = sum(t for _, t in ex_totals)
+        ex_totals.sort(key=lambda kv: kv[1], reverse=True)
+        for ex_name, t in ex_totals[:3]:
+            share = (t / total_all * 100) if total_all > 0 else 0
+            by_ex_summary.append({
+                "exchange": ex_name,
+                "total_usd": round(t, 0),
+                "share_pct": round(share, 1),
+            })
 
-    # 3) crowding_global：OI delta + Funding + 多空 + 推断仓位状态
-    cg = pressure_snapshot.crowding_global
-    if cg:
-        crowding = {
-            "oi_delta_1h_pct": cg.oi_delta_1h_pct,
-            "oi_delta_24h_pct": cg.oi_delta_24h_pct,
-            "oi_margin_split": cg.oi_margin_split,
-            "funding_now_pct": cg.funding_now_pct,
-            "funding_percentile_30d": cg.funding_percentile_30d,
-            "top_position_ls_ratio": cg.top_position_ls_ratio,
-            "global_account_ls_ratio": cg.global_account_ls_ratio,
-            "inferred_position_state": cg.inferred_position_state,
-            "long_crowding_risk": round(cg.long_crowding_risk, 3),
-            "short_crowding_risk": round(cg.short_crowding_risk, 3),
-        }
-        out["crowding"] = {k: v for k, v in crowding.items() if v is not None}
-
-    return out
+    return LiquidationMapBlock(
+        cycle=cycle,
+        clusters_above=list(liq_map.clusters_above[:8]),
+        clusters_below=list(liq_map.clusters_below[:8]),
+        vacuum_zones=list(liq_map.vacuum_zones[:5]),
+        imbalance_ratio=liq_map.imbalance_ratio,
+        max_pain=max_pain,
+        by_exchange_summary=by_ex_summary,
+    )
 
 
 def _collect_news_context() -> dict:
-    """P1.2b · 从 news_brief / geo_risk / narrative tracker 抓取最新摘要。
-
-    返回可作为 AISnapshot 构造参数的 dict（任一模块缺失时降级为空值，
-    绝不阻断主快照构建）。
-    """
     ctx: dict = {
+        "active_narratives": [],
         "news_brief_text": "",
         "news_brief_version": 0,
         "news_brief_trigger": "",
         "news_brief_updated_at": None,
         "geo_overview": None,
-        "active_narratives": [],
     }
     try:
         from processors.news_brief import get_current_brief
         brief = get_current_brief()
         if brief is not None:
-            # ─────────────────────────────────────────────────────────────
-            # P0-3 · events=0 熔断：当简报没有任何真实事件支撑时
-            #   不注入 news_brief_text 到主 AI prompt（防止虚构新闻污染决策）
-            #   仍保留 version / trigger / updated_at 作为元数据，便于前端展示
-            # ─────────────────────────────────────────────────────────────
             based_on = int(getattr(brief, "based_on_events_count", 0) or 0)
             if based_on <= 0:
                 ctx["news_brief_text"] = ""
@@ -590,7 +308,6 @@ def _collect_news_context() -> dict:
             else:
                 import json as _json
                 payload = brief.model_dump(mode="json")
-                # 精简 json 字段：sections + themes + coverage
                 keep = {
                     "version": payload.get("version"),
                     "ts_range_start": payload.get("ts_range_start"),

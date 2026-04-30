@@ -18,7 +18,7 @@ import pytest
 from models.market_structure import MarketStructure
 from models.regime import RegimeSnapshot
 from processors.market_regime import compute_regime_from_state
-from utils.decision_tracker import D, get_tracker
+# PR-3 · utils.decision_tracker 已下线
 
 
 def _ms(direction: str, conf: float = 0.6) -> MarketStructure:
@@ -134,25 +134,4 @@ class TestRegimeDegraded:
         assert "降级" in snap.description_cn
 
 
-class TestD01TrackerIntegration:
-    def test_compute_marks_tracker(self):
-        tracker = get_tracker()
-        rec_before = tracker.get_record(D.D01_REGIME)
-        assert rec_before is not None
-        total_before = rec_before.total_marks
-
-        compute_regime_from_state(
-            coin="BTC", price=100_000, atr_14=2500,
-            boll_data={"upper": 103_000, "middle": 100_000, "lower": 97_000},
-            structure=_ms("bullish"),
-        )
-
-        rec_after = tracker.get_record(D.D01_REGIME)
-        assert rec_after is not None
-        assert rec_after.total_marks > total_before
-        # 正常路径应至少有一次 ok
-        assert rec_after.ok_count >= 1
-        assert rec_after.metrics.get("regime") in {
-            "trend_up", "trend_down", "range",
-            "squeeze", "high_vol_chop", "extreme",
-        }
+# PR-3 · TestD01TrackerIntegration 已下线（decision_tracker 被删除）

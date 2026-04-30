@@ -9,6 +9,78 @@ export interface TickerData {
   change_pct_24h: number;
 }
 
+/** 后端 `AIStrategicReport` JSON（REST / WS `strategic_report`），前端按需取子集。 */
+export type StrategicDecision =
+  | "WAIT"
+  | "LONG_OBSERVATION"
+  | "SHORT_OBSERVATION"
+  | "LONG_PLAN"
+  | "SHORT_PLAN"
+  | "NO_TRADE";
+
+export interface StrategicTradingPlan {
+  setup_type: string;
+  entry_zone_low: number;
+  entry_zone_high: number;
+  trigger_conditions: string[];
+  soft_invalidation: string;
+  hard_invalidation: string;
+  targets: Array<{ price: number; reason: string; rr: number }>;
+  cancel_conditions: string[];
+  risk_unit: string;
+  leverage_risk_level: string;
+  position_sizing_note: string;
+}
+
+export interface StrategicReport {
+  coin: string;
+  timestamp: number;
+  decision: StrategicDecision;
+  horizon: string;
+  bias: string;
+  confidence: number;
+  confidence_rationale: string;
+  market_phase: string;
+  cycle_position: string;
+  current_zone_assessment?: {
+    zone_id?: string;
+    role?: string;
+    nearest_critical_above_pct?: number | null;
+    nearest_critical_below_pct?: number | null;
+    key_conflict?: string;
+  };
+  structure_analysis: string;
+  flow_analysis: string;
+  macro_context: string;
+  primary_plan?: StrategicTradingPlan | null;
+  alternative_plan?: StrategicTradingPlan | null;
+  no_trade_conditions: string[];
+  alternative_scenario?: {
+    description: string;
+    probability_pct: number;
+    trigger: string;
+  } | null;
+  evidence_matrix?: {
+    long_evidence: unknown[];
+    short_evidence: unknown[];
+    wait_evidence: unknown[];
+    contradictions: string[];
+  };
+  invalidation_conditions: string[];
+  data_self_check?: {
+    missing: string[];
+    stale: string[];
+    provisional: string[];
+    hard_stop_triggered: boolean;
+    confidence_penalty_reason: string;
+  };
+  macro_modifier_note: string;
+  data_quality: string;
+  stale_minutes: number;
+  prompt_debug?: Record<string, unknown> | null;
+  stale_sec?: number;
+}
+
 export interface FactorCard {
   id: string;
   name: string;
@@ -1601,7 +1673,7 @@ export interface FinalDecisionResponse {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // AI 详情页专用：AIAnalysisResult + L7 trader_report + L7.5 final_decision + 新闻简报
-// 由 /api/ai/detail/{coin}/{ts} 返回，字段非破坏性追加
+// 旧 Trader 详情契约（已下线）。Strategic 详情见 `StrategicReport`，接口：`/api/strategic/report/{coin}/{ts}`。
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface AIDetailNewsBrief {

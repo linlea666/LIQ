@@ -1,7 +1,6 @@
 "use client";
 
 import { useMarketStore } from "@/stores/marketStore";
-import DecisionTrackerBadge from "./DecisionTrackerBadge";
 
 const STATUS_ICON: Record<string, string> = {
   connected: "🟢",
@@ -33,8 +32,6 @@ export default function StatusFooter() {
         <span>⏳ 等待数据源连接...</span>
       )}
       <span className="ml-auto flex items-center gap-4">
-        {/* P1.6 · D1-D17 架构决策全景灯（点击展开详情） */}
-        <DecisionTrackerBadge />
         <span className="text-slate-600">LIQ 防猎杀 v1.0</span>
       </span>
     </div>

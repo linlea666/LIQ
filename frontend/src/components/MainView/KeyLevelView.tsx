@@ -14,12 +14,75 @@ import type {
 } from "@/lib/types";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import type { StrategicReport } from "@/lib/types";
 import StrongLevelsCard from "./StrongLevelsCard";
 import MarketStructureBadge from "./MarketStructureBadge";
-import ExecutionPlanCard from "./ExecutionPlanCard";
-import FinalDecisionCard from "./FinalDecisionCard";
 import RegimeChip from "./RegimeChip";
 import LifecyclePanel from "./LifecyclePanel";
+
+const STRATEGIC_DECISION_CN: Record<string, string> = {
+  WAIT: "等待",
+  LONG_OBSERVATION: "看多观察",
+  SHORT_OBSERVATION: "看空观察",
+  LONG_PLAN: "多头计划",
+  SHORT_PLAN: "空头计划",
+  NO_TRADE: "禁止交易",
+};
+
+function StrategicReportCard({ coin }: { coin: string }) {
+  const report = useMarketStore((s) => s.strategicReport);
+  const loadStrategicReport = useMarketStore((s) => s.loadStrategicReport);
+  useEffect(() => {
+    void loadStrategicReport(coin);
+  }, [coin, loadStrategicReport]);
+
+  const c = coin.toUpperCase();
+  const r: StrategicReport | null =
+    report && report.coin?.toUpperCase() === c ? report : null;
+
+  if (!r) {
+    return (
+      <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4 text-xs text-slate-500">
+        <h3 className="text-sm font-semibold text-slate-300 mb-1">
+          🛡️ Strategic 主报告
+        </h3>
+        暂无报告：等待自动循环或点击顶栏「Strategic」触发。
+      </div>
+    );
+  }
+
+  const label = STRATEGIC_DECISION_CN[r.decision] ?? r.decision;
+  const confPct = Math.round((r.confidence ?? 0) * 100);
+
+  return (
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h3 className="text-sm font-semibold text-slate-300">🛡️ Strategic 主报告</h3>
+        <Link
+          href={`/ai/${r.coin}/${r.timestamp}`}
+          target="_blank"
+          className="text-[11px] text-blue-400 hover:text-blue-300"
+        >
+          详情 ↗
+        </Link>
+      </div>
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className="text-white font-semibold">{label}</span>
+        <span className="text-slate-500">{r.horizon}</span>
+        <span className="text-slate-400">{r.bias}</span>
+        <span className="text-amber-400/90">置信 {confPct}%</span>
+        {r.stale_sec != null && r.stale_sec >= 0 && (
+          <span className="text-slate-600">龄 {r.stale_sec}s</span>
+        )}
+      </div>
+      {(r.confidence_rationale || "").trim() && (
+        <p className="mt-2 text-xs text-slate-400 leading-relaxed line-clamp-4">
+          {r.confidence_rationale}
+        </p>
+      )}
+    </div>
+  );
+}
 
 const STATE_LABELS: Record<string, { text: string; color: string }> = {
   idle: { text: "待观察", color: "text-slate-500" },
@@ -74,12 +137,8 @@ export default function KeyLevelView() {
       <MarketStructureBadge />
       {/* M3 · F2 · 当前 regime chip（KL snapshot 内嵌的 regime 字段） */}
       <RegimeChip kl={kl} />
-      {/* P1.4 · L7.5 双引擎融合最终决策（置顶，代表对外最终结论） */}
-      <FinalDecisionCard coin={coin} />
-      {/* D06 · 数学引擎 L4 执行计划（红绿灯 + 仓位 + 一句话） */}
-      <ExecutionPlanCard coin={coin} />
+      <StrategicReportCard coin={coin} />
       <StructureSummary kl={kl} coin={coin} />
-      <BacktestStatsCard coin={coin} />
       <KLHistoryLinks coin={coin} />
       {kl.bull_bear_line && (
         <BullBearCard bb={kl.bull_bear_line} price={price} coin={coin} />
@@ -1019,101 +1078,6 @@ function KLHistoryLinks({ coin }: { coin: string }) {
           ({item.levels_count}位)
         </Link>
       ))}
-    </div>
-  );
-}
-
-interface BtStats {
-  total_signals: number;
-  triggered: number;
-  tp1_hit: number;
-  sl_hit: number;
-  pending: number;
-  win_rate: number;
-  avg_rr: number;
-  by_source: Record<string, { total: number; tp1: number; sl: number }>;
-}
-
-function BacktestStatsCard({ coin }: { coin: string }) {
-  const [stats, setStats] = useState<BtStats | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    const load = () => {
-      fetch(`${API_BASE}/api/backtest/stats/${coin}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setStats(d);
-          setLoaded(true);
-        })
-        .catch(() => setLoaded(true));
-    };
-    load();
-    const t = setInterval(load, 120000);
-    return () => clearInterval(t);
-  }, [coin]);
-
-  if (!loaded) return null;
-
-  if (!stats || stats.total_signals === 0) {
-    return (
-      <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-300">📊 信号回测统计</h3>
-        <span className="text-[10px] text-slate-500">数据积累中，AI自动分析后将展示统计结果...</span>
-      </div>
-    );
-  }
-
-  const resolved = stats.tp1_hit + stats.sl_hit;
-
-  return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-300">📊 信号回测统计</h3>
-        <span className="text-[10px] text-slate-600">基于AI历史报告</span>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCell label="总信号" value={String(stats.total_signals)} />
-        <StatCell label="已触发" value={String(stats.triggered)} />
-        <StatCell
-          label="胜率"
-          value={resolved > 0 ? `${stats.win_rate}%` : "-"}
-          color={stats.win_rate >= 50 ? "text-green-400" : stats.win_rate > 0 ? "text-red-400" : "text-slate-400"}
-        />
-        <StatCell label="平均R:R" value={stats.avg_rr > 0 ? `1:${stats.avg_rr}` : "-"} color="text-amber-400" />
-      </div>
-      {resolved > 0 && (
-        <div className="mt-3 flex items-center gap-2">
-          <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-green-500 rounded-full"
-              style={{ width: `${stats.win_rate}%` }}
-            />
-          </div>
-          <span className="text-[10px] text-slate-500 shrink-0">
-            {stats.tp1_hit}胜 / {stats.sl_hit}负 / {stats.pending}待定
-          </span>
-        </div>
-      )}
-      {stats.by_source && Object.keys(stats.by_source).length > 1 && (
-        <div className="mt-2 flex gap-3 text-[10px] text-slate-500">
-          {Object.entries(stats.by_source).map(([src, s]) => (
-            <span key={src}>
-              {src === "ai_inferred" ? "⚡AI" : "引擎"}: {s.total}个
-              {s.tp1 + s.sl > 0 && ` (胜率${s.tp1 + s.sl > 0 ? Math.round(s.tp1 / (s.tp1 + s.sl) * 100) : 0}%)`}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatCell({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="text-center">
-      <div className={`text-lg font-bold ${color || "text-white"}`}>{value}</div>
-      <div className="text-[10px] text-slate-500">{label}</div>
     </div>
   );
 }

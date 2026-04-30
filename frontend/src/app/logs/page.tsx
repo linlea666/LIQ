@@ -26,7 +26,7 @@ export default function LogsPage() {
   const [health, setHealth] = useState<{
     status: string;
     sources: { name: string; status: string; latency_ms: number; error_count: number }[];
-    ai_available: boolean;
+    strategic_available: boolean;
     ai_provider: string;
   } | null>(null);
 
@@ -92,8 +92,8 @@ export default function LogsPage() {
             <h2 className="text-sm font-semibold text-white mb-2">系统状态</h2>
             <div className="flex flex-wrap gap-4 text-xs">
               <span>引擎: <span className="text-green-400">{health.status}</span></span>
-              <span>AI: <span className={health.ai_available ? "text-green-400" : "text-red-400"}>
-                {health.ai_available ? `可用 (${health.ai_provider})` : "未配置"}
+              <span>Strategic: <span className={health.strategic_available ? "text-green-400" : "text-red-400"}>
+                {health.strategic_available ? `可用 (${health.ai_provider})` : "不可用"}
               </span></span>
               {health.sources?.map((s) => (
                 <span key={s.name}>

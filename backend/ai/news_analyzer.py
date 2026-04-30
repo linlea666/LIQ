@@ -188,36 +188,12 @@ class NewsChatAnalyzer:
         self._mark_running("warn" if fail_streak >= 3 else "ok")
 
     def _mark_init_locked(self) -> None:
-        try:
-            from utils.decision_tracker import D, get_tracker
-            get_tracker().mark(
-                D.D12_DS_DUAL_TASK,
-                status="ok" if self.available else "warn",
-                log=True,
-                model=self._model,
-                key_set=self.available,
-                timeout_sec=self._timeout,
-                max_retries=self._max_retries,
-            )
-        except Exception:  # noqa: BLE001
-            logger.debug("[D12] init mark failed", exc_info=True)
+        """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+        return
 
     def _mark_running(self, status: str) -> None:
-        try:
-            from utils.decision_tracker import D, get_tracker
-            m = self.snapshot_metrics()
-            get_tracker().mark(
-                D.D12_DS_DUAL_TASK,
-                status=status,
-                log=False,
-                chat_calls=m["chat_calls"],
-                total_tokens=m["total_tokens"],
-                avg_latency_ms=m["avg_latency_ms"],
-                fail_streak=m["fail_streak"],
-                last_error=m["last_error"],
-            )
-        except Exception:  # noqa: BLE001
-            logger.debug("[D12] runtime mark failed", exc_info=True)
+        """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+        return
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 
 import socketio
 
@@ -79,14 +78,8 @@ async def subscribe(sid, data):
     logger.info("Client subscribed | sid=%s coin=%s viewers=%d", sid, coin, _coin_viewer_count.get(coin, 0))
     await sio.emit("subscribed", {"coin": coin}, to=sid)
 
-    if _engine:
-        history = _engine.get_ai_history(coin)
-        if history:
-            latest = history[-1]
-            age = time.time() - latest.ts
-            if age < 300:
-                await sio.emit("ai_result", latest.model_dump(), to=sid)
-                logger.info("AI result replayed on subscribe | sid=%s coin=%s age=%.0fs", sid, coin, age)
+    # PR-3 · 旧 Trader AI history replay 已下线（get_ai_history 已删除）
+    # 新的 Strategic AI 通过独立通道推送，不在订阅时回放
 
     # TE · AI 解读 replay：若当前信号有缓存解读，订阅时推一次（与主 AI 对齐）
     if _engine:

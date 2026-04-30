@@ -523,20 +523,5 @@ def _sentiment_score_from_title(text: str) -> int:
 def _mark_d08_layer2(
     *, input_: int, structured: int, tokens: int, latency_ms: int, fallbacks: int,
 ) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        success_rate = round(structured / input_, 4) if input_ > 0 else 0.0
-        status = "ok" if (fallbacks == 0 or structured > 0) else "warn"
-        get_tracker().mark(
-            D.D08_NEWS_PIPELINE,
-            status=status,
-            log=False,
-            layer2_input=input_,
-            layer2_structured=structured,
-            layer2_fallbacks=fallbacks,
-            layer2_tokens=tokens,
-            layer2_latency_ms=latency_ms,
-            layer2_success_rate=success_rate,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D08] mark layer2 failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳避免上游调用失败。"""
+    return

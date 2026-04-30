@@ -478,18 +478,5 @@ def _deep_copy_templates(src: dict) -> dict:
 
 
 def _mark_d11_warn(state: GeoRiskState, severity: str) -> None:
-    try:
-        from utils.decision_tracker import D, get_tracker
-        get_tracker().mark(
-            D.D11_GEO_RISK,
-            status="warn",
-            log=False,
-            theme_id=state.theme_id,
-            current_level=state.current_level,
-            level_label=state.level_label,
-            severity=severity,
-            flip_flop_count_24h=state.flip_flop_count_24h,
-            flip_flop_warning=state.flip_flop_warning,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[D11] mark failed", exc_info=True)
+    """PR-3 · decision_tracker 已下线，本函数保留壳。"""
+    return

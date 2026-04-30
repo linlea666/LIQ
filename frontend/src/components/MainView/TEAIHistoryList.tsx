@@ -7,7 +7,7 @@
  * 点击条目跳转到 /te-ai/[coin]/[ts]/page.tsx 详情页。
  *
  * 数据源：GET /api/te/ai_interpret/{coin}/history
- * 架构决策：与主 AI 对齐（主 AI 用 /api/ai/history + /ai/[coin]/[ts]/page.tsx）
+ * 架构决策：与 Strategic 主 AI 路由风格对齐（/api/strategic/report/history + /ai/[coin]/[ts]）
  */
 
 import { useCallback, useEffect, useState } from "react";
