@@ -240,6 +240,145 @@ class TestNoCrashOnPartialData:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# 数据契约修复回归（funding 双源 / IV 量纲 / put_call OI / coinbase 溢价）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _make_snap_for_render_checks(**kwargs):
+    """构造能触发 §7/§11/§12 全部渲染分支的最小 snapshot。"""
+    from ai.snapshot import build_ai_snapshot
+    return build_ai_snapshot(
+        coin="BTC", price=65000, high_24h=66000, low_24h=64000,
+        atr=500, market_temp_score=50, pin_risk_level="low",
+        **kwargs,
+    )
+
+
+class TestFundingPercentileSingleSource:
+    """§7 不再渲染 funding 30d 百分位（避免与 §9 双源刻度混淆）。
+
+    根因记录：cg.funding_percentile_30d 是 0-1 浮点，ffu.percentile_30d 是
+    1-100 整数；同名"30d 百分位"在同一份 prompt 出现两个值（如 0 vs 68），
+    AI 在 evidence_matrix 里多次抄错。修复策略：§7 删除该行，§9 单点输出。
+    """
+
+    def test_section7_no_longer_shows_funding_percentile(self):
+        from ai.strategic_prompts import build_user_prompt
+        from models.orderbook_pressure import PositionCrowdingSnapshot
+
+        snap = _make_snap_for_render_checks()
+        snap.crowding_global = PositionCrowdingSnapshot(
+            oi_delta_1h_pct=0.5,
+            oi_delta_24h_pct=-1.2,
+            funding_now_pct=0.001,
+            funding_percentile_30d=0.0,  # 0-1 刻度的 0
+        )
+
+        text, _ = build_user_prompt(snap)
+
+        # 确认 §7 仍渲染 funding_now_pct
+        assert "Funding now=" in text
+        # 但 §7 不再含 "30d 百分位"——避免 cg(0-1) / ffu(0-100) 同名冲突
+        # 通过限定 §7 子段标题来精准断言
+        sec7_start = text.index("§7")
+        sec8_start = text.index("§8")
+        sec7_block = text[sec7_start:sec8_start]
+        assert "Funding 百分位" not in sec7_block, (
+            "§7 子段标题不应再宣称 Funding 百分位"
+        )
+        assert "30d 百分位" not in sec7_block, (
+            "§7 不应再渲染 30d 百分位（与 §9 ffu.percentile_30d 双源冲突）"
+        )
+
+    def test_section9_keeps_funding_percentile_30d(self):
+        """§9 仍保留 ffu.percentile_30d（1-100 刻度）作为唯一真值源。"""
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import FundingSnapshot, MarketActionFacts
+
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000,
+            funding=FundingSnapshot(
+                avg_current=0.0001, percentile_30d=68, percentile_7d=71,
+            ),
+        )
+        snap = _make_snap_for_render_checks(market_action_facts=facts)
+        text, _ = build_user_prompt(snap)
+
+        sec9_start = text.index("§9")
+        sec10_start = text.index("§10")
+        sec9_block = text[sec9_start:sec10_start]
+        assert "30d 百分位=68" in sec9_block
+        assert "7d 百分位=71" in sec9_block
+
+
+class TestOptionFieldRenderHardening:
+    """§12 期权字段渲染防御：IV 量纲 / put_call_oi 缺失保护。"""
+
+    def test_btc_iv_normalized_when_decimal_scale(self):
+        """上游 BBX 历史返回过 0-1 小数（如 0.38 = 38%）；
+        必须 ×100 后显示，避免出现 "BTC IV=0.38%" 让 AI 误判极低波动率。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks(btc_implied_vol=0.38)
+        text, _ = build_user_prompt(snap)
+
+        assert "BTC IV=38.00%" in text
+        assert "BTC IV=0.38%" not in text
+
+    def test_btc_iv_passthrough_when_percent_scale(self):
+        """若上游已是百分比刻度（如 38），原样显示。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks(btc_implied_vol=38.0)
+        text, _ = build_user_prompt(snap)
+
+        assert "BTC IV=38.00%" in text
+
+    def test_put_call_oi_zero_skipped(self):
+        """put/call OI 比例为 0 = 上游数据缺失，不应作为"持仓平衡"渲染。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks(btc_put_call_oi=0.0)
+        text, _ = build_user_prompt(snap)
+
+        assert "put/call OI" not in text
+
+    def test_put_call_oi_positive_renders(self):
+        """正常 P/C 比例（> 0）正常显示。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks(btc_put_call_oi=1.25)
+        text, _ = build_user_prompt(snap)
+
+        assert "put/call OI=1.25" in text
+
+
+class TestCoinbasePremiumNearZero:
+    """Coinbase 溢价极小值不应渲染为 "-0.00"（看起来像 bug）。"""
+
+    def test_near_zero_premium_renders_approx(self):
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks()
+        snap.coinbase_premium = -0.001  # |x| < 0.01
+
+        text, _ = build_user_prompt(snap)
+
+        assert "Coinbase 溢价=≈0" in text
+        assert "-0.00" not in text  # 旧渲染瑕疵
+
+    def test_meaningful_premium_renders_value(self):
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _make_snap_for_render_checks()
+        snap.coinbase_premium = -1.25
+
+        text, _ = build_user_prompt(snap)
+
+        assert "Coinbase 溢价=-1.25" in text
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # extract_json_payload 复用
 # ────────────────────────────────────────────────────────────────────────────
 

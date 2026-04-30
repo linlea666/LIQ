@@ -559,18 +559,21 @@ def build_user_prompt(
     if snapshot.usd_usdt_basis_pct is not None:
         lines.append(f"\n- Coinbase USD vs Binance USDT 基差：{_fmt_pct(snapshot.usd_usdt_basis_pct, nd=3)}（>30bp 异常 / <5bp 正常）")
 
-    # 拥挤度（OI / Funding / LS）
+    # 拥挤度（OI / LS；funding 百分位由 §9 单点输出，避免双源刻度冲突）
     cg = snapshot.crowding_global
     if cg is not None:
-        _sub("全局拥挤度（OI 多周期 + Funding 百分位 + LS）")
+        _sub("全局拥挤度（OI 多周期 + LS）")
         lines.append(
             f"- OI Δ：1h={_fmt_pct(cg.oi_delta_1h_pct)} | 24h={_fmt_pct(cg.oi_delta_24h_pct)}"
         )
         if cg.oi_margin_split is not None:
             lines.append(f"- OI 保证金切分：{cg.oi_margin_split}")
+        # Funding 详细百分位（7d/30d/slope）由 §9 单点输出，此处仅给当前值
+        # 避免与 §9 percentile（1-100）双源混淆——cg.funding_percentile_30d 是 0-1，
+        # 同名"30d 百分位"在 prompt 同一份输出里会出现两个值（如 0 vs 68），
+        # 已多次让 AI 在 evidence_matrix 里抄错数。此处只保留 funding_now_pct。
         lines.append(
-            f"- Funding now={_fmt(cg.funding_now_pct, nd=4)}% | "
-            f"30d 百分位={_fmt(cg.funding_percentile_30d, nd=0)}"
+            f"- Funding now={_fmt(cg.funding_now_pct, nd=4)}%"
         )
         lines.append(
             f"- LS top_position={_fmt(cg.top_position_ls_ratio, nd=2)} | "
@@ -829,8 +832,11 @@ def build_user_prompt(
             f"7d Δ={_fmt_pct(snapshot.stablecoin_7d_change_pct)}"
         )
     if snapshot.coinbase_premium is not None:
+        # 极小值（|x| < 0.01）显示为 ≈0，避免出现 "-0.00" 看起来像 bug 的渲染
+        cb_prem_val = snapshot.coinbase_premium
+        cb_prem_str = "≈0" if abs(cb_prem_val) < 0.01 else _fmt(cb_prem_val, nd=2)
         lines.append(
-            f"- Coinbase 溢价={_fmt(snapshot.coinbase_premium, nd=2)}({snapshot.coinbase_premium_trend or '—'})"
+            f"- Coinbase 溢价={cb_prem_str}({snapshot.coinbase_premium_trend or '—'})"
         )
     # 现货流入流出 + 鲸鱼
     if snapshot.whale_net_direction:
@@ -881,8 +887,16 @@ def build_user_prompt(
     if snapshot.option_nearest_expiry:
         lines.append(f"- option_nearest_expiry={snapshot.option_nearest_expiry}")
     if snapshot.btc_implied_vol is not None:
-        lines.append(f"- BTC IV={_fmt(snapshot.btc_implied_vol, nd=2)}%")
-    if snapshot.btc_put_call_oi is not None:
+        # 兜底两种刻度：BBX OKX 上游历史返回过 0-1 小数（如 0.38=38%）
+        # 与 0-100 百分比（如 38）两种格式；BTC IV 正常区间 20-150%，
+        # 任何 < 5 的值必为小数刻度，统一 ×100 后显示，避免出现"BTC IV=0.38%"
+        # 这种让 AI 误判"波动率极低"的渲染。
+        iv_raw = snapshot.btc_implied_vol
+        iv_pct = iv_raw * 100.0 if iv_raw < 5.0 else iv_raw
+        lines.append(f"- BTC IV={_fmt(iv_pct, nd=2)}%")
+    # put/call OI 比例：上游缺失时部分链路会塞 0.0（而非 None），导致 AI 误读
+    # "看跌看涨持仓平衡"。比例 ≤ 0 没有金融意义，直接跳过显示。
+    if snapshot.btc_put_call_oi is not None and snapshot.btc_put_call_oi > 0:
         lines.append(f"- BTC put/call OI={_fmt(snapshot.btc_put_call_oi, nd=2)}")
 
     # ── §13 冲突矩阵自检（必填提示，AI 真正在 evidence_matrix 字段输出） ──
