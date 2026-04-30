@@ -291,6 +291,8 @@ class Engine:
         self._maa_arbiter = None  # type: ignore[assignment]
         # PR-2 · Strategic AI arbiter（懒创建，与 MAA 相同模式）
         self._strategic_arbiter = None  # type: ignore[assignment]
+        # F-15 · arbiter 初始化失败时的冷却时间戳，避免每次调用都重新 import / 建客户端
+        self._strategic_arbiter_init_failed_at: Optional[float] = None
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
         self._running = False
@@ -2197,15 +2199,35 @@ class Engine:
     # PR-2 · Strategic AI 决策官 · 周期循环 + 触发器
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+    _STRATEGIC_INIT_BACKOFF_SEC = 300.0
+
     def _get_strategic_arbiter(self):
-        """懒加载 Strategic arbiter（避免启动时 openai 客户端重复初始化）。"""
-        if self._strategic_arbiter is None:
-            try:
-                from ai.strategic_arbiter import create_strategic_arbiter
-                self._strategic_arbiter = create_strategic_arbiter()
-            except Exception:
-                logger.error("Strategic arbiter init failed", exc_info=True)
-                self._strategic_arbiter = None
+        """懒加载 Strategic arbiter（避免启动时 openai 客户端重复初始化）。
+
+        F-15：失败时进入 5min 退避冷却——避免 key 缺失 / 网络中断时被自动循环
+        / API 调用反复触发昂贵的 import + client 构造，并刷屏 error 日志。
+        """
+        if self._strategic_arbiter is not None:
+            return self._strategic_arbiter
+        now = time.time()
+        if (
+            self._strategic_arbiter_init_failed_at is not None
+            and (now - self._strategic_arbiter_init_failed_at)
+            < self._STRATEGIC_INIT_BACKOFF_SEC
+        ):
+            return None
+        try:
+            from ai.strategic_arbiter import create_strategic_arbiter
+            self._strategic_arbiter = create_strategic_arbiter()
+            self._strategic_arbiter_init_failed_at = None
+        except Exception:
+            logger.error(
+                "Strategic arbiter init failed (backoff %.0fs before retry)",
+                self._STRATEGIC_INIT_BACKOFF_SEC,
+                exc_info=True,
+            )
+            self._strategic_arbiter = None
+            self._strategic_arbiter_init_failed_at = now
         return self._strategic_arbiter
 
     @property

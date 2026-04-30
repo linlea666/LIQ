@@ -340,18 +340,17 @@ def wall_priority(wall: "WallZone") -> float:
     """WallZone 决策相关性评分。
 
     公式（与 prompt §7 同源）：
-      0.25 × proximity_score
-      + 0.25 × trust_score
+      0.30 × proximity_score
+      + 0.30 × trust_score
       + 0.20 × size_score          ← log10(current_usd / 1M) / 2，clamp 到 [0,1]
       + 0.15 × persistence_score   ← visible_minutes / 60（1h+ 持续 = 满分）
-      + 0.10 × event_recency       ← 简化为最近 30min 内事件标记（实际由调用方填）
       + 0.05 × coinbase_bonus      ← coinbase_spot_confluence ? 1.0 : 0.0
 
     设计取舍：
       - size_score 用 log 而非线性：1M / 10M / 100M 大单尺度对数差异更合理
-      - event_recency：本函数不直接读 wall_events（避免 cross-object 依赖），
-        默认 0；上层若需要可在 sort_walls 调用前预填 wall._recent_event_score
-        attribute（duck-typing）
+      - 原 event_recency（0.10 权重）依赖上层预填 wall._recent_event_score，
+        但实际从未被预填，权重对所有墙都是 0；移除并按"距离/trust 是决策最关键"
+        把 0.10 平摊到 proximity 与 trust 上，避免无效权重稀释信号
       - coinbase_bonus 单独加 0.05 而非作为 trust 加权——确保 Coinbase 共振墙
         在距离/trust 接近时优先于纯合约墙（机构资金 footprint 优势）
     """
@@ -365,14 +364,12 @@ def wall_priority(wall: "WallZone") -> float:
         size = 0.0
     persistence = min(1.0, (float(getattr(wall, "visible_minutes", 0.0) or 0.0)) / 60.0)
     coinbase_bonus = 1.0 if getattr(wall, "coinbase_spot_confluence", False) else 0.0
-    event_recency = float(getattr(wall, "_recent_event_score", 0.0) or 0.0)
 
     score = (
-        0.25 * proximity_score(distance)
-        + 0.25 * _clip01(getattr(wall, "trust_score", 0.0) or 0.0)
+        0.30 * proximity_score(distance)
+        + 0.30 * _clip01(getattr(wall, "trust_score", 0.0) or 0.0)
         + 0.20 * size
         + 0.15 * persistence
-        + 0.10 * _clip01(event_recency)
         + 0.05 * coinbase_bonus
     )
     return _clip01(score)

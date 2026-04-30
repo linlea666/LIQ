@@ -7,7 +7,7 @@
   - SignalBus 推送 news_event. / geo_risk. 候选信号（保守策略，action=wait）
 
 设计要点：
-  - 所有外部依赖（registry / analyzer / trackers / ledger / bus）都可注入 → 单测零网络
+  - 所有外部依赖（registry / analyzer / trackers / ledger）都可注入 → 单测零网络
   - tick 内部每步都 try/except，子步失败不阻断后续（防止上游网络抖动打断主循环）
   - 每步 mark DecisionTracker D-code，便于 runtime 追踪
   - 黑天鹅阈值：tier=blackswan 或 geo level_after≥4
@@ -76,7 +76,6 @@ async def run_news_tick(
     narrative_tracker: Any = None,
     geo_tracker: Any = None,
     ledger: Any = None,
-    bus: Any = None,
 ) -> NewsTickStats:
     """执行一次完整新闻流水线 tick。
 
@@ -113,8 +112,6 @@ async def run_news_tick(
         if ledger is None:
             from processors.news_ledger import get_ledger
             ledger = get_ledger()
-        # PR-3 · signal_bus 已下线，新闻事件不再投放到 SignalBus
-        bus = None  # noqa: F841 (kept to preserve downstream None-checks)
 
         # ── Step 1: 拉取 ──
         items: list[RawNewsItem] = []

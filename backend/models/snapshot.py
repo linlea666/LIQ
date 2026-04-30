@@ -165,7 +165,6 @@ class AISnapshot(BaseModel):
     news_brief_version: int = 0
     news_brief_trigger: str = ""
     news_brief_updated_at: Optional[int] = None
-    geo_overview: Optional[dict] = None
 
     option_max_pain_price: Optional[float] = None
     option_nearest_expiry: str = ""

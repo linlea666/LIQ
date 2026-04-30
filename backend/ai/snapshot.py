@@ -293,7 +293,6 @@ def _collect_news_context() -> dict:
         "news_brief_version": 0,
         "news_brief_trigger": "",
         "news_brief_updated_at": None,
-        "geo_overview": None,
     }
     try:
         from processors.news_brief import get_current_brief
@@ -323,14 +322,6 @@ def _collect_news_context() -> dict:
                 ctx["news_brief_version"] = int(payload.get("version") or 0)
                 ctx["news_brief_trigger"] = str(payload.get("update_trigger") or "")
                 ctx["news_brief_updated_at"] = int(payload.get("updated_at") or 0) or None
-    except Exception:
-        pass
-
-    try:
-        from processors.geo_risk_tracker import get_geo_risk_tracker
-        overview = get_geo_risk_tracker().get_overview()
-        if overview is not None:
-            ctx["geo_overview"] = overview.model_dump(mode="json")
     except Exception:
         pass
 

@@ -1681,7 +1681,6 @@ export interface AIDetailNewsBrief {
   version: number;
   trigger: string;
   updated_at: number;
-  geo_overview: Record<string, unknown> | null;
   active_narratives: Array<Record<string, unknown>>;
 }
 
