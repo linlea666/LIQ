@@ -2351,23 +2351,48 @@ class Engine:
             logger.debug("Strategic collect_facts failed | coin=%s", ccy, exc_info=True)
 
         # TradingBrain Snapshot（PR-1 已集成，graceful degrade）
+        # 参数契约 (trading_brain_builder.build_trading_brain_snapshot):
+        #   kl: Optional[KeyLevelSnapshotV2]
+        #   op: Optional[OrderbookPressureSnapshot]
+        #   liq: Optional[LiquidationMap]   ← 单个，不是 dict
+        #   cvd_contract_trend / cvd_spot_trend: str
+        #   oi_delta_1h_pct: Optional[float]
+        #   funding_interpretation: str
+        # 注：state.cvd_contract/cvd_spot/oi/funding 是富对象，需要先抽出标量字段。
+        liq_for_brain = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        cvd_c_trend = (
+            state.cvd_contract.trend_1h if state.cvd_contract else ""
+        ) or ""
+        cvd_s_trend = (
+            state.cvd_spot.trend_1h if state.cvd_spot else ""
+        ) or ""
+        oi_d1h = state.oi.change_1h_pct if state.oi else None
+        fd_interp = (
+            state.funding.interpretation if state.funding else ""
+        ) or ""
+
         trading_brain_for_ai = None
         try:
             trading_brain_for_ai = build_trading_brain_snapshot(
                 coin=ccy,
                 last_price=float(state.ticker.last),
-                key_level_snapshot=state.key_level_snapshot_v2,
-                pressure_snapshot=state.orderbook_pressure_snapshot,
-                liq_maps=state.liq_maps,
-                cvd_contract=state.cvd_contract,
-                oi_snapshot=state.oi,
-                funding_snapshot=state.funding,
                 atr=float(state.atr or state.atr_cg or 0.0),
+                kl=state.key_level_snapshot_v2,
+                op=state.orderbook_pressure_snapshot,
+                liq=liq_for_brain,
+                cvd_contract_trend=cvd_c_trend,
+                cvd_spot_trend=cvd_s_trend,
+                oi_delta_1h_pct=oi_d1h,
+                funding_interpretation=fd_interp,
                 prev_setup_states=state.brain_setup_states,
             )
         except Exception:
-            logger.debug("Strategic build_trading_brain_snapshot failed | coin=%s",
-                         ccy, exc_info=True)
+            # 升级到 warning：这条路径曾因参数名 typo 静默失败数周，
+            # 表现为 §2 / §4 / §5 全部 None。再静默一次的代价太高。
+            logger.warning(
+                "Strategic build_trading_brain_snapshot failed | coin=%s",
+                ccy, exc_info=True,
+            )
 
         liq_1d = state.liq_maps.get("1d") or state.liq_maps.get("24h")
         liq_7d = state.liq_maps.get("7d")

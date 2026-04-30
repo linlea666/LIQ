@@ -99,3 +99,28 @@ class TestBuildStrategicSnapshotSmoke:
         assert "low_24h" in fields, "TickerData.low_24h 字段不能改名/删除"
         assert "high24" not in fields, "防止再次出现下划线 typo"
         assert "low24" not in fields, "防止再次出现下划线 typo"
+
+    def test_trading_brain_assembled_not_swallowed(self):
+        """根因防御：engine 调用 build_trading_brain_snapshot 时，6 个参数名
+        必须与函数签名一致，否则 TypeError 会被 except 吞到 logger.warning，
+        导致 §2 / §4 / §5 全部空白（用户在前端看到"TradingBrain 数据不可用"
+        / "无 PriceZone 数据" / "无 Opportunity 候选"）。
+
+        builder 即便 kl/op/liq 全部 None 也会返回非 None 的 partial_ready
+        TradingBrainSnapshot；因此 snap.trading_brain is None **唯一**意味
+        着 engine 调用本身抛了异常被吞。
+        """
+        state = _make_minimal_state("BTC", 70000.0)
+        eng = _make_engine_with_state(state)
+
+        snap = eng._build_strategic_snapshot("BTC")
+
+        assert snap is not None
+        assert snap.trading_brain is not None, (
+            "trading_brain 装配失败被静默吞掉——大概率是 engine 调用 "
+            "build_trading_brain_snapshot 的参数名/类型与函数签名不匹配。"
+            "查 backend/engine.py 中的 build_trading_brain_snapshot(...) 调用。"
+        )
+        # partial_ready：3 个核心源都未注入，应被标记
+        assert snap.trading_brain.data_quality.is_partial_ready is True
+        assert snap.trading_brain.data_quality.ready_count == 0
