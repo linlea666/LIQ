@@ -543,6 +543,128 @@ class TestLiqClusterRenderingSemantics:
         assert "不是支撑" in text
 
 
+class TestStopBandAggregationRendering:
+    """GPT-3 必修：§8 渲染层把 N 个独立 cluster 聚合成"扫单磁铁带"。
+
+    根因：上一版 §8 给 AI 1d/7d/30d × 8 = 24 个独立 100 美元 bins，AI 无法
+    形成"带"的整体认知，反骑墙规则的"扫前/扫中/扫后"判断失去结构化依据。
+    """
+
+    def _snap_with_dense_clusters(self, current_price=76280.0, atr=400.0):
+        from ai.snapshot import build_ai_snapshot
+        from models.liquidation import LiqCluster
+        from models.snapshot import LiquidationMapBlock
+
+        snap = build_ai_snapshot(
+            coin="BTC", price=current_price,
+            high_24h=current_price + 1000, low_24h=current_price - 1000,
+            atr=atr, market_temp_score=50, pin_risk_level="low",
+        )
+        # 模拟 GPT 反馈中真实场景：上方 76400/76500/76600/76700/76800 五个连续 bins
+        snap.liq_map_block_1d = LiquidationMapBlock(
+            cycle="1d", imbalance_ratio=1.13,
+            clusters_above=[
+                LiqCluster(
+                    price_center=76400.0, price_from=76350.0, price_to=76450.0,
+                    total_usd=85_000_000.0, side="short", distance_pct=0.16,
+                    exchange_count=2,
+                ),
+                LiqCluster(
+                    price_center=76500.0, price_from=76450.0, price_to=76550.0,
+                    total_usd=72_000_000.0, side="short", distance_pct=0.29,
+                    exchange_count=2,
+                ),
+                LiqCluster(
+                    price_center=76800.0, price_from=76750.0, price_to=76850.0,
+                    total_usd=242_000_000.0, side="short", distance_pct=0.68,
+                    exchange_count=3,
+                ),
+            ],
+            clusters_below=[
+                LiqCluster(
+                    price_center=75000.0, price_from=74950.0, price_to=75050.0,
+                    total_usd=200_000_000.0, side="long", distance_pct=1.68,
+                    exchange_count=3,
+                ),
+                LiqCluster(
+                    price_center=75300.0, price_from=75250.0, price_to=75350.0,
+                    total_usd=442_000_000.0, side="long", distance_pct=1.29,
+                    exchange_count=3,
+                ),
+            ],
+        )
+        return snap
+
+    def test_above_clusters_rendered_as_aggregated_band(self):
+        """上方 3 个相邻 cluster 应聚合成一条带，并在文本里出现"聚合带"标签
+        + peak / total / bins / 距离区间。"""
+        from ai.strategic_prompts import build_user_prompt
+        snap = self._snap_with_dense_clusters()
+        text, _ = build_user_prompt(snap)
+
+        # 聚合带视图存在
+        assert "聚合带" in text
+        # 阈值 = max(0.4×400, 0.4%×76280) = 305
+        # 76400→76500 间距 100 ≤ 305 合并；76500→76800 间距 300 ≤ 305 合并 → 1 条带
+        # peak 是 76800（USD 最大）
+        assert "peak=$76,800" in text
+        # total = 85M + 72M + 242M = 399M
+        assert "total=399.00M" in text or "total=399M" in text
+        # bins=3
+        assert "bins=3" in text
+
+    def test_below_clusters_aggregated_with_negative_distance(self):
+        """下方多头止损带聚合距离为负（与 §6/§7 一致）。"""
+        from ai.strategic_prompts import build_user_prompt
+        snap = self._snap_with_dense_clusters()
+        text, _ = build_user_prompt(snap)
+        # 75000→75300 间距 300 ≤ 305 合并；_fmt_price 输出 `$75,000.00` 形式
+        assert "[$75,000.00, $75,300.00]" in text
+        # 距离负号（下方）
+        for ln in text.splitlines():
+            if "$75,000.00" in ln and "$75,300.00" in ln and "聚合带" not in ln:
+                assert "-1." in ln, (
+                    f"下方聚合带距离必须为负 | line={ln!r}"
+                )
+                break
+        else:
+            assert False, "未找到下方聚合带的渲染行"
+
+    def test_top3_detail_preserved_for_audit(self):
+        """聚合带后仍保留明细 top 3，便于 sweep_state_assessment 引用 + 审计。"""
+        from ai.strategic_prompts import build_user_prompt
+        snap = self._snap_with_dense_clusters()
+        text, _ = build_user_prompt(snap)
+        # "明细 top" 标签存在
+        assert "明细 top" in text
+        # 至少出现 1 条原 cluster 行（旧格式：side=`short`）
+        assert "side=`short`" in text
+
+    def test_no_atr_falls_back_to_legacy_render(self):
+        """ATR=0 + last_price=0 极端场景退化到旧 cluster 列表（不聚合）。"""
+        from ai.strategic_prompts import build_user_prompt
+        from models.liquidation import LiqCluster
+        from models.snapshot import LiquidationMapBlock
+
+        from ai.snapshot import build_ai_snapshot
+        snap = build_ai_snapshot(
+            coin="BTC", price=0.0, high_24h=0.0, low_24h=0.0,
+            atr=0.0, market_temp_score=50, pin_risk_level="low",
+        )
+        snap.liq_map_block_1d = LiquidationMapBlock(
+            cycle="1d", imbalance_ratio=1.0,
+            clusters_above=[
+                LiqCluster(
+                    price_center=76400.0, price_from=76350, price_to=76450,
+                    total_usd=85_000_000, side="short", distance_pct=0.16,
+                ),
+            ],
+        )
+        text, _ = build_user_prompt(snap)
+        # 不崩；side=`short` 仍然渲染（旧格式 fallback）
+        assert "side=`short`" in text
+
+
 class TestNewsBriefStructuredRendering:
     """§11 新闻简报智能截断（GPT-13）：解析 JSON 后输出 tldr + sections.bullets[:N]，
     避免上一版"硬截 500 字符 + 中间断裂"的丑陋渲染。"""

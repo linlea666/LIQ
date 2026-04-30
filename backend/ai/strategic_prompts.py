@@ -30,6 +30,7 @@ from typing import Any, Optional
 from ai.market_action_prompts import extract_json_payload as _extract_json_shared
 from ai.strategic_priority import (
     LIQ_TIMEFRAME_WEIGHT,
+    aggregate_stop_bands,
     sort_key_levels,
     sort_liq_clusters,
     sort_opportunities,
@@ -680,18 +681,54 @@ def build_user_prompt(
                 f"lev_intensity={_fmt(getattr(c, 'leverage_intensity', 0), nd=2)}"
             )
 
+        def _fmt_band(b: dict, idx: int) -> str:
+            # 聚合带视图：让 AI 看到"一条扫单磁铁带"而不是 N 个独立 100 美元 bins
+            return (
+                f"    · #{idx} [{_fmt_price(b['price_low'])}, {_fmt_price(b['price_high'])}] | "
+                f"peak={_fmt_price(b['peak_price'])}({_fmt(b['peak_usd'])}) | "
+                f"total={_fmt(b['total_usd'])} | "
+                f"bins={b['bin_count']} | "
+                f"距离={_fmt_pct(b['distance_low_pct'])}~{_fmt_pct(b['distance_high_pct'])} | "
+                f"ex_count_max={b['exchange_count_max']}"
+            )
+
+        # GPT-3 必修：先聚合带、再明细 top3
+        # 反骑墙规则要求 AI 知道扫空带的边缘在哪——光给离散 bins 不够，必须给"带"
+        last_p = float(snapshot.price) if snapshot.price else 0.0
+        atr_for_agg = float(snapshot.atr_14 or 0.0)
+
         if ca:
+            bands_above = aggregate_stop_bands(ca, last_p, atr_for_agg)
             lines.append(
-                f"  - 上方空头止损/轧空磁铁（向上买入流动性，**不是阻力**）（top {len(ca)}）："
+                f"  - 上方空头止损/轧空磁铁（向上买入流动性，**不是阻力**）（共 {len(ca)} bins）："
             )
-            for c in ca:
-                lines.append(_fmt_cluster(c))
+            if bands_above:
+                lines.append(f"    · 聚合带（共 {len(bands_above)} 条）：")
+                for i, b in enumerate(bands_above, 1):
+                    lines.append(_fmt_band(b, i))
+                lines.append(f"    · 明细 top {min(3, len(ca))}（用于 sweep_state 引用）：")
+                for c in ca[:3]:
+                    lines.append(_fmt_cluster(c))
+            else:
+                # ATR=0 / last_price=0 等极端场景退化到旧渲染
+                for c in ca:
+                    lines.append(_fmt_cluster(c))
+
         if cb:
+            bands_below = aggregate_stop_bands(cb, last_p, atr_for_agg)
             lines.append(
-                f"  - 下方多头止损/扫多磁铁（向下卖出流动性，**不是支撑**）（top {len(cb)}）："
+                f"  - 下方多头止损/扫多磁铁（向下卖出流动性，**不是支撑**）（共 {len(cb)} bins）："
             )
-            for c in cb:
-                lines.append(_fmt_cluster(c))
+            if bands_below:
+                lines.append(f"    · 聚合带（共 {len(bands_below)} 条）：")
+                for i, b in enumerate(bands_below, 1):
+                    lines.append(_fmt_band(b, i))
+                lines.append(f"    · 明细 top {min(3, len(cb))}（用于 sweep_state 引用）：")
+                for c in cb[:3]:
+                    lines.append(_fmt_cluster(c))
+            else:
+                for c in cb:
+                    lines.append(_fmt_cluster(c))
         # 真空区
         vz_list = (block.vacuum_zones or [])[:TOP_N_LIQ_VACUUM]
         if vz_list:

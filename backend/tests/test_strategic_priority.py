@@ -407,3 +407,154 @@ class TestLiqClusterPriority:
         sorted_clusters = sort_liq_clusters(clusters, "1d")
         # 距离最近 + 金额最大 → 第一
         assert sorted_clusters[0].price_center == 66000
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 6. Stop Liquidity Band 聚合（GPT 反馈 G-3 必修）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestAggregateStopBands:
+    """根因防御：§8 给 AI 的 1d/7d/30d 各 8 个 cluster = 24 个独立 100 美元 bins，
+    AI 无法理解"上方 76,400-77,000 是一条带"。聚合算法把相邻 cluster 合并，
+    threshold = max(0.4 × ATR, 0.4% × last_price)。"""
+
+    def test_empty_input(self):
+        from ai.strategic_priority import aggregate_stop_bands
+        assert aggregate_stop_bands([], 70000.0, 400.0) == []
+
+    def test_invalid_last_price_returns_empty(self):
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [_make_liq(price_center=76400.0)]
+        assert aggregate_stop_bands(clusters, 0.0, 400.0) == []
+
+    def test_single_cluster_becomes_single_band(self):
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [_make_liq(
+            price_center=76800.0, total_usd=242_000_000, side="short", exchange_count=3,
+        )]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert len(bands) == 1
+        b = bands[0]
+        assert b["price_low"] == 76800.0
+        assert b["price_high"] == 76800.0
+        assert b["peak_price"] == 76800.0
+        assert b["peak_usd"] == 242_000_000
+        assert b["total_usd"] == 242_000_000
+        assert b["bin_count"] == 1
+        assert b["exchange_count_max"] == 3
+        # 距离正号（上方）
+        assert b["distance_low_pct"] > 0
+
+    def test_adjacent_clusters_merged_into_one_band(self):
+        """76400/76500/76600/76700/76800 间距 100 USD，
+        threshold = max(0.4×400, 0.4%×76280) = max(160, 305) = 305 USD
+        → 全部合并为 1 条带。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, total_usd=85_000_000, side="short"),
+            _make_liq(price_center=76500.0, total_usd=72_000_000, side="short"),
+            _make_liq(price_center=76600.0, total_usd=63_000_000, side="short"),
+            _make_liq(price_center=76700.0, total_usd=118_000_000, side="short"),
+            _make_liq(price_center=76800.0, total_usd=242_000_000, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert len(bands) == 1
+        b = bands[0]
+        assert b["price_low"] == 76400.0
+        assert b["price_high"] == 76800.0
+        assert b["peak_price"] == 76800.0  # USD 最大的
+        assert b["peak_usd"] == 242_000_000
+        assert b["total_usd"] == 580_000_000  # 累加
+        assert b["bin_count"] == 5
+
+    def test_far_clusters_stay_separate_bands(self):
+        """76400 → 76800 → 78500（间距 1700 远大于 305 阈值）→ 第二条独立。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, total_usd=85_000_000, side="short"),
+            _make_liq(price_center=76800.0, total_usd=242_000_000, side="short"),
+            _make_liq(price_center=78500.0, total_usd=89_000_000, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        # 76400+76800（间距 400 > 305） 也独立——验证阈值边界
+        assert len(bands) == 3
+        prices = [b["peak_price"] for b in bands]
+        assert prices == [76400.0, 76800.0, 78500.0]
+
+    def test_atr_widens_threshold(self):
+        """ATR 从 400 提到 2000 → threshold 跃升到 800 → 76400+76800（间距 400）
+        现在能合并。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, total_usd=85_000_000, side="short"),
+            _make_liq(price_center=76800.0, total_usd=242_000_000, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 2000.0)
+        assert len(bands) == 1
+        assert bands[0]["bin_count"] == 2
+
+    def test_below_clusters_negative_distance(self):
+        """下方多头止损带聚合后距离应为负（与 §6/§7 渲染一致）。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=75000.0, total_usd=200_000_000, side="long"),
+            _make_liq(price_center=75300.0, total_usd=442_000_000, side="long"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert len(bands) == 1
+        b = bands[0]
+        assert b["distance_low_pct"] < 0
+        assert b["distance_high_pct"] < 0
+        # high 边界（更接近当前价）距离绝对值更小
+        assert abs(b["distance_high_pct"]) < abs(b["distance_low_pct"])
+        assert b["side"] == "long"
+
+    def test_unsorted_input_handled(self):
+        """函数应内部按 price_center 升序，不依赖输入顺序。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76800.0, total_usd=242_000_000, side="short"),
+            _make_liq(price_center=76400.0, total_usd=85_000_000, side="short"),  # 乱序
+            _make_liq(price_center=76600.0, total_usd=63_000_000, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert len(bands) == 1
+        assert bands[0]["price_low"] == 76400.0
+        assert bands[0]["price_high"] == 76800.0
+        assert bands[0]["bin_count"] == 3
+
+    def test_peak_tracks_max_usd_not_max_price(self):
+        """peak_price 必须是 USD 最大的 cluster 价位（不是带的最高价）。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, total_usd=500_000_000, side="short"),  # 最大 USD
+            _make_liq(price_center=76600.0, total_usd=100_000_000, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert bands[0]["peak_price"] == 76400.0  # 不是 76600（带最高价）
+        assert bands[0]["peak_usd"] == 500_000_000
+
+    def test_zero_atr_falls_back_to_pct_threshold(self):
+        """ATR=0 时退化到 0.4% × last_price 阈值。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, total_usd=85_000_000, side="short"),
+            _make_liq(price_center=76700.0, total_usd=118_000_000, side="short"),
+        ]
+        # threshold = 0.4% × 76280 = 305 → 间距 300 < 305 → 合并
+        bands = aggregate_stop_bands(clusters, 76280.0, 0.0)
+        assert len(bands) == 1
+        # 间距 = 76700-76400 = 300，刚好 ≤ 305 → 合并
+        assert bands[0]["bin_count"] == 2
+
+    def test_exchange_count_max_tracked(self):
+        """exchange_count_max 取带内最高值（而不是平均/最低）。"""
+        from ai.strategic_priority import aggregate_stop_bands
+        clusters = [
+            _make_liq(price_center=76400.0, exchange_count=2, side="short"),
+            _make_liq(price_center=76600.0, exchange_count=4, side="short"),
+            _make_liq(price_center=76700.0, exchange_count=1, side="short"),
+        ]
+        bands = aggregate_stop_bands(clusters, 76280.0, 400.0)
+        assert bands[0]["exchange_count_max"] == 4

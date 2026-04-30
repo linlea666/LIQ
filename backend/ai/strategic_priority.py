@@ -482,3 +482,127 @@ def sort_liq_clusters(
         ),
         reverse=True,
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stop Liquidity Band 聚合（GPT 反馈 G-3 必修）
+# ────────────────────────────────────────────────────────────────────────────
+#
+# 根因：
+#   §8 给 AI 的 1d / 7d / 30d 各 8 个 cluster = 24 个 100 美元 bins。AI 看到
+#   76,400 / 76,500 / 76,600 / 76,700 / 76,800 / 77,000 这种连续点，无法形成
+#   "上方有一条 600 美元宽的扫空带"的整体认知。这是反骑墙规则能否真正落地
+#   的前提——AI 不知道扫空带边缘在哪，就没法判断"扫前 / 扫中 / 扫后"。
+#
+# 算法：单 pass 距离阈值聚类
+#   1. 把 clusters 按 price_center 升序排序
+#   2. 维护当前带 [low, high]，下一个 cluster 与 high 的价差 ≤ threshold 即合并
+#   3. threshold = max(0.4 × ATR, 0.4% × last_price)（无 ATR 时退化到 0.4%）
+#
+# 注意：不跨周期合并——每个 cycle (1d/7d/30d) 各自聚合，保留周期信号差异。
+# 跨周期共识合并是更高级的优化，可单独 PR 处理。
+
+
+def aggregate_stop_bands(
+    clusters: list["LiqCluster"],
+    last_price: float,
+    atr: float,
+) -> list[dict]:
+    """把按距离从近到远排序的 LiqCluster 列表聚合成 stop liquidity bands。
+
+    Args:
+        clusters: 单侧（above 或 below）的 LiqCluster 列表（任意顺序，函数内
+            会按 price_center 升序）
+        last_price: 当前价（用于阈值计算与百分比距离）
+        atr: ATR 绝对值（与 last_price 同单位；为 0 时退化到纯百分比阈值）
+
+    Returns:
+        list of dict（按 price_low 升序）：
+            {
+              "price_low": float,
+              "price_high": float,
+              "peak_price": float,        # 带内 USD 最大的 cluster 价位
+              "peak_usd": float,
+              "total_usd": float,
+              "distance_low_pct": float,  # 带 lower 边距当前价百分比（带符号：above=正/below=负）
+              "distance_high_pct": float,
+              "bin_count": int,
+              "exchange_count_max": int,  # 带内最高的 exchange_count
+              "constituents_count": int,  # = bin_count（语义别名，前端可用）
+              "side": str,                # 取自首个 cluster.side（"long" | "short"）
+            }
+    """
+    if not clusters or last_price <= 0:
+        return []
+
+    # 阈值：max(0.4 × ATR, 0.4% × last_price)
+    pct_thresh = 0.004 * last_price
+    atr_thresh = 0.4 * (atr or 0.0)
+    threshold = max(pct_thresh, atr_thresh)
+    if threshold <= 0:
+        return []
+
+    # 按 price_center 升序（聚合需要邻接判断）
+    sorted_cs = sorted(
+        clusters,
+        key=lambda c: float(getattr(c, "price_center", 0.0) or 0.0),
+    )
+
+    bands: list[dict] = []
+    cur: Optional[dict] = None
+
+    for c in sorted_cs:
+        cp = float(getattr(c, "price_center", 0.0) or 0.0)
+        if cp <= 0:
+            continue
+        usd = float(getattr(c, "total_usd", 0.0) or 0.0)
+        ex_cnt = int(getattr(c, "exchange_count", 1) or 1)
+        side = (getattr(c, "side", "") or "").lower()
+
+        if cur is None:
+            cur = _new_band(c, cp, usd, ex_cnt, side)
+            continue
+
+        # 是否与当前带相邻
+        if (cp - cur["price_high"]) <= threshold:
+            cur["price_high"] = max(cur["price_high"], cp)
+            cur["total_usd"] += usd
+            cur["bin_count"] += 1
+            if usd > cur["peak_usd"]:
+                cur["peak_usd"] = usd
+                cur["peak_price"] = cp
+            cur["exchange_count_max"] = max(cur["exchange_count_max"], ex_cnt)
+        else:
+            bands.append(_finalize_band(cur, last_price))
+            cur = _new_band(c, cp, usd, ex_cnt, side)
+
+    if cur is not None:
+        bands.append(_finalize_band(cur, last_price))
+
+    return bands
+
+
+def _new_band(c, cp: float, usd: float, ex_cnt: int, side: str) -> dict:
+    return {
+        "price_low": cp,
+        "price_high": cp,
+        "peak_price": cp,
+        "peak_usd": usd,
+        "total_usd": usd,
+        "bin_count": 1,
+        "exchange_count_max": ex_cnt,
+        "side": side,
+    }
+
+
+def _finalize_band(b: dict, last_price: float) -> dict:
+    """填充 distance_*_pct（带符号：above 自然得正，below 自然得负）。
+
+    注意：与 §6/§7 渲染一致，above（side=short）距离为正，below（side=long）距离为负。
+    无需根据 side 分支——price - last_price 自然反映符号；这与 LiqCluster.distance_pct
+    旧契约（恒为绝对值）的差异由调用方知晓即可。
+    """
+    b["distance_low_pct"] = round((b["price_low"] - last_price) / last_price * 100.0, 3)
+    b["distance_high_pct"] = round((b["price_high"] - last_price) / last_price * 100.0, 3)
+    b["constituents_count"] = b["bin_count"]
+    return b
