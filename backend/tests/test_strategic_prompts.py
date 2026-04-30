@@ -186,6 +186,58 @@ class TestNoCrashOnPartialData:
         # OI 数值出现在 §9
         assert "20.00B" in text or "20000000000" in text
 
+    def test_oi_with_venue_split(self):
+        """venue_split 渲染分支：曾因字段名 typo（v.exchange vs v.venue）整链崩溃。
+
+        本用例显式构造非空 venue_split → 触发 prompt 中 line 675 的 join 闭包，
+        如果未来再写错字段名（exchange / name / 其它），用例立即失败。
+        """
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import (
+            MarketActionFacts,
+            OISnapshot,
+            OIVenueEntry,
+        )
+
+        facts = MarketActionFacts(
+            coin="BTC",
+            timestamp=1700000000,
+            oi=OISnapshot(
+                current_usd=20_000_000_000,
+                change_1h_pct=1.5,
+                change_24h_pct=3.2,
+                venue_split=[
+                    OIVenueEntry(
+                        venue="Binance",
+                        oi_usd=12_000_000_000,
+                        share_pct=60.0,
+                        change_1h_pct=2.1,
+                        change_24h_pct=4.5,
+                    ),
+                    OIVenueEntry(
+                        venue="OKX",
+                        oi_usd=4_000_000_000,
+                        share_pct=20.0,
+                        change_1h_pct=0.3,
+                        change_24h_pct=1.0,
+                    ),
+                ],
+            ),
+        )
+        snap = build_ai_snapshot(
+            coin="BTC", price=65000, high_24h=66000, low_24h=64000,
+            atr=500, market_temp_score=50, pin_risk_level="low",
+            market_action_facts=facts,
+        )
+
+        text, _ = build_user_prompt(snap)
+
+        # 渲染分支必须执行：venue 名称应直接出现在 prompt 文本里
+        assert "Binance" in text
+        assert "OKX" in text
+        assert "头部 venue 1h Δ" in text
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # extract_json_payload 复用

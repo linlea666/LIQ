@@ -673,7 +673,7 @@ def build_user_prompt(
         venue = getattr(foi, "venue_split", None) or []
         if venue:
             split_str = " · ".join(
-                f"{v.exchange}:{_fmt_pct(getattr(v, 'change_1h_pct', None))}"
+                f"{getattr(v, 'venue', '?')}:{_fmt_pct(getattr(v, 'change_1h_pct', None))}"
                 for v in venue[:3]
             )
             lines.append(f"- 头部 venue 1h Δ：{split_str}")
