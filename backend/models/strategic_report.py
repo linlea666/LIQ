@@ -185,6 +185,75 @@ class AlternativeScenario(BaseModel):
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# 扫单状态评估（GPT-15 必修 · 反骑墙规则的结构化锚点）
+# ────────────────────────────────────────────────────────────────────────────
+
+SweepBandType = Literal[
+    "short_stops_above",   # 上方空头止损/轧空磁铁
+    "long_stops_below",    # 下方多头止损/扫多磁铁
+    "",                    # 未识别 / 无邻近带
+]
+
+SweepBandState = Literal[
+    "not_swept",           # 未被触及
+    "sweeping",            # 正在扫单（价格刚进入带）
+    "swept_rejected",      # 上方扫空带被快速反向（突破失败 → 看空信号）
+    "swept_accepted",      # 上方扫空带被站稳（突破确认 → 看多信号）
+    "swept_reclaimed",     # 下方扫多带被快速收回（假跌破 → 看多信号）
+    "swept_failed",        # 下方扫多带破后无法收回（破位确认 → 看空信号）
+    "",                    # 未评估
+]
+
+SweepPreferredAction = Literal[
+    "wait_for_sweep",                # 等待扫单
+    "wait_for_reclaim",              # 等扫后收回
+    "wait_for_breakout_acceptance",  # 等突破后站稳
+    "limit_probe_ok",                # 边缘限价试错合格
+    "no_trade",                      # 无可执行计划
+    "",                              # 未评估
+]
+
+
+class SweepBandAssessment(BaseModel):
+    """单条止损/清算带的扫单状态评估。
+
+    设计：
+      - range_low/high：带价区下/上沿（与 §8 聚合带 price_low/high 对齐）
+      - band_type：标注磁铁方向（short_stops_above = 轧空磁铁；不是阻力）
+      - state：扫单状态（未触/扫中/扫破被反向/扫破被站稳 等）
+      - interpretation：AI 文字解读（"扫空 76,800 后被卖墙吸收，做空候选"等）
+    """
+    range_low: Optional[float] = None
+    range_high: Optional[float] = None
+    band_type: SweepBandType = ""
+    state: SweepBandState = ""
+    interpretation: str = ""
+
+
+class SweepStateAssessment(BaseModel):
+    """扫单状态总评（GPT-15 必修 · 反骑墙规则配套结构）。
+
+    根因：反骑墙规则要求 AI 回答"扫前 / 扫中 / 扫后"，但光靠 prompt 文字让 AI
+    自由表述是不可审计的。强制结构化字段才能让前端展示、回测脚本筛选、
+    AI 自检（"为什么 preferred_action=wait_for_sweep？state 不是 sweeping
+    而是 not_swept 应该 wait_for_sweep ✓"）。
+
+    使用约束：
+      - §8 存在止损带时**必须**填写（否则 prompt 自检阶段会标"missing"）
+      - §8 完全无数据时可省略（保持向后兼容旧历史 JSON）
+    """
+    nearest_upper_band: Optional[SweepBandAssessment] = None
+    """最近的上方扫空带（短头止损带聚合后最近一条）"""
+    nearest_lower_band: Optional[SweepBandAssessment] = None
+    """最近的下方扫多带（多头止损带聚合后最近一条）"""
+    preferred_action: SweepPreferredAction = ""
+    """当前最优动作（wait_for_sweep / wait_for_reclaim / wait_for_breakout_acceptance
+    / limit_probe_ok / no_trade）"""
+    notes: str = ""
+    """AI 综合扫单状态后的一句话总评"""
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # 数据自检
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -271,6 +340,10 @@ class AIStrategicReport(BaseModel):
 
     # ── 替代场景（强制） ──
     alternative_scenario: Optional[AlternativeScenario] = None
+
+    # ── 扫单状态评估（反骑墙规则配套结构 · §8 有止损带时建议填写） ──
+    # 旧版历史 JSON 没有此字段，Optional 兜底向后兼容
+    sweep_state_assessment: Optional[SweepStateAssessment] = None
 
     # ── 冲突矩阵（强制） ──
     evidence_matrix: EvidenceMatrix = Field(default_factory=EvidenceMatrix)

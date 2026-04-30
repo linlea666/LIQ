@@ -111,6 +111,89 @@ class TestAIStrategicReport:
         assert r.evidence_matrix.long_evidence == []
         assert r.data_self_check.hard_stop_triggered is False
         assert r.primary_plan is None
+        # PR-A G-15: sweep_state_assessment 默认 None（向后兼容旧历史 JSON）
+        assert r.sweep_state_assessment is None
+
+    def test_sweep_state_assessment_full_roundtrip(self):
+        """G-15 必修：SweepStateAssessment + 双侧 SweepBandAssessment 完整序列化。
+
+        根因防御：反骑墙规则要求 AI 输出"扫前/扫中/扫后"，必须有结构化字段
+        而不是只靠 prompt 文字。schema 字段值 + state 枚举 + preferred_action
+        枚举 都需要可序列化往返。
+        """
+        from models.strategic_report import (
+            AIStrategicReport,
+            SweepBandAssessment,
+            SweepStateAssessment,
+        )
+
+        sweep = SweepStateAssessment(
+            nearest_upper_band=SweepBandAssessment(
+                range_low=76400.0,
+                range_high=76800.0,
+                band_type="short_stops_above",
+                state="not_swept",
+                interpretation="76,400-76,800 是上方空头止损/扫空磁铁，未触；"
+                "若被扫且回吐 > 200 USD 视为 swept_rejected → 做空候选",
+            ),
+            nearest_lower_band=SweepBandAssessment(
+                range_low=75000.0,
+                range_high=75300.0,
+                band_type="long_stops_below",
+                state="not_swept",
+                interpretation="75,000-75,300 是下方多头止损/扫多磁铁，未触；"
+                "若被扫且 5m 收回 > 75,400 视为 swept_reclaimed → 做多候选",
+            ),
+            preferred_action="wait_for_sweep",
+            notes="当前价距上下扫单带均 < 1.5 ATR，等任一方向扫单后反应明确再动。",
+        )
+        report = AIStrategicReport(
+            coin="BTC", timestamp=1700000000,
+            decision="WAIT",
+            sweep_state_assessment=sweep,
+        )
+
+        dumped = report.model_dump()
+        from models.strategic_report import AIStrategicReport as ReportCls
+        restored = ReportCls.model_validate(dumped)
+        assert restored.sweep_state_assessment is not None
+        assert restored.sweep_state_assessment.preferred_action == "wait_for_sweep"
+        assert restored.sweep_state_assessment.nearest_upper_band.band_type == "short_stops_above"
+        assert restored.sweep_state_assessment.nearest_upper_band.state == "not_swept"
+        assert restored.sweep_state_assessment.nearest_lower_band.band_type == "long_stops_below"
+
+    def test_sweep_state_invalid_band_type_rejected(self):
+        """band_type 限制在 short_stops_above / long_stops_below / "" 三选一。"""
+        from models.strategic_report import SweepBandAssessment
+
+        with pytest.raises(ValidationError):
+            SweepBandAssessment(band_type="resistance")  # 错误：止损带不能叫 resistance
+
+    def test_sweep_state_invalid_state_rejected(self):
+        """state 枚举严格区分上方/下方场景。"""
+        from models.strategic_report import SweepBandAssessment
+
+        with pytest.raises(ValidationError):
+            SweepBandAssessment(state="invalid_state")
+
+    def test_legacy_history_without_sweep_state_loads(self):
+        """G-15 兼容性：旧版历史 JSON（无 sweep_state_assessment 字段）必须能加载。
+
+        防 strategic_history.json 因新字段而无法反序列化。
+        """
+        from models.strategic_report import AIStrategicReport
+
+        # 模拟旧持久化（缺 sweep_state_assessment）
+        legacy_dict = {
+            "coin": "BTC",
+            "timestamp": 1700000000,
+            "decision": "WAIT",
+            "horizon": "intraday",
+            "bias": "neutral",
+            "confidence": 0.5,
+        }
+        report = AIStrategicReport.model_validate(legacy_dict)
+        assert report.sweep_state_assessment is None  # 默认 None，无破坏
 
     def test_confidence_range_validation(self):
         """confidence 必须在 [0, 1]——保证 prompt 约束被 schema 拦住。"""

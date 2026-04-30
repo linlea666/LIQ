@@ -4,7 +4,28 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { API_BASE } from "@/lib/constants";
-import type { StrategicReport, StrategicTradingPlan } from "@/lib/types";
+import type {
+  StrategicReport,
+  StrategicTradingPlan,
+  SweepBandAssessment,
+} from "@/lib/types";
+
+const SWEEP_STATE_CN: Record<string, string> = {
+  not_swept: "未触及",
+  sweeping: "扫单中",
+  swept_rejected: "扫破被反向（突破失败）",
+  swept_accepted: "扫破被站稳（突破确认）",
+  swept_reclaimed: "扫破被收回（假跌破）",
+  swept_failed: "扫破未收回（破位确认）",
+};
+
+const PREFERRED_ACTION_CN: Record<string, string> = {
+  wait_for_sweep: "等待扫单",
+  wait_for_reclaim: "等扫后收回",
+  wait_for_breakout_acceptance: "等突破后站稳",
+  limit_probe_ok: "边缘限价试错合格",
+  no_trade: "无可执行计划",
+};
 
 const DECISION_CN: Record<string, string> = {
   WAIT: "等待",
@@ -215,9 +236,13 @@ export default function StrategicDetailPage() {
           <Card title="对立场景（强制）">
             <p className="text-white font-medium">{data.alternative_scenario.description}</p>
             <p className="text-xs text-slate-500 mt-2">
-              概率 {data.alternative_scenario.probability_pct}% · 触发: {data.alternative_scenario.trigger}
+              倾向 {data.alternative_scenario.probability_pct}%（相对情景权重，非统计概率） · 触发: {data.alternative_scenario.trigger}
             </p>
           </Card>
+        )}
+
+        {data.sweep_state_assessment && (
+          <SweepStateCard assessment={data.sweep_state_assessment} />
         )}
 
         {data.evidence_matrix && (
@@ -381,6 +406,60 @@ function CurrentZoneCard({ zone }: { zone: CurrentZoneAssessment }) {
           <p className="text-amber-300/90 mt-1">{zone.key_conflict}</p>
         </div>
       )}
+    </Card>
+  );
+}
+
+type SweepStateAssessment = NonNullable<StrategicReport["sweep_state_assessment"]>;
+
+function SweepBandRow({
+  band,
+  side,
+}: {
+  band: SweepBandAssessment | null | undefined;
+  side: "upper" | "lower";
+}) {
+  if (!band) return null;
+  const stateLabel = band.state ? (SWEEP_STATE_CN[band.state] ?? band.state) : "—";
+  const sideLabel =
+    side === "upper" ? "上方空头止损/轧空磁铁（不是阻力）" : "下方多头止损/扫多磁铁（不是支撑）";
+  const range =
+    band.range_low != null && band.range_high != null
+      ? `[$${band.range_low.toLocaleString("en-US")}, $${band.range_high.toLocaleString("en-US")}]`
+      : "—";
+  return (
+    <div className="border border-slate-800/50 rounded p-3 space-y-1.5">
+      <div className="text-xs text-slate-500">{sideLabel}</div>
+      <div className="font-mono text-sm text-white">{range}</div>
+      <div className="text-xs">
+        <span className="text-slate-500">状态：</span>
+        <span className="text-white">{stateLabel}</span>
+      </div>
+      {band.interpretation && (
+        <p className="text-xs text-slate-400 leading-relaxed">{band.interpretation}</p>
+      )}
+    </div>
+  );
+}
+
+function SweepStateCard({ assessment }: { assessment: SweepStateAssessment }) {
+  const action = assessment.preferred_action || "";
+  const actionLabel = action ? (PREFERRED_ACTION_CN[action] ?? action) : "—";
+  return (
+    <Card title="扫单状态评估（反骑墙规则锚点）">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SweepBandRow band={assessment.nearest_upper_band} side="upper" />
+        <SweepBandRow band={assessment.nearest_lower_band} side="lower" />
+      </div>
+      <div className="mt-4 pt-3 border-t border-slate-800/50 space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500 text-xs">推荐动作</span>
+          <span className="text-emerald-300 font-medium">{actionLabel}</span>
+        </div>
+        {assessment.notes && (
+          <p className="text-xs text-slate-400 leading-relaxed">{assessment.notes}</p>
+        )}
+      </div>
     </Card>
   );
 }

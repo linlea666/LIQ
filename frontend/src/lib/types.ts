@@ -9,6 +9,27 @@ export interface TickerData {
   change_pct_24h: number;
 }
 
+/**
+ * 单条止损/清算带的扫单状态评估（GPT-15 配套）。
+ *
+ * band_type 提示语义：short_stops_above 是轧空磁铁不是阻力；
+ * long_stops_below 是扫多磁铁不是支撑。
+ */
+export interface SweepBandAssessment {
+  range_low?: number | null;
+  range_high?: number | null;
+  band_type?: "short_stops_above" | "long_stops_below" | "";
+  state?:
+    | "not_swept"
+    | "sweeping"
+    | "swept_rejected"
+    | "swept_accepted"
+    | "swept_reclaimed"
+    | "swept_failed"
+    | "";
+  interpretation?: string;
+}
+
 /** 后端 `AIStrategicReport` JSON（REST / WS `strategic_report`），前端按需取子集。 */
 export type StrategicDecision =
   | "WAIT"
@@ -59,6 +80,22 @@ export interface StrategicReport {
     description: string;
     probability_pct: number;
     trigger: string;
+  } | null;
+  /**
+   * 扫单状态评估（GPT-15 必修 · 反骑墙规则配套结构）。
+   * §8 存在聚合带时建议填写；旧版历史 JSON 可能为空。
+   */
+  sweep_state_assessment?: {
+    nearest_upper_band?: SweepBandAssessment | null;
+    nearest_lower_band?: SweepBandAssessment | null;
+    preferred_action?:
+      | "wait_for_sweep"
+      | "wait_for_reclaim"
+      | "wait_for_breakout_acceptance"
+      | "limit_probe_ok"
+      | "no_trade"
+      | "";
+    notes?: string;
   } | null;
   evidence_matrix?: {
     long_evidence: unknown[];

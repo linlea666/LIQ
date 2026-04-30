@@ -205,6 +205,25 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
     "probability_pct": "0-100 的整数（这是相对情景权重，非统计概率，仅表达主观倾向）",
     "trigger": "触发该场景所需的观察条件"
   },
+  "sweep_state_assessment": {
+    "_说明": "反骑墙规则配套结构。§8 存在止损带时必填；§8 完全无数据时可省略。这是 AI 决策的可审计锚点——前端 / 回测脚本会读 preferred_action 与 state 做断言。",
+    "nearest_upper_band": {
+      "range_low": "最近上方空头止损带下沿价位（参考 §8 聚合带 #1 price_low）",
+      "range_high": "最近上方空头止损带上沿价位",
+      "band_type": "short_stops_above（固定值；提示 AI: 这是轧空磁铁，不是阻力）",
+      "state": "not_swept | sweeping | swept_rejected | swept_accepted（上方枚举）",
+      "interpretation": "AI 文字解读，例：'76,800 扫空带未触；若被扫且回吐 > 200 USD 视为 swept_rejected → 做空候选'"
+    },
+    "nearest_lower_band": {
+      "range_low": "最近下方多头止损带下沿价位",
+      "range_high": "最近下方多头止损带上沿价位",
+      "band_type": "long_stops_below（固定值；提示 AI: 这是扫多磁铁，不是支撑）",
+      "state": "not_swept | sweeping | swept_reclaimed | swept_failed（下方枚举）",
+      "interpretation": "AI 文字解读，例：'75,300 扫多带未触；若被扫且 5m 收回 > 75,400 视为 swept_reclaimed → 做多候选'"
+    },
+    "preferred_action": "wait_for_sweep | wait_for_reclaim | wait_for_breakout_acceptance | limit_probe_ok | no_trade",
+    "notes": "一句话总评：当前扫单状态 + 推荐动作的衔接逻辑"
+  },
   "evidence_matrix": {
     "long_evidence": [
       {"section_ref": "§7", "observation": "纯事实+数值", "inference": "跨维度判断", "supports": "main", "weight": "high"}
@@ -235,6 +254,7 @@ SYSTEM_PROMPT = """你是"Strategic Trading Decision Officer"——主 AI 决策
 - `decision in [LONG_PLAN, SHORT_PLAN]` 时 `primary_plan` 必填，且 `evidence_matrix.contradictions` 不能严重冲突
 - `decision in [LONG_OBSERVATION, SHORT_OBSERVATION]` 时 `primary_plan` **必填**，`trigger_conditions` 必须明确写"等什么"（具体到价位 + bar 周期 + 确认信号）
 - `decision = WAIT` 时 `no_trade_conditions` 必填，且 `alternative_plan` 不允许为 null（给"区间边缘 / 扫后反应 / 突破跟进"任一条件化方案）
+- §8 存在聚合带时 `sweep_state_assessment` 必填（否则反骑墙规则的"扫前/扫中/扫后"判断失去结构化锚点）。state 枚举严格区分：上方带只能取 `not_swept/sweeping/swept_rejected/swept_accepted`，下方带只能取 `not_swept/sweeping/swept_reclaimed/swept_failed`
 - 禁止 evidence 只写 observation 不写 inference
 - 禁止 inference 引入 facts 之外的信息（宏观传闻 / 币圈八卦）
 - 禁止把 §8 清算/止损带描述为"阻力"或"支撑"（详见核心原则 #11）

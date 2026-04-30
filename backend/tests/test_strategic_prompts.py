@@ -461,6 +461,25 @@ class TestSystemPromptHardRulesV2:
         assert "insufficient_evidence" in SYSTEM_PROMPT
         assert "禁止幻觉" in SYSTEM_PROMPT or "不要靠想象" in SYSTEM_PROMPT
 
+    def test_sweep_state_assessment_in_schema(self):
+        """G-15 必修：sweep_state_assessment 必须在 schema 描述里 + 验证规则里出现。"""
+        from ai.strategic_prompts import SYSTEM_PROMPT
+        # schema 字段
+        assert "sweep_state_assessment" in SYSTEM_PROMPT
+        assert "nearest_upper_band" in SYSTEM_PROMPT
+        assert "nearest_lower_band" in SYSTEM_PROMPT
+        # 状态枚举（区分上下方场景）
+        assert "swept_rejected" in SYSTEM_PROMPT
+        assert "swept_accepted" in SYSTEM_PROMPT
+        assert "swept_reclaimed" in SYSTEM_PROMPT
+        assert "swept_failed" in SYSTEM_PROMPT
+        # preferred_action 枚举
+        assert "wait_for_sweep" in SYSTEM_PROMPT
+        assert "wait_for_reclaim" in SYSTEM_PROMPT
+        assert "limit_probe_ok" in SYSTEM_PROMPT
+        # 验证规则：§8 有聚合带时必填
+        assert "聚合带时" in SYSTEM_PROMPT and "sweep_state_assessment" in SYSTEM_PROMPT
+
 
 class TestLiqClusterRenderingSemantics:
     """§8 渲染层防御：(1) 距离符号根据 side 动态决定，(2) 标题写明语义。"""
