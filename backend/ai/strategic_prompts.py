@@ -343,7 +343,16 @@ def build_user_prompt(
         except Exception:
             prev_dict = None
     if prev_dict:
-        _header("§0'", "前情提要（上一份决策报告）")
+        _header("§0'", "前情提要（你上一轮的输出 · 仅作连贯性参考）")
+        # 反路径依赖硬提示：上一份是"同一个 AI 角色"的自我延续，不是真理。
+        # 防止弱 AI 出现"上轮 LONG 这轮就 LONG"的惯性推理——必须基于 §1-§12 当前数据
+        # 重新做判断，与上轮假设矛盾时果断修正/反转。
+        lines.append(
+            '- **使用约束**：以下是你（同一个 AI 角色）上一轮的输出，**仅作连贯性参考、不是真理**。'
+            '禁止路径依赖（「上轮 LONG 这轮就继续 LONG」/「上轮 WAIT 这轮也跟着 WAIT」都是错误推理）。'
+            '你必须基于 §1-§12 当前 facts **独立**得出本轮决策——若当前数据与上轮假设矛盾，'
+            '应在 confidence_rationale 中明确说明「修正/反转上轮 X 因为 Y」。'
+        )
         prev_ts = prev_dict.get("timestamp")
         prev_decision = prev_dict.get("decision", "—")
         prev_horizon = prev_dict.get("horizon", "—")

@@ -118,6 +118,10 @@ class TestBuildUserPromptStructure:
         assert "前情提要" in text
         assert "LONG_PLAN" in text
         assert "回踩支撑" in text
+        # 反路径依赖硬提示必须存在（防止 AI 路径依赖"上轮 LONG 这轮也 LONG"）
+        assert "禁止路径依赖" in text
+        assert "仅作连贯性参考" in text
+        assert "不是真理" in text
 
 
 # ────────────────────────────────────────────────────────────────────────────
