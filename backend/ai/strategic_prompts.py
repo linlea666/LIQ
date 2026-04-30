@@ -653,7 +653,15 @@ def build_user_prompt(
                 lines.append(_fmt_kl(kl))
 
     # ── §7 现货墙 / 合约墙 / Coinbase / Orderbook ──
-    _header("§7", "挂单墙（现货 + 合约 · 按 priority 排序 · 含 Coinbase 共振 / 双源）")
+    _header("§7", "挂单墙（按 priority 排序 · 厚度拆分：合约杠杆 / Binance 现货 / Coinbase 现货）")
+    # G-9：在墙列表前加"语义指南"，让 AI 一眼知道厚度来源差异。
+    lines.append(
+        "- **厚度语义**："
+        "**合约**=杠杆挂单（可被清算/撤单）；"
+        "**Binance 现货**=真买卖家（不可杠杆爆仓 → 真支撑/阻力硬证据）；"
+        "**Coinbase 现货**=美国机构资金 footprint（ETF 链路 · 独立硬证据）。"
+        "三者同价位共振 → 最高可信。"
+    )
 
     def _fmt_wall(w) -> str:
         side_zh = "卖墙" if getattr(w, "side", "") == "ask" else "买墙"
@@ -669,16 +677,49 @@ def build_user_prompt(
             f"break_risk={_fmt(getattr(w, 'break_through_risk', 0), nd=2)}"
         )
 
+    def _fmt_wall_breakdown(w) -> Optional[str]:
+        """G-9：把 current_usd 拆成 合约/Binance 现货/Coinbase 现货 3 维度。
+
+        约定：current_usd 是合约层（depth heatmap），spot_current_usd 是 Binance
+        现货同价区，coinbase_spot_usd 是 Coinbase 现货同价区。`source` 字段标注
+        本墙的底层 dataset（spot_only / depth_only / spot+depth 等）。
+
+        若三者全部为 0 / spot_only 时也给出对应说明，便于 AI 读取。
+        """
+        contract_usd = float(getattr(w, "current_usd", 0) or 0)
+        binance_spot = float(getattr(w, "spot_current_usd", 0) or 0)
+        coinbase_spot = float(getattr(w, "coinbase_spot_usd", 0) or 0)
+        source = getattr(w, "source", None) or "—"
+        # 当三个都是 0（不应该发生，至少 current_usd 有值）则跳过
+        if contract_usd <= 0 and binance_spot <= 0 and coinbase_spot <= 0:
+            return None
+        parts: list[str] = []
+        if contract_usd > 0:
+            parts.append(f"合约 {_fmt(contract_usd)}")
+        if binance_spot > 0:
+            parts.append(f"Binance 现货 {_fmt(binance_spot)}")
+        if coinbase_spot > 0:
+            parts.append(f"Coinbase 现货 {_fmt(coinbase_spot)}")
+        if not parts:
+            return None
+        return f"     · 厚度拆分：{' + '.join(parts)} · source=`{source}`"
+
     walls_above = sort_walls(snapshot.wall_zones_above or [])[:TOP_N_WALLS_PER_SIDE]
     walls_below = sort_walls(snapshot.wall_zones_below or [])[:TOP_N_WALLS_PER_SIDE]
     if walls_above:
         _sub(f"上方卖墙（top {len(walls_above)}）")
         for w in walls_above:
             lines.append(_fmt_wall(w))
+            bd = _fmt_wall_breakdown(w)
+            if bd:
+                lines.append(bd)
     if walls_below:
         _sub(f"下方买墙（top {len(walls_below)}）")
         for w in walls_below:
             lines.append(_fmt_wall(w))
+            bd = _fmt_wall_breakdown(w)
+            if bd:
+                lines.append(bd)
     if not (walls_above or walls_below):
         lines.append("- 无显著挂单墙数据。")
 
@@ -898,23 +939,59 @@ def build_user_prompt(
             lines.append(f"- 连续负费率天数：{days_neg}")
 
     # CVD（合约 + 现货）
+    # G-12：在 trend 之外暴露最近 6 根 5m bar 的 delta 序列；trend_1h/30m 是
+    # 派生标签，序列让 AI 直接看到拐点/连续性（如最后 2-3 根反转）。
     fcc = snapshot.facts_cvd_contract
     fcs = snapshot.facts_cvd_spot
+
+    def _fmt_cvd_series(cvd: Any) -> str:
+        """返回 `[+1.2k, +0.5k, -0.3k, -1.1k, …]` 形式，最后一根用 `*` 标注未收盘。"""
+        if cvd is None:
+            return ""
+        seq = getattr(cvd, "recent_delta_5m", None) or []
+        if not seq:
+            return ""
+        bar_closed = getattr(cvd, "latest_bar_closed", None)
+        parts: list[str] = []
+        for i, v in enumerate(seq[-6:]):
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                parts.append("—")
+                continue
+            sign = "+" if fv >= 0 else "−"
+            mag = abs(fv)
+            if mag >= 1_000_000:
+                disp = f"{mag / 1_000_000:.2f}M"
+            elif mag >= 1_000:
+                disp = f"{mag / 1_000:.1f}k"
+            else:
+                disp = f"{mag:.0f}"
+            tag = "*" if (i == len(seq[-6:]) - 1 and bar_closed is False) else ""
+            parts.append(f"{sign}{disp}{tag}")
+        return "[" + ", ".join(parts) + "]"
+
     if fcc or fcs:
-        _sub("CVD · 期现")
+        _sub("CVD · 期现（最近 6×5m + 1h 趋势 · `*`=未收盘 bar）")
         if fcc:
+            series_str = _fmt_cvd_series(fcc)
             lines.append(
                 f"- 合约：trend_1h=`{getattr(fcc, 'trend_1h', '—')}` | "
                 f"trend_30m=`{getattr(fcc, 'trend_recent_30m', '—')}` | "
                 f"delta_1h={_fmt(getattr(fcc, 'delta_1h', None))} | "
                 f"divergence=`{getattr(fcc, 'divergence_note', '—')}`"
             )
+            if series_str:
+                lines.append(f"  · 最近 6×5m delta（旧→新）：{series_str}")
         if fcs:
+            series_str = _fmt_cvd_series(fcs)
             lines.append(
                 f"- 现货：trend_1h=`{getattr(fcs, 'trend_1h', '—')}` | "
                 f"trend_30m=`{getattr(fcs, 'trend_recent_30m', '—')}` | "
                 f"delta_1h={_fmt(getattr(fcs, 'delta_1h', None))}"
             )
+            if series_str:
+                lines.append(f"  · 最近 6×5m delta（旧→新）：{series_str}")
 
     # Basis
     fb = snapshot.facts_basis

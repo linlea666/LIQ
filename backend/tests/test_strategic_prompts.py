@@ -1069,6 +1069,228 @@ class TestFootprintAbsorptionInterpretation:
         assert "$8.00M" in s10 or "$8,000,000" in s10  # vol
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# G-12：§9 CVD 6×5m 序列展示（让 AI 看到瞬时拐点）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestCVDFiveMinuteSeries:
+    @staticmethod
+    def _make_facts_with_cvd(*, contract_seq=None, spot_seq=None,
+                              contract_closed=True, spot_closed=True):
+        from models.market_action import CVDSnapshot, MarketActionFacts
+        kwargs: dict = {}
+        if contract_seq is not None:
+            kwargs["cvd_contract"] = CVDSnapshot(
+                delta_1h=sum(contract_seq),
+                trend_1h="rising",
+                trend_recent_30m="declining",
+                recent_delta_5m=list(contract_seq),
+                latest_bar_closed=contract_closed,
+            )
+        if spot_seq is not None:
+            kwargs["cvd_spot"] = CVDSnapshot(
+                delta_1h=sum(spot_seq),
+                trend_1h="declining",
+                trend_recent_30m="flat",
+                recent_delta_5m=list(spot_seq),
+                latest_bar_closed=spot_closed,
+            )
+        return MarketActionFacts(coin="BTC", timestamp=1700000000, **kwargs)
+
+    def _build(self, facts):
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            market_action_facts=facts,
+        )
+        text, _ = build_user_prompt(snap)
+        return text[text.index("## §9"):text.index("## §10")]
+
+    def test_section_9_cvd_renders_5m_series(self):
+        """合约 CVD 有序列时必须输出 `最近 6×5m delta`。"""
+        facts = self._make_facts_with_cvd(
+            contract_seq=[1500.0, 800.0, -300.0, -1100.0, -2300.0, -3500.0],
+        )
+        s9 = self._build(facts)
+        assert "最近 6×5m delta（旧→新）" in s9
+        # 序列必须包含至少一个负数与一个正数
+        assert "+1.5k" in s9
+        assert "−3.5k" in s9
+
+    def test_unclosed_bar_marked_with_asterisk(self):
+        """latest_bar_closed=False 时最后一根必须带 `*` 标注。"""
+        facts = self._make_facts_with_cvd(
+            contract_seq=[100.0, 200.0, 300.0, 400.0, 500.0, 999.0],
+            contract_closed=False,
+        )
+        s9 = self._build(facts)
+        # 最后一个数 +999*（最后一根被标 *）
+        assert "+999*" in s9
+        # 标题必须解释 *
+        assert "未收盘 bar" in s9 or "`*`=未收盘" in s9
+
+    def test_closed_bar_not_marked(self):
+        """latest_bar_closed=True 时最后一根**不**带 *。"""
+        facts = self._make_facts_with_cvd(
+            contract_seq=[100.0, 200.0, 300.0, 400.0, 500.0, 999.0],
+            contract_closed=True,
+        )
+        s9 = self._build(facts)
+        # 不应出现带 * 的最后一根
+        assert "+999*" not in s9
+        # 但裸值 +999 应在
+        assert "+999" in s9
+
+    def test_long_series_truncates_to_last_six(self):
+        """超过 6 根时只渲染最后 6 根（旧→新）。"""
+        seq = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+        facts = self._make_facts_with_cvd(contract_seq=seq)
+        s9 = self._build(facts)
+        # 只应出现最后 6 个：50, 60, 70, 80, 90, 100
+        assert "+100" in s9
+        assert "+50" in s9
+        # 旧的 10 / 20 / 30 / 40 不应出现
+        for old in ("+10", "+20", "+30", "+40"):
+            line = next((ln for ln in s9.split("\n")
+                         if "最近 6×5m" in ln and "合约" in ln), "")
+            # 这里需要严格在序列行检查；简单做 substring 检查序列行
+        # 改用更准确的：渲染串里 "+10," 不应出现（前后有逗号）
+        assert "+10, " not in s9
+        assert "+40, " not in s9
+
+    def test_no_series_falls_back_silently(self):
+        """recent_delta_5m=[] 时不输出"6×5m delta（旧→新）"行（不污染 prompt）。"""
+        facts = self._make_facts_with_cvd(contract_seq=[])
+        s9 = self._build(facts)
+        # trend_1h 行还在
+        assert "trend_1h" in s9
+        # 但不应有"6×5m delta（旧→新）"明细行（标题行允许出现"最近 6×5m"字样）
+        assert "delta（旧→新）" not in s9
+
+    def test_both_contract_and_spot_renders_two_series(self):
+        """期现都有数据时，两条序列各自渲染。"""
+        facts = self._make_facts_with_cvd(
+            contract_seq=[100.0, 200.0, -50.0, -100.0, -200.0, -300.0],
+            spot_seq=[50.0, 80.0, 60.0, 40.0, 20.0, 10.0],
+        )
+        s9 = self._build(facts)
+        # 应出现两条 "最近 6×5m delta"
+        count = s9.count("最近 6×5m delta")
+        assert count == 2, f"期现各一条；实际 {count}"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# G-9：§7 墙厚度按 合约 / Binance 现货 / Coinbase 现货 三维度拆分渲染
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestWallBreakdownRendering:
+    @staticmethod
+    def _wall(*, side="ask", price=76_500.0, contract_usd=20_000_000.0,
+              binance_spot=0.0, coinbase_spot=0.0, source="depth_only",
+              dual_source=False, coinbase_confluence=False):
+        from models.orderbook_pressure import WallZone
+        return WallZone(
+            zone_id=f"w_{int(price)}",
+            side=side,
+            price_low=price - 50,
+            price_high=price + 50,
+            price_mid=price,
+            peak_price=price,
+            distance_pct=0.5 if side == "ask" else -0.5,
+            current_usd=contract_usd,
+            max_usd_1h=contract_usd * 1.2,
+            avg_usd_1h=contract_usd * 0.9,
+            bin_count=3,
+            seen_count=10,
+            persistence_score=0.7,
+            trust_score=0.85,
+            visible_minutes=30,
+            source=source,
+            dual_source=dual_source,
+            spot_current_usd=binance_spot,
+            coinbase_spot_confluence=coinbase_confluence,
+            coinbase_spot_usd=coinbase_spot,
+        )
+
+    def _build(self, *, walls_above=None, walls_below=None):
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+        )
+        snap.wall_zones_above = walls_above or []
+        snap.wall_zones_below = walls_below or []
+        text, _ = build_user_prompt(snap)
+        return text[text.index("## §7"):text.index("## §8")]
+
+    def test_section_7_renders_breakdown_semantic_header(self):
+        """§7 顶部必须渲染语义指南。"""
+        s7 = self._build(walls_above=[self._wall()])
+        assert "厚度语义" in s7
+        assert "合约" in s7 and "Binance 现货" in s7 and "Coinbase 现货" in s7
+        assert "真买卖家" in s7
+        assert "ETF 链路" in s7
+
+    def test_pure_contract_wall_only_shows_contract(self):
+        """纯合约墙（spot=0, coinbase=0）只渲染"合约 $X"。"""
+        w = self._wall(contract_usd=20_000_000.0, binance_spot=0.0,
+                       coinbase_spot=0.0, source="depth_only")
+        s7 = self._build(walls_above=[w])
+        assert "厚度拆分：合约" in s7
+        assert "Binance 现货" not in s7.split("厚度拆分")[1].split("\n")[0] \
+            or "Binance 现货 $0" not in s7  # 应该完全不出现 $0 的 Binance 现货
+        assert "source=`depth_only`" in s7
+
+    def test_dual_source_wall_renders_three_components(self):
+        """三源齐备的墙（合约+Binance+Coinbase）必须三段全显。"""
+        w = self._wall(
+            contract_usd=15_000_000.0,
+            binance_spot=8_000_000.0,
+            coinbase_spot=3_000_000.0,
+            source="spot+depth",
+            dual_source=True,
+            coinbase_confluence=True,
+        )
+        s7 = self._build(walls_above=[w])
+        assert "厚度拆分：" in s7
+        # 三个来源都必须出现（_fmt 输出形如 "15.00M"）
+        assert "合约 15.00M" in s7
+        assert "Binance 现货 8.00M" in s7
+        assert "Coinbase 现货 3.00M" in s7
+        assert "source=`spot+depth`" in s7
+        # 主行的 ·CB双源·双源 标注也保留
+        assert "·CB双源" in s7
+        assert "·双源" in s7
+
+    def test_spot_only_wall(self):
+        """spot_only 墙（来自现货热力图，contract_usd 仍由 spot 填）。"""
+        w = self._wall(
+            contract_usd=10_000_000.0,
+            binance_spot=10_000_000.0,
+            coinbase_spot=0.0,
+            source="spot_only",
+        )
+        s7 = self._build(walls_below=[w], walls_above=[])
+        assert "source=`spot_only`" in s7
+        # 至少有合约 + Binance 现货两段
+        assert "合约 10.00M" in s7
+        assert "Binance 现货 10.00M" in s7
+
+    def test_no_walls_no_breakdown_section(self):
+        """无墙时不应出现"厚度拆分：合约 ..."明细行（标题/语义指南行可以含此字样）。"""
+        s7 = self._build()
+        assert "无显著挂单墙数据" in s7
+        # 明细行格式形如 "厚度拆分：合约 X.XXM" 或 "厚度拆分：Binance 现货 X.XXM" 等
+        assert "厚度拆分：合约 " not in s7
+        assert "厚度拆分：Binance 现货 " not in s7
+        assert "厚度拆分：Coinbase 现货 " not in s7
+
+
 class TestExtractJsonPayload:
     def test_markdown_fence(self):
         from ai.strategic_prompts import extract_json_payload
