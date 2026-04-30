@@ -316,6 +316,85 @@ def _fmt_price(v: Any, nd: int = 2) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# §5 OpportunityBoard 空时的拒绝理由诊断（GPT-10 必修 · 让 AI 精准引用拒绝原因）
+# ────────────────────────────────────────────────────────────────────────────
+
+# 拒绝理由 reason_code → 中文短描述（用于按 reason 聚类后的 §5 列表表达）
+_REJECT_REASON_LABELS_CN: dict[str, str] = {
+    "role_mismatch": "zone 角色不匹配（要求 spot_defense / contested）",
+    "trust_too_low": "支撑/阻力信任分不足（< 0.70 / 0.65）",
+    "distance_too_far": "距当前价过远（|distance| > 1.5%）",
+    "data_quality_low": "data_confidence 不足（< 0.75 / 0.70）",
+    "regime_blocks": "当前 regime 阻断该方向",
+    "targets_missing": "无可达目标位",
+    "rr_insufficient": "T1 RR 低于门槛（< 2.0）",
+}
+
+
+def _collect_opportunity_rejections(brain: Any) -> list:
+    """对 brain 的 zones 跑一遍诊断；任何异常吞掉返回空 list（保证 prompt 不崩）。"""
+    if brain is None:
+        return []
+    zones = getattr(brain, "zones", None) or []
+    last_price = float(getattr(brain, "last_price", 0) or 0)
+    atr = float(getattr(brain, "atr", 0) or 0)
+    if not zones or last_price <= 0:
+        return []
+    try:
+        from processors.opportunity_engine import diagnose_opportunities
+        return diagnose_opportunities(
+            zones=zones,
+            last_price=last_price,
+            atr=atr,
+            ctx=getattr(brain, "context", None),
+            dq=getattr(brain, "data_quality", None),
+        )
+    except Exception:
+        return []
+
+
+def _summarize_rejections(rejections: list) -> list[str]:
+    """把 OpportunityRejection 按 reason_code 聚类，每个 reason 输出一行汇总。
+
+    输出格式：
+      `<reason_cn>` · 影响 N 个 zone（4 个 setup_type）：
+        · 例：zone=KL_BTC_… · support_trust=0.62 < 0.70
+    """
+    if not rejections:
+        return []
+    by_reason: dict[str, list] = {}
+    for rej in rejections:
+        code = getattr(rej, "reason_code", "unknown")
+        by_reason.setdefault(code, []).append(rej)
+
+    # 排序：按命中次数降序，同次数按 reason_code 字典序
+    ordered = sorted(by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    out: list[str] = []
+    for code, items in ordered:
+        label = _REJECT_REASON_LABELS_CN.get(code, code)
+        zone_ids = sorted({getattr(r, "zone_id", "?") for r in items})
+        # 取头 1-2 个 detail 当样例（同 reason 不同 setup_type 可能 detail 一致，去重）
+        sample_details: list[str] = []
+        seen_detail: set[str] = set()
+        for r in items:
+            d = (getattr(r, "detail", "") or "").strip()
+            if not d or d in seen_detail:
+                continue
+            seen_detail.add(d)
+            sample_details.append(d)
+            if len(sample_details) >= 2:
+                break
+        head = (
+            f"`{code}`：{label} · 命中 {len(items)} 条"
+            f"（zones={len(zone_ids)}）"
+        )
+        if sample_details:
+            head += " · 例：" + "；".join(sample_details)
+        out.append(head)
+    return out
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # build_user_prompt · §0-§14 完整渲染
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -495,7 +574,15 @@ def build_user_prompt(
     # ── §5 高盈亏比候选（OpportunityBoard） ──
     _header("§5", "高盈亏比候选（OpportunityBoard，按 state + score 排序）")
     if brain is None or not brain.opportunities:
-        lines.append("- 无 Opportunity 候选。")
+        # G-10：候选为空时调用诊断函数，按拒绝理由聚类列出原因，
+        # 让 AI 的 no_trade_conditions 能精准复述（避免黑盒"无候选"）。
+        rejections = _collect_opportunity_rejections(brain) if brain is not None else []
+        if not rejections:
+            lines.append("- 无 Opportunity 候选（zones 为空或 last_price 无效）。")
+        else:
+            lines.append("- 无 Opportunity 候选 · 拒绝原因诊断（按 reason 聚类）：")
+            for reason_line in _summarize_rejections(rejections):
+                lines.append(f"  · {reason_line}")
     else:
         opps = sort_opportunities(brain.opportunities)[:TOP_N_OPPORTUNITIES]
         for opp in opps:
@@ -862,49 +949,140 @@ def build_user_prompt(
         )
 
     # ── §10 Footprint / Absorption（硬证据确认层） ──
-    _header("§10", "Footprint / Absorption（已成交硬证据确认层）")
+    _header("§10", "Footprint / Absorption（已成交硬证据确认层 · 验证 §6/§7 的真伪）")
+    # G-11：在 §10 顶部加入解读规则，避免 AI 把这两块当噪声字段；
+    # 这是把 §6 KL / §7 现货墙从"挂单意图"升级为"实际吸收"的硬证据层。
+    lines.append(
+        "- **如何解读 §10**："
+    )
+    lines.append(
+        "  · **Footprint imbalance**："
+        "`ratio≥3.0 + side=buy` = 该价位主动买盘吃掉卖单 → 短期上行 magnet；"
+        "`side=sell` 反之 → 下行 magnet；"
+        "`one-sided`（ratio≥999）= 单边压制极强，最强方向信号。"
+        "**临时性信号，5m 内有效**。"
+    )
+    lines.append(
+        "  · **Absorption（吸收）**："
+        "主动单被对手挂单「吃下但价格不动」→ 该价位有结构性被动防守。"
+        "判定：`vol≥$5M + |delta|<0.05 + bar_count≥3 + age<4h` ⇒ 强吸收带。"
+    )
+    lines.append(
+        "  · **方向语义**："
+        "`zones_support` = 主动卖单被吸收 = **多方在该价位吃货防守**（潜在支撑硬证据）；"
+        "`zones_resistance` = 主动买单被吸收 = **空方在该价位反手压盘**（潜在阻力硬证据）。"
+    )
+    lines.append(
+        "  · **共振判定**："
+        "§10 absorption 与 §6 KL（high-tier） / §7 现货墙 **同价位** → 真支撑/真阻力，可信度高；"
+        "若 §10 在该价位**无吸收** → §6/§7 仅是「挂单意图」，需要其他数据交叉验证。"
+    )
     fp = snapshot.facts_footprint
     if fp is not None:
         _sub("Footprint")
-        lines.append(f"- bar_closed=`{getattr(fp, 'latest_bar_closed', None)}`（False = provisional）")
-        zones = getattr(fp, "top_imbalance_zones", []) or []
-        if zones:
-            lines.append(f"- top imbalance zones（{len(zones)}）：")
+        # G-11 关键缺陷即修：top_imbalance_zones / latest_bar_closed 实际嵌套在
+        # FootprintBarStats（contract_latest / spot_latest）里，旧代码 getattr
+        # 直接从 FootprintSnapshot 顶层取永远是空——AI 完全看不到 footprint。
+        contract_latest = getattr(fp, "contract_latest", None)
+        spot_latest = getattr(fp, "spot_latest", None)
+
+        def _bar_closed(bs: Any) -> Any:
+            return getattr(bs, "bar_closed", None) if bs is not None else None
+
+        contract_closed = _bar_closed(contract_latest)
+        spot_closed = _bar_closed(spot_latest)
+        if contract_closed is not None or spot_closed is not None:
+            lines.append(
+                f"- bar_closed: contract=`{contract_closed}` / spot=`{spot_closed}` "
+                "（False = provisional · 仅参考）"
+            )
+
+        def _strength_tag(ratio: float) -> str:
+            if ratio >= 999:
+                return " · **极强**"
+            if ratio >= 5:
+                return " · 强"
+            if ratio >= 3:
+                return " · 中"
+            return ""
+
+        def _render_imbalance_zones(label: str, bs: Any) -> None:
+            if bs is None:
+                return
+            zones = getattr(bs, "top_imbalance_zones", []) or []
+            if not zones:
+                return
+            lines.append(f"- {label} top imbalance zones（{len(zones)}）：")
+            # 每条是 dict（FootprintBarStats.top_imbalance_zones: list[dict]）
             for z in zones[:5]:
-                price_z = getattr(z, "price", None)
-                buy = getattr(z, "buy", 0) or 0
-                sell = getattr(z, "sell", 0) or 0
-                ratio = getattr(z, "ratio", 0) or 0
-                side = getattr(z, "side", "—")
+                if not isinstance(z, dict):
+                    continue
+                price_z = z.get("price")
+                buy = z.get("buy", 0) or 0
+                sell = z.get("sell", 0) or 0
+                ratio = z.get("ratio", 0) or 0
+                side = z.get("side", "—")
                 ratio_str = "one-sided" if ratio >= 999 else f"{ratio:.1f}x"
                 lines.append(
                     f"  - {_fmt_price(price_z)}: buy={_fmt(buy)} / sell={_fmt(sell)} "
-                    f"({ratio_str}, `{side}`)"
+                    f"({ratio_str}, `{side}`{_strength_tag(ratio)})"
                 )
+
+        _render_imbalance_zones("合约", contract_latest)
+        _render_imbalance_zones("现货", spot_latest)
+        # 期现一致性（强证据合并指标）
+        diff = getattr(fp, "spot_contract_delta_diff_pct", None)
+        if diff is not None:
+            lines.append(
+                f"- 期现 delta 差={_fmt(diff, nd=3)}（spot − contract，反映期现一致性）"
+            )
+        interp = getattr(fp, "interpretation", None)
+        if interp:
+            lines.append(f"- 解读：{interp}")
     fab = snapshot.facts_absorption
     if fab is not None:
         _sub("Absorption · 价位级被动吸收")
+
+        def _absorption_strength(vol: float, delta_abs: float, bar_count: int) -> str:
+            """G-11 强度标签：根据 vol/|delta|/bar_count 推断吸收等级。"""
+            try:
+                if vol >= 5_000_000 and delta_abs < 0.05 and bar_count >= 3:
+                    return " · **强**"
+                if vol >= 1_000_000 and delta_abs < 0.10 and bar_count >= 2:
+                    return " · 中"
+                return " · 弱"
+            except Exception:
+                return ""
+
         sup_zones = getattr(fab, "zones_support", []) or []
         res_zones = getattr(fab, "zones_resistance", []) or []
         if sup_zones:
-            lines.append(f"- Support 带 top {min(3, len(sup_zones))}：")
+            lines.append(f"- Support 带 top {min(3, len(sup_zones))}（多方吃货 · 潜在真支撑）：")
             for z in sup_zones[:3]:
+                vol = getattr(z, 'taker_volume_usd', 0) or 0
+                delta_abs = getattr(z, 'delta_pct_abs_avg', 0) or 0
+                bc = getattr(z, 'bar_count', 0) or 0
+                tag = _absorption_strength(float(vol), float(delta_abs), int(bc))
                 lines.append(
                     f"  - {_fmt_price(getattr(z, 'price', 0))} | "
-                    f"vol=${_fmt(getattr(z, 'taker_volume_usd', 0))} | "
-                    f"|delta|={_fmt(getattr(z, 'delta_pct_abs_avg', 0), nd=3)} | "
-                    f"bar_count={getattr(z, 'bar_count', 0)} | "
-                    f"age={_fmt(getattr(z, 'age_hours', 0), nd=1)}h"
+                    f"vol=${_fmt(vol)} | "
+                    f"|delta|={_fmt(delta_abs, nd=3)} | "
+                    f"bar_count={bc} | "
+                    f"age={_fmt(getattr(z, 'age_hours', 0), nd=1)}h{tag}"
                 )
         if res_zones:
-            lines.append(f"- Resistance 带 top {min(3, len(res_zones))}：")
+            lines.append(f"- Resistance 带 top {min(3, len(res_zones))}（空方反手 · 潜在真阻力）：")
             for z in res_zones[:3]:
+                vol = getattr(z, 'taker_volume_usd', 0) or 0
+                delta_abs = getattr(z, 'delta_pct_abs_avg', 0) or 0
+                bc = getattr(z, 'bar_count', 0) or 0
+                tag = _absorption_strength(float(vol), float(delta_abs), int(bc))
                 lines.append(
                     f"  - {_fmt_price(getattr(z, 'price', 0))} | "
-                    f"vol=${_fmt(getattr(z, 'taker_volume_usd', 0))} | "
-                    f"|delta|={_fmt(getattr(z, 'delta_pct_abs_avg', 0), nd=3)} | "
-                    f"bar_count={getattr(z, 'bar_count', 0)} | "
-                    f"age={_fmt(getattr(z, 'age_hours', 0), nd=1)}h"
+                    f"vol=${_fmt(vol)} | "
+                    f"|delta|={_fmt(delta_abs, nd=3)} | "
+                    f"bar_count={bc} | "
+                    f"age={_fmt(getattr(z, 'age_hours', 0), nd=1)}h{tag}"
                 )
 
     # ── §11 宏观 / 情绪 / ETF / 稳定币 / 资金面慢变量（修正器，非主决策锚） ──

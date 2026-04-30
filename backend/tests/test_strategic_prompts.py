@@ -761,6 +761,314 @@ class TestNewsBriefStructuredRendering:
         assert "…" in text
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# G-10：§5 OpportunityBoard 为空时拒绝原因渲染（必修组）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestOpportunityBoardEmptyDiagnostics:
+    @staticmethod
+    def _brain_with_zones(zones: list, last_price: float = 76_000.0,
+                          atr: float = 400.0) -> "TradingBrainSnapshot":
+        from models.trading_brain import (
+            BrainContextChips,
+            BrainDataQuality,
+            TradingBrainSnapshot,
+        )
+        return TradingBrainSnapshot(
+            coin="BTC",
+            ts=1700000000,
+            last_price=last_price,
+            atr=atr,
+            context=BrainContextChips(),
+            zones=zones,
+            data_quality=BrainDataQuality(),
+            opportunities=[],
+        )
+
+    @staticmethod
+    def _zone(*, support_trust=0.85, distance_pct=-1.0, data_confidence=0.85,
+              dominant_role="spot_defense", price_mid=75_000.0):
+        from models.trading_brain import BrainPriceZone, BrainZoneRoles
+        return BrainPriceZone(
+            zone_id=f"z_{int(price_mid)}",
+            coin="BTC",
+            price_low=price_mid * 0.998,
+            price_high=price_mid * 1.002,
+            price_mid=price_mid,
+            distance_pct=distance_pct,
+            roles=BrainZoneRoles(key_level=True, spot_supply_wall=True),
+            dominant_role=dominant_role,
+            dominant_label="测试区",
+            support_trust=support_trust,
+            resistance_trust=0.0,
+            sweep_attractiveness=0.30,
+            break_through_risk=0.20,
+            data_confidence=data_confidence,
+            evidence=["测试证据"],
+        )
+
+    def test_empty_zones_falls_back_to_legacy_message(self):
+        """zones 空时旧文案保留，不调用诊断（避免 noisy 输出）。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+
+        brain = self._brain_with_zones([])
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            trading_brain=brain,
+        )
+        text, _ = build_user_prompt(snap)
+        # 旧文案路径
+        assert "无 Opportunity 候选" in text
+        # zones 空时不应出现"拒绝原因诊断"
+        assert "拒绝原因诊断" not in text
+
+    def test_low_trust_zone_renders_trust_too_low_reason(self):
+        """zones 存在但全部 trust 不足 → §5 应渲染 trust_too_low 拒绝原因。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+
+        # support_trust=0.50 < 0.70 → trust_too_low
+        # 至少加个上方 target zone 让 RR/targets 路径不是首要拒绝
+        weak = self._zone(support_trust=0.50, distance_pct=-1.0, price_mid=75_000.0)
+        target = self._zone(support_trust=0.40, distance_pct=2.0, price_mid=77_500.0)
+        brain = self._brain_with_zones([weak, target])
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            trading_brain=brain,
+        )
+        text, _ = build_user_prompt(snap)
+        s5_start = text.index("## §5")
+        s6_start = text.index("## §6")
+        s5 = text[s5_start:s6_start]
+        assert "拒绝原因诊断" in s5
+        # 必须出现 trust_too_low（reason_code）和"信任分不足"（中文标签）
+        assert "trust_too_low" in s5
+        assert "信任分不足" in s5
+
+    def test_distance_too_far_zone_renders_distance_reason(self):
+        """zones 距离过远 → §5 出现 distance_too_far。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+
+        far = self._zone(distance_pct=-5.0, price_mid=72_000.0)
+        brain = self._brain_with_zones([far])
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            trading_brain=brain,
+        )
+        text, _ = build_user_prompt(snap)
+        s5 = text[text.index("## §5"):text.index("## §6")]
+        assert "distance_too_far" in s5
+        # 中文标签必须出现，便于 AI 直接复述
+        assert "距当前价过远" in s5
+
+    def test_rejection_clusters_by_reason_with_count(self):
+        """多 zone 同 reason 应聚类为一行（含命中次数）。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+
+        # 3 个全部 trust 不足的 zone
+        zones = [
+            self._zone(support_trust=0.50, distance_pct=-1.0, price_mid=75_000.0),
+            self._zone(support_trust=0.55, distance_pct=-0.8, price_mid=75_200.0),
+            self._zone(support_trust=0.45, distance_pct=-1.2, price_mid=74_800.0),
+        ]
+        brain = self._brain_with_zones(zones)
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            trading_brain=brain,
+        )
+        text, _ = build_user_prompt(snap)
+        s5 = text[text.index("## §5"):text.index("## §6")]
+        # 至少 3 条 trust_too_low（3 zone × 2 setup_type 含 fake_break_reclaim_long）
+        assert "trust_too_low" in s5
+        assert "命中" in s5  # "命中 N 条" 字样
+        assert "zones=" in s5  # zone 数量统计
+
+    def test_rejection_diagnose_does_not_break_prompt_on_exception(self):
+        """诊断函数任何异常都应被吞，不应让 build_user_prompt 整体崩溃。"""
+        from unittest.mock import patch
+
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+
+        zones = [self._zone(support_trust=0.50, price_mid=75_000.0)]
+        brain = self._brain_with_zones(zones)
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            trading_brain=brain,
+        )
+        with patch(
+            "processors.opportunity_engine.diagnose_opportunities",
+            side_effect=RuntimeError("boom"),
+        ):
+            text, _ = build_user_prompt(snap)
+            # 异常吞掉后退化到旧文案
+            assert "无 Opportunity 候选" in text
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# G-11：§10 Footprint / Absorption 解读规则与强度标注（必修组）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestFootprintAbsorptionInterpretation:
+    def test_section_10_renders_interpretation_block(self):
+        """§10 顶部必须包含「如何解读」段，让 AI 知道 footprint/absorption 语义。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = _empty_snapshot()
+        text, _ = build_user_prompt(snap)
+        s10 = text[text.index("## §10"):text.index("## §11")]
+        # 标题加强语义
+        assert "验证 §6/§7 的真伪" in s10
+        # 解读段
+        assert "如何解读 §10" in s10
+        # 三个语义块都必须存在
+        assert "Footprint imbalance" in s10
+        assert "Absorption（吸收）" in s10
+        assert "方向语义" in s10
+        # 共振判定（与 §6/§7 的桥接）
+        assert "共振判定" in s10
+        # 关键反语义：zones_support = 多方吃货
+        assert "多方在该价位吃货" in s10
+        assert "空方在该价位反手压盘" in s10
+
+    def test_footprint_strength_label_for_one_sided(self):
+        """ratio≥999 → one-sided + 极强标签（同时回归 PR-5 之前就存在的"读错字段"bug）。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import (
+            FootprintBarStats,
+            FootprintSnapshot,
+            MarketActionFacts,
+        )
+
+        fp = FootprintSnapshot(
+            contract_latest=FootprintBarStats(
+                ts=1700000000,
+                total_buy_usd=5_000_000.0,
+                total_sell_usd=2_000.0,
+                delta_usd=4_998_000.0,
+                delta_pct=0.99,
+                bar_closed=True,
+                top_imbalance_zones=[
+                    {
+                        "price": 75_500.0,
+                        "buy": 5_000_000.0,
+                        "sell": 2_000.0,
+                        "ratio": 999.0,
+                        "side": "stacked_buy",
+                    }
+                ],
+            ),
+        )
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000, footprint=fp,
+        )
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            market_action_facts=facts,
+        )
+        text, _ = build_user_prompt(snap)
+        s10 = text[text.index("## §10"):text.index("## §11")]
+        assert "one-sided" in s10
+        assert "极强" in s10
+        # bar_closed 必须从 contract_latest 正确读出（旧 bug：从顶层永远 None）
+        assert "bar_closed: contract=`True`" in s10
+
+    def test_footprint_strength_label_for_medium(self):
+        """3.0 ≤ ratio < 5.0 → 中标签。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import (
+            FootprintBarStats,
+            FootprintSnapshot,
+            MarketActionFacts,
+        )
+
+        fp = FootprintSnapshot(
+            spot_latest=FootprintBarStats(
+                ts=1700000000,
+                total_buy_usd=300_000.0,
+                total_sell_usd=80_000.0,
+                delta_usd=220_000.0,
+                delta_pct=0.58,
+                bar_closed=True,
+                top_imbalance_zones=[
+                    {
+                        "price": 75_500.0,
+                        "buy": 300_000.0,
+                        "sell": 80_000.0,
+                        "ratio": 3.5,
+                        "side": "buy",
+                    }
+                ],
+            ),
+        )
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000, footprint=fp,
+        )
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            market_action_facts=facts,
+        )
+        text, _ = build_user_prompt(snap)
+        s10 = text[text.index("## §10"):text.index("## §11")]
+        assert "3.5x" in s10
+        assert " · 中" in s10
+        # 通过 spot_latest 渲染 → 必须出现"现货 top imbalance zones"
+        assert "现货 top imbalance zones" in s10
+
+    def test_absorption_strength_strong_label(self):
+        """vol≥5M + |delta|<0.05 + bar_count≥3 → 强吸收标签。"""
+        from ai.snapshot import build_ai_snapshot
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import (
+            AbsorptionSnapshot,
+            AbsorptionZone,
+            MarketActionFacts,
+        )
+
+        absp = AbsorptionSnapshot(
+            zones_support=[
+                AbsorptionZone(
+                    price=75_000.0,
+                    side="support",
+                    taker_volume_usd=8_000_000.0,
+                    delta_pct_abs_avg=0.03,
+                    bar_count=4,
+                    age_hours=1.5,
+                ),
+            ],
+            zones_resistance=[],
+        )
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000, absorption=absp,
+        )
+        snap = build_ai_snapshot(
+            coin="BTC", price=76_000, high_24h=77_000, low_24h=75_000,
+            atr=400, market_temp_score=50, pin_risk_level="low",
+            market_action_facts=facts,
+        )
+        text, _ = build_user_prompt(snap)
+        s10 = text[text.index("## §10"):text.index("## §11")]
+        assert "Support 带" in s10
+        assert "强" in s10  # 必须出现强标签
+        # 同时确保改动没破坏既有数值渲染
+        assert "$75,000" in s10
+        assert "$8.00M" in s10 or "$8,000,000" in s10  # vol
+
+
 class TestExtractJsonPayload:
     def test_markdown_fence(self):
         from ai.strategic_prompts import extract_json_payload

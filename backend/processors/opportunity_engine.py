@@ -31,6 +31,8 @@ import math
 import time
 from typing import Optional
 
+from pydantic import BaseModel
+
 from models.trading_brain import (
     BrainContextChips,
     BrainDataQuality,
@@ -41,6 +43,62 @@ from models.trading_brain import (
     SetupTarget,
     TradeSetupCandidate,
 )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 拒绝理由模型（GPT-10 必修 · §5 OpportunityBoard 为空时供 prompt 渲染拒绝原因）
+# ────────────────────────────────────────────────────────────────────────────
+#
+# 根因：当 build_opportunities 对所有 zone × setup_type 全部 return None 时，
+# §5 prompt 只显示"无 Opportunity 候选"是黑盒——AI 只能猜"为什么没机会"。
+# 引擎层早就在 7 个早返回点拒绝了候选（role/trust/distance/data_quality/
+# regime/targets/rr），把拒绝理由暴露给 prompt，AI 的 no_trade_conditions
+# 就能精准复述。
+#
+# 设计：侵入式 `reject_log` 参数注入到 builder——默认 None 保持旧行为，
+# 仅 diagnose_opportunities 调用时传入 list 收集；不破坏 build_opportunities
+# 旧签名与下游 trading_brain_builder。
+
+
+_REASON_CODES = {
+    "role_mismatch": "zone 角色不匹配（要求 spot_defense/contested）",
+    "trust_too_low": "信任分不足",
+    "distance_too_far": "距离当前价过远",
+    "data_quality_low": "data_confidence 不足",
+    "regime_blocks": "当前 regime 阻断该方向",
+    "targets_missing": "无可达目标位",
+    "rr_insufficient": "T1 RR 低于门槛",
+}
+
+
+class OpportunityRejection(BaseModel):
+    """单条拒绝理由（zone × setup_type 的早返回快照）。"""
+    zone_id: str
+    setup_type: str
+    direction: str
+    reason_code: str
+    detail: str = ""
+
+
+def _log_reject(
+    log: Optional[list],
+    *,
+    zone: BrainPriceZone,
+    setup_type: str,
+    direction: str,
+    reason_code: str,
+    detail: str = "",
+) -> None:
+    """把拒绝理由 append 到 reject_log（仅当 log 非 None）。"""
+    if log is None:
+        return
+    log.append(OpportunityRejection(
+        zone_id=zone.zone_id,
+        setup_type=setup_type,
+        direction=direction,
+        reason_code=reason_code,
+        detail=detail,
+    ))
 
 
 # ── 严筛门槛（GPT 第 15 节翻译为代码常量；保守起见不暴露给配置层）─────────
@@ -323,16 +381,33 @@ def _build_support_limit_probe(
     *, zone: BrainPriceZone, all_zones: list[BrainPriceZone],
     last_price: float, atr: float, ctx: Optional[BrainContextChips],
     dq: Optional[BrainDataQuality],
+    reject_log: Optional[list] = None,
 ) -> Optional[TradeSetupCandidate]:
+    setup = "support_limit_probe"
     if zone.dominant_role not in ("spot_defense", "contested"):
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="role_mismatch",
+                    detail=f"role={zone.dominant_role}")
         return None
     if zone.support_trust < _MIN_SUPPORT_TRUST:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="trust_too_low",
+                    detail=f"support_trust={zone.support_trust:.2f} < {_MIN_SUPPORT_TRUST}")
         return None
     if abs(zone.distance_pct) > _MAX_DISTANCE_PCT:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="distance_too_far",
+                    detail=f"|distance|={abs(zone.distance_pct):.2f}% > {_MAX_DISTANCE_PCT}%")
         return None
     if zone.data_confidence < _MIN_DATA_CONFIDENCE:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="data_quality_low",
+                    detail=f"data_confidence={zone.data_confidence:.2f} < {_MIN_DATA_CONFIDENCE}")
         return None
     if _regime_blocks_long(ctx):
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="regime_blocks",
+                    detail=f"regime={(ctx.regime if ctx else '') or '—'} 阻断做多")
         return None
 
     a = _safe_atr(atr, last_price)
@@ -346,7 +421,15 @@ def _build_support_limit_probe(
     # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
     # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
     # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
-    if not targets or targets[0].rr < _MIN_RR_T1:
+    if not targets:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="targets_missing",
+                    detail="无可达多头目标位（_select_targets_for_long 返回空）")
+        return None
+    if targets[0].rr < _MIN_RR_T1:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                    reason_code="rr_insufficient",
+                    detail=f"T1 RR={targets[0].rr:.2f} < {_MIN_RR_T1}")
         return None
 
     aggressive = SetupEntryStyle(
@@ -427,16 +510,33 @@ def _build_resistance_limit_probe(
     *, zone: BrainPriceZone, all_zones: list[BrainPriceZone],
     last_price: float, atr: float, ctx: Optional[BrainContextChips],
     dq: Optional[BrainDataQuality],
+    reject_log: Optional[list] = None,
 ) -> Optional[TradeSetupCandidate]:
+    setup = "resistance_limit_probe"
     if zone.dominant_role not in ("spot_defense", "contested"):
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="role_mismatch",
+                    detail=f"role={zone.dominant_role}")
         return None
     if zone.resistance_trust < _MIN_RESISTANCE_TRUST:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="trust_too_low",
+                    detail=f"resistance_trust={zone.resistance_trust:.2f} < {_MIN_RESISTANCE_TRUST}")
         return None
     if abs(zone.distance_pct) > _MAX_DISTANCE_PCT:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="distance_too_far",
+                    detail=f"|distance|={abs(zone.distance_pct):.2f}% > {_MAX_DISTANCE_PCT}%")
         return None
     if zone.data_confidence < _MIN_DATA_CONFIDENCE:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="data_quality_low",
+                    detail=f"data_confidence={zone.data_confidence:.2f} < {_MIN_DATA_CONFIDENCE}")
         return None
     if _regime_blocks_short(ctx):
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="regime_blocks",
+                    detail=f"regime={(ctx.regime if ctx else '') or '—'} 阻断做空")
         return None
 
     a = _safe_atr(atr, last_price)
@@ -446,11 +546,16 @@ def _build_resistance_limit_probe(
     targets = _select_targets_for_short(
         zone=zone, all_zones=all_zones, hard_stop=hard,
     )
-    # P0 修复：原用 max(t.rr ...) 取所有 target 中最高 RR 比对门槛，
-    # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
-    # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
-    # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
-    if not targets or targets[0].rr < _MIN_RR_T1:
+    # P0 修复：T1（targets[0]）必须 ≥ 门槛（详见上方注释）
+    if not targets:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="targets_missing",
+                    detail="无可达空头目标位（_select_targets_for_short 返回空）")
+        return None
+    if targets[0].rr < _MIN_RR_T1:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                    reason_code="rr_insufficient",
+                    detail=f"T1 RR={targets[0].rr:.2f} < {_MIN_RR_T1}")
         return None
 
     aggressive = SetupEntryStyle(
@@ -529,6 +634,7 @@ def _build_fake_break_reclaim(
     *, zone: BrainPriceZone, all_zones: list[BrainPriceZone],
     last_price: float, atr: float, ctx: Optional[BrainContextChips],
     dq: Optional[BrainDataQuality], side: str,
+    reject_log: Optional[list] = None,
 ) -> Optional[TradeSetupCandidate]:
     """扫破后收回；前置态固定为 forming/waiting，方向 long/short 由 side 决定。
 
@@ -537,24 +643,49 @@ def _build_fake_break_reclaim(
       - 必须等扫破 + 收回 + CVD 不再恶化 才进入 triggered
       - 默认 direction=neutral 表示等待，UI 显示「等待」
     """
+    setup = "fake_break_reclaim_long" if side == "long" else "fake_break_reclaim_short"
     if side == "long":
         if zone.dominant_role not in ("spot_defense", "contested"):
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                        reason_code="role_mismatch",
+                        detail=f"role={zone.dominant_role}")
             return None
         if zone.support_trust < _MIN_SUPPORT_TRUST - 0.05:
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                        reason_code="trust_too_low",
+                        detail=f"support_trust={zone.support_trust:.2f} < {_MIN_SUPPORT_TRUST - 0.05}")
             return None
         if _regime_blocks_long(ctx):
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="long",
+                        reason_code="regime_blocks",
+                        detail=f"regime={(ctx.regime if ctx else '') or '—'} 阻断做多")
             return None
     else:
         if zone.dominant_role not in ("spot_defense", "contested"):
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                        reason_code="role_mismatch",
+                        detail=f"role={zone.dominant_role}")
             return None
         if zone.resistance_trust < _MIN_RESISTANCE_TRUST - 0.05:
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                        reason_code="trust_too_low",
+                        detail=f"resistance_trust={zone.resistance_trust:.2f} < {_MIN_RESISTANCE_TRUST - 0.05}")
             return None
         if _regime_blocks_short(ctx):
+            _log_reject(reject_log, zone=zone, setup_type=setup, direction="short",
+                        reason_code="regime_blocks",
+                        detail=f"regime={(ctx.regime if ctx else '') or '—'} 阻断做空")
             return None
 
     if abs(zone.distance_pct) > _MAX_DISTANCE_PCT:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction=side,
+                    reason_code="distance_too_far",
+                    detail=f"|distance|={abs(zone.distance_pct):.2f}% > {_MAX_DISTANCE_PCT}%")
         return None
     if zone.data_confidence < _MIN_DATA_CONFIDENCE - 0.05:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction=side,
+                    reason_code="data_quality_low",
+                    detail=f"data_confidence={zone.data_confidence:.2f} < {_MIN_DATA_CONFIDENCE - 0.05}")
         return None
 
     a = _safe_atr(atr, last_price)
@@ -570,11 +701,16 @@ def _build_fake_break_reclaim(
         targets = _select_targets_for_short(
             zone=zone, all_zones=all_zones, hard_stop=hard,
         )
-    # P0 修复：原用 max(t.rr ...) 取所有 target 中最高 RR 比对门槛，
-    # 等价于"任一远期 target RR ≥ 2 即放行"，但 T1（首要目标）可能仅 0.8。
-    # OpportunityBoard 显示"T1 RR 0.8"与"高盈亏比机会雷达"定位矛盾。
-    # 改为 T1（targets 按最近优先排序，targets[0]=T1）必须 ≥ 门槛。
-    if not targets or targets[0].rr < _MIN_RR_T1:
+    # P0 修复：T1（targets[0]）必须 ≥ 门槛（详见上方注释）
+    if not targets:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction=side,
+                    reason_code="targets_missing",
+                    detail=f"无可达 {side} 目标位")
+        return None
+    if targets[0].rr < _MIN_RR_T1:
+        _log_reject(reject_log, zone=zone, setup_type=setup, direction=side,
+                    reason_code="rr_insufficient",
+                    detail=f"T1 RR={targets[0].rr:.2f} < {_MIN_RR_T1}")
         return None
 
     if side == "long":
@@ -667,8 +803,13 @@ def build_opportunities(
     ctx: Optional[BrainContextChips] = None,
     dq: Optional[BrainDataQuality] = None,
     max_opps: int = 8,
+    reject_log: Optional[list] = None,
 ) -> list[TradeSetupCandidate]:
-    """从 zones 派生候选；按 opportunity_score 排序，截 max_opps。"""
+    """从 zones 派生候选；按 opportunity_score 排序，截 max_opps。
+
+    新增 ``reject_log``（可选）：调用方传入空 list 时，引擎会把每个 zone × setup_type
+    的拒绝理由（OpportunityRejection）append 进去；不传保持旧行为。
+    """
     if not zones or last_price <= 0:
         return []
     out: list[TradeSetupCandidate] = []
@@ -684,7 +825,7 @@ def build_opportunities(
                 cand = builder(  # type: ignore[arg-type]
                     zone=z, all_zones=zones,
                     last_price=last_price, atr=atr,
-                    ctx=ctx, dq=dq, **kw,
+                    ctx=ctx, dq=dq, reject_log=reject_log, **kw,
                 )
             except Exception:
                 cand = None
@@ -697,3 +838,26 @@ def build_opportunities(
 
     out.sort(key=lambda c: (-c.opportunity_score, abs(c.asymmetry_score - 1)))
     return out[:max_opps]
+
+
+def diagnose_opportunities(
+    *,
+    zones: list[BrainPriceZone],
+    last_price: float,
+    atr: float,
+    ctx: Optional[BrainContextChips] = None,
+    dq: Optional[BrainDataQuality] = None,
+) -> list[OpportunityRejection]:
+    """诊断版：对所有 zone × 4 个 setup_type 跑一遍并收集拒绝理由。
+
+    ``build_opportunities`` 已经把 reject_log 暴露给调用方；本函数仅是便捷
+    封装——传入 zones/last_price/atr/ctx/dq 即可拿到结构化 rejections。
+    """
+    if not zones or last_price <= 0:
+        return []
+    log: list[OpportunityRejection] = []
+    build_opportunities(
+        zones=zones, last_price=last_price, atr=atr,
+        ctx=ctx, dq=dq, reject_log=log,
+    )
+    return log

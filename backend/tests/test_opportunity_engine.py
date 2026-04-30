@@ -358,3 +358,115 @@ def test_real_setup_far_stop_gets_lower_asymmetry_than_optimal_stop():
     assert o_norm.asymmetry_score >= o_far.asymmetry_score, (
         f"宽止损 setup 的不对称分应不高于适中止损：norm={o_norm.asymmetry_score} far={o_far.asymmetry_score}"
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# G-10：build_opportunities reject_log + diagnose_opportunities 拒绝理由收集
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestRejectionDiagnostics:
+    def test_build_opportunities_default_no_reject_log_no_side_effect(self):
+        """旧调用方（不传 reject_log）行为完全不变。"""
+        last = 100_000.0
+        sup = _zone(price_mid=99_000.0, distance_pct=-1.0)
+        t = _target_zone_above(101_500.0)
+        opps_old = build_opportunities(zones=[sup, t], last_price=last, atr=400.0)
+        opps_new = build_opportunities(
+            zones=[sup, t], last_price=last, atr=400.0, reject_log=None,
+        )
+        assert [o.setup_id for o in opps_old] == [o.setup_id for o in opps_new]
+
+    def test_low_trust_zone_records_trust_reason(self):
+        """support_trust=0.50 的 zone 应记录 trust_too_low（support_limit_probe 路径）。"""
+        from processors.opportunity_engine import OpportunityRejection
+        last = 100_000.0
+        weak = _zone(price_mid=99_000.0, distance_pct=-1.0, support_trust=0.50)
+        t = _target_zone_above(101_500.0)
+        log: list = []
+        build_opportunities(
+            zones=[weak, t], last_price=last, atr=400.0, reject_log=log,
+        )
+        assert all(isinstance(r, OpportunityRejection) for r in log)
+        slr = [
+            r for r in log
+            if r.zone_id == weak.zone_id
+            and r.setup_type == "support_limit_probe"
+        ]
+        assert slr, "弱信任 zone 在 support_limit_probe 必须留下拒绝记录"
+        assert slr[0].reason_code == "trust_too_low"
+        assert "support_trust" in slr[0].detail
+
+    def test_distance_too_far_recorded(self):
+        last = 100_000.0
+        far = _zone(price_mid=95_000.0, distance_pct=-5.0)
+        t = _target_zone_above(101_500.0)
+        log: list = []
+        build_opportunities(
+            zones=[far, t], last_price=last, atr=400.0, reject_log=log,
+        )
+        rs = [r for r in log if r.zone_id == far.zone_id]
+        assert any(r.reason_code == "distance_too_far" for r in rs), (
+            f"距离过远 zone 必须留下 distance_too_far 拒绝记录，实际: "
+            f"{[(r.zone_id, r.setup_type, r.reason_code) for r in rs]}"
+        )
+
+    def test_regime_blocks_long_recorded(self):
+        last = 100_000.0
+        z = _zone(price_mid=99_000.0, distance_pct=-1.0)
+        t = _target_zone_above(101_500.0)
+        ctx = BrainContextChips(regime="trend_down")
+        log: list = []
+        build_opportunities(
+            zones=[z, t], last_price=last, atr=400.0, ctx=ctx, reject_log=log,
+        )
+        long_rs = [
+            r for r in log
+            if r.zone_id == z.zone_id and r.direction == "long"
+        ]
+        assert any(r.reason_code == "regime_blocks" for r in long_rs), (
+            f"trend_down regime 必须在多头路径留下 regime_blocks 记录"
+        )
+
+    def test_rr_insufficient_recorded(self):
+        """T1 RR < 2.0 的 setup 必须留下 rr_insufficient（不应只是 silent drop）。"""
+        last = 100_000.0
+        sup = _zone(price_mid=99_000.0, distance_pct=-1.0)
+        near_low_rr = _target_zone_above(99_400.0, role="key_level_only")
+        log: list = []
+        build_opportunities(
+            zones=[sup, near_low_rr], last_price=last, atr=400.0, reject_log=log,
+        )
+        slr = [
+            r for r in log
+            if r.zone_id == sup.zone_id
+            and r.setup_type == "support_limit_probe"
+        ]
+        assert any(r.reason_code == "rr_insufficient" for r in slr)
+
+    def test_diagnose_opportunities_returns_full_log(self):
+        """diagnose_opportunities 是 reject_log 的便捷封装；返回值非 None。"""
+        from processors.opportunity_engine import diagnose_opportunities
+        last = 100_000.0
+        weak = _zone(price_mid=99_000.0, distance_pct=-1.0, support_trust=0.50)
+        rejections = diagnose_opportunities(
+            zones=[weak], last_price=last, atr=400.0,
+        )
+        # 4 个 setup_type × 1 个 zone = 至多 4 条；至少应有 1 条
+        assert len(rejections) >= 1
+        codes = {r.reason_code for r in rejections}
+        # 弱信任 + 无 target zone 至少触发 trust 或 targets 类拒绝
+        assert codes & {"trust_too_low", "targets_missing", "rr_insufficient"}
+
+    def test_diagnose_with_empty_zones_returns_empty(self):
+        from processors.opportunity_engine import diagnose_opportunities
+        assert diagnose_opportunities(
+            zones=[], last_price=100_000.0, atr=400.0,
+        ) == []
+
+    def test_diagnose_with_zero_price_returns_empty(self):
+        from processors.opportunity_engine import diagnose_opportunities
+        z = _zone(price_mid=99_000.0, distance_pct=-1.0)
+        assert diagnose_opportunities(
+            zones=[z], last_price=0.0, atr=400.0,
+        ) == []
