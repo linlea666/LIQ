@@ -1861,6 +1861,10 @@ class Engine:
     def get_liquidation_map(self, ccy: str, cycle: str) -> Optional[LiquidationMap]:
         return self._states.get(ccy, CoinState(ccy)).liq_maps.get(cycle)
 
+    def get_liq_heatmap(self, ccy: str, range_: str) -> Optional[HeatmapData]:
+        """直读 state.liq_heatmaps[range]（仅 24h / 7d 当前会被填充）。"""
+        return self._states.get(ccy, CoinState(ccy)).liq_heatmaps.get(range_)
+
     def get_waterfall(self, ccy: str) -> Optional[WaterfallData]:
         return self._states.get(ccy, CoinState(ccy)).waterfall
 

@@ -258,6 +258,27 @@ export interface LiquidationMap {
   imbalance_ratio: number;
 }
 
+/**
+ * 清算热力图（aggregated-heatmap/model1）
+ *
+ * 后端在 polls/liquidation.parse_liq_heatmap 已把"时间×价格"稀疏矩阵压缩为
+ * 价格维 USD 总量；前端仅消费 price 维点列作为辅助燃料带，不参与统计。
+ */
+export interface HeatmapDataPoint {
+  price: number;
+  value: number;
+  ts: number;
+}
+
+export interface HeatmapData {
+  coin: string;
+  ts: number;
+  model: number;
+  range: string;
+  exchange?: string;
+  data: HeatmapDataPoint[];
+}
+
 export interface CVDPoint {
   ts: number;
   delta: number;

@@ -72,6 +72,23 @@ async def get_liquidation_map(coin: str, cycle: str = Query("1d")):
     return liq.model_dump()
 
 
+@router.get("/liquidation-heatmap/{coin}")
+async def get_liquidation_heatmap(coin: str, range_: str = Query("24h", alias="range")):
+    """获取清算热力图（aggregated-heatmap/model1）。
+
+    支持 range：24h / 7d（30d 暂未启用轮询，调用会返回 503）。
+    与 `/api/liquidation/{coin}` 的清算地图是两条独立链路；本接口仅供前端
+    作为辅助第二视角叠加，不参与 imbalance / clusters 等统计。
+    """
+    if not _engine:
+        raise HTTPException(503, "Engine not ready")
+    coin = coin.upper()
+    hm = _engine.get_liq_heatmap(coin, range_)
+    if not hm:
+        raise HTTPException(503, f"No liquidation heatmap for {coin} range={range_}")
+    return hm.model_dump()
+
+
 @router.get("/waterfall/{coin}")
 async def get_waterfall(coin: str):
     """获取多空归因瀑布图数据"""

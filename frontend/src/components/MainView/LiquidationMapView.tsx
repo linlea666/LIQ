@@ -4,7 +4,13 @@ import { useMarketStore } from "@/stores/marketStore";
 import { formatCnUsd, formatPct, formatPrice } from "@/lib/format";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { API_BASE } from "@/lib/constants";
-import type { LiqBand, LiqCluster, LiquidationMap } from "@/lib/types";
+import type {
+  HeatmapData,
+  HeatmapDataPoint,
+  LiqBand,
+  LiqCluster,
+  LiquidationMap,
+} from "@/lib/types";
 
 /* ════════════════════════════════════════════════════════════════════
  * 清算地图视图（双视图组合 · 直显式信息密度）
@@ -41,6 +47,17 @@ interface KeyLevel {
 
 const CYCLES = ["1d", "7d", "30d"] as const;
 const LEVERAGES = ["all", "10", "25", "50", "100"];
+
+/**
+ * 清算地图 cycle → 清算热力图 range 自动联动。
+ * Coinglass aggregated-heatmap 仅支持 24h / 7d / 30d；
+ * 但当前后端只轮询 24h / 7d，故 30d 暂不可用，UI 自动提示 + 不发请求。
+ */
+function cycleToHeatmapRange(cycle: string): "24h" | "7d" | null {
+  if (cycle === "1d") return "24h";
+  if (cycle === "7d") return "7d";
+  return null;
+}
 const TOP_N_PER_SIDE = 5;
 /** 摘要区「紧凑排名」默认展示条数；更多用展开 */
 const CLUSTER_RANK_PREVIEW = 3;
@@ -119,6 +136,9 @@ function TopControls({
   setShowAdvanced,
   leverage,
   setLeverage,
+  showHeatmap,
+  setShowHeatmap,
+  heatmapStatus,
 }: {
   cycle: string;
   setCycle: (c: string) => void;
@@ -126,7 +146,19 @@ function TopControls({
   setShowAdvanced: (b: boolean) => void;
   leverage: string;
   setLeverage: (l: string) => void;
+  showHeatmap: boolean;
+  setShowHeatmap: (b: boolean) => void;
+  /** "ready" / "unavailable"（30d 未轮询）/ "loading" / "empty" */
+  heatmapStatus: "ready" | "unavailable" | "loading" | "empty";
 }) {
+  const range = cycleToHeatmapRange(cycle);
+  const heatmapDisabled = range === null; // 当前 cycle 不支持热力图
+
+  let heatmapHint = "叠加清算热力图作为辅助燃料带（不参与统计）";
+  if (heatmapDisabled) heatmapHint = "30d 周期暂未启用热力图轮询";
+  else if (heatmapStatus === "loading") heatmapHint = `热力图加载中（range=${range}）`;
+  else if (heatmapStatus === "empty") heatmapHint = `热力图暂无数据（range=${range}）`;
+
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <span className="text-sm text-slate-400">周期:</span>
@@ -147,8 +179,23 @@ function TopControls({
       <span className="ml-2 hidden h-4 border-l border-slate-700 sm:inline" />
 
       <button
+        onClick={() => !heatmapDisabled && setShowHeatmap(!showHeatmap)}
+        disabled={heatmapDisabled}
+        className={`ml-auto rounded px-2 py-0.5 text-xs transition-colors ${
+          heatmapDisabled
+            ? "cursor-not-allowed bg-slate-900 text-slate-600"
+            : showHeatmap
+              ? "bg-amber-600/80 text-white"
+              : "bg-slate-800 text-slate-400 hover:text-white"
+        }`}
+        title={heatmapHint}
+      >
+        🌡 热力图{range ? `（${range}）` : "（不可用）"}
+      </button>
+
+      <button
         onClick={() => setShowAdvanced(!showAdvanced)}
-        className={`ml-auto rounded px-2 py-0.5 text-xs ${
+        className={`rounded px-2 py-0.5 text-xs ${
           showAdvanced
             ? "bg-slate-600 text-white"
             : "bg-slate-800 text-slate-400 hover:text-white"
@@ -590,6 +637,55 @@ function ClusterStatsPanel({
 }
 
 /* ──────────────────────────────────────────────
+ * 子组件：HeatmapStripe · 第二图层（aggregated-heatmap）
+ *
+ * 作为密度图的「辅助燃料带」叠加：
+ * - 与 short/long bands 共用同一条价格轴（toY），不重新归一化坐标
+ * - USD 值独立归一化（不和 maxUsd 共用），免被两个数量级互相压扁
+ * - 颜色用琥珀色，避免与 rose/emerald 抢辨识；位于柱条之下作背景
+ *
+ * 仅渲染落入价格视窗 [priceMin, priceMax] 的点；超出会被裁剪。
+ * ────────────────────────────────────────────── */
+
+function HeatmapStripe({
+  points,
+  toY,
+  priceMin,
+  priceMax,
+}: {
+  points: HeatmapDataPoint[];
+  toY: (p: number) => number;
+  priceMin: number;
+  priceMax: number;
+}) {
+  if (!points || points.length === 0) return null;
+  const inWindow = points.filter((p) => p.price >= priceMin && p.price <= priceMax);
+  if (inWindow.length === 0) return null;
+  const localMax = Math.max(...inWindow.map((p) => p.value), 1);
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0">
+      {inWindow.map((p, i) => {
+        const intensity = p.value / localMax; // 0–1
+        const w = 4 + intensity * 88; // 占满 4–92% 容器宽度
+        const alpha = 0.14 + intensity * 0.32;
+        return (
+          <div
+            key={`hm-${i}`}
+            className="absolute h-[2px] rounded"
+            style={{
+              top: toY(p.price),
+              left: `${(100 - w) / 2}%`,
+              width: `${w}%`,
+              backgroundColor: `rgba(245, 158, 11, ${alpha})`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
  * 子组件：DensityChart · 左侧密度图（无文字、纯视觉）
  * ────────────────────────────────────────────── */
 
@@ -602,6 +698,9 @@ function DensityChart({
   maxUsd,
   onMove,
   onLeave,
+  heatmapPoints,
+  priceMin,
+  priceMax,
 }: {
   shortBands: LiqBandRow[];
   longBands: LiqBandRow[];
@@ -611,6 +710,10 @@ function DensityChart({
   maxUsd: number;
   onMove: (e: MouseEvent<HTMLDivElement>) => void;
   onLeave: () => void;
+  /** 可选：开启热力图叠加时传入；空时不渲染该层 */
+  heatmapPoints?: HeatmapDataPoint[];
+  priceMin: number;
+  priceMax: number;
 }) {
   return (
     <div className="relative">
@@ -625,6 +728,16 @@ function DensityChart({
         onMouseMove={onMove}
         onMouseLeave={onLeave}
       >
+        {/* 第二图层：清算热力图（开启时显示，作背景燃料带） */}
+        {heatmapPoints && heatmapPoints.length > 0 && (
+          <HeatmapStripe
+            points={heatmapPoints}
+            toY={toY}
+            priceMin={priceMin}
+            priceMax={priceMax}
+          />
+        )}
+
         {/* 中线参考 */}
         <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px bg-slate-700/40" />
 
@@ -677,6 +790,9 @@ function DensityChart({
       </div>
       <p className="mt-1 px-0.5 text-[10px] text-slate-500">
         柱越长 = 该价位清算量越大；颜色越深 = 越接近本图最大值。鼠标悬停可查具体杠杆。
+        {heatmapPoints && heatmapPoints.length > 0 && (
+          <span className="ml-1 text-amber-400/80">琥珀色背景带 = 清算热力图（辅助参考，不参与统计）</span>
+        )}
       </p>
     </div>
   );
@@ -897,6 +1013,11 @@ export default function LiquidationMapView() {
   const [activeCycle, setActiveCycle] = useState<string>("1d");
   const [activeLeverage, setActiveLeverage] = useState<string>("all");
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
+  const [heatmapData, setHeatmapData] = useState<HeatmapData | null>(null);
+  const [heatmapStatus, setHeatmapStatus] = useState<"ready" | "unavailable" | "loading" | "empty">(
+    "unavailable",
+  );
   const [hoverTip, setHoverTip] = useState<{
     left: number;
     anchorTop: number;
@@ -923,6 +1044,45 @@ export default function LiquidationMapView() {
       clearInterval(timer);
     };
   }, [coin, activeCycle]);
+
+  // 热力图独立 fetch：仅在开关打开 + 当前 cycle 支持 range 时拉取
+  useEffect(() => {
+    const range = cycleToHeatmapRange(activeCycle);
+    if (!showHeatmap || range === null) {
+      setHeatmapData(null);
+      setHeatmapStatus(range === null ? "unavailable" : "ready");
+      return;
+    }
+    let cancelled = false;
+    setHeatmapStatus("loading");
+    const fetchHeatmap = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/liquidation-heatmap/${coin}?range=${range}`,
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          setHeatmapData(null);
+          setHeatmapStatus("empty");
+          return;
+        }
+        const json = (await res.json()) as HeatmapData;
+        setHeatmapData(json);
+        setHeatmapStatus(json.data && json.data.length > 0 ? "ready" : "empty");
+      } catch {
+        if (!cancelled) {
+          setHeatmapData(null);
+          setHeatmapStatus("empty");
+        }
+      }
+    };
+    fetchHeatmap();
+    const timer = setInterval(fetchHeatmap, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [coin, activeCycle, showHeatmap]);
 
   useEffect(() => {
     queueMicrotask(() => setHoverTip(null));
@@ -961,14 +1121,26 @@ export default function LiquidationMapView() {
 
   const allBands = useMemo(() => [...shortBands, ...longBands], [shortBands, longBands]);
   const maxUsd = Math.max(...allBands.map((b) => b.usd), 1);
+
+  /**
+   * 当热力图开启时，把其价格点也纳入视窗，避免被裁剪。
+   * heatmap 价格分布通常比清算地图更宽（特别是 7d）。
+   */
+  const heatmapPrices = useMemo(
+    () => (showHeatmap && heatmapData ? heatmapData.data.map((p) => p.price) : []),
+    [showHeatmap, heatmapData],
+  );
+
   const priceMin = useMemo(() => {
-    if (allBands.length === 0) return currentPrice * 0.95;
-    return Math.min(...allBands.map((b) => b.price), currentPrice * 0.95);
-  }, [allBands, currentPrice]);
+    const candidates = [...allBands.map((b) => b.price), ...heatmapPrices];
+    if (candidates.length === 0) return currentPrice * 0.95;
+    return Math.min(...candidates, currentPrice * 0.95);
+  }, [allBands, heatmapPrices, currentPrice]);
   const priceMax = useMemo(() => {
-    if (allBands.length === 0) return currentPrice * 1.05;
-    return Math.max(...allBands.map((b) => b.price), currentPrice * 1.05);
-  }, [allBands, currentPrice]);
+    const candidates = [...allBands.map((b) => b.price), ...heatmapPrices];
+    if (candidates.length === 0) return currentPrice * 1.05;
+    return Math.max(...candidates, currentPrice * 1.05);
+  }, [allBands, heatmapPrices, currentPrice]);
   const priceRange = priceMax - priceMin || 1;
   const toY = (p: number) => ((priceMax - p) / priceRange) * DENSITY_HEIGHT;
 
@@ -1076,6 +1248,9 @@ export default function LiquidationMapView() {
         setShowAdvanced={setShowAdvanced}
         leverage={activeLeverage}
         setLeverage={setActiveLeverage}
+        showHeatmap={showHeatmap}
+        setShowHeatmap={setShowHeatmap}
+        heatmapStatus={heatmapStatus}
       />
 
       <PressureBalanceCard
@@ -1101,6 +1276,9 @@ export default function LiquidationMapView() {
           maxUsd={maxUsd}
           onMove={handleMove}
           onLeave={() => setHoverTip(null)}
+          heatmapPoints={showHeatmap && heatmapData ? heatmapData.data : undefined}
+          priceMin={priceMin}
+          priceMax={priceMax}
         />
         <KeyLevelStack
           shortLevels={shortLevels}
