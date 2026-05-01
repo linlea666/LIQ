@@ -712,7 +712,10 @@ function HeatmapRankPanel({
       title="热力图 = Coinglass aggregated-heatmap/model1，按价位累计 USD；与清算簇为独立口径，不混合统计。"
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-medium text-amber-300">
+        <span
+          className="text-xs font-medium text-amber-300"
+          title="最大估值 = 该价位在 range 窗口内最大的瞬时清算预估（Coinglass aggregated-heatmap，按 time×price 网格取该 price 列的 MAX），不是历史成交 USD，也不与簇直接相加。"
+        >
           🌡 清算热力图 Top 价位
           <span className="ml-1.5 font-normal text-amber-300/60">· range {range}</span>
         </span>
@@ -728,7 +731,12 @@ function HeatmapRankPanel({
                 <tr>
                   <th className="px-1.5 py-1 font-normal">#</th>
                   <th className="px-1 py-1 font-normal">价位</th>
-                  <th className="px-1 py-1 text-right font-normal">USD</th>
+                  <th
+                    className="px-1 py-1 text-right font-normal"
+                    title="窗口内最大瞬时清算预估（非历史成交 USD）"
+                  >
+                    最大估值
+                  </th>
                   <th className="px-1 py-1 text-right font-normal">距现价</th>
                 </tr>
               </thead>
@@ -761,7 +769,12 @@ function HeatmapRankPanel({
                 <tr>
                   <th className="px-1.5 py-1 font-normal">#</th>
                   <th className="px-1 py-1 font-normal">价位</th>
-                  <th className="px-1 py-1 text-right font-normal">USD</th>
+                  <th
+                    className="px-1 py-1 text-right font-normal"
+                    title="窗口内最大瞬时清算预估（非历史成交 USD）"
+                  >
+                    最大估值
+                  </th>
                   <th className="px-1 py-1 text-right font-normal">距现价</th>
                 </tr>
               </thead>

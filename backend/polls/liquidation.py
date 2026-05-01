@@ -231,8 +231,16 @@ def parse_liq_heatmap(data: Any, coin: str, range_: str) -> Optional[HeatmapData
 
     旧解析（prices/y/x/data/z）完全错位 → 这是 P0：旧代码永远写出空 points。
 
-    本函数职责：把"时间×价格"二维稀疏网格压缩为"价格维度汇总"（每个 price 的总
-    清算量），而不是保留全部时空粒度。理由：
+    本函数职责：把"时间×价格"二维稀疏网格压缩为价格维度的**窗口内最大瞬时投影**
+    （每个 price 取所有时间切片中最大的预估清算量），而不是保留全部时空粒度。
+
+    **重要语义说明**（修复 SUM 误读）：
+      Coinglass 单 cell value 是「若价格在 t 时刻触及 p 价位，按当时持仓×杠杆估算
+      会爆掉多少」的瞬时投影；同一价位在不同 t 的值是同一现象的滑动估计，
+      **不可直接累加为 USD**——累加会被时间切片数（24h≈数十、7d≈一两百）整体放大，
+      量级失真为「百亿」。改用 MAX 后，与 LiquidationMap.clusters_*.total_usd 同级
+      可对比阅读。
+    理由：
       1. 下游消费者（NOFX hotspots/AI prompts/前端）都只看价格维度峰值
       2. 全网格点数巨大（30923 行），保留浪费内存与序列化带宽
       3. 时间维度信息保留 `price_candlesticks` 的最近一根 close 用于 last_price
@@ -249,7 +257,9 @@ def parse_liq_heatmap(data: Any, coin: str, range_: str) -> Optional[HeatmapData
         if not y_axis:
             return None
 
-        # 价格维度汇总：price_idx -> usd_total
+        # 价格维度汇总：price_idx -> max(瞬时投影)
+        # 见函数 docstring 的语义说明：同一 price 在不同时间切片的多个值是
+        # 同一估算的滑动版本，取 MAX 表示窗口内"最热"的瞬时清算预估。
         agg: dict[int, float] = {}
         for triple in sparse:
             if not isinstance(triple, list) or len(triple) < 3:
@@ -261,7 +271,9 @@ def parse_liq_heatmap(data: Any, coin: str, range_: str) -> Optional[HeatmapData
                 continue
             if usd <= 0 or p_idx < 0 or p_idx >= len(y_axis):
                 continue
-            agg[p_idx] = agg.get(p_idx, 0.0) + usd
+            prev = agg.get(p_idx, 0.0)
+            if usd > prev:
+                agg[p_idx] = usd
 
         # 取最近一根 K 线 close 时间戳作为 ts（若无则用当前）
         ref_ts = 0

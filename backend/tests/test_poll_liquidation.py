@@ -114,9 +114,9 @@ class TestParseLiqHeatmap:
     SAMPLE_REAL = {
         "y_axis": [70000.0, 75000.0, 80000.0],   # 价格刻度
         "liquidation_leverage_data": [
-            [1, 0, 1_000_000],   # t_idx=1, p_idx=0(70000), usd=1M
-            [1, 2, 2_000_000],   # t_idx=1, p_idx=2(80000), usd=2M
-            [2, 0, 500_000],     # 同价位再加 0.5M
+            [1, 0, 1_000_000],   # t_idx=1, p_idx=0(70000), 瞬时投影=1M
+            [1, 2, 2_000_000],   # t_idx=1, p_idx=2(80000), 瞬时投影=2M
+            [2, 0, 500_000],     # 同价位另一切片：0.5M（应被 MAX 忽略）
             [3, 1, 3_000_000],   # 75000 价位 3M
         ],
         "price_candlesticks": [
@@ -127,13 +127,14 @@ class TestParseLiqHeatmap:
     }
 
     def test_basic_aggregation(self):
+        """同 price 多个切片应取 MAX（窗口内最大瞬时投影），不再累加。"""
         hm = parse_liq_heatmap(self.SAMPLE_REAL, "BTC", "24h")
         assert hm is not None
         assert hm.range == "24h"
         assert hm.model == 1
         prices = {p.price: p.value for p in hm.data}
         assert prices == {
-            70000.0: 1_500_000,   # 同价位累加
+            70000.0: 1_000_000,   # max(1M, 0.5M)
             75000.0: 3_000_000,
             80000.0: 2_000_000,
         }
