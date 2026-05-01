@@ -23,6 +23,7 @@ import type {
  *   ① TopControls       周期切换 + ⚙ 杠杆高级面板（默认折叠）
  *   ② PressureBalanceCard  一句话结论 + 双色多空压力条
  *   ③ ClusterStatsPanel  最大堆积 / Top3 集中度 / 最近簇 / 可展开排名（随周期同步）
+ *   ③' HeatmapRankPanel   清算热力图 Top 价位（开热力图开关时显示，独立口径）
  *   ④ Main 双栏：
  *        左 DensityChart  价格分布密度图（无文字、纯视觉）
  *        右 KeyLevelStack Top5+5 关键价位卡片栈（直接显示价/金额）
@@ -632,6 +633,172 @@ function ClusterStatsPanel({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+ * 子组件：HeatmapRankPanel · 清算热力图 Top 价位
+ *
+ * 独立口径展示：把 heatmapData.data 按 above/below 当前价分成两栏，
+ * 各侧按 value 降序取 Top，与 ClusterStatsPanel 保持视觉对称但**不混源**。
+ * 默认每侧 5 行，可展开看更多；零数据 / 30d 不可用时不渲染。
+ * ────────────────────────────────────────────── */
+
+const HEATMAP_RANK_PREVIEW = 5;
+const HEATMAP_RANK_EXPANDED = 30;
+
+function HeatmapRankPanel({
+  heatmapData,
+  heatmapStatus,
+  currentPrice,
+  coin,
+  range,
+}: {
+  heatmapData: HeatmapData | null;
+  heatmapStatus: "ready" | "unavailable" | "loading" | "empty";
+  currentPrice: number;
+  coin: string;
+  range: "24h" | "7d" | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { above, below } = useMemo(() => {
+    const a: { price: number; value: number; distancePct: number }[] = [];
+    const b: { price: number; value: number; distancePct: number }[] = [];
+    if (!heatmapData || !heatmapData.data || currentPrice <= 0) return { above: a, below: b };
+    for (const p of heatmapData.data) {
+      if (p.value <= 0) continue;
+      if (p.price > currentPrice) {
+        a.push({
+          price: p.price,
+          value: p.value,
+          distancePct: ((p.price - currentPrice) / currentPrice) * 100,
+        });
+      } else if (p.price < currentPrice) {
+        b.push({
+          price: p.price,
+          value: p.value,
+          distancePct: ((currentPrice - p.price) / currentPrice) * 100,
+        });
+      }
+    }
+    a.sort((x, y) => y.value - x.value);
+    b.sort((x, y) => y.value - x.value);
+    return { above: a, below: b };
+  }, [heatmapData, currentPrice]);
+
+  // 30d 等不支持周期：直接不渲染（按钮也已禁用）
+  if (range === null) return null;
+
+  const maxRows = expanded ? HEATMAP_RANK_EXPANDED : HEATMAP_RANK_PREVIEW;
+  const canExpand = above.length > HEATMAP_RANK_PREVIEW || below.length > HEATMAP_RANK_PREVIEW;
+
+  // 占位状态：加载中 / 暂无数据
+  if (heatmapStatus === "loading" || heatmapStatus === "empty" || (above.length === 0 && below.length === 0)) {
+    return (
+      <div className="mb-3 rounded-lg border border-amber-900/40 bg-amber-950/10 px-3 py-2 text-[11px] text-amber-300/80">
+        🌡 清算热力图 Top 价位 · range={range} ·{" "}
+        {heatmapStatus === "loading"
+          ? "加载中…"
+          : "当前周期暂无热力图数据"}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-3 rounded-lg border border-amber-900/40 bg-amber-950/10 px-3 py-2.5"
+      title="热力图 = Coinglass aggregated-heatmap/model1，按价位累计 USD；与清算簇为独立口径，不混合统计。"
+    >
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-amber-300">
+          🌡 清算热力图 Top 价位
+          <span className="ml-1.5 font-normal text-amber-300/60">· range {range}</span>
+        </span>
+        <span className="text-[10px] text-slate-500">独立口径 · 不参与簇统计</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <div className="mb-1 text-[10px] text-rose-400/90">上方空头（高于现价）</div>
+          <div className="max-h-[min(280px,45vh)] overflow-y-auto rounded border border-slate-700/80">
+            <table className="w-full text-left text-[11px]">
+              <thead className="sticky top-0 bg-slate-900/95 text-slate-500">
+                <tr>
+                  <th className="px-1.5 py-1 font-normal">#</th>
+                  <th className="px-1 py-1 font-normal">价位</th>
+                  <th className="px-1 py-1 text-right font-normal">USD</th>
+                  <th className="px-1 py-1 text-right font-normal">距现价</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums text-slate-300">
+                {above.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-2 py-2 text-center text-slate-500">
+                      暂无上方热力点
+                    </td>
+                  </tr>
+                ) : (
+                  above.slice(0, maxRows).map((p, i) => (
+                    <tr key={`hma-${p.price}-${i}`} className="border-t border-slate-800/80">
+                      <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
+                      <td className="px-1 py-1">{formatPrice(p.price, coin)}</td>
+                      <td className="px-1 py-1 text-right text-rose-300/90">{formatCnUsd(p.value)}</td>
+                      <td className="px-1 py-1 text-right text-slate-400">{formatPct(p.distancePct)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 text-[10px] text-emerald-400/90">下方多头（低于现价）</div>
+          <div className="max-h-[min(280px,45vh)] overflow-y-auto rounded border border-slate-700/80">
+            <table className="w-full text-left text-[11px]">
+              <thead className="sticky top-0 bg-slate-900/95 text-slate-500">
+                <tr>
+                  <th className="px-1.5 py-1 font-normal">#</th>
+                  <th className="px-1 py-1 font-normal">价位</th>
+                  <th className="px-1 py-1 text-right font-normal">USD</th>
+                  <th className="px-1 py-1 text-right font-normal">距现价</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums text-slate-300">
+                {below.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-2 py-2 text-center text-slate-500">
+                      暂无下方热力点
+                    </td>
+                  </tr>
+                ) : (
+                  below.slice(0, maxRows).map((p, i) => (
+                    <tr key={`hmb-${p.price}-${i}`} className="border-t border-slate-800/80">
+                      <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
+                      <td className="px-1 py-1">{formatPrice(p.price, coin)}</td>
+                      <td className="px-1 py-1 text-right text-emerald-300/90">{formatCnUsd(p.value)}</td>
+                      <td className="px-1 py-1 text-right text-slate-400">{formatPct(p.distancePct)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {canExpand && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-2 text-[11px] text-amber-400/90 hover:text-amber-300"
+        >
+          {expanded
+            ? "收起热力图排名"
+            : `展开热力图排名（共上方 ${above.length} / 下方 ${below.length} 个价位）`}
+        </button>
+      )}
     </div>
   );
 }
@@ -1265,6 +1432,16 @@ export default function LiquidationMapView() {
         coin={coin}
         cycle={activeCycle}
       />
+
+      {showHeatmap && (
+        <HeatmapRankPanel
+          heatmapData={heatmapData}
+          heatmapStatus={heatmapStatus}
+          currentPrice={currentPrice}
+          coin={coin}
+          range={cycleToHeatmapRange(activeCycle)}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <DensityChart
