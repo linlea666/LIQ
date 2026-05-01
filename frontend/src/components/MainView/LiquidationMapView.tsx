@@ -286,22 +286,57 @@ function ClusterStatsPanel({
   cycle: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  /**
+   * 排序模式：
+   * - amount：按 total_usd 降序（亿 → 千万 → 百万），看「最大磁吸点」
+   * - distance：按 distance_pct 升序（最先被价格触达），看「最先威胁位」
+   * 默认 amount，与表头「按金额排序」语义自洽。
+   */
+  const [sortMode, setSortMode] = useState<"amount" | "distance">("amount");
+
+  const sortedAbove = useMemo(() => {
+    const arr = [...clustersAbove];
+    if (sortMode === "amount") arr.sort((a, b) => b.total_usd - a.total_usd);
+    else arr.sort((a, b) => a.distance_pct - b.distance_pct);
+    return arr;
+  }, [clustersAbove, sortMode]);
+
+  const sortedBelow = useMemo(() => {
+    const arr = [...clustersBelow];
+    if (sortMode === "amount") arr.sort((a, b) => b.total_usd - a.total_usd);
+    else arr.sort((a, b) => a.distance_pct - b.distance_pct);
+    return arr;
+  }, [clustersBelow, sortMode]);
+
+  /**
+   * 「最大堆积」「Top3 集中度」必须以金额排序后的列表为准。
+   * 后端返回的 clusters_* 是按距离排序的，sortedAbove/sortedBelow 已根据 sortMode 处理；
+   * 这里用一份独立的金额序列以保证语义稳定，不被 UI 切换影响。
+   */
+  const amountSortedAbove = useMemo(
+    () => [...clustersAbove].sort((a, b) => b.total_usd - a.total_usd),
+    [clustersAbove],
+  );
+  const amountSortedBelow = useMemo(
+    () => [...clustersBelow].sort((a, b) => b.total_usd - a.total_usd),
+    [clustersBelow],
+  );
 
   const { aboveSum, belowSum, top3AbovePct, top3BelowPct } = useMemo(() => {
-    const asum = clustersAbove.reduce((s, c) => s + c.total_usd, 0);
-    const bsum = clustersBelow.reduce((s, c) => s + c.total_usd, 0);
-    const t3a = clustersAbove.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
-    const t3b = clustersBelow.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
+    const asum = amountSortedAbove.reduce((s, c) => s + c.total_usd, 0);
+    const bsum = amountSortedBelow.reduce((s, c) => s + c.total_usd, 0);
+    const t3a = amountSortedAbove.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
+    const t3b = amountSortedBelow.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
     return {
       aboveSum: asum,
       belowSum: bsum,
       top3AbovePct: asum > 0 ? Math.round((t3a / asum) * 1000) / 10 : null,
       top3BelowPct: bsum > 0 ? Math.round((t3b / bsum) * 1000) / 10 : null,
     };
-  }, [clustersAbove, clustersBelow]);
+  }, [amountSortedAbove, amountSortedBelow]);
 
-  const peakAbove = clustersAbove[0];
-  const peakBelow = clustersBelow[0];
+  const peakAbove = amountSortedAbove[0];
+  const peakBelow = amountSortedBelow[0];
 
   const nearestAbove = useMemo(() => {
     if (!clustersAbove.length) return null;
@@ -429,8 +464,44 @@ function ClusterStatsPanel({
       )}
 
       <div className="mt-2.5 border-t border-slate-700/60 pt-2">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-          按簇规模排序（与右侧 Top 列表一致）
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            清算簇排名
+          </span>
+          <div
+            className="inline-flex overflow-hidden rounded border border-slate-700 text-[10px]"
+            role="tablist"
+            aria-label="排序方式"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sortMode === "amount"}
+              onClick={() => setSortMode("amount")}
+              className={`px-2 py-0.5 transition-colors ${
+                sortMode === "amount"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-800 text-slate-400 hover:text-white"
+              }`}
+              title="按 USD 总额降序：亿 → 千万 → 百万"
+            >
+              按金额
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sortMode === "distance"}
+              onClick={() => setSortMode("distance")}
+              className={`px-2 py-0.5 transition-colors ${
+                sortMode === "distance"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-800 text-slate-400 hover:text-white"
+              }`}
+              title="按距现价百分比升序：最近的在前"
+            >
+              按距离
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -453,7 +524,7 @@ function ClusterStatsPanel({
                       </td>
                     </tr>
                   ) : (
-                    clustersAbove.slice(0, maxRows).map((c, i) => (
+                    sortedAbove.slice(0, maxRows).map((c, i) => (
                       <tr key={`a-${c.price_from}-${c.price_to}-${i}`} className="border-t border-slate-800/80">
                         <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
                         <td className="max-w-[7rem] truncate px-1 py-1" title={formatClusterPriceRange(c, coin)}>
@@ -488,7 +559,7 @@ function ClusterStatsPanel({
                       </td>
                     </tr>
                   ) : (
-                    clustersBelow.slice(0, maxRows).map((c, i) => (
+                    sortedBelow.slice(0, maxRows).map((c, i) => (
                       <tr key={`b-${c.price_from}-${c.price_to}-${i}`} className="border-t border-slate-800/80">
                         <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
                         <td className="max-w-[7rem] truncate px-1 py-1" title={formatClusterPriceRange(c, coin)}>
