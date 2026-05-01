@@ -240,6 +240,11 @@ export interface LiqCluster {
   side: string;
   dominant_leverage: string;
   distance_pct: number;
+  /** 后端 M1：参与该簇的交易所数量 */
+  exchange_count?: number;
+  dominant_exchange?: string;
+  /** 主导杠杆档金额占比 0–1 */
+  leverage_intensity?: number;
 }
 
 export interface LiquidationMap {

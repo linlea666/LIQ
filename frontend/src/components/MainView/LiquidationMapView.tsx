@@ -16,11 +16,12 @@ import type { LiqBand, LiqCluster, LiquidationMap } from "@/lib/types";
  * 布局（自上而下）：
  *   ① TopControls       周期切换 + ⚙ 杠杆高级面板（默认折叠）
  *   ② PressureBalanceCard  一句话结论 + 双色多空压力条
- *   ③ Main 双栏：
+ *   ③ ClusterStatsPanel  最大堆积 / Top3 集中度 / 最近簇 / 可展开排名（随周期同步）
+ *   ④ Main 双栏：
  *        左 DensityChart  价格分布密度图（无文字、纯视觉）
  *        右 KeyLevelStack Top5+5 关键价位卡片栈（直接显示价/金额）
- *   ④ VacuumZones       清算真空区（瞬间穿越点）
- *   ⑤ HoverDetailCard   悬浮密度图时的详细弹层（保留旧体验作加强）
+ *   ⑤ VacuumZones       清算真空区（瞬间穿越点）
+ *   ⑥ HoverDetailCard   悬浮密度图时的详细弹层（保留旧体验作加强）
  *
  * 单位：金额一律用 formatCnUsd（"亿/万" 两档，雪球/东财风格），不用 M/K。
  * ══════════════════════════════════════════════════════════════════ */
@@ -41,6 +42,8 @@ interface KeyLevel {
 const CYCLES = ["1d", "7d", "30d"] as const;
 const LEVERAGES = ["all", "10", "25", "50", "100"];
 const TOP_N_PER_SIDE = 5;
+/** 摘要区「紧凑排名」默认展示条数；更多用展开 */
+const CLUSTER_RANK_PREVIEW = 3;
 const DENSITY_HEIGHT = 360;
 const HIT_RADIUS_PX = 12;
 const TOOLTIP_WIDTH_PX = 288;
@@ -235,6 +238,281 @@ function PressureBalanceCard({
       </div>
       <div className="mt-1 text-[10px] text-slate-500">
         失衡比 = 上方空头 / 下方多头 = {ratio.toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
+/** 与 KeyLevelCard 一致的价位区间展示 */
+function formatClusterPriceRange(c: LiqCluster, coin: string): string {
+  const lo = formatPrice(c.price_from, coin);
+  if (Math.abs(c.price_to - c.price_from) > 1) {
+    return `${lo} ~ ${formatPrice(c.price_to, coin)}`;
+  }
+  return lo;
+}
+
+function clusterMetaLine(c: LiqCluster): string | null {
+  const parts: string[] = [];
+  const n = c.exchange_count ?? 0;
+  const dom = c.dominant_exchange?.trim();
+  if (n >= 2 && dom) {
+    parts.push(`${n} 所 · 主 ${dom}`);
+  } else if (n >= 2) {
+    parts.push(`${n} 所共振`);
+  } else if (dom) {
+    parts.push(`主所 ${dom}`);
+  }
+  const li = c.leverage_intensity ?? 0;
+  if (li >= 0.01 && li < 0.999) {
+    parts.push(`桶内主力档 ${(li * 100).toFixed(0)}%`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/**
+ * 清算簇摘要：极值、Top3 占簇总额、距现价最近簇、可展开按金额排序列表。
+ * 数据与上方双色条同源周期（liqData 随 activeCycle 刷新）。
+ */
+function ClusterStatsPanel({
+  clustersAbove,
+  clustersBelow,
+  coin,
+  cycle,
+}: {
+  clustersAbove: LiqCluster[];
+  clustersBelow: LiqCluster[];
+  coin: string;
+  cycle: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { aboveSum, belowSum, top3AbovePct, top3BelowPct } = useMemo(() => {
+    const asum = clustersAbove.reduce((s, c) => s + c.total_usd, 0);
+    const bsum = clustersBelow.reduce((s, c) => s + c.total_usd, 0);
+    const t3a = clustersAbove.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
+    const t3b = clustersBelow.slice(0, 3).reduce((s, c) => s + c.total_usd, 0);
+    return {
+      aboveSum: asum,
+      belowSum: bsum,
+      top3AbovePct: asum > 0 ? Math.round((t3a / asum) * 1000) / 10 : null,
+      top3BelowPct: bsum > 0 ? Math.round((t3b / bsum) * 1000) / 10 : null,
+    };
+  }, [clustersAbove, clustersBelow]);
+
+  const peakAbove = clustersAbove[0];
+  const peakBelow = clustersBelow[0];
+
+  const nearestAbove = useMemo(() => {
+    if (!clustersAbove.length) return null;
+    return [...clustersAbove].sort((a, b) => a.distance_pct - b.distance_pct)[0];
+  }, [clustersAbove]);
+
+  const nearestBelow = useMemo(() => {
+    if (!clustersBelow.length) return null;
+    return [...clustersBelow].sort((a, b) => a.distance_pct - b.distance_pct)[0];
+  }, [clustersBelow]);
+
+  const samePeak = (a: LiqCluster | null, b: LiqCluster | null) =>
+    Boolean(
+      a &&
+        b &&
+        Math.abs(a.price_center - b.price_center) < 1e-6 &&
+        Math.abs(a.price_from - b.price_from) < 1e-3,
+    );
+
+  const showNearestAbove = nearestAbove && peakAbove && !samePeak(nearestAbove, peakAbove);
+  const showNearestBelow = nearestBelow && peakBelow && !samePeak(nearestBelow, peakBelow);
+
+  const maxRows = expanded ? 32 : CLUSTER_RANK_PREVIEW;
+  const canExpand =
+    clustersAbove.length > CLUSTER_RANK_PREVIEW ||
+    clustersBelow.length > CLUSTER_RANK_PREVIEW;
+
+  const hasAny = clustersAbove.length > 0 || clustersBelow.length > 0;
+  if (!hasAny) {
+    return (
+      <div className="mb-3 rounded-lg border border-dashed border-slate-700 bg-slate-800/20 px-3 py-2 text-[11px] text-slate-500">
+        当前周期暂无达到阈值的清算密集簇。可切换 1d / 7d / 30d
+        或查看中间密度图与右侧卡片；统计与上方百分比条独立口径。
+      </div>
+    );
+  }
+
+  function PeakCell({
+    label,
+    cluster,
+    variant,
+  }: {
+    label: string;
+    cluster: LiqCluster;
+    variant: "above" | "below";
+  }) {
+    const isAbove = variant === "above";
+    const titleCls = isAbove ? "text-rose-400" : "text-emerald-400";
+    const meta = clusterMetaLine(cluster);
+    return (
+      <div className="rounded-md border border-slate-700 bg-slate-900/40 px-2.5 py-2">
+        <div className={`text-[11px] font-semibold ${titleCls}`}>{label}</div>
+        <div
+          className={`mt-1 tabular-nums text-sm font-medium ${
+            isAbove ? "text-rose-200" : "text-emerald-200"
+          }`}
+        >
+          {formatClusterPriceRange(cluster, coin)}
+        </div>
+        <div className="mt-0.5 tabular-nums text-xs text-slate-300">
+          {formatCnUsd(cluster.total_usd)} · 距现价 {formatPct(cluster.distance_pct)}
+        </div>
+        {meta && <div className="mt-1 text-[10px] text-slate-500">{meta}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-3 rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-2.5"
+      title="堆积 = 后端按价位桶合并后的密集簇（已过滤小额 noise）；与双色条的全量 band 口径不同。"
+    >
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-200">
+          清算簇统计
+          <span className="ml-1.5 font-normal text-slate-500">· 周期 {cycle}</span>
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {peakAbove && <PeakCell label="上方空头 · 最大堆积" cluster={peakAbove} variant="above" />}
+        {peakBelow && <PeakCell label="下方多头 · 最大堆积" cluster={peakBelow} variant="below" />}
+      </div>
+
+      {(top3AbovePct != null || top3BelowPct != null) && (
+        <div className="mt-2 grid grid-cols-1 gap-1.5 text-[11px] text-slate-400 sm:grid-cols-2">
+          {top3AbovePct != null && (
+            <div>
+              <span className="text-rose-400/90">上方</span> Top3 簇占{" "}
+              <span className="tabular-nums text-slate-200">{top3AbovePct}%</span>{" "}
+              的上方簇总额（{formatCnUsd(aboveSum)}）
+            </div>
+          )}
+          {top3BelowPct != null && (
+            <div>
+              <span className="text-emerald-400/90">下方</span> Top3 簇占{" "}
+              <span className="tabular-nums text-slate-200">{top3BelowPct}%</span>{" "}
+              的下方簇总额（{formatCnUsd(belowSum)}）
+            </div>
+          )}
+        </div>
+      )}
+
+      {(showNearestAbove || showNearestBelow) && (
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {showNearestAbove && nearestAbove && (
+            <div className="rounded border border-rose-900/40 bg-rose-950/20 px-2 py-1.5 text-[11px]">
+              <span className="font-medium text-rose-400">距现价最近 · 上方簇</span>
+              <div className="mt-0.5 tabular-nums text-slate-200">
+                {formatClusterPriceRange(nearestAbove, coin)} · {formatCnUsd(nearestAbove.total_usd)}{" "}
+                · {formatPct(nearestAbove.distance_pct)}
+              </div>
+            </div>
+          )}
+          {showNearestBelow && nearestBelow && (
+            <div className="rounded border border-emerald-900/40 bg-emerald-950/20 px-2 py-1.5 text-[11px]">
+              <span className="font-medium text-emerald-400">距现价最近 · 下方簇</span>
+              <div className="mt-0.5 tabular-nums text-slate-200">
+                {formatClusterPriceRange(nearestBelow, coin)} · {formatCnUsd(nearestBelow.total_usd)}{" "}
+                · {formatPct(nearestBelow.distance_pct)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2.5 border-t border-slate-700/60 pt-2">
+        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          按簇规模排序（与右侧 Top 列表一致）
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <div className="mb-1 text-[10px] text-rose-400/90">上方空头</div>
+            <div className="max-h-[min(240px,40vh)] overflow-y-auto rounded border border-slate-700/80">
+              <table className="w-full text-left text-[11px]">
+                <thead className="sticky top-0 bg-slate-900/95 text-slate-500">
+                  <tr>
+                    <th className="px-1.5 py-1 font-normal">#</th>
+                    <th className="px-1 py-1 font-normal">价位</th>
+                    <th className="px-1 py-1 text-right font-normal">金额</th>
+                    <th className="px-1 py-1 text-right font-normal">距现价</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums text-slate-300">
+                  {clustersAbove.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-2 py-2 text-center text-slate-500">
+                        暂无上方簇
+                      </td>
+                    </tr>
+                  ) : (
+                    clustersAbove.slice(0, maxRows).map((c, i) => (
+                      <tr key={`a-${c.price_from}-${c.price_to}-${i}`} className="border-t border-slate-800/80">
+                        <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
+                        <td className="max-w-[7rem] truncate px-1 py-1" title={formatClusterPriceRange(c, coin)}>
+                          {formatClusterPriceRange(c, coin)}
+                        </td>
+                        <td className="px-1 py-1 text-right text-rose-300/90">{formatCnUsd(c.total_usd)}</td>
+                        <td className="px-1 py-1 text-right text-slate-400">{formatPct(c.distance_pct)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-[10px] text-emerald-400/90">下方多头</div>
+            <div className="max-h-[min(240px,40vh)] overflow-y-auto rounded border border-slate-700/80">
+              <table className="w-full text-left text-[11px]">
+                <thead className="sticky top-0 bg-slate-900/95 text-slate-500">
+                  <tr>
+                    <th className="px-1.5 py-1 font-normal">#</th>
+                    <th className="px-1 py-1 font-normal">价位</th>
+                    <th className="px-1 py-1 text-right font-normal">金额</th>
+                    <th className="px-1 py-1 text-right font-normal">距现价</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums text-slate-300">
+                  {clustersBelow.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-2 py-2 text-center text-slate-500">
+                        暂无下方簇
+                      </td>
+                    </tr>
+                  ) : (
+                    clustersBelow.slice(0, maxRows).map((c, i) => (
+                      <tr key={`b-${c.price_from}-${c.price_to}-${i}`} className="border-t border-slate-800/80">
+                        <td className="px-1.5 py-1 text-slate-500">{i + 1}</td>
+                        <td className="max-w-[7rem] truncate px-1 py-1" title={formatClusterPriceRange(c, coin)}>
+                          {formatClusterPriceRange(c, coin)}
+                        </td>
+                        <td className="px-1 py-1 text-right text-emerald-300/90">{formatCnUsd(c.total_usd)}</td>
+                        <td className="px-1 py-1 text-right text-slate-400">{formatPct(c.distance_pct)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {canExpand && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-2 text-[11px] text-blue-400/90 hover:text-blue-300"
+          >
+            {expanded ? "收起排名" : `展开完整排名（共上方 ${clustersAbove.length} / 下方 ${clustersBelow.length} 簇）`}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -733,6 +1011,13 @@ export default function LiquidationMapView() {
         longTotal={longTotal}
         shortTotal={shortTotal}
         ratio={ratio}
+      />
+
+      <ClusterStatsPanel
+        clustersAbove={liqData.clusters_above}
+        clustersBelow={liqData.clusters_below}
+        coin={coin}
+        cycle={activeCycle}
       />
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
