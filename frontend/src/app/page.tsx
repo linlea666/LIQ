@@ -203,6 +203,12 @@ function ToolsMenu() {
                 }
               : undefined,
       },
+      {
+        href: "/scalp",
+        label: "短线信号",
+        icon: "⚡",
+        desc: "10/30/60min 预测合约 · 仅测试统计",
+      },
     ],
     [coin, urgentCount, activeCount],
   );

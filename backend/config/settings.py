@@ -242,6 +242,18 @@ class StrategicConfig:
 
 
 @dataclass(frozen=True)
+class ScalpSignalConfig:
+    """短线预测合约信号引擎 · 启动级配置（运行参数）
+
+    策略本身的启用 / 阈值 / 通知等用户可调项走 JSON（ScalpConfig）由前端配置面板管理，
+    yaml 中只配启动开关、主循环间隔、数据目录等"系统层"参数。
+    """
+    enabled: bool = True
+    tick_interval_sec: float = 30.0
+    data_dir: str = "data/scalp_signal"  # 相对 backend/ 工作目录
+
+
+@dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
@@ -256,6 +268,7 @@ class Settings:
     # PR-3 · nofx 字段已下线
     market_action: MarketActionConfig = field(default_factory=MarketActionConfig)
     strategic: StrategicConfig = field(default_factory=StrategicConfig)
+    scalp_signal: ScalpSignalConfig = field(default_factory=ScalpSignalConfig)
     coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
     default_coin: str = "BTC"
 
@@ -461,6 +474,14 @@ def _build_settings(raw: dict) -> Settings:
         include_prompt_in_api=bool(strat_raw.get("include_prompt_in_api", True)),
     )
 
+    # 短线预测合约信号引擎（30s 周期，独立模块）
+    scalp_raw = raw.get("scalp_signal", {}) or {}
+    scalp_cfg = ScalpSignalConfig(
+        enabled=bool(scalp_raw.get("enabled", True)),
+        tick_interval_sec=max(5.0, float(scalp_raw.get("tick_interval_sec", 30.0) or 30.0)),
+        data_dir=str(scalp_raw.get("data_dir", "data/scalp_signal") or "data/scalp_signal"),
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -475,6 +496,7 @@ def _build_settings(raw: dict) -> Settings:
         notifications=notifications_cfg,
         market_action=maa_cfg,
         strategic=strat_cfg,
+        scalp_signal=scalp_cfg,
         default_coin=default_coin,
     )
 

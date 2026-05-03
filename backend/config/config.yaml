@@ -305,6 +305,17 @@ server:
 # 输出固定 6 块 JSON + PromptDebug（供前端展示"本轮喂给 AI 的完整数据"）。
 market_action:
   enabled: true
-  auto_interval_sec: 600      # 10 分钟一次；v4-flash 非思考单次 ~5-20s，3 币交错无压力
-  max_history: 200            # per-coin 历史保留条数（~33h @ 10min）
+  auto_interval_sec: 3600     # 1 小时一次；MAA 看 OI/funding/杠杆等结构指标，
+                              # 1h 颗粒足以平滑 noise 同时保留风暴敏感度
+                              # （想更省可改 7200=2h；最小 60s 由 settings 强制）
+  max_history: 200            # per-coin 历史保留条数（~8.3d @ 1h）
   include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
+
+# ── 短线预测合约信号引擎（独立模块，仅消费 state，不写回） ──
+# 周期：30s 一个 tick；策略覆盖 10/30/60min 预测周期。
+# 策略启用 / 置信阈值 / 通知开关等"用户可调项"由前端 /api/scalp/config 管理，
+# 持久化在 data_dir/config.json，不在 yaml 中。
+scalp_signal:
+  enabled: true               # 启动 SignalEngine 后台任务
+  tick_interval_sec: 30       # 主循环间隔（秒）；最小 5s（settings 强制）
+  data_dir: "data/scalp_signal"  # 持久化根目录（相对 backend/ 工作目录）

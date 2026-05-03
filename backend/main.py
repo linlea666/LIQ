@@ -18,6 +18,12 @@ from api.routes import router, set_engine as set_routes_engine
 from api.roll_position import router as roll_router, set_service as set_roll_service
 from api.routes_market_action import router as maa_router, set_engine as set_maa_engine
 from api.routes_strategic import router as strategic_router, set_engine as set_strategic_engine
+from api.routes_scalp import (
+    router as scalp_router,
+    set_components as set_scalp_components,
+    push_signal_created as scalp_push_created,
+    push_signal_settled as scalp_push_settled,
+)
 from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
@@ -174,6 +180,60 @@ async def _te_eval_scheduler():
         await asyncio.sleep(3600)
 
 
+def _build_scalp_signal_engine(main_engine: Engine):
+    """构造短线信号引擎全套组件（store + 3 策略 + scorer / veto / calibrator + engine）
+
+    返回 (store, signal_engine, calibrator)；调用方负责注入路由 + start/stop。
+    """
+    import time as _time
+    from processors.scalp_signal.calibrator import Calibrator
+    from processors.scalp_signal.signal_engine import SignalEngine
+    from processors.scalp_signal.strategy_a_sweep import SweepReclaimStrategy
+    from processors.scalp_signal.strategy_b_cvd_div import CVDDivergenceStrategy
+    from processors.scalp_signal.strategy_c_range_edge import RangeEdgeFadeStrategy
+    from processors.scalp_signal.strategy_registry import StrategyRegistry
+    from storage.scalp_signal_store import ScalpSignalStore
+
+    cfg = get_settings().scalp_signal
+    store = ScalpSignalStore(data_dir=cfg.data_dir)
+
+    registry = StrategyRegistry()
+    registry.register(SweepReclaimStrategy())
+    registry.register(CVDDivergenceStrategy())
+    registry.register(RangeEdgeFadeStrategy())
+
+    calibrator = Calibrator(store)
+
+    def _state_getter(coin: str):
+        return main_engine._states.get(coin)
+
+    def _blackswan_getter() -> tuple[bool, "Any"]:
+        try:
+            from processors.news_brief import get_current_brief
+            b = get_current_brief()
+            if b is None:
+                return False, None
+            is_bs = b.update_trigger == "blackswan"
+            age = int(_time.time() - b.updated_at) if b.updated_at else None
+            return is_bs, age
+        except Exception:
+            logger.debug("scalp blackswan_getter failed", exc_info=True)
+            return False, None
+
+    signal_engine = SignalEngine(
+        store=store,
+        registry=registry,
+        calibrator=calibrator,
+        config_getter=store.load_config,
+        state_getter=_state_getter,
+        blackswan_getter=_blackswan_getter,
+        on_signal_created=scalp_push_created,
+        on_signal_settled=scalp_push_settled,
+        tick_interval_sec=cfg.tick_interval_sec,
+    )
+    return store, signal_engine, calibrator
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     set_routes_engine(engine)
@@ -195,12 +255,38 @@ async def lifespan(app: FastAPI):
     # P0-B 每小时评估任务
     te_eval_task = asyncio.create_task(_te_eval_scheduler(), name="te_eval_scheduler")
 
+    # 短线信号引擎（独立模块，仅消费 state，不写回）
+    scalp_signal_engine = None
+    scalp_cfg = get_settings().scalp_signal
+    if scalp_cfg.enabled:
+        try:
+            scalp_store, scalp_signal_engine, scalp_calibrator = _build_scalp_signal_engine(engine)
+            set_scalp_components(
+                store=scalp_store,
+                engine=scalp_signal_engine,
+                calibrator=scalp_calibrator,
+            )
+            await scalp_signal_engine.start()
+            logger.info("scalp signal engine started | data_dir=%s tick=%.1fs",
+                        scalp_cfg.data_dir, scalp_cfg.tick_interval_sec)
+        except Exception:
+            logger.exception("scalp signal engine startup failed (continuing without it)")
+            scalp_signal_engine = None
+    else:
+        logger.info("scalp signal engine disabled by config")
+
     logger.info("LIQ Engine started")
     yield
     engine._running = False
     await engine.stop()
     task.cancel()
     te_eval_task.cancel()
+    # 短线信号引擎清理
+    if scalp_signal_engine is not None:
+        try:
+            await scalp_signal_engine.stop()
+        except Exception:
+            logger.warning("scalp signal engine stop failed", exc_info=True)
     # Shadow Logger 清理
     try:
         from monitoring.te_shadow import get_te_shadow_logger
@@ -231,6 +317,7 @@ app.include_router(router)
 app.include_router(roll_router)
 app.include_router(maa_router)
 app.include_router(strategic_router)
+app.include_router(scalp_router)
 
 _socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)

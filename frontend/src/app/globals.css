@@ -16,6 +16,7 @@ body:has(.levels-detail-page),
 body:has(.range-detail-page),
 body:has(.news-brief-page),
 body:has(.roll-page),
+body:has(.scalp-page),
 body:has(.brain-page) {
   overflow: auto;
 }
