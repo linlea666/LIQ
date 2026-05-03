@@ -30,7 +30,9 @@ P0 修复要点：
 铁律：
   - 引擎仅消费 state（只读），永不写回 state
   - 任何异常逐策略隔离
-  - 完整日志：每个决策点记录原因
+  - 可观测性：
+      * 每轮 tick 打 1 条 INFO `scalp tick | …`（含结算/池子/各策略阶段），便于 grep 巡检
+      * veto/threshold 细节仍可用 DEBUG：`scalp veto blocked` / `scalp threshold not met`
 """
 
 from __future__ import annotations
@@ -316,12 +318,20 @@ class SignalEngine:
 
         if not cfg.enabled:
             result["skipped_reason"] = "config_disabled"
+            logger.debug(
+                "scalp tick skip | reason=config_disabled coin=%s (引擎总开关关闭)",
+                cfg.coin,
+            )
             return result
 
         coin = cfg.coin
         state = self._state_getter(coin)
         if state is None:
             result["skipped_reason"] = "no_state"
+            logger.warning(
+                "scalp tick skip | reason=no_state coin=%s (无 CoinState，主 engine 是否未就绪？)",
+                coin,
+            )
             return result
 
         # 0) 记录 price tick（P0-1 结算依据）
@@ -366,6 +376,11 @@ class SignalEngine:
             )
             result["cancelled"] = [s.signal_id for s in cancelled]
             result["skipped_reason"] = "blackswan_active"
+            logger.info(
+                "scalp tick skip | coin=%s reason=blackswan_active cancelled_active=%d "
+                "settled=%d shadow=%d",
+                coin, len(cancelled), len(result["settled"]), len(result["shadow_settled"]),
+            )
             return result
 
         # 3) RegimeGate 检查
@@ -381,6 +396,13 @@ class SignalEngine:
                 )
                 result["cancelled"] = [s.signal_id for s in cancelled]
             result["skipped_reason"] = gate.skip_reason
+            logger.info(
+                "scalp tick skip | coin=%s reason=regime_gate:%s regime=%s "
+                "cancelled_active=%d settled=%d shadow=%d pending_settle=%d",
+                coin, gate.skip_reason, gate.regime, len(result["cancelled"]),
+                len(result["settled"]), len(result["shadow_settled"]),
+                len(batch.pending),
+            )
             return result
 
         # 4) MTF Bias
@@ -400,10 +422,11 @@ class SignalEngine:
         )
 
         bundles: list[tuple[CandidateBundle, StrategyCandidate, ScoringResult, list, str]] = []
+        stage_parts: list[str] = []
         # bundle, candidate, scoring, veto.reasons_passed, bias_summary
         for strategy in self._registry.enabled_for(cfg, gate.regime, cfg.horizon_min):
             try:
-                bundle_pack = self._evaluate_one(
+                bundle_pack, stage = self._evaluate_one(
                     strategy=strategy, ctx=ctx, cfg=cfg,
                     blackswan_active=bs_active,
                     blackswan_age_sec=bs_age,
@@ -414,13 +437,30 @@ class SignalEngine:
                     "scalp strategy %s evaluate failed | err=%s",
                     strategy.name.value, e, exc_info=True,
                 )
+                stage_parts.append(f"{strategy.name.value}:exception")
                 continue
+            stage_parts.append(f"{strategy.name.value}:{stage}")
             if bundle_pack is None:
                 continue
             bundles.append(bundle_pack + (bias.summary_cn,))
 
         # 6) 冲突解决
         if not bundles:
+            logger.info(
+                "scalp tick | coin=%s horizon=%dm regime=%s gate=allow bias=%+.3f | "
+                "settle=%d shadow=%d pending_settle=%d price_buf=%d active_pool=%d | "
+                "stages [%s] candidates=0 generated=0",
+                coin,
+                cfg.horizon_min,
+                gate.regime,
+                bias.bias_score,
+                len(batch.settled),
+                len(batch.shadow_settled),
+                len(batch.pending),
+                len(self._price_buffer),
+                len(self._store.get_active()),
+                "; ".join(stage_parts) if stage_parts else "(no enabled strategies)",
+            )
             return result
         cb_list = [b[0] for b in bundles]
         report = resolve_conflicts(cb_list)
@@ -471,6 +511,25 @@ class SignalEngine:
             if self._on_created is not None:
                 await self._safe_callback(self._on_created, signal)
 
+        logger.info(
+            "scalp tick | coin=%s horizon=%dm regime=%s gate=allow bias=%+.3f | "
+            "settle=%d shadow=%d pending_settle=%d price_buf=%d active_pool=%d | "
+            "stages [%s] candidates=%d conflict_rejected=%d generated=%d ids=%s",
+            coin,
+            cfg.horizon_min,
+            gate.regime,
+            bias.bias_score,
+            len(batch.settled),
+            len(batch.shadow_settled),
+            len(batch.pending),
+            len(self._price_buffer),
+            len(self._store.get_active()),
+            "; ".join(stage_parts) if stage_parts else "-",
+            len(bundles),
+            len(report.rejected),
+            len(result["generated"]),
+            result["generated"] or "-",
+        )
         return result
 
     # ── 单策略评估（detect + veto + score → CandidateBundle | None）───
@@ -484,14 +543,22 @@ class SignalEngine:
         blackswan_active: bool,
         blackswan_age_sec: Optional[int],
         now: int,
-    ) -> Optional[tuple[CandidateBundle, StrategyCandidate, ScoringResult, list]]:
+    ) -> tuple[
+        Optional[tuple[CandidateBundle, StrategyCandidate, ScoringResult, list]],
+        str,
+    ]:
+        """返回 (bundle 或 None, 管线阶段缩写)
+
+        stage 取值（用于 INFO 摘要）：
+          no_detect | off | veto|<reason> | threshold|<conf>lt<th> | pass
+        """
         candidate = strategy.detect(ctx)
         if candidate is None:
-            return None
+            return None, "no_detect"
 
         sc = cfg.strategies.get(strategy.name)
         if sc is None or not sc.enabled:
-            return None
+            return None, "off"
         last_ts = self._store.get_last_signal_ts(
             strategy.name, candidate.direction, coin=ctx.coin,
         )
@@ -509,7 +576,8 @@ class SignalEngine:
                 strategy.name.value, candidate.direction,
                 veto.reason_blocked, veto.block_detail,
             )
-            return None
+            rb = veto.reason_blocked or "unknown"
+            return None, f"veto|{rb}"
 
         # P0-3：带 sample_size 注入；P0-2：calibration_lookup 注入
         hist_wr, hist_n = self._calibrator.historical_winrate_with_sample_size(strategy.name)
@@ -527,7 +595,9 @@ class SignalEngine:
                 "scalp threshold not met | strategy=%s confidence=%d < %d",
                 strategy.name.value, scoring.confidence, sc.confidence_threshold,
             )
-            return None
+            return None, (
+                f"threshold|{scoring.confidence}lt{sc.confidence_threshold}"
+            )
 
         bundle = CandidateBundle(
             strategy_name=strategy.name.value,
@@ -536,7 +606,7 @@ class SignalEngine:
             candidate=candidate,
             scoring=scoring,
         )
-        return bundle, candidate, scoring, veto.reasons_passed
+        return (bundle, candidate, scoring, veto.reasons_passed), "pass"
 
     # ── 装配 ──────────────────────────────────────────────────
 
