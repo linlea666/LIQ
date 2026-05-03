@@ -72,7 +72,8 @@ class CORSASGIWrapper:
             self._log.info("CORS preflight OK | %s | origin=%s", path, origin)
             headers = [
                 (b"access-control-allow-origin", origin.encode()),
-                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
+                # 须含 PATCH：短线 scalp 等 PATCH 热更新；缺则浏览器预检放行但真实请求被拒 → Failed to fetch
+                (b"access-control-allow-methods", b"GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"),
                 (b"access-control-allow-headers", b"*"),
                 (b"access-control-allow-credentials", b"true"),
                 (b"access-control-max-age", b"86400"),
