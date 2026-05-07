@@ -315,6 +315,187 @@ class TestFundingPercentileSingleSource:
         assert "7d 百分位=71" in sec9_block
 
 
+class TestSection7CrowdingDeconcluded:
+    """§7 全局拥挤度去结论化（与 MAA `funding/basis/footprint.interpretation
+    已剔除` 设计纪律对齐）。
+
+    根因记录：
+      - `cg.inferred_position_state` 是 liquidity_wall_engine
+        `_classify_inferred_position_state` 用 price/OI/taker/清算 矩阵分类的
+        **方向偏置标签**（long_opening / short_opening / liquidation_flush / …）
+      - `cg.long_crowding_risk` / `short_crowding_risk` 是 `_build_position_crowding`
+        用硬阈值（funding > funding_high → long_risk +0.4 / LS > extreme → +0.3 / …）
+        计算的**带方向打分**
+      把这两类灌进 prompt → AI 直接抄结论，独立辩论被替代。
+      原料（OI Δ、Funding now、LS、清算事件）已在 §7+§8+§9 暴露，AI 自行综合。
+      前端 LiquidityWallCard 仍读模型字段，UI 链路不受影响。
+    """
+
+    def _snap_with_full_crowding(self):
+        from models.orderbook_pressure import PositionCrowdingSnapshot
+
+        snap = _make_snap_for_render_checks()
+        snap.crowding_global = PositionCrowdingSnapshot(
+            oi_delta_1h_pct=0.5,
+            oi_delta_24h_pct=-1.2,
+            oi_margin_split="stable_dominant",
+            funding_now_pct=0.001,
+            top_position_ls_ratio=2.6,
+            global_account_ls_ratio=1.5,
+            inferred_position_state="long_opening",
+            long_crowding_risk=0.85,
+            short_crowding_risk=0.10,
+        )
+        return snap
+
+    def test_section7_no_longer_shows_inferred_position_state(self):
+        """`推断仓位状态` 是后端硬规则分类的方向标签，不应进 prompt。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = self._snap_with_full_crowding()
+        text, _ = build_user_prompt(snap)
+
+        sec7_start = text.index("## §7")
+        sec8_start = text.index("## §8")
+        sec7_block = text[sec7_start:sec8_start]
+
+        assert "推断仓位状态" not in sec7_block, (
+            "§7 不应再渲染 inferred_position_state（后端规则给的方向标签）"
+        )
+        assert "long_opening" not in sec7_block, (
+            "inferred_position_state 枚举值不应出现在 §7"
+        )
+        # 同时验证：原料（OI Δ / Funding now / LS）仍正常渲染
+        assert "Funding now=" in sec7_block
+        assert "LS top_position=" in sec7_block
+
+    def test_section7_no_longer_shows_crowding_risk_score(self):
+        """`拥挤风险 long/short` 是后端硬阈值打的方向分，不应进 prompt。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = self._snap_with_full_crowding()
+        text, _ = build_user_prompt(snap)
+
+        sec7_start = text.index("## §7")
+        sec8_start = text.index("## §8")
+        sec7_block = text[sec7_start:sec8_start]
+
+        assert "拥挤风险" not in sec7_block, (
+            "§7 不应再渲染 long_crowding_risk / short_crowding_risk（带方向偏置打分）"
+        )
+        # 即便 long_crowding_risk=0.85，"long=0.85" 这种字串也不应出现在 §7
+        assert "long=0.85" not in sec7_block
+        assert "short=0.10" not in sec7_block
+
+    def test_section7_keeps_neutral_raw_signals(self):
+        """对照检查：去结论化 ≠ 把所有 §7 字段一刀切。
+
+        OI Δ / Funding now / LS / oi_margin_split 是**纯数值或数值口径分类**，
+        不带方向偏置，必须保留。"""
+        from ai.strategic_prompts import build_user_prompt
+
+        snap = self._snap_with_full_crowding()
+        text, _ = build_user_prompt(snap)
+
+        sec7_start = text.index("## §7")
+        sec8_start = text.index("## §8")
+        sec7_block = text[sec7_start:sec8_start]
+
+        assert "OI Δ" in sec7_block
+        assert "OI 保证金切分" in sec7_block
+        assert "stable_dominant" in sec7_block  # 纯口径分类，不是方向标签
+        assert "Funding now=" in sec7_block
+        assert "LS top_position=" in sec7_block
+        assert "global_account=" in sec7_block
+
+
+class TestSection9FundingRawDecimal:
+    """§9 Funding 渲染必须以**原始小数费率**给 AI（与 MAA market_action_prompts
+    对齐），不要量纲错配 / 不要精度丢失 / 不要漏 oi_weighted / cost。
+
+    旧 bug：`f"{avg_current:.4f}%"` 把 raw decimal 0.000022 渲染为 "0.0000%"——
+      (a) 加 % 后缀让 AI 把它当成 0.000022%（实际等价 0.0022%，差 100 倍）
+      (b) nd=4 把 0.000022 四舍五入成 0.0000 直接归零
+    """
+
+    def test_section9_funding_avg_current_uses_raw_decimal(self):
+        """avg_current 是原始小数费率（例 0.000022）→ 须以 nd=6 显示，不带 %。"""
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import FundingSnapshot, MarketActionFacts
+
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000,
+            funding=FundingSnapshot(
+                avg_current=0.000022,
+                avg_7d=-0.000023,
+                oi_weighted=0.000038,
+            ),
+        )
+        snap = _make_snap_for_render_checks(market_action_facts=facts)
+        text, _ = build_user_prompt(snap)
+
+        sec9_start = text.index("## §9")
+        sec10_start = text.index("## §10")
+        sec9_block = text[sec9_start:sec10_start]
+
+        # 原始小数完整显示（nd=6）
+        assert "当前均值=0.000022" in sec9_block
+        assert "7d 均值=-0.000023" in sec9_block
+        assert "OI 加权=0.000038" in sec9_block
+        # 旧 bug 指纹绝不能再出现
+        assert "avg_current=0.0000%" not in sec9_block, (
+            "§9 funding 不应把 raw decimal 用 % 后缀 + nd=4 渲染成 0.0000%"
+        )
+        assert "0.000022%" not in sec9_block, (
+            "raw decimal 不应直接拼 % 后缀（量纲错配）"
+        )
+        # 量纲提示必须存在，让 AI 知道这是原始小数
+        assert "原始小数费率" in sec9_block
+
+    def test_section9_funding_renders_oi_weighted_and_cost(self):
+        """oi_weighted / hourly_cost_usd / cost_24h_usd 必须暴露给 AI——
+        与 MAA market_action_prompts.py:443-470 对齐。"""
+        from ai.strategic_prompts import build_user_prompt
+        from models.market_action import FundingSnapshot, MarketActionFacts
+
+        facts = MarketActionFacts(
+            coin="BTC", timestamp=1700000000,
+            funding=FundingSnapshot(
+                avg_current=0.000022,
+                avg_7d=-0.000023,
+                oi_weighted=0.000038,
+                hourly_cost_usd=165488.16,
+                cost_24h_usd=4490000.0,
+                exchange_count=2,
+                dispersion_abs=0.000041,
+                history_sample_size=90,
+                slope_24h="flat",
+                percentile_7d=90,
+                percentile_30d=91,
+                days_negative_streak=0.0,
+                sign_flip_7d=False,
+            ),
+        )
+        snap = _make_snap_for_render_checks(market_action_facts=facts)
+        text, _ = build_user_prompt(snap)
+
+        sec9_start = text.index("## §9")
+        sec10_start = text.index("## §10")
+        sec9_block = text[sec9_start:sec10_start]
+
+        # 资金费成本（让 AI 看到杠杆持有成本而非只看费率小数）
+        assert "hourly=$165,488.16" in sec9_block
+        assert "cost_24h=$4.49M" in sec9_block
+        assert "n=90" in sec9_block
+        # 交易所数 + 分散度（数据可信度上下文）
+        assert "交易所数=2" in sec9_block
+        assert "分散度(std)=0.000041" in sec9_block
+        # 百分位与 slope 必须保留
+        assert "7d 百分位=90" in sec9_block
+        assert "30d 百分位=91" in sec9_block
+        assert "slope_24h=`flat`" in sec9_block
+
+
 class TestOptionFieldRenderHardening:
     """§12 期权字段渲染防御：IV 量纲 / put_call_oi 缺失保护。"""
 

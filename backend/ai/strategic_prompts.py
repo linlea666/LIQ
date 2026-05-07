@@ -767,12 +767,14 @@ def build_user_prompt(
             f"- LS top_position={_fmt(cg.top_position_ls_ratio, nd=2)} | "
             f"global_account={_fmt(cg.global_account_ls_ratio, nd=2)}"
         )
-        if cg.inferred_position_state:
-            lines.append(f"- 推断仓位状态：`{cg.inferred_position_state}`")
-        lines.append(
-            f"- 拥挤风险：long={_fmt(cg.long_crowding_risk, nd=2)} | "
-            f"short={_fmt(cg.short_crowding_risk, nd=2)}"
-        )
+        # 故意不渲染 cg.inferred_position_state / long_crowding_risk / short_crowding_risk：
+        # 这两类字段是 liquidity_wall_engine._classify_inferred_position_state 与
+        # _build_position_crowding 用硬规则（funding>=high → long_risk+0.4 / LS>extreme → +0.3 / …）
+        # 计算出的**带方向偏置的派生结论**，给 AI 看会让它直接抄结论、跳过独立辩论。
+        # 与 MAA market_action_prompts.py 剔除 funding/basis/footprint.interpretation
+        # 的"暴露原料、隐藏定性"纪律对齐。原料（OI Δ / Funding now / LS / 清算事件）
+        # 已在前面 §7 + §8 + §9 完整暴露，AI 自行综合判断方向。
+        # 前端展示链路（LiquidityWallCard）仍读 crowding_global 模型字段，不受影响。
 
     # ── §8 清算图 / 止损带 / 清算磁铁（流动性目标与扫单路径） ──
     _header("§8", "清算图 / 止损带 / 清算磁铁（流动性目标与扫单路径，**不是支撑/阻力**）")
@@ -921,17 +923,44 @@ def build_user_prompt(
             lines.append(f"- 头部 venue 1h Δ：{split_str}")
 
     # Funding
+    # 渲染纪律：FundingSnapshot.avg_current / avg_7d / oi_weighted 是**原始小数费率**
+    # （例 0.000022 表示 0.0022%）。旧实现 `f"{avg_current:.4f}%"` 同时犯了两个错：
+    #   (1) 量纲错配——原始小数加 % 后缀，让 AI 把 0.000022 当成 0.000022%
+    #   (2) 精度丢失——nd=4 把 0.000022 四舍五入成 0.0000，最终输出 "0.0000%"
+    # 修复后与 ai/market_action_prompts.py:446-454 对齐：nd=6 + 不带 % + 同时给出
+    # 原始 + OI 加权 + 资金费成本，让 AI 看到完整 funding 上下文。
     ffu = snapshot.facts_funding
     if ffu is not None:
         _sub("Funding · 资金费")
         lines.append(
-            f"- avg_current={_fmt(getattr(ffu, 'avg_current', None), nd=4)}% | "
-            f"7d 百分位={_fmt(getattr(ffu, 'percentile_7d', None), nd=0)} | "
+            f"- 当前均值={_fmt(getattr(ffu, 'avg_current', None), nd=6)} | "
+            f"7d 均值={_fmt(getattr(ffu, 'avg_7d', None), nd=6)} | "
+            f"OI 加权={_fmt(getattr(ffu, 'oi_weighted', None), nd=6)}"
+            "（**原始小数费率**：×100 即百分比，例 0.000025 = 0.0025%）"
+        )
+        ex_n = getattr(ffu, "exchange_count", 0) or 0
+        disp = getattr(ffu, "dispersion_abs", None)
+        if ex_n or disp is not None:
+            lines.append(
+                f"- 交易所数={ex_n} | 分散度(std)={_fmt(disp, nd=6)}"
+            )
+        h_cost = getattr(ffu, "hourly_cost_usd", None)
+        c_24h = getattr(ffu, "cost_24h_usd", None)
+        fd_n = getattr(ffu, "history_sample_size", None)
+        if h_cost is not None or c_24h is not None:
+            sample_str = f"，n={fd_n}" if fd_n else ""
+            lines.append(
+                f"- 资金费成本（基于当前 OI 近似{sample_str}）："
+                f"hourly=${_fmt(h_cost)} | cost_24h=${_fmt(c_24h)}"
+            )
+        lines.append(
+            f"- 7d 百分位={_fmt(getattr(ffu, 'percentile_7d', None), nd=0)} | "
             f"30d 百分位={_fmt(getattr(ffu, 'percentile_30d', None), nd=0)}"
+            "（1-100；<10 极端负 / >90 极端正；样本不足返回 —）"
         )
         slope = getattr(ffu, "slope_24h", None)
         if slope:
-            lines.append(f"- slope_24h=`{slope}`")
+            lines.append(f"- slope_24h=`{slope}`（最近 24h funding 方向变化）")
         if getattr(ffu, "sign_flip_7d", None):
             lines.append("- ⚠ 7d 符号翻转：是")
         days_neg = getattr(ffu, "days_negative_streak", 0)
