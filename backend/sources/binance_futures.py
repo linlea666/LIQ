@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 import time
@@ -9,6 +10,11 @@ from collections.abc import AsyncIterator
 from typing import Any, Optional
 
 import aiohttp
+
+# WS 读超时：aiohttp heartbeat=30s 之外再加一层应用级 read timeout。
+# 触发场景：TCP 半开（pong 写不出 / 收不到 close 帧）时，async for 会无限阻塞，
+# 历史曾出现 52min 静默 + ClientConnectionResetError。45s 留足容错（>= heartbeat 30s + 余量）。
+_WS_READ_TIMEOUT_SEC = 45
 
 from sources.base import DataSource
 
@@ -81,12 +87,31 @@ class BinanceFuturesSource(DataSource):
     async def stream_tickers(
         self, watched_symbols: set[str] | None = None,
     ) -> AsyncIterator[list[dict]]:
-        """订阅 Binance !ticker@arr 实时流，产出简化后的 ticker 事件列表。"""
+        """订阅 Binance !ticker@arr 实时流，产出简化后的 ticker 事件列表。
+
+        健壮性：
+            - aiohttp 的 heartbeat=30 每 30s 发 ping，对端无响应才认连接死
+            - 额外加 _WS_READ_TIMEOUT_SEC 应用级读超时，覆盖 TCP 半开场景：
+              `async for msg in ws` 在半开连接下不会抛错也不会返回，只是
+              永远阻塞——这是历史"52min 静默 + ClientConnectionResetError"
+              的根因。read 超时后主动 break，由调用方触发重连
+        """
         session = await self.get_session()
         try:
             async with session.ws_connect(self._ws_url, heartbeat=30) as ws:
                 logger.info("Binance WS connected | url=%s", self._ws_url)
-                async for msg in ws:
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(
+                            ws.receive(), timeout=_WS_READ_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        self._mark_failure()
+                        logger.warning(
+                            "Binance WS receive timeout (%ds) | forcing reconnect",
+                            _WS_READ_TIMEOUT_SEC,
+                        )
+                        break
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         payload = json.loads(msg.data)
                         rows = payload.get("data") if isinstance(payload, dict) else payload
@@ -105,7 +130,11 @@ class BinanceFuturesSource(DataSource):
                         if events:
                             self._mark_success()
                             yield events
-                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    elif msg.type in (
+                        aiohttp.WSMsgType.CLOSED,
+                        aiohttp.WSMsgType.CLOSING,
+                        aiohttp.WSMsgType.ERROR,
+                    ):
                         self._mark_failure()
                         break
         except Exception:
