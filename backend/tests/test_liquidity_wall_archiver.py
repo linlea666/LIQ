@@ -5,7 +5,7 @@
   - 按 coin/day 切片（多币 / 跨日）
   - 写入失败 best-effort（snapshot=None / 缺字段）
   - 磁盘高水位时跳过 + dropped_count 计数
-  - 90 天 GC 删除超期文件
+  - 30 天 GC 删除超期文件
   - 字段向前兼容（没有 wall_zone_id / raw_trust_score 等新字段时默认值兼容）
   - reset_for_testing 清空目录
   - global singleton
@@ -304,7 +304,7 @@ class TestDiskWatermark:
 
 
 # ─────────────────────────────────────────────────────────────────
-# 5. 90 天 GC
+# 5. 30 天 GC
 # ─────────────────────────────────────────────────────────────────
 
 class TestGarbageCollection:

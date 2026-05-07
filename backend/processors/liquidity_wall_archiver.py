@@ -8,7 +8,7 @@
     - 同步 IO + threading.RLock，主路径用 run_in_executor 推到 thread pool
     - 不 gzip：纯 JSONL，便于 `jq / rg / pandas.read_json(lines=True)` 直读
     - 按币/按天分文件：data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl
-    - 90 天 GC（snapshot_archiver 是 30 天，本模块要更长观察期）
+    - 30 天 GC（与 snapshot_archiver 对齐；后验脚本所需的 1-2 周观察期已足够覆盖）
     - 磁盘水位保护：> 80% 跳过落盘 + 日志告警，30s 抑制再检测
     - 写入失败全部 best-effort（吞异常），绝不影响主轮询
 
@@ -55,7 +55,7 @@ _DEFAULT_ROOT = os.path.abspath(
         "liquidity_wall_history",
     )
 )
-_KEEP_DAYS = 90                       # 1-2 周观察期需更长保留
+_KEEP_DAYS = 30                       # 与 snapshot_archiver 对齐；1-2 周观察期足够覆盖
 _TZ_CN = timezone(timedelta(hours=8))
 
 # 磁盘水位保护
