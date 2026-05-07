@@ -678,26 +678,44 @@ def build_user_prompt(
         )
 
     def _fmt_wall_breakdown(w) -> Optional[str]:
-        """G-9：把 current_usd 拆成 合约/Binance 现货/Coinbase 现货 3 维度。
+        """G-9：把厚度拆成 合约 / Binance 现货 / Coinbase 现货 3 维度。
 
-        约定：current_usd 是合约层（depth heatmap），spot_current_usd 是 Binance
-        现货同价区，coinbase_spot_usd 是 Coinbase 现货同价区。`source` 字段标注
-        本墙的底层 dataset（spot_only / depth_only / spot+depth 等）。
+        字段语义（与 liquidity_wall_engine 对齐）：
+          - `current_usd` 通常 = 合约 depth heatmap 厚度
+          - `spot_current_usd` = Binance 现货同价区厚度
+          - `coinbase_spot_usd` = Coinbase 现货同价区厚度
+          - `source` 标注底层 dataset：
+              · `spot_only`     = 现货独立 zone（无合约源）；
+                _build_spot_only_zones 会镜像 current_usd → spot_current_usd
+              · `depth_only`    = 仅合约 depth
+              · `spot+depth`    = 合约 zone 同价区现货叠加（dual_source）
 
-        若三者全部为 0 / spot_only 时也给出对应说明，便于 AI 读取。
+        关键：source==spot_only 时 current_usd 实际是现货厚度（已镜像到
+        spot_current_usd），若仍按"合约层"输出会把同一笔现货数双计——AI 会把
+        spot_only 单源墙误读为"合约+现货双源叠加"，高估其可信度。这是和
+        §7 顶部"合约=杠杆挂单 / Binance 现货=真买卖家"语义直接冲突的硬错。
         """
         contract_usd = float(getattr(w, "current_usd", 0) or 0)
         binance_spot = float(getattr(w, "spot_current_usd", 0) or 0)
         coinbase_spot = float(getattr(w, "coinbase_spot_usd", 0) or 0)
         source = getattr(w, "source", None) or "—"
-        # 当三个都是 0（不应该发生，至少 current_usd 有值）则跳过
         if contract_usd <= 0 and binance_spot <= 0 and coinbase_spot <= 0:
             return None
         parts: list[str] = []
-        if contract_usd > 0:
-            parts.append(f"合约 {_fmt(contract_usd)}")
-        if binance_spot > 0:
-            parts.append(f"Binance 现货 {_fmt(binance_spot)}")
+        if source == "spot_only":
+            # current_usd 与 spot_current_usd 是镜像同源——只输出"Binance 现货"
+            # 一项即可，丢弃"合约"项避免双计。spot_current_usd 缺失（理论上不
+            # 应发生）时退化用 current_usd 当现货数。
+            spot_to_show = binance_spot if binance_spot > 0 else contract_usd
+            if spot_to_show > 0:
+                parts.append(f"Binance 现货 {_fmt(spot_to_show)}")
+        else:
+            # depth_only / spot+depth / 其它：current_usd 是合约层、
+            # spot_current_usd 是独立累加的 Binance 现货厚度，分别输出。
+            if contract_usd > 0:
+                parts.append(f"合约 {_fmt(contract_usd)}")
+            if binance_spot > 0:
+                parts.append(f"Binance 现货 {_fmt(binance_spot)}")
         if coinbase_spot > 0:
             parts.append(f"Coinbase 现货 {_fmt(coinbase_spot)}")
         if not parts:

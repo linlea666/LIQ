@@ -1448,19 +1448,62 @@ class TestWallBreakdownRendering:
         assert "·CB双源" in s7
         assert "·双源" in s7
 
-    def test_spot_only_wall(self):
-        """spot_only 墙（来自现货热力图，contract_usd 仍由 spot 填）。"""
+    def test_spot_only_wall_does_not_double_count_as_contract(self):
+        """spot_only 墙：current_usd 已被 _build_spot_only_zones 镜像到
+        spot_current_usd（同源同值），渲染层必须**只**输出"Binance 现货"，
+        否则会让 AI 误以为合约+现货双源叠加（高估墙的可信度）。
+
+        根因：liquidity_wall_engine.py:824-826 在生成 spot_only zone 时
+        `z.spot_current_usd = z.current_usd`——两个字段是镜像，不是独立累加。
+        渲染层若不区分 source，就会把同一笔现货数报两次。
+        """
         w = self._wall(
-            contract_usd=10_000_000.0,
-            binance_spot=10_000_000.0,
-            coinbase_spot=0.0,
+            contract_usd=10_000_000.0,    # 实际是现货厚度（spot_only 镜像）
+            binance_spot=10_000_000.0,    # 与 contract_usd 同值同源
+            coinbase_spot=3_240_000.0,
             source="spot_only",
         )
         s7 = self._build(walls_below=[w], walls_above=[])
         assert "source=`spot_only`" in s7
-        # 至少有合约 + Binance 现货两段
-        assert "合约 10.00M" in s7
-        assert "Binance 现货 10.00M" in s7
+        # 找到本墙的"厚度拆分"那一行
+        breakdown_lines = [
+            ln for ln in s7.split("\n")
+            if "厚度拆分" in ln and "spot_only" in ln
+        ]
+        assert breakdown_lines, "未找到 spot_only 墙的厚度拆分行"
+        line = breakdown_lines[0]
+        # 关键：不应再出现"合约 X"（避免双计）
+        assert "合约 10.00M" not in line, (
+            "spot_only 墙不应输出『合约 10.00M』——current_usd 与 spot_current_usd "
+            "是镜像同值，会让 AI 误读为合约+现货双源叠加"
+        )
+        assert "合约 " not in line, (
+            "spot_only 墙的厚度拆分不应包含任何『合约』项"
+        )
+        # 现货端必须保留
+        assert "Binance 现货 10.00M" in line
+        # Coinbase 同价区独立厚度仍照常输出
+        assert "Coinbase 现货 3.24M" in line
+
+    def test_spot_only_wall_falls_back_when_spot_field_missing(self):
+        """边界：理论上 spot_only 墙的 spot_current_usd 必非零（_build_spot_only_zones
+        会镜像），但旧数据 / 异常路径可能没填。此时 current_usd 是唯一现货数据来源，
+        必须降级把它当 Binance 现货输出，而不是当合约。"""
+        w = self._wall(
+            contract_usd=8_000_000.0,
+            binance_spot=0.0,            # 异常：spot_current_usd 未镜像
+            coinbase_spot=0.0,
+            source="spot_only",
+        )
+        s7 = self._build(walls_above=[w])
+        breakdown_lines = [
+            ln for ln in s7.split("\n")
+            if "厚度拆分" in ln and "spot_only" in ln
+        ]
+        assert breakdown_lines
+        line = breakdown_lines[0]
+        assert "合约 " not in line
+        assert "Binance 现货 8.00M" in line
 
     def test_no_walls_no_breakdown_section(self):
         """无墙时不应出现"厚度拆分：合约 ..."明细行（标题/语义指南行可以含此字样）。"""
