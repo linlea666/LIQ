@@ -26,6 +26,7 @@ NANSEN_FLOW_PROBE_TOKENS = {
     },
 }
 NANSEN_FLOW_PROBE_LABELS = ("exchange", "smart_money", "whale")
+NANSEN_FLOW_PROBE_PER_PAGE = 200
 
 _engine = None
 
@@ -99,6 +100,14 @@ def _probe_sorted_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: str(r.get("date") or r.get("time") or ""))
 
 
+def _probe_net_from_signed_or_positive_parts(in_value: float, out_value: float) -> float:
+    # Nansen currently returns total_outflows_* as negative deltas. Keep this
+    # tolerant in case another endpoint returns positive outflow magnitudes.
+    if out_value < 0:
+        return in_value + out_value
+    return in_value - out_value
+
+
 def _probe_flow_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows or not any("total_inflows_cex" in r or "total_outflows_cex" in r for r in rows):
         return {}
@@ -109,18 +118,20 @@ def _probe_flow_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     cex_out = sum(_probe_num(r.get("total_outflows_cex")) for r in ordered)
     dex_in = sum(_probe_num(r.get("total_inflows_dex")) for r in ordered)
     dex_out = sum(_probe_num(r.get("total_outflows_dex")) for r in ordered)
-    cex_net = cex_in - cex_out
-    dex_net = dex_in - dex_out
+    cex_net = _probe_net_from_signed_or_positive_parts(cex_in, cex_out)
+    dex_net = _probe_net_from_signed_or_positive_parts(dex_in, dex_out)
     summary: dict[str, Any] = {
         "from": ordered[0].get("date"),
         "to": latest.get("date"),
         "rows": len(ordered),
         "latest_price_usd": latest_price,
         "cex_in_token": cex_in,
-        "cex_out_token": cex_out,
+        "cex_out_token_abs": abs(cex_out),
+        "cex_out_token_raw": cex_out,
         "cex_net_token": cex_net,
         "dex_in_token": dex_in,
-        "dex_out_token": dex_out,
+        "dex_out_token_abs": abs(dex_out),
+        "dex_out_token_raw": dex_out,
         "dex_net_token": dex_net,
     }
     if latest_price > 0:
@@ -216,7 +227,7 @@ async def probe_nansen_flows() -> dict[str, Any]:
                 label=label,
                 from_date=start.isoformat(),
                 to_date=today.isoformat(),
-                per_page=20,
+                per_page=NANSEN_FLOW_PROBE_PER_PAGE,
             )
             results.append(_log_probe_result(f"{symbol} tgm/flows label={label}", rows, source.last_error))
 
