@@ -20,6 +20,7 @@ from models.smc import (
     SMCFieldMapItem,
     SMCFundFlowAlert,
     SMCFundFlowContext,
+    SMCKeyLevel,
     SMCHorizon,
     SMCLiquidityPool,
     SMCMarketBreadth,
@@ -50,6 +51,18 @@ class _Swing:
     price: float
     index: int
     strength: float
+
+
+@dataclass
+class _LevelCandidate:
+    side: Literal["support", "resistance"]
+    price: float
+    price_from: float
+    price_to: float
+    strength: float
+    source: str
+    evidence: str
+    timeframe: str = ""
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -106,6 +119,24 @@ def _last_price(state: Any, bars: list[_Bar]) -> float:
 
 def _pct(price: float, base: float) -> float:
     return round((price - base) / base * 100, 4) if base else 0.0
+
+
+def _distance_tier(distance_abs_pct: float, horizon: SMCHorizon) -> Optional[Literal["near", "mid", "far"]]:
+    if horizon == "intraday":
+        if distance_abs_pct <= 1.5:
+            return "near"
+        if distance_abs_pct <= 5:
+            return "mid"
+        if distance_abs_pct <= 8:
+            return "far"
+        return None
+    if distance_abs_pct <= 3:
+        return "near"
+    if distance_abs_pct <= 10:
+        return "mid"
+    if distance_abs_pct <= 18:
+        return "far"
+    return None
 
 
 def _zone_id(*parts: Any) -> str:
@@ -388,7 +419,7 @@ def _liq_pools(state: Any, price: float, horizon: SMCHorizon) -> list[SMCLiquidi
                 evidence=[f"{key} heatmap node ${val:,.0f}"],
             ))
     pools.sort(key=lambda p: (abs(p.distance_pct), -p.strength))
-    return pools[:16]
+    return pools[:80]
 
 
 def _detect_raids(
@@ -630,6 +661,266 @@ def _turnover_zones(state: Any, bars: list[_Bar], price: float, tf: str) -> list
             evidence=[f"Self-calculated turnover node, relative volume {vol / max_vol:.2f}"],
         ))
     return sorted(zones, key=lambda z: abs(z.distance_pct))[:6]
+
+
+def _source_label(source: str) -> str:
+    labels = {
+        "liq_map_above": "清算地图",
+        "liq_map_below": "清算地图",
+        "liq_heatmap": "清算热力图",
+        "equal_highs_lows": "等高/等低",
+        "swing_high_low": "前高/前低",
+        "turnover_sr": "成交密集区",
+        "order_block": "订单块",
+        "fair_value_gap": "失衡区",
+        "breaker": "破坏块",
+        "fib": "斐波那契",
+        "ma": "均线",
+    }
+    return labels.get(source, source)
+
+
+def _candidate_side(candidate_price: float, current_price: float) -> Literal["support", "resistance"]:
+    return "support" if candidate_price < current_price else "resistance"
+
+
+def _key_level_candidates(
+    state: Any,
+    bars: list[_Bar],
+    swings: list[_Swing],
+    pools: list[SMCLiquidityPool],
+    zones: list[SMCZone],
+    price: float,
+    horizon: SMCHorizon,
+    atr: float,
+) -> list[_LevelCandidate]:
+    candidates: list[_LevelCandidate] = []
+
+    for p in pools:
+        candidates.append(_LevelCandidate(
+            side=_candidate_side(p.price, price),
+            price=p.price,
+            price_from=p.price_from,
+            price_to=p.price_to,
+            strength=min(100, p.strength + (8 if p.timeframe in {"7d", "30d"} else 0)),
+            source=p.source,
+            timeframe=p.timeframe,
+            evidence=(p.evidence[0] if p.evidence else f"{p.timeframe} liquidity pool"),
+        ))
+
+    for z in zones:
+        if z.state in {"expired", "invalidated"} and abs(z.distance_pct) < 1.0:
+            continue
+        candidates.append(_LevelCandidate(
+            side=_candidate_side(z.midpoint, price),
+            price=z.midpoint,
+            price_from=z.price_from,
+            price_to=z.price_to,
+            strength=z.strength,
+            source=z.kind,
+            timeframe=z.timeframe,
+            evidence=(z.evidence[0] if z.evidence else z.kind),
+        ))
+
+    for sw in swings[-24:]:
+        side: Literal["support", "resistance"]
+        if sw.kind == "low":
+            side = "support" if sw.price <= price else "resistance"
+            source_note = "Prior swing low"
+        else:
+            side = "resistance" if sw.price >= price else "support"
+            source_note = "Prior swing high"
+        band = max(price * 0.0012, atr * 0.25)
+        candidates.append(_LevelCandidate(
+            side=side,
+            price=sw.price,
+            price_from=sw.price - band,
+            price_to=sw.price + band,
+            strength=min(80, 38 + sw.strength * 18),
+            source="swing_high_low",
+            timeframe="structure",
+            evidence=f"{source_note} {sw.price:,.2f}",
+        ))
+
+    if swings:
+        highs = [s for s in swings if s.kind == "high"]
+        lows = [s for s in swings if s.kind == "low"]
+        if highs and lows:
+            high = max(s.price for s in highs[-10:])
+            low = min(s.price for s in lows[-10:])
+            if high > low:
+                for ratio in (0.382, 0.5, 0.618, 0.705, 0.786):
+                    level = high - (high - low) * ratio
+                    band = max(price * 0.0015, atr * 0.25)
+                    candidates.append(_LevelCandidate(
+                        side=_candidate_side(level, price),
+                        price=level,
+                        price_from=level - band,
+                        price_to=level + band,
+                        strength=42 if ratio in {0.5, 0.705} else 36,
+                        source="fib",
+                        timeframe="range",
+                        evidence=f"Fib {ratio:.3f} of recent swing range",
+                    ))
+
+    ma_items: list[tuple[str, Any]] = [
+        ("EMA20", _attr(state, "ema20_cg")),
+        ("MA60", _attr(state, "ma60_daily_cg")),
+        ("MA120", _attr(state, "ma120_daily_cg")),
+        ("SMA200", _attr(state, "sma200_daily_cg")),
+    ]
+    ema_daily = _attr(state, "ema_daily", default={}) or {}
+    if isinstance(ema_daily, dict):
+        for period in (50, 100, 200):
+            ma_items.append((f"EMA{period}", ema_daily.get(period)))
+    seen_ma: set[int] = set()
+    for name, raw_val in ma_items:
+        ma = _num(raw_val, 0)
+        if ma <= 0:
+            continue
+        bucket = int(round(ma))
+        if bucket in seen_ma:
+            continue
+        seen_ma.add(bucket)
+        distance = abs(_pct(ma, price))
+        max_dist = 10 if horizon == "intraday" else 20
+        if distance > max_dist:
+            continue
+        band = max(price * 0.001, atr * 0.2)
+        candidates.append(_LevelCandidate(
+            side=_candidate_side(ma, price),
+            price=ma,
+            price_from=ma - band,
+            price_to=ma + band,
+            strength=45 if name in {"MA60", "MA120", "SMA200", "EMA200"} else 34,
+            source="ma",
+            timeframe="1d",
+            evidence=f"{name} daily moving average",
+        ))
+
+    return [c for c in candidates if c.price > 0]
+
+
+def _merge_key_levels(
+    state: Any,
+    candidates: list[_LevelCandidate],
+    price: float,
+    horizon: SMCHorizon,
+    atr: float,
+) -> list[SMCKeyLevel]:
+    if not candidates or price <= 0:
+        return []
+    tolerance = max(
+        atr * (0.35 if horizon == "intraday" else 0.65),
+        price * (0.0025 if horizon == "intraday" else 0.005),
+    )
+    ordered = sorted(candidates, key=lambda c: c.price)
+    groups: list[list[_LevelCandidate]] = []
+    for cand in ordered:
+        placed = False
+        for group in groups:
+            center = sum(x.price * max(x.strength, 1) for x in group) / sum(max(x.strength, 1) for x in group)
+            if abs(cand.price - center) <= tolerance:
+                group.append(cand)
+                placed = True
+                break
+        if not placed:
+            groups.append([cand])
+
+    levels: list[SMCKeyLevel] = []
+    source_weights = {
+        "liq_map_above": 24,
+        "liq_map_below": 24,
+        "liq_heatmap": 22,
+        "equal_highs_lows": 18,
+        "swing_high_low": 16,
+        "turnover_sr": 15,
+        "breaker": 14,
+        "order_block": 13,
+        "fair_value_gap": 11,
+        "fib": 9,
+        "ma": 8,
+    }
+    for group in groups:
+        total_weight = sum(max(c.strength, 1) for c in group)
+        center = sum(c.price * max(c.strength, 1) for c in group) / total_weight
+        side = _candidate_side(center, price)
+        distance = _pct(center, price)
+        tier = _distance_tier(abs(distance), horizon)
+        source_set = sorted({c.source for c in group})
+        has_strong_far_liq = any(c.source in {"liq_map_above", "liq_map_below", "liq_heatmap"} and c.strength >= 75 for c in group)
+        if tier is None and not has_strong_far_liq:
+            continue
+        if tier is None:
+            tier = "far"
+        score = min(100.0, max(c.strength for c in group) * 0.55 + sum(source_weights.get(s, 6) for s in source_set))
+        has_liquidity = any(s in {"liq_map_above", "liq_map_below", "liq_heatmap"} for s in source_set)
+        has_structure = any(s in {"equal_highs_lows", "swing_high_low", "breaker", "order_block", "turnover_sr"} for s in source_set)
+        if len(source_set) >= 2 and has_liquidity and has_structure:
+            score = min(100.0, score + 8)
+        confidence: Literal["low", "medium", "high"]
+        if len(source_set) >= 2 and score >= 68:
+            confidence = "high"
+        elif len(source_set) >= 2 or score >= 58:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        # Conservative main ladder: weak single-source levels stay out of the
+        # primary SMC price map, but remain represented in facts through raw zones.
+        if confidence == "low" and score < 55:
+            continue
+        price_from = min(c.price_from for c in group)
+        price_to = max(c.price_to for c in group)
+        evidence = []
+        for cand in sorted(group, key=lambda c: -c.strength):
+            label = _source_label(cand.source)
+            text = f"{label}: {cand.evidence}"
+            if text not in evidence:
+                evidence.append(text)
+            if len(evidence) >= 4:
+                break
+        source_labels = [_source_label(s) for s in source_set]
+        note = "多源合流关键位" if len(source_set) >= 2 else f"{source_labels[0]}关键位"
+        levels.append(SMCKeyLevel(
+            level_id=_zone_id("key-level", state.coin, horizon, side, tier, round(center, 1), ",".join(source_set)),
+            side=side,
+            tier=tier,
+            price=round(center, 4),
+            price_from=round(price_from, 4),
+            price_to=round(price_to, 4),
+            distance_pct=round(distance, 4),
+            strength=round(score, 2),
+            confidence=confidence,
+            sources=source_labels,
+            evidence=evidence,
+            note=note,
+        ))
+
+    bucketed: list[SMCKeyLevel] = []
+    for side in ("resistance", "support"):
+        for tier in ("near", "mid", "far"):
+            members = [lv for lv in levels if lv.side == side and lv.tier == tier]
+            members.sort(key=lambda lv: (
+                {"high": 0, "medium": 1, "low": 2}[lv.confidence],
+                -lv.strength,
+                abs(lv.distance_pct),
+            ))
+            bucketed.extend(members[:3])
+    return bucketed
+
+
+def _build_key_levels(
+    state: Any,
+    bars: list[_Bar],
+    swings: list[_Swing],
+    pools: list[SMCLiquidityPool],
+    zones: list[SMCZone],
+    price: float,
+    horizon: SMCHorizon,
+    atr: float,
+) -> list[SMCKeyLevel]:
+    candidates = _key_level_candidates(state, bars, swings, pools, zones, price, horizon, atr)
+    return _merge_key_levels(state, candidates, price, horizon, atr)
 
 
 def _po3_zones(state: Any, bars: list[_Bar], price: float, tf: str, atr: float) -> list[SMCZone]:
@@ -1243,6 +1534,7 @@ def build_smc_snapshot(
     zones.extend(_turnover_zones(state, bars, price, tf))
     _mark_entry_zones(zones, price)
     zones.sort(key=lambda z: (z.state != "entry_zone_active", abs(z.distance_pct), -z.strength))
+    key_levels = _build_key_levels(state, bars, swings, pools, zones, price, horizon, atr)
 
     confirmations, contradictions = _cvd_confirmation(state)
     confirmations.extend(_derivative_confirmations(state))
@@ -1281,6 +1573,7 @@ def build_smc_snapshot(
         structure=structure[:18],
         liquidity_pools=pools[:16],
         zones=zones[:18],
+        key_levels=key_levels,
         targets=_targets(pools, zones, observation, price),
         confirmations=confirmations[:16],
         contradictions=contradictions[:10],
@@ -1294,6 +1587,7 @@ def build_smc_field_map() -> list[SMCFieldMapItem]:
     return [
         SMCFieldMapItem(field="candles_15m/1h/4h/1d/1w", priority="P0", periods=["15m", "1h", "4h", "1d", "1w"], use="swing, BOS, MSS, OB, FVG, PO3, Fib/OTE"),
         SMCFieldMapItem(field="liq_maps + liq_heatmaps", priority="P0", periods=["24h", "7d", "30d"], use="buy-side/sell-side liquidity pools"),
+        SMCFieldMapItem(field="key_levels", priority="P0", periods=["15m", "4h", "1d", "7d", "30d"], use="conservative support/resistance ladder from SMC raw inputs"),
         SMCFieldMapItem(field="cvd_contract + cvd_spot", priority="P0", periods=["5m", "1h"], use="orderflow confirmation and divergence"),
         SMCFieldMapItem(field="footprint_contract + footprint_spot", priority="P0", periods=["1h"], use="absorption / imbalance confirmation"),
         SMCFieldMapItem(field="oi + oi_hourly_history", priority="P1", periods=["1h", "24h", "30d"], use="position build-up context"),

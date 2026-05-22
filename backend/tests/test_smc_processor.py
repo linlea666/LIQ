@@ -64,6 +64,31 @@ def _state_with_pattern() -> CoinState:
         ],
     )
     st.liq_maps["7d"] = st.liq_maps["1d"].model_copy(update={"cycle": "7d"})
+    st.liq_maps["30d"] = st.liq_maps["1d"].model_copy(update={
+        "cycle": "30d",
+        "clusters_below": [
+            LiqCluster(
+                price_center=74,
+                price_from=73.5,
+                price_to=74.5,
+                total_usd=120_000_000,
+                side="long",
+            )
+        ],
+        "clusters_above": [
+            LiqCluster(
+                price_center=118,
+                price_from=117.5,
+                price_to=118.5,
+                total_usd=130_000_000,
+                side="short",
+            )
+        ],
+    })
+    st.ma60_daily_cg = 90.2
+    st.ma120_daily_cg = 112.4
+    st.sma200_daily_cg = 78.0
+    st.ema_daily = {50: 90.4, 100: 112.1, 200: 78.2}
     st.cvd_contract = CVDData(
         coin="BTC",
         inst_type="CONTRACTS",
@@ -157,6 +182,15 @@ def test_smc_fund_flow_tracks_exchange_outflow_as_bullish_confirmation():
     assert snap.fund_flow.seven_day.cex_net_usd_approx is not None
     assert snap.fund_flow.seven_day.cex_net_usd_approx < 0
     assert any(item.source.startswith("nansen_exchange_flow") for item in snap.confirmations)
+
+
+def test_smc_key_levels_keep_far_liquidation_levels_and_confluence():
+    snap = build_smc_snapshot(_state_with_pattern(), horizon="swing")
+
+    assert snap.key_levels
+    assert any(level.tier == "far" and level.side == "support" and level.price < 90 for level in snap.key_levels)
+    assert any(level.tier == "far" and level.side == "resistance" and level.price > 110 for level in snap.key_levels)
+    assert any(level.confidence in {"medium", "high"} and len(level.sources) >= 2 for level in snap.key_levels)
 
 
 def test_smc_facts_expose_field_map_and_forbidden_contract():

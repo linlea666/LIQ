@@ -39,6 +39,9 @@ SMCZoneRole = Literal[
     "resistance",
     "neutral",
 ]
+SMCKeyLevelSide = Literal["support", "resistance"]
+SMCKeyLevelTier = Literal["near", "mid", "far"]
+SMCKeyLevelConfidence = Literal["low", "medium", "high"]
 
 
 class SMCFieldMapItem(BaseModel):
@@ -108,6 +111,21 @@ class SMCTargetZone(BaseModel):
     kind: str
     side: Literal["above", "below", "neutral"] = "neutral"
     distance_pct: float = 0
+    note: str = ""
+
+
+class SMCKeyLevel(BaseModel):
+    level_id: str
+    side: SMCKeyLevelSide
+    tier: SMCKeyLevelTier
+    price: float
+    price_from: float
+    price_to: float
+    distance_pct: float = 0
+    strength: float = 0
+    confidence: SMCKeyLevelConfidence = "low"
+    sources: list[str] = []
+    evidence: list[str] = []
     note: str = ""
 
 
@@ -224,6 +242,7 @@ class SMCSnapshot(BaseModel):
     structure: list[SMCStructureEvent] = []
     liquidity_pools: list[SMCLiquidityPool] = []
     zones: list[SMCZone] = []
+    key_levels: list[SMCKeyLevel] = []
     targets: list[SMCTargetZone] = []
     confirmations: list[SMCConfirmation] = []
     contradictions: list[SMCContradiction] = []

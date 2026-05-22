@@ -7,6 +7,7 @@ import { useMarketStore } from "@/stores/marketStore";
 import type {
   SMCConfirmation,
   SMCHorizon,
+  SMCKeyLevel,
   SMCLiquidityPool,
   SMCSnapshot,
   SMCStructureEvent,
@@ -52,6 +53,53 @@ const ROLE_LABEL: Record<string, string> = {
   support: "支撑",
   resistance: "阻力",
   neutral: "中性",
+};
+
+const QUALITY_LABEL: Record<string, string> = {
+  ok: "正常",
+  partial: "部分可用",
+  degraded: "降级",
+  missing: "缺失",
+};
+
+const BIAS_LABEL: Record<string, string> = {
+  bullish: "偏多",
+  bearish: "偏空",
+  neutral: "中性",
+};
+
+const DIRECTION_LABEL: Record<string, string> = {
+  bullish: "偏多",
+  bearish: "偏空",
+  neutral: "中性",
+  exchange_inflow: "交易所净流入",
+  exchange_outflow: "交易所净流出",
+};
+
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: "高置信",
+  medium: "中置信",
+  low: "低置信",
+};
+
+const TIER_LABEL: Record<string, string> = {
+  near: "近端",
+  mid: "中程",
+  far: "远端",
+};
+
+const EVENT_LABEL: Record<string, string> = {
+  swing_high: "结构高点",
+  swing_low: "结构低点",
+  bos: "结构突破",
+  mss: "结构转换",
+  liquidity_raid: "扫流动性",
+};
+
+const SEVERITY_LABEL: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
 };
 
 type PriceItem = {
@@ -156,6 +204,15 @@ function targetPlain(t: SMCTargetZone) {
   return "中性目标区。";
 }
 
+function levelPlain(level: SMCKeyLevel) {
+  if (level.side === "resistance") {
+    if (level.confidence === "high") return "强阻力区，接近后优先观察是否扫损失败或承压。";
+    return "阻力观察区，需等待价格反应确认。";
+  }
+  if (level.confidence === "high") return "强支撑区，接近后优先观察是否扫损收回或止跌。";
+  return "支撑观察区，需等待价格反应确认。";
+}
+
 function buildPriceItems(snapshot: SMCSnapshot): { above: PriceItem[]; below: PriceItem[] } {
   const items: PriceItem[] = [];
   const push = (item: PriceItem) => {
@@ -225,6 +282,30 @@ function buildPriceItems(snapshot: SMCSnapshot): { above: PriceItem[]; below: Pr
   return { above, below };
 }
 
+function fallbackKeyLevels(snapshot: SMCSnapshot): SMCKeyLevel[] {
+  const { above, below } = buildPriceItems(snapshot);
+  return [...above, ...below].map((item): SMCKeyLevel => {
+    const side = item.side === "above" ? "resistance" : "support";
+    const absDistance = Math.abs(item.distancePct);
+    const tier = absDistance <= 2 ? "near" : absDistance <= 6 ? "mid" : "far";
+    const confidence = item.strength >= 70 ? "medium" : "low";
+    return {
+      level_id: item.id,
+      side,
+      tier,
+      price: item.price,
+      price_from: item.priceFrom ?? item.price,
+      price_to: item.priceTo ?? item.price,
+      distance_pct: item.distancePct,
+      strength: item.strength,
+      confidence,
+      sources: [item.source],
+      evidence: [item.detail || item.plain],
+      note: item.title,
+    };
+  });
+}
+
 function ActionBrief({ snapshot }: { snapshot: SMCSnapshot }) {
   const primary =
     snapshot.observation === "long_watch"
@@ -249,7 +330,7 @@ function ActionBrief({ snapshot }: { snapshot: SMCSnapshot }) {
         </div>
         <Metric label="现价" value={fmtPrice(snapshot.last_price)} sub={snapshot.horizon === "intraday" ? "日内视角" : "波段视角"} />
         <Metric label="状态" value={STATE_LABEL[snapshot.setup_state]} sub={`置信度 ${snapshot.confidence}/100`} />
-        <Metric label="失效价" value={fmtPrice(snapshot.invalidation_price)} sub={`数据 ${snapshot.data_quality.status} · ${snapshot.data_quality.score}`} />
+        <Metric label="失效价" value={fmtPrice(snapshot.invalidation_price)} sub={`数据 ${QUALITY_LABEL[snapshot.data_quality.status] ?? snapshot.data_quality.status} · ${snapshot.data_quality.score}`} />
       </div>
     </section>
   );
@@ -265,59 +346,104 @@ function Metric({ label, value, sub }: { label: string; value: string; sub: stri
   );
 }
 
-function PriceItemRow({ item }: { item: PriceItem }) {
-  const sideClass = item.side === "above" ? "border-rose-900/50 bg-rose-950/15" : "border-emerald-900/50 bg-emerald-950/15";
-  const textClass = item.side === "above" ? "text-rose-200" : "text-emerald-200";
+function KeyLevelRow({ level }: { level: SMCKeyLevel }) {
+  const isResistance = level.side === "resistance";
+  const sideClass = isResistance ? "border-rose-900/50 bg-rose-950/15" : "border-emerald-900/50 bg-emerald-950/15";
+  const textClass = isResistance ? "text-rose-200" : "text-emerald-200";
+  const confidenceClass =
+    level.confidence === "high"
+      ? "text-amber-200"
+      : level.confidence === "medium"
+        ? "text-blue-200"
+        : "text-slate-500";
   return (
     <div className={`border p-2 ${sideClass}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={`truncate text-[12px] font-semibold ${textClass}`}>{item.title}</div>
-          <div className="mt-1 text-[11px] text-slate-400">{rangeLabel(item.priceFrom, item.priceTo, item.price)}</div>
+          <div className={`truncate text-[12px] font-semibold ${textClass}`}>
+            {isResistance ? "阻力" : "支撑"} · {CONFIDENCE_LABEL[level.confidence] ?? level.confidence}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-300">{rangeLabel(level.price_from, level.price_to, level.price)}</div>
         </div>
         <div className="shrink-0 text-right">
-          <div className="text-[11px] text-slate-200">{fmtPct(item.distancePct)}</div>
-          <div className="text-[10px] text-slate-500">强度 {Math.round(item.strength)}</div>
+          <div className="text-[11px] text-slate-200">{fmtPct(level.distance_pct)}</div>
+          <div className="text-[10px] text-slate-500">强度 {Math.round(level.strength)}</div>
         </div>
       </div>
-      <div className="mt-2 text-[11px] leading-relaxed text-slate-300">{item.plain}</div>
-      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-600">
-        <span className="truncate">{item.source}</span>
-        {item.state && <span className="shrink-0">{item.state}</span>}
+      <div className="mt-2 text-[11px] leading-relaxed text-slate-300">{levelPlain(level)}</div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {level.sources.slice(0, 4).map((source) => (
+          <span key={`${level.level_id}-${source}`} className="bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{source}</span>
+        ))}
       </div>
-      {item.detail && <div className="mt-1 truncate text-[10px] text-slate-500">{item.detail}</div>}
+      <div className={`mt-1 text-[10px] ${confidenceClass}`}>{level.note}</div>
+      {level.evidence[0] && <div className="mt-1 truncate text-[10px] text-slate-500">{level.evidence[0]}</div>}
+    </div>
+  );
+}
+
+function LevelColumn({ title, levels }: { title: string; levels: SMCKeyLevel[] }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-slate-300">{title}</div>
+        <span className="text-[10px] text-slate-600">{levels.length} 个</span>
+      </div>
+      <div className="space-y-2">
+        {levels.length ? levels.map((level) => <KeyLevelRow key={level.level_id} level={level} />) : <Empty text="暂无高质量关键位" />}
+      </div>
     </div>
   );
 }
 
 function PriceMap({ snapshot }: { snapshot: SMCSnapshot }) {
-  const { above, below } = buildPriceItems(snapshot);
-  const nearestResistance = above.find((i) => i.title.includes("阻力") || i.title.includes("做空") || i.title.includes("上方"));
-  const nearestSupport = below.find((i) => i.title.includes("支撑") || i.title.includes("做多") || i.title.includes("下方"));
+  const levels = (snapshot.key_levels?.length ? snapshot.key_levels : fallbackKeyLevels(snapshot)).slice();
+  const resistances = levels.filter((level) => level.side === "resistance").sort((a, b) => Math.abs(a.distance_pct) - Math.abs(b.distance_pct));
+  const supports = levels.filter((level) => level.side === "support").sort((a, b) => Math.abs(a.distance_pct) - Math.abs(b.distance_pct));
+  const nearestResistance = resistances[0];
+  const nearestSupport = supports[0];
+  const strongResistance = resistances.slice().sort((a, b) => b.strength - a.strength)[0];
+  const strongSupport = supports.slice().sort((a, b) => b.strength - a.strength)[0];
+  const byTier = (side: "support" | "resistance", tier: "near" | "mid" | "far") =>
+    levels
+      .filter((level) => level.side === side && level.tier === tier)
+      .sort((a, b) => {
+        const ca = { high: 0, medium: 1, low: 2 }[a.confidence];
+        const cb = { high: 0, medium: 1, low: 2 }[b.confidence];
+        return ca - cb || b.strength - a.strength || Math.abs(a.distance_pct) - Math.abs(b.distance_pct);
+      });
   return (
     <Section
-      title="价格地图"
-      right={<span className="text-[10px] text-slate-500">从近到远</span>}
+      title="关键位价格梯"
+      right={<span className="text-[10px] text-slate-500">保守精选 · 近/中/远</span>}
       className="xl:col-span-2"
     >
-      <div className="grid gap-3 lg:grid-cols-[1fr_180px_1fr]">
-        <div>
-          <div className="mb-2 text-[11px] font-semibold text-rose-200">上方：阻力 / 顶部 / 扫空止损区</div>
-          <div className="space-y-2">{above.length ? above.map((item) => <PriceItemRow key={item.id} item={item} />) : <Empty text="上方暂无关键区" />}</div>
+      <div className="grid gap-3 xl:grid-cols-[1fr_220px_1fr]">
+        <div className="space-y-3">
+          <div className="text-[11px] font-semibold text-rose-200">上方阻力 / 顶部 / 扫空止损区</div>
+          {(["near", "mid", "far"] as const).map((tier) => (
+            <LevelColumn key={`res-${tier}`} title={`${TIER_LABEL[tier]}阻力`} levels={byTier("resistance", tier)} />
+          ))}
         </div>
         <div className="flex flex-col justify-center border border-slate-800 bg-slate-950/45 p-3 text-center">
           <div className="text-[10px] text-slate-500">最近阻力</div>
-          <div className="mt-1 text-[13px] font-semibold text-rose-200">{nearestResistance ? rangeLabel(nearestResistance.priceFrom, nearestResistance.priceTo, nearestResistance.price) : "-"}</div>
+          <div className="mt-1 text-[13px] font-semibold text-rose-200">{nearestResistance ? rangeLabel(nearestResistance.price_from, nearestResistance.price_to, nearestResistance.price) : "-"}</div>
+          <div className="mt-3 text-[10px] text-slate-500">强阻力</div>
+          <div className="mt-1 text-[12px] font-semibold text-rose-100">{strongResistance ? rangeLabel(strongResistance.price_from, strongResistance.price_to, strongResistance.price) : "-"}</div>
           <div className="my-4 border-y border-slate-800 py-4">
             <div className="text-[10px] text-slate-500">当前价格</div>
             <div className="mt-1 text-xl font-semibold text-slate-100">{fmtPrice(snapshot.last_price)}</div>
           </div>
           <div className="text-[10px] text-slate-500">最近支撑</div>
-          <div className="mt-1 text-[13px] font-semibold text-emerald-200">{nearestSupport ? rangeLabel(nearestSupport.priceFrom, nearestSupport.priceTo, nearestSupport.price) : "-"}</div>
+          <div className="mt-1 text-[13px] font-semibold text-emerald-200">{nearestSupport ? rangeLabel(nearestSupport.price_from, nearestSupport.price_to, nearestSupport.price) : "-"}</div>
+          <div className="mt-3 text-[10px] text-slate-500">强支撑</div>
+          <div className="mt-1 text-[12px] font-semibold text-emerald-100">{strongSupport ? rangeLabel(strongSupport.price_from, strongSupport.price_to, strongSupport.price) : "-"}</div>
         </div>
-        <div>
-          <div className="mb-2 text-[11px] font-semibold text-emerald-200">下方：支撑 / 底部 / 扫多止损区</div>
-          <div className="space-y-2">{below.length ? below.map((item) => <PriceItemRow key={item.id} item={item} />) : <Empty text="下方暂无关键区" />}</div>
+        <div className="space-y-3">
+          <div className="text-[11px] font-semibold text-emerald-200">下方支撑 / 底部 / 扫多止损区</div>
+          {(["near", "mid", "far"] as const).map((tier) => (
+            <LevelColumn key={`sup-${tier}`} title={`${TIER_LABEL[tier]}支撑`} levels={byTier("support", tier)} />
+          ))}
         </div>
       </div>
     </Section>
@@ -407,7 +533,7 @@ function EventList({ events }: { events: SMCStructureEvent[] }) {
       {events.slice(0, 8).map((event) => (
         <div key={event.event_id} className="flex items-start justify-between gap-3 border-b border-slate-800/70 pb-2 last:border-0 last:pb-0">
           <div className="min-w-0">
-            <div className="text-[12px] text-slate-200">{event.kind} · {event.direction}</div>
+            <div className="text-[12px] text-slate-200">{EVENT_LABEL[event.kind] ?? event.kind} · {DIRECTION_LABEL[event.direction] ?? event.direction}</div>
             <div className="mt-0.5 truncate text-[10px] text-slate-500">{event.note}</div>
           </div>
           <div className="shrink-0 text-right text-[11px] text-slate-400">
@@ -432,7 +558,7 @@ function ConfirmationList({ items }: { items: SMCConfirmation[] }) {
           </div>
           <div className="shrink-0 text-right">
             <div className={item.direction === "bullish" ? "text-[11px] text-emerald-300" : item.direction === "bearish" ? "text-[11px] text-rose-300" : "text-[11px] text-slate-400"}>
-              {item.direction}
+              {DIRECTION_LABEL[item.direction] ?? item.direction}
             </div>
             <div className="text-[10px] text-slate-500">{item.score_delta > 0 ? "+" : ""}{item.score_delta.toFixed(1)}</div>
           </div>
@@ -489,7 +615,7 @@ function FundFlowMonitor({ snapshot }: { snapshot: SMCSnapshot }) {
             只作为资金确认层：净流入交易所偏潜在卖压，净流出交易所偏抛压下降。
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-            <Metric label="状态" value={flow.status} sub="数据质量" />
+            <Metric label="状态" value={QUALITY_LABEL[flow.status] ?? flow.status} sub="数据质量" />
             <Metric label="置信" value={`${Math.round(flow.confidence * 100)}%`} sub="资金层" />
           </div>
         </div>
@@ -527,7 +653,7 @@ function FundFlowMonitor({ snapshot }: { snapshot: SMCSnapshot }) {
             <div key={alert.alert_id} className="border border-slate-800 bg-slate-950/35 p-2">
               <div className="flex items-center justify-between gap-2">
                 <div className={alert.direction === "bullish" ? "text-[12px] font-semibold text-emerald-200" : "text-[12px] font-semibold text-rose-200"}>{alert.title}</div>
-                <div className="text-[10px] text-slate-500">{alert.severity}</div>
+                <div className="text-[10px] text-slate-500">{SEVERITY_LABEL[alert.severity] ?? alert.severity}</div>
               </div>
               <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{alert.note}</div>
               <div className="mt-2 flex flex-wrap gap-1">
@@ -625,9 +751,9 @@ export default function SMCPage() {
             <FundFlowMonitor snapshot={snap} />
             <Section title="Nansen 确认">
               <div className="mb-3 grid grid-cols-3 gap-2 text-center">
-                <Metric label="状态" value={snap.smart_money.status} sub="聪明钱层" />
-                <Metric label="偏向" value={snap.smart_money.bias} sub="资金方向" />
-                <Metric label="宽度" value={breadth ? breadth.breadth_score.toFixed(1) : "-"} sub={breadth?.status ?? "missing"} />
+                <Metric label="状态" value={QUALITY_LABEL[snap.smart_money.status] ?? snap.smart_money.status} sub="聪明钱层" />
+                <Metric label="偏向" value={BIAS_LABEL[snap.smart_money.bias] ?? snap.smart_money.bias} sub="资金方向" />
+                <Metric label="宽度" value={breadth ? breadth.breadth_score.toFixed(1) : "-"} sub={breadth ? (QUALITY_LABEL[breadth.status] ?? breadth.status) : "缺失"} />
               </div>
               <ConfirmationList items={nansenConfirmations} />
             </Section>
@@ -654,7 +780,7 @@ export default function SMCPage() {
                 <div className="space-y-2">
                   {snap.contradictions.length ? snap.contradictions.map((item, idx) => (
                     <div key={`${item.source}-${idx}`} className="border border-slate-800 bg-slate-950/35 p-2">
-                      <div className="text-[12px] text-amber-200">{item.source} · {item.severity}</div>
+                      <div className="text-[12px] text-amber-200">{item.source} · {SEVERITY_LABEL[item.severity] ?? item.severity}</div>
                       <div className="mt-1 text-[10px] leading-relaxed text-slate-500">{item.note}</div>
                     </div>
                   )) : <Empty text="暂无明确反证" />}

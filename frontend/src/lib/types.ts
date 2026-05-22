@@ -2728,6 +2728,21 @@ export interface SMCTargetZone {
   note: string;
 }
 
+export interface SMCKeyLevel {
+  level_id: string;
+  side: "support" | "resistance";
+  tier: "near" | "mid" | "far";
+  price: number;
+  price_from: number;
+  price_to: number;
+  distance_pct: number;
+  strength: number;
+  confidence: "low" | "medium" | "high";
+  sources: string[];
+  evidence: string[];
+  note: string;
+}
+
 export interface SMCConfirmation {
   source: string;
   direction: "bullish" | "bearish" | "neutral";
@@ -2804,6 +2819,7 @@ export interface SMCSnapshot {
   structure: SMCStructureEvent[];
   liquidity_pools: SMCLiquidityPool[];
   zones: SMCZone[];
+  key_levels: SMCKeyLevel[];
   targets: SMCTargetZone[];
   confirmations: SMCConfirmation[];
   contradictions: SMCContradiction[];
