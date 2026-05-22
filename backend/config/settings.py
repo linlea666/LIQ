@@ -98,6 +98,7 @@ class NansenSourceConfig:
     poll_intervals: dict[str, int] = field(default_factory=lambda: {
         "perp_screener": 900,
         "flow_intelligence": 3600,
+        "exchange_flows": 14400,
         "market_breadth": 14400,
     })
     chains: list[str] = field(default_factory=lambda: ["ethereum", "base", "solana"])
@@ -370,6 +371,7 @@ def _build_settings(raw: dict) -> Settings:
         poll_intervals={
             "perp_screener": int(nsn_intervals.get("perp_screener", 900)),
             "flow_intelligence": int(nsn_intervals.get("flow_intelligence", 3600)),
+            "exchange_flows": int(nsn_intervals.get("exchange_flows", 14400)),
             "market_breadth": int(nsn_intervals.get("market_breadth", 14400)),
         },
         chains=[

@@ -9,13 +9,17 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional
 
 from models.smc import (
+    SMCExchangeFlowWindow,
     SMCConfirmation,
     SMCContradiction,
     SMCDataQuality,
     SMCFieldMapItem,
+    SMCFundFlowAlert,
+    SMCFundFlowContext,
     SMCHorizon,
     SMCLiquidityPool,
     SMCMarketBreadth,
@@ -834,6 +838,180 @@ def _nansen_flow(raw: dict[str, Any] | None, updated_at: int) -> Optional[SMCNan
     )
 
 
+def _parse_nansen_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    raw = str(value)
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _net_from_signed_or_positive_parts(in_value: float, out_value: float) -> float:
+    if out_value < 0:
+        return in_value + out_value
+    return in_value - out_value
+
+
+def _flow_window(
+    rows: list[dict[str, Any]],
+    *,
+    window: Literal["1d", "7d"],
+) -> Optional[SMCExchangeFlowWindow]:
+    parsed: list[tuple[datetime, dict[str, Any]]] = []
+    for row in rows:
+        dt = _parse_nansen_dt(row.get("date") or row.get("time"))
+        if dt is not None:
+            parsed.append((dt, row))
+    if not parsed:
+        return None
+    parsed.sort(key=lambda x: x[0])
+    latest_dt = parsed[-1][0]
+    if window == "1d":
+        cutoff = latest_dt - timedelta(hours=24)
+        parsed = [item for item in parsed if item[0] >= cutoff]
+    selected = [row for _, row in parsed]
+    if not selected:
+        return None
+    latest = selected[-1]
+    latest_price = _num(latest.get("price_usd"), 0)
+    cex_in = sum(_num(row.get("total_inflows_cex"), 0) for row in selected)
+    cex_out = sum(_num(row.get("total_outflows_cex"), 0) for row in selected)
+    dex_in = sum(_num(row.get("total_inflows_dex"), 0) for row in selected)
+    dex_out = sum(_num(row.get("total_outflows_dex"), 0) for row in selected)
+    cex_net = _net_from_signed_or_positive_parts(cex_in, cex_out)
+    dex_net = _net_from_signed_or_positive_parts(dex_in, dex_out)
+    direction: Literal["exchange_inflow", "exchange_outflow", "neutral"]
+    if abs(cex_net) < 1e-9:
+        direction = "neutral"
+    elif cex_net > 0:
+        direction = "exchange_inflow"
+    else:
+        direction = "exchange_outflow"
+    usd = cex_net * latest_price if latest_price > 0 else None
+    if direction == "exchange_inflow":
+        interpretation = "交易所净流入，代表潜在可卖筹码增加，需要结合价格结构确认抛压。"
+    elif direction == "exchange_outflow":
+        interpretation = "交易所净流出，代表潜在抛压下降，更偏囤币或转出冷钱包。"
+    else:
+        interpretation = "交易所净流向不明显。"
+    return SMCExchangeFlowWindow(
+        window=window,
+        from_ts=parsed[0][0].isoformat(),
+        to_ts=latest_dt.isoformat(),
+        rows=len(selected),
+        latest_price_usd=latest_price or None,
+        cex_in_token=cex_in,
+        cex_out_token_abs=abs(cex_out),
+        cex_out_token_raw=cex_out,
+        cex_net_token=cex_net,
+        cex_net_usd_approx=usd,
+        dex_net_token=dex_net,
+        dex_net_usd_approx=dex_net * latest_price if latest_price > 0 else None,
+        direction=direction,
+        interpretation=interpretation,
+    )
+
+
+def _fund_flow_context(state: Any) -> tuple[SMCFundFlowContext, list[SMCConfirmation], list[SMCContradiction]]:
+    rows = [row for row in (_attr(state, "nansen_exchange_flows", default=[]) or []) if isinstance(row, dict)]
+    updated = _attr(state, "nansen_updated_at", default={}) or {}
+    updated_at = _int(updated.get("exchange_flows"), 0)
+    if not rows:
+        return SMCFundFlowContext(
+            status="missing",
+            updated_at=updated_at,
+            notes=["Nansen exchange flow rows missing"],
+        ), [], []
+
+    one_day = _flow_window(rows, window="1d")
+    seven_day = _flow_window(rows, window="7d")
+    if not one_day and not seven_day:
+        return SMCFundFlowContext(
+            status="partial",
+            updated_at=updated_at,
+            notes=["Nansen exchange flow rows have no parseable timestamps"],
+        ), [], []
+
+    alerts: list[SMCFundFlowAlert] = []
+    confirmations: list[SMCConfirmation] = []
+    contradictions: list[SMCContradiction] = []
+    notes: list[str] = []
+
+    def _score_usd(window_obj: Optional[SMCExchangeFlowWindow]) -> float:
+        return _num(window_obj.cex_net_usd_approx if window_obj else None, 0)
+
+    one_usd = _score_usd(one_day)
+    seven_usd = _score_usd(seven_day)
+    combined = one_usd * 0.65 + seven_usd * 0.35
+    bias: Literal["bullish", "bearish", "neutral"] = "neutral"
+    if combined > 2_500_000:
+        bias = "bearish"
+    elif combined < -2_500_000:
+        bias = "bullish"
+    confidence = min(1.0, abs(combined) / 30_000_000)
+
+    def _severity(value: float) -> Literal["low", "medium", "high"]:
+        size = abs(value)
+        if size >= 25_000_000:
+            return "high"
+        if size >= 10_000_000:
+            return "medium"
+        return "low"
+
+    for window_obj in (one_day, seven_day):
+        if not window_obj or window_obj.cex_net_usd_approx is None:
+            continue
+        net_usd = window_obj.cex_net_usd_approx
+        if abs(net_usd) < 3_000_000:
+            continue
+        is_inflow = net_usd > 0
+        direction: Literal["bullish", "bearish", "neutral"] = "bearish" if is_inflow else "bullish"
+        title = "交易所净流入" if is_inflow else "交易所净流出"
+        note = (
+            f"{window_obj.window} CEX净流入约 ${net_usd:,.0f}，潜在可卖筹码增加。"
+            if is_inflow
+            else f"{window_obj.window} CEX净流出约 ${abs(net_usd):,.0f}，潜在抛压下降。"
+        )
+        alerts.append(SMCFundFlowAlert(
+            alert_id=_zone_id("fund-flow", state.coin, window_obj.window, round(net_usd)),
+            severity=_severity(net_usd),
+            direction=direction,
+            title=title,
+            note=note,
+            tags=[state.coin, window_obj.window, "Nansen", "CEX"],
+            ts=updated_at or int(time.time()),
+        ))
+        confirmations.append(SMCConfirmation(
+            source=f"nansen_exchange_flow_{window_obj.window}",
+            direction=direction,
+            score_delta=max(-4, min(4, -net_usd / 10_000_000)),
+            confidence=min(0.7, abs(net_usd) / 30_000_000),
+            note=note,
+        ))
+
+    if seven_day and seven_day.rows < 120:
+        notes.append(f"7d exchange flow rows low: {seven_day.rows}")
+
+    status: Literal["ok", "partial", "missing"] = "ok" if seven_day and seven_day.rows >= 120 else "partial"
+    return SMCFundFlowContext(
+        status=status,
+        bias=bias,
+        confidence=round(confidence, 3),
+        one_day=one_day,
+        seven_day=seven_day,
+        alerts=alerts[:6],
+        updated_at=updated_at,
+        notes=notes,
+    ), confirmations, contradictions
+
+
 def _smart_money_context(state: Any, market_breadth: dict[str, Any] | None) -> tuple[SMCSmartMoneyContext, list[SMCConfirmation], list[SMCContradiction]]:
     updated = _attr(state, "nansen_updated_at", default={}) or {}
     perp = _nansen_perp(_attr(state, "nansen_perp"), _int(updated.get("perp_screener"), 0))
@@ -1077,6 +1255,9 @@ def build_smc_snapshot(
     smart, nansen_conf, nansen_contra = _smart_money_context(state, market_breadth)
     confirmations.extend(nansen_conf)
     contradictions.extend(nansen_contra)
+    fund_flow, flow_conf, flow_contra = _fund_flow_context(state)
+    confirmations.extend(flow_conf)
+    contradictions.extend(flow_contra)
 
     data_quality = _quality(state, bars, horizon, smart)
     observation, setup_state, confidence, invalidation, summary = _select_signal(
@@ -1104,6 +1285,7 @@ def build_smc_snapshot(
         confirmations=confirmations[:16],
         contradictions=contradictions[:10],
         smart_money=smart,
+        fund_flow=fund_flow,
         data_quality=data_quality,
     )
 
@@ -1118,6 +1300,7 @@ def build_smc_field_map() -> list[SMCFieldMapItem]:
         SMCFieldMapItem(field="funding + funding_history_8h", priority="P1", periods=["8h", "7d", "30d"], use="crowding and squeeze risk"),
         SMCFieldMapItem(field="taker_flow", priority="P1", periods=["5m"], use="aggressive buy/sell pressure"),
         SMCFieldMapItem(field="nansen_perp + nansen_flow_intelligence", priority="P1", periods=["15m", "60m", "4h"], use="smart-money confirmation only"),
+        SMCFieldMapItem(field="nansen_exchange_flows", priority="P1", periods=["1d", "7d"], use="main fund-flow tracking and CEX pressure alerts"),
         SMCFieldMapItem(field="orderbook/depth/large-orders", priority="P2", periods=["5m", "1h", "8h"], use="visible liquidity auxiliary evidence", notes="Cannot trigger SMC signal by itself"),
         SMCFieldMapItem(field="etf_flow", priority="P2", periods=["1d", "3d"], use="macro flow background"),
     ]

@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 # PR-3 · ai.analyzer 已下线（旧 Trader）。Strategic AI 走 ai.strategic_arbiter。
@@ -269,6 +269,7 @@ class CoinState:
         # SMC · Nansen confirmation cache（仅 BTC/ETH 使用；失败只降级 SMC 数据质量）
         self.nansen_perp: Optional[dict] = None
         self.nansen_flow_intelligence: Optional[dict] = None
+        self.nansen_exchange_flows: list[dict] = []
         self.nansen_updated_at: dict[str, int] = {}
         self.nansen_errors: dict[str, str] = {}
 
@@ -599,9 +600,13 @@ class Engine:
                     f"nansen_flow_{ccy}", self._poll_nansen_flow_intelligence, coin,
                     nsn_cfg.get("flow_intelligence", 3600), 48 + idx * 3,
                 )))
+                tasks.append(asyncio.create_task(self._poll_loop(
+                    f"nansen_exchange_flows_{ccy}", self._poll_nansen_exchange_flows, coin,
+                    nsn_cfg.get("exchange_flows", 14400), 54 + idx * 3,
+                )))
             tasks.append(asyncio.create_task(self._poll_loop(
                 "nansen_breadth", self._poll_nansen_market_breadth, btc_coin,
-                nsn_cfg.get("market_breadth", 14400), 55,
+                nsn_cfg.get("market_breadth", 14400), 61,
             )))
 
         for idx, ccy in enumerate(self._settings.supported_coins):
@@ -1419,6 +1424,42 @@ class Engine:
             state.nansen_errors.pop("flow_intelligence", None)
         else:
             state.nansen_errors["flow_intelligence"] = self._nansen.last_error or "empty"
+
+    async def _poll_nansen_exchange_flows(self, coin: CoinConfig):
+        """SMC · Nansen TGM exchange flows（WBTC/WETH 4h，主力资金提醒层）。"""
+        if self._nansen is None or coin.ccy not in {"BTC", "ETH"}:
+            return
+        token_map = {
+            "BTC": ("WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"),
+            "ETH": ("WETH", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+        }
+        _symbol, token_address = token_map[coin.ccy]
+        state = self._states[coin.ccy]
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=7)
+        rows = await self._nansen.fetch_tgm_flows(
+            chain="ethereum",
+            token_address=token_address,
+            label="exchange",
+            from_date=start.isoformat(),
+            to_date=today.isoformat(),
+            per_page=200,
+        )
+        if rows:
+            state.nansen_exchange_flows = rows
+            state.nansen_updated_at["exchange_flows"] = int(time.time())
+            state.nansen_errors.pop("exchange_flows", None)
+            first = rows[0].get("date") if isinstance(rows[0], dict) else None
+            last = rows[-1].get("date") if isinstance(rows[-1], dict) else None
+            logger.info(
+                "Nansen exchange flows ready | coin=%s rows=%d from=%s to=%s",
+                coin.ccy,
+                len(rows),
+                first,
+                last,
+            )
+        else:
+            state.nansen_errors["exchange_flows"] = self._nansen.last_error or "empty"
 
     async def _poll_nansen_market_breadth(self, _coin: CoinConfig):
         """SMC · low-frequency smart-money market breadth."""
@@ -2926,6 +2967,7 @@ class Engine:
                 "swing": None,
                 "nansen_perp_age_sec": None,
                 "nansen_flow_age_sec": None,
+                "nansen_exchange_flow_age_sec": None,
                 "nansen_errors": dict(getattr(state, "nansen_errors", {}) or {}),
             }
             updated = getattr(state, "nansen_updated_at", {}) or {}
@@ -2933,6 +2975,8 @@ class Engine:
                 item["nansen_perp_age_sec"] = max(0, now - int(updated["perp_screener"]))
             if updated.get("flow_intelligence"):
                 item["nansen_flow_age_sec"] = max(0, now - int(updated["flow_intelligence"]))
+            if updated.get("exchange_flows"):
+                item["nansen_exchange_flow_age_sec"] = max(0, now - int(updated["exchange_flows"]))
             for horizon in ("intraday", "swing"):
                 try:
                     snap = self.get_smc_snapshot(ccy, horizon=horizon)
@@ -2948,6 +2992,11 @@ class Engine:
                         "degraded": snap.data_quality.degraded,
                         "zones": len(snap.zones),
                         "liquidity_pools": len(snap.liquidity_pools),
+                        "fund_flow": {
+                            "status": snap.fund_flow.status,
+                            "bias": snap.fund_flow.bias,
+                            "alerts": len(snap.fund_flow.alerts),
+                        },
                     }
                 except Exception as exc:
                     item[horizon] = {"error": exc.__class__.__name__}

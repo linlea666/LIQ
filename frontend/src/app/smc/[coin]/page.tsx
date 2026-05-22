@@ -79,6 +79,21 @@ function fmtPct(v?: number | null) {
   return `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
+function fmtMoney(v?: number | null) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
+  const sign = v > 0 ? "+" : v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  if (abs >= 100_000_000) return `${sign}$${(abs / 100_000_000).toFixed(2)}亿`;
+  if (abs >= 10_000) return `${sign}$${(abs / 10_000).toFixed(1)}万`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
+function fmtToken(v?: number | null) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
+  const sign = v > 0 ? "+" : v < 0 ? "-" : "";
+  return `${sign}${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
 function rangeLabel(from?: number, to?: number, price?: number) {
   if (from && to && Math.abs(from - to) > 0) return `${fmtPrice(from)} - ${fmtPrice(to)}`;
   return fmtPrice(price);
@@ -445,6 +460,87 @@ function TargetList({ targets }: { targets: SMCTargetZone[] }) {
   );
 }
 
+function FundFlowMonitor({ snapshot }: { snapshot: SMCSnapshot }) {
+  const flow = snapshot.fund_flow;
+  const windows = [flow.one_day, flow.seven_day].filter(Boolean);
+  const biasClass =
+    flow.bias === "bullish"
+      ? "text-emerald-200"
+      : flow.bias === "bearish"
+        ? "text-rose-200"
+        : "text-slate-300";
+  const biasText =
+    flow.bias === "bullish"
+      ? "交易所净流出，抛压下降"
+      : flow.bias === "bearish"
+        ? "交易所净流入，留意抛压"
+        : "资金流向中性";
+
+  return (
+    <Section
+      title="主力资金跟踪"
+      right={<span className="text-[10px] text-slate-500">Nansen · CEX流向</span>}
+    >
+      <div className="grid gap-3 xl:grid-cols-[260px_1fr]">
+        <div className="border border-slate-800 bg-slate-950/45 p-3">
+          <div className="text-[11px] text-slate-500">当前提醒</div>
+          <div className={`mt-2 text-base font-semibold ${biasClass}`}>{biasText}</div>
+          <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+            只作为资金确认层：净流入交易所偏潜在卖压，净流出交易所偏抛压下降。
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+            <Metric label="状态" value={flow.status} sub="数据质量" />
+            <Metric label="置信" value={`${Math.round(flow.confidence * 100)}%`} sub="资金层" />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {windows.length ? windows.map((item) => {
+            if (!item) return null;
+            const isInflow = item.direction === "exchange_inflow";
+            const tone = isInflow ? "border-rose-900/50 bg-rose-950/15" : item.direction === "exchange_outflow" ? "border-emerald-900/50 bg-emerald-950/15" : "border-slate-800 bg-slate-950/35";
+            return (
+              <div key={item.window} className={`border p-3 ${tone}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[12px] font-semibold text-slate-100">{item.window === "1d" ? "最近 1 天" : "最近 7 天"}</div>
+                  <div className={isInflow ? "text-[11px] text-rose-200" : item.direction === "exchange_outflow" ? "text-[11px] text-emerald-200" : "text-[11px] text-slate-400"}>
+                    {item.direction === "exchange_inflow" ? "净流入" : item.direction === "exchange_outflow" ? "净流出" : "中性"}
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Metric label="CEX净额" value={fmtMoney(item.cex_net_usd_approx)} sub={`${fmtToken(item.cex_net_token)} token`} />
+                  <Metric label="DEX净额" value={fmtMoney(item.dex_net_usd_approx)} sub={`${fmtToken(item.dex_net_token)} token`} />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-500">
+                  <div className="border border-slate-800 bg-slate-950/30 p-2">流入 {fmtToken(item.cex_in_token)}</div>
+                  <div className="border border-slate-800 bg-slate-950/30 p-2">流出 {fmtToken(item.cex_out_token_abs)}</div>
+                </div>
+                <div className="mt-2 text-[10px] leading-relaxed text-slate-500">{item.interpretation}</div>
+                <div className="mt-1 text-[10px] text-slate-600">rows {item.rows} · {item.to_ts ? item.to_ts.slice(5, 16).replace("T", " ") : "-"}</div>
+              </div>
+            );
+          }) : <Empty text="Nansen 交易所流向未返回" />}
+        </div>
+      </div>
+      {flow.alerts.length > 0 && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {flow.alerts.map((alert) => (
+            <div key={alert.alert_id} className="border border-slate-800 bg-slate-950/35 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className={alert.direction === "bullish" ? "text-[12px] font-semibold text-emerald-200" : "text-[12px] font-semibold text-rose-200"}>{alert.title}</div>
+                <div className="text-[10px] text-slate-500">{alert.severity}</div>
+              </div>
+              <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{alert.note}</div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {alert.tags.map((tag) => <span key={`${alert.alert_id}-${tag}`} className="bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{tag}</span>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export default function SMCPage() {
   const params = useParams();
   const coin = ((params.coin as string) || "BTC").toUpperCase();
@@ -525,13 +621,8 @@ export default function SMCPage() {
             <Playbook snapshot={snap} />
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[1fr_1fr_1fr]">
-            <Section title="结构事件">
-              <EventList events={snap.structure} />
-            </Section>
-            <Section title="订单流确认">
-              <ConfirmationList items={orderFlowConfirmations} />
-            </Section>
+          <div className="grid gap-3 xl:grid-cols-[1fr_360px]">
+            <FundFlowMonitor snapshot={snap} />
             <Section title="Nansen 确认">
               <div className="mb-3 grid grid-cols-3 gap-2 text-center">
                 <Metric label="状态" value={snap.smart_money.status} sub="聪明钱层" />
@@ -539,6 +630,18 @@ export default function SMCPage() {
                 <Metric label="宽度" value={breadth ? breadth.breadth_score.toFixed(1) : "-"} sub={breadth?.status ?? "missing"} />
               </div>
               <ConfirmationList items={nansenConfirmations} />
+            </Section>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[1fr_1fr_1fr]">
+            <Section title="结构事件">
+              <EventList events={snap.structure} />
+            </Section>
+            <Section title="订单流确认">
+              <ConfirmationList items={orderFlowConfirmations} />
+            </Section>
+            <Section title="资金反证">
+              <ConfirmationList items={(snap.confirmations ?? []).filter((item) => item.source.startsWith("nansen_exchange_flow"))} />
             </Section>
           </div>
 

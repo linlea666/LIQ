@@ -152,6 +152,44 @@ class SMCNansenFlow(BaseModel):
     updated_at: int = 0
 
 
+class SMCExchangeFlowWindow(BaseModel):
+    window: Literal["1d", "7d"] = "7d"
+    from_ts: Optional[str] = None
+    to_ts: Optional[str] = None
+    rows: int = 0
+    latest_price_usd: Optional[float] = None
+    cex_in_token: float = 0
+    cex_out_token_abs: float = 0
+    cex_out_token_raw: float = 0
+    cex_net_token: float = 0
+    cex_net_usd_approx: Optional[float] = None
+    dex_net_token: float = 0
+    dex_net_usd_approx: Optional[float] = None
+    direction: Literal["exchange_inflow", "exchange_outflow", "neutral"] = "neutral"
+    interpretation: str = ""
+
+
+class SMCFundFlowAlert(BaseModel):
+    alert_id: str
+    severity: Literal["low", "medium", "high"] = "low"
+    direction: Literal["bullish", "bearish", "neutral"] = "neutral"
+    title: str = ""
+    note: str = ""
+    tags: list[str] = []
+    ts: int = 0
+
+
+class SMCFundFlowContext(BaseModel):
+    status: Literal["ok", "partial", "missing"] = "missing"
+    bias: Literal["bullish", "bearish", "neutral"] = "neutral"
+    confidence: float = 0
+    one_day: Optional[SMCExchangeFlowWindow] = None
+    seven_day: Optional[SMCExchangeFlowWindow] = None
+    alerts: list[SMCFundFlowAlert] = []
+    updated_at: int = 0
+    notes: list[str] = []
+
+
 class SMCSmartMoneyContext(BaseModel):
     status: Literal["ok", "partial", "missing"] = "missing"
     bias: Literal["bullish", "bearish", "neutral"] = "neutral"
@@ -190,5 +228,6 @@ class SMCSnapshot(BaseModel):
     confirmations: list[SMCConfirmation] = []
     contradictions: list[SMCContradiction] = []
     smart_money: SMCSmartMoneyContext = Field(default_factory=SMCSmartMoneyContext)
+    fund_flow: SMCFundFlowContext = Field(default_factory=SMCFundFlowContext)
     data_quality: SMCDataQuality = Field(default_factory=SMCDataQuality)
     facts_version: str = "smc.v1"

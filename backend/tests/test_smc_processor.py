@@ -90,7 +90,25 @@ def _state_with_pattern() -> CoinState:
         "top_pnl_net_flow_usd": 1_500_000,
         "whale_net_flow_usd": 500_000,
     }
-    st.nansen_updated_at = {"perp_screener": base, "flow_intelligence": base}
+    st.nansen_exchange_flows = [
+        {
+            "date": "2026-05-15T01:00:00",
+            "price_usd": 100_000,
+            "total_inflows_cex": 2.0,
+            "total_outflows_cex": -1.0,
+            "total_inflows_dex": 0.0,
+            "total_outflows_dex": 0.0,
+        },
+        {
+            "date": "2026-05-22T01:00:00",
+            "price_usd": 100_000,
+            "total_inflows_cex": 1.0,
+            "total_outflows_cex": -101.0,
+            "total_inflows_dex": 0.0,
+            "total_outflows_dex": 0.0,
+        },
+    ]
+    st.nansen_updated_at = {"perp_screener": base, "flow_intelligence": base, "exchange_flows": base}
     return st
 
 
@@ -127,6 +145,18 @@ def test_smc_degrades_without_nansen_but_still_returns_snapshot():
     assert snap.smart_money.status == "missing"
     assert "nansen" in snap.data_quality.degraded
     assert snap.last_price > 0
+
+
+def test_smc_fund_flow_tracks_exchange_outflow_as_bullish_confirmation():
+    snap = build_smc_snapshot(_state_with_pattern(), horizon="swing")
+
+    assert snap.fund_flow.status in {"ok", "partial"}
+    assert snap.fund_flow.bias == "bullish"
+    assert snap.fund_flow.seven_day is not None
+    assert snap.fund_flow.seven_day.cex_net_token < 0
+    assert snap.fund_flow.seven_day.cex_net_usd_approx is not None
+    assert snap.fund_flow.seven_day.cex_net_usd_approx < 0
+    assert any(item.source.startswith("nansen_exchange_flow") for item in snap.confirmations)
 
 
 def test_smc_facts_expose_field_map_and_forbidden_contract():

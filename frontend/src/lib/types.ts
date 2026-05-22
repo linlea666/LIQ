@@ -2752,6 +2752,44 @@ export interface SMCSmartMoneyContext {
   notes: string[];
 }
 
+export interface SMCExchangeFlowWindow {
+  window: "1d" | "7d";
+  from_ts: string | null;
+  to_ts: string | null;
+  rows: number;
+  latest_price_usd: number | null;
+  cex_in_token: number;
+  cex_out_token_abs: number;
+  cex_out_token_raw: number;
+  cex_net_token: number;
+  cex_net_usd_approx: number | null;
+  dex_net_token: number;
+  dex_net_usd_approx: number | null;
+  direction: "exchange_inflow" | "exchange_outflow" | "neutral";
+  interpretation: string;
+}
+
+export interface SMCFundFlowAlert {
+  alert_id: string;
+  severity: "low" | "medium" | "high";
+  direction: "bullish" | "bearish" | "neutral";
+  title: string;
+  note: string;
+  tags: string[];
+  ts: number;
+}
+
+export interface SMCFundFlowContext {
+  status: "ok" | "partial" | "missing";
+  bias: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  one_day: SMCExchangeFlowWindow | null;
+  seven_day: SMCExchangeFlowWindow | null;
+  alerts: SMCFundFlowAlert[];
+  updated_at: number;
+  notes: string[];
+}
+
 export interface SMCSnapshot {
   coin: string;
   ts: number;
@@ -2770,6 +2808,7 @@ export interface SMCSnapshot {
   confirmations: SMCConfirmation[];
   contradictions: SMCContradiction[];
   smart_money: SMCSmartMoneyContext;
+  fund_flow: SMCFundFlowContext;
   data_quality: SMCDataQuality;
   facts_version: string;
 }
