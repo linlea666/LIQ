@@ -13,6 +13,10 @@ async def test_nansen_perp_screener_filters_symbol(monkeypatch):
     async def fake_post(path, body, *, cache_ttl):
         assert path == "perp-screener"
         assert cache_ttl == 900
+        assert body["date"]["from"]
+        assert body["date"]["to"]
+        assert body["filters"]["token_symbol"] == "BTC"
+        assert body["only_smart_money"] is True
         return {
             "data": [
                 {"token_symbol": "ETH", "smart_money_buy_volume": 1},

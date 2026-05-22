@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config.settings import NansenSourceConfig, get_settings
@@ -128,11 +129,15 @@ class NansenSource(DataSource):
     async def fetch_perp_screener(self, symbol: str) -> Optional[dict[str, Any]]:
         """Fetch smart-money perp rows and select the requested BTC/ETH symbol."""
         sym = symbol.upper()
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=1)
         body = {
-            "timeframe": "24h",
-            "order_by": [
-                {"field": "smart_money_volume", "direction": "DESC"},
-            ],
+            "date": {
+                "from": start.isoformat(),
+                "to": today.isoformat(),
+            },
+            "filters": {"token_symbol": sym},
+            "only_smart_money": True,
             "pagination": {"page": 1, "per_page": 100},
         }
         payload = await self._post("perp-screener", body, cache_ttl=900)
