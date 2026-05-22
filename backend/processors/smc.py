@@ -20,6 +20,7 @@ from models.smc import (
     SMCFieldMapItem,
     SMCFundFlowAlert,
     SMCFundFlowContext,
+    SMCFundFlowEvent,
     SMCKeyLevel,
     SMCHorizon,
     SMCLiquidityPool,
@@ -1210,6 +1211,74 @@ def _flow_window(
     )
 
 
+def _fund_flow_events(rows: list[dict[str, Any]], coin: str) -> list[SMCFundFlowEvent]:
+    parsed: list[tuple[datetime, dict[str, Any]]] = []
+    for row in rows:
+        dt = _parse_nansen_dt(row.get("date") or row.get("time"))
+        if dt is not None:
+            parsed.append((dt, row))
+    if not parsed:
+        return []
+    parsed.sort(key=lambda x: x[0])
+    latest_dt = parsed[-1][0]
+    cutoff = latest_dt - timedelta(days=7)
+    recent = [(dt, row) for dt, row in parsed if dt >= cutoff]
+    candidates: list[SMCFundFlowEvent] = []
+
+    def _severity(value: float) -> Literal["low", "medium", "high"]:
+        size = abs(value)
+        if size >= 25_000_000:
+            return "high"
+        if size >= 8_000_000:
+            return "medium"
+        return "low"
+
+    for dt, row in recent:
+        price = _num(row.get("price_usd"), 0)
+        cex_in = _num(row.get("total_inflows_cex"), 0)
+        cex_out = _num(row.get("total_outflows_cex"), 0)
+        cex_net = _net_from_signed_or_positive_parts(cex_in, cex_out)
+        usd = cex_net * price if price > 0 else 0
+        if abs(usd) < 250_000 and dt != latest_dt:
+            continue
+        is_inflow = usd > 0
+        is_outflow = usd < 0
+        direction: Literal["bullish", "bearish", "neutral"] = "bearish" if is_inflow else "bullish" if is_outflow else "neutral"
+        title = (
+            f"{coin} 交易所净流入放大"
+            if is_inflow
+            else f"{coin} 交易所净流出放大"
+            if is_outflow
+            else f"{coin} 交易所流向中性"
+        )
+        note = (
+            f"CEX净流入约 ${usd:,.0f}，潜在可卖筹码增加。"
+            if is_inflow
+            else f"CEX净流出约 ${abs(usd):,.0f}，潜在抛压下降。"
+            if is_outflow
+            else "CEX净流向暂不明显。"
+        )
+        candidates.append(SMCFundFlowEvent(
+            event_id=_zone_id("fund-flow-event", coin, dt.isoformat(), round(usd)),
+            ts=int(dt.timestamp()),
+            direction=direction,
+            severity=_severity(usd),
+            title=title,
+            note=note,
+            cex_net_usd_approx=usd if price > 0 else None,
+            cex_net_token=cex_net,
+            price_usd=price or None,
+            tags=[coin, "Nansen", "CEX"],
+        ))
+
+    # Keep a real timeline: latest meaningful rows first, while preserving large
+    # older anomalies that may explain the current 7d bias.
+    by_id: dict[str, SMCFundFlowEvent] = {}
+    for event in sorted(candidates, key=lambda e: (e.ts, abs(e.cex_net_usd_approx or 0)), reverse=True):
+        by_id[event.event_id] = event
+    return list(by_id.values())[:10]
+
+
 def _fund_flow_context(state: Any) -> tuple[SMCFundFlowContext, list[SMCConfirmation], list[SMCContradiction]]:
     rows = [row for row in (_attr(state, "nansen_exchange_flows", default=[]) or []) if isinstance(row, dict)]
     updated = _attr(state, "nansen_updated_at", default={}) or {}
@@ -1223,10 +1292,12 @@ def _fund_flow_context(state: Any) -> tuple[SMCFundFlowContext, list[SMCConfirma
 
     one_day = _flow_window(rows, window="1d")
     seven_day = _flow_window(rows, window="7d")
+    events = _fund_flow_events(rows, state.coin)
     if not one_day and not seven_day:
         return SMCFundFlowContext(
             status="partial",
             updated_at=updated_at,
+            events=events,
             notes=["Nansen exchange flow rows have no parseable timestamps"],
         ), [], []
 
@@ -1298,6 +1369,7 @@ def _fund_flow_context(state: Any) -> tuple[SMCFundFlowContext, list[SMCConfirma
         one_day=one_day,
         seven_day=seven_day,
         alerts=alerts[:6],
+        events=events,
         updated_at=updated_at,
         notes=notes,
     ), confirmations, contradictions

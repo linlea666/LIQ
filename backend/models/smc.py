@@ -197,6 +197,19 @@ class SMCFundFlowAlert(BaseModel):
     ts: int = 0
 
 
+class SMCFundFlowEvent(BaseModel):
+    event_id: str
+    ts: int = 0
+    direction: Literal["bullish", "bearish", "neutral"] = "neutral"
+    severity: Literal["low", "medium", "high"] = "low"
+    title: str = ""
+    note: str = ""
+    cex_net_usd_approx: Optional[float] = None
+    cex_net_token: float = 0
+    price_usd: Optional[float] = None
+    tags: list[str] = []
+
+
 class SMCFundFlowContext(BaseModel):
     status: Literal["ok", "partial", "missing"] = "missing"
     bias: Literal["bullish", "bearish", "neutral"] = "neutral"
@@ -204,6 +217,7 @@ class SMCFundFlowContext(BaseModel):
     one_day: Optional[SMCExchangeFlowWindow] = None
     seven_day: Optional[SMCExchangeFlowWindow] = None
     alerts: list[SMCFundFlowAlert] = []
+    events: list[SMCFundFlowEvent] = []
     updated_at: int = 0
     notes: list[str] = []
 

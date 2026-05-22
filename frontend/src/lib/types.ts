@@ -2794,6 +2794,19 @@ export interface SMCFundFlowAlert {
   ts: number;
 }
 
+export interface SMCFundFlowEvent {
+  event_id: string;
+  ts: number;
+  direction: "bullish" | "bearish" | "neutral";
+  severity: "low" | "medium" | "high";
+  title: string;
+  note: string;
+  cex_net_usd_approx: number | null;
+  cex_net_token: number;
+  price_usd: number | null;
+  tags: string[];
+}
+
 export interface SMCFundFlowContext {
   status: "ok" | "partial" | "missing";
   bias: "bullish" | "bearish" | "neutral";
@@ -2801,6 +2814,7 @@ export interface SMCFundFlowContext {
   one_day: SMCExchangeFlowWindow | null;
   seven_day: SMCExchangeFlowWindow | null;
   alerts: SMCFundFlowAlert[];
+  events: SMCFundFlowEvent[];
   updated_at: number;
   notes: string[];
 }

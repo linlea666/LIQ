@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMarketStore } from "@/stores/marketStore";
 import type {
   SMCConfirmation,
+  SMCFundFlowEvent,
   SMCHorizon,
   SMCKeyLevel,
   SMCLiquidityPool,
@@ -140,6 +141,19 @@ function fmtToken(v?: number | null) {
   if (v === null || v === undefined || Number.isNaN(v)) return "-";
   const sign = v > 0 ? "+" : v < 0 ? "-" : "";
   return `${sign}${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function fmtClock(ts?: number | null) {
+  if (!ts) return "-";
+  const date = new Date(ts * 1000);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function rangeLabel(from?: number, to?: number, price?: number) {
@@ -396,14 +410,71 @@ function LevelColumn({ title, levels }: { title: string; levels: SMCKeyLevel[] }
   );
 }
 
+function levelRank(level: SMCKeyLevel) {
+  const confidence = { high: 30, medium: 15, low: 0 }[level.confidence] ?? 0;
+  const farBonus = level.tier === "far" ? 10 : level.tier === "mid" ? 4 : 0;
+  return level.strength + confidence + farBonus;
+}
+
+function pickLevel(levels: SMCKeyLevel[], side: "support" | "resistance") {
+  const filtered = levels.filter((level) => level.side === side);
+  return filtered.slice().sort((a, b) => levelRank(b) - levelRank(a) || Math.abs(b.distance_pct) - Math.abs(a.distance_pct))[0];
+}
+
+function pickFarLevel(levels: SMCKeyLevel[], side: "support" | "resistance") {
+  return levels
+    .filter((level) => level.side === side && level.tier === "far")
+    .slice()
+    .sort((a, b) => levelRank(b) - levelRank(a) || Math.abs(b.distance_pct) - Math.abs(a.distance_pct))[0];
+}
+
+function KeyLevelHighlight({
+  label,
+  level,
+  tone,
+}: {
+  label: string;
+  level?: SMCKeyLevel;
+  tone: "support" | "resistance";
+}) {
+  const color = tone === "resistance" ? "text-rose-200 border-rose-900/50 bg-rose-950/15" : "text-emerald-200 border-emerald-900/50 bg-emerald-950/15";
+  return (
+    <div className={`min-w-0 border p-3 ${color}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-slate-400">{label}</span>
+        {level && <span className="text-[10px] text-slate-500">{TIER_LABEL[level.tier]} · {CONFIDENCE_LABEL[level.confidence]}</span>}
+      </div>
+      <div className="mt-2 truncate text-base font-semibold text-slate-100">
+        {level ? rangeLabel(level.price_from, level.price_to, level.price) : "-"}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-500">
+        <span>{level ? fmtPct(level.distance_pct) : "暂无"}</span>
+        <span>{level ? `强度 ${Math.round(level.strength)}` : ""}</span>
+      </div>
+      {level && (
+        <>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {level.sources.slice(0, 3).map((source) => (
+              <span key={`${level.level_id}-highlight-${source}`} className="bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-slate-400">{source}</span>
+            ))}
+          </div>
+          <div className="mt-2 truncate text-[10px] text-slate-500">{level.evidence[0] || level.note}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PriceMap({ snapshot }: { snapshot: SMCSnapshot }) {
   const levels = (snapshot.key_levels?.length ? snapshot.key_levels : fallbackKeyLevels(snapshot)).slice();
   const resistances = levels.filter((level) => level.side === "resistance").sort((a, b) => Math.abs(a.distance_pct) - Math.abs(b.distance_pct));
   const supports = levels.filter((level) => level.side === "support").sort((a, b) => Math.abs(a.distance_pct) - Math.abs(b.distance_pct));
   const nearestResistance = resistances[0];
   const nearestSupport = supports[0];
-  const strongResistance = resistances.slice().sort((a, b) => b.strength - a.strength)[0];
-  const strongSupport = supports.slice().sort((a, b) => b.strength - a.strength)[0];
+  const strongResistance = pickLevel(levels, "resistance");
+  const strongSupport = pickLevel(levels, "support");
+  const farResistance = pickFarLevel(levels, "resistance");
+  const farSupport = pickFarLevel(levels, "support");
   const byTier = (side: "support" | "resistance", tier: "near" | "mid" | "far") =>
     levels
       .filter((level) => level.side === side && level.tier === tier)
@@ -418,6 +489,12 @@ function PriceMap({ snapshot }: { snapshot: SMCSnapshot }) {
       right={<span className="text-[10px] text-slate-500">保守精选 · 近/中/远</span>}
       className="xl:col-span-2"
     >
+      <div className="mb-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <KeyLevelHighlight label="远端强阻力" level={farResistance} tone="resistance" />
+        <KeyLevelHighlight label="最近阻力" level={nearestResistance} tone="resistance" />
+        <KeyLevelHighlight label="最近支撑" level={nearestSupport} tone="support" />
+        <KeyLevelHighlight label="远端强支撑" level={farSupport} tone="support" />
+      </div>
       <div className="grid gap-3 xl:grid-cols-[1fr_220px_1fr]">
         <div className="space-y-3">
           <div className="text-[11px] font-semibold text-rose-200">上方阻力 / 顶部 / 扫空止损区</div>
@@ -586,6 +663,46 @@ function TargetList({ targets }: { targets: SMCTargetZone[] }) {
   );
 }
 
+function FundFlowTimeline({ events }: { events: SMCFundFlowEvent[] }) {
+  if (!events.length) return <Empty text="暂无资金流时间线" />;
+  return (
+    <div className="mt-3 border border-slate-800 bg-slate-950/30 p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-slate-300">主力资金时间线</div>
+        <div className="text-[10px] text-slate-600">最近 Nansen CEX 异动</div>
+      </div>
+      <div className="relative space-y-3 pl-5 before:absolute before:left-1.5 before:top-1 before:h-[calc(100%-8px)] before:w-px before:bg-slate-800">
+        {events.slice(0, 8).map((event) => {
+          const isBullish = event.direction === "bullish";
+          const isBearish = event.direction === "bearish";
+          const dot = isBullish ? "bg-emerald-400" : isBearish ? "bg-rose-400" : "bg-slate-500";
+          const tone = isBullish ? "text-emerald-200" : isBearish ? "text-rose-200" : "text-slate-300";
+          return (
+            <div key={event.event_id} className="relative">
+              <span className={`absolute -left-[18px] top-1.5 h-2.5 w-2.5 rounded-full ${dot}`} />
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className={`text-[12px] font-semibold ${tone}`}>{event.title}</div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{event.note}</div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {event.tags.map((tag) => <span key={`${event.event_id}-${tag}`} className="bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{tag}</span>)}
+                    <span className="bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">{SEVERITY_LABEL[event.severity] ?? event.severity}</span>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right text-[10px] text-slate-500">
+                  <div>{fmtClock(event.ts)}</div>
+                  <div className="mt-1">{fmtMoney(event.cex_net_usd_approx)}</div>
+                  <div>{fmtPrice(event.price_usd)}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function FundFlowMonitor({ snapshot }: { snapshot: SMCSnapshot }) {
   const flow = snapshot.fund_flow;
   const windows = [flow.one_day, flow.seven_day].filter(Boolean);
@@ -663,6 +780,7 @@ function FundFlowMonitor({ snapshot }: { snapshot: SMCSnapshot }) {
           ))}
         </div>
       )}
+      <FundFlowTimeline events={flow.events ?? []} />
     </Section>
   );
 }

@@ -181,6 +181,10 @@ def test_smc_fund_flow_tracks_exchange_outflow_as_bullish_confirmation():
     assert snap.fund_flow.seven_day.cex_net_token < 0
     assert snap.fund_flow.seven_day.cex_net_usd_approx is not None
     assert snap.fund_flow.seven_day.cex_net_usd_approx < 0
+    assert snap.fund_flow.events
+    assert snap.fund_flow.events[0].direction == "bullish"
+    assert snap.fund_flow.events[0].cex_net_usd_approx is not None
+    assert snap.fund_flow.events[0].cex_net_usd_approx < 0
     assert any(item.source.startswith("nansen_exchange_flow") for item in snap.confirmations)
 
 
