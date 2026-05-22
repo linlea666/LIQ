@@ -168,7 +168,7 @@ class TestRoundTrip:
         assert row["source_age"] == {"orderbook": 12, "spot": 35}
 
     def test_multiple_appends_same_day(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
         for i in range(3):
             snap = _make_snapshot(walls_above=[_make_zone(price_mid=76000 + i * 100)])
             assert archiver.append(snap) is True
@@ -178,7 +178,7 @@ class TestRoundTrip:
         assert len(rows) == 3
 
     def test_crowding_global_serialized(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
         snap = _make_snapshot()
         archiver.append(snap)
         day = datetime.now(_TZ_CN).strftime("%Y%m%d")
@@ -195,7 +195,7 @@ class TestRoundTrip:
 
 class TestPartitioning:
     def test_per_coin_isolation(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
         archiver.append(_make_snapshot(coin="BTC"))
         archiver.append(_make_snapshot(coin="ETH"))
         archiver.append(_make_snapshot(coin="SOL"))
@@ -204,7 +204,7 @@ class TestPartitioning:
             assert (tmp_path / c / f"{day}.jsonl").exists()
 
     def test_cross_day_partitioning(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
         # 第 1 天
         ts_d1 = int(datetime(2026, 4, 28, 12, tzinfo=_TZ_CN).timestamp())
         archiver.append(_make_snapshot(ts_sec=ts_d1))
@@ -215,7 +215,7 @@ class TestPartitioning:
         assert (tmp_path / "BTC" / "20260429.jsonl").exists()
 
     def test_list_days(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
         ts1 = int(datetime(2026, 4, 28, tzinfo=_TZ_CN).timestamp())
         ts2 = int(datetime(2026, 4, 29, tzinfo=_TZ_CN).timestamp())
         archiver.append(_make_snapshot(coin="BTC", ts_sec=ts1))

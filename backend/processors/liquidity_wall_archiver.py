@@ -8,7 +8,7 @@
     - 同步 IO + threading.RLock，主路径用 run_in_executor 推到 thread pool
     - 不 gzip：纯 JSONL，便于 `jq / rg / pandas.read_json(lines=True)` 直读
     - 按币/按天分文件：data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl
-    - 30 天 GC（与 snapshot_archiver 对齐；后验脚本所需的 1-2 周观察期已足够覆盖）
+    - 默认 14 天 GC（可用 LIQUIDITY_WALL_KEEP_DAYS 调整；后验脚本所需的 1-2 周观察期已足够覆盖）
     - 磁盘水位保护：> 80% 跳过落盘 + 日志告警，30s 抑制再检测
     - 写入失败全部 best-effort（吞异常），绝不影响主轮询
 
@@ -55,11 +55,41 @@ _DEFAULT_ROOT = os.path.abspath(
         "liquidity_wall_history",
     )
 )
-_KEEP_DAYS = 30                       # 与 snapshot_archiver 对齐；1-2 周观察期足够覆盖
 _TZ_CN = timezone(timedelta(hours=8))
 
 # 磁盘水位保护
-_DISK_HIGH_WATERMARK = 0.80           # > 80% 跳过落盘
+def _env_int(name: str, default: int, min_value: int, max_value: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "[liquidity_wall_archiver] invalid env %s=%r, fallback=%s",
+            name, raw, default,
+        )
+        return default
+    return max(min_value, min(max_value, value))
+
+
+def _env_float(name: str, default: float, min_value: float, max_value: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "[liquidity_wall_archiver] invalid env %s=%r, fallback=%s",
+            name, raw, default,
+        )
+        return default
+    return max(min_value, min(max_value, value))
+
+
+_KEEP_DAYS = _env_int("LIQUIDITY_WALL_KEEP_DAYS", 14, 3, 90)
+_DISK_HIGH_WATERMARK = _env_float("LIQUIDITY_WALL_DISK_HIGH_WATERMARK", 0.80, 0.50, 0.98)
 _DISK_CHECK_INTERVAL_SEC = 30         # 高水位后 30s 内不再检测
 
 
@@ -75,7 +105,7 @@ class LiquidityWallArchiver:
       - 接收 OrderbookPressureSnapshot（pydantic model）+ source_age dict
       - 提炼摘要（轻量 schema，不含原始 bins）
       - 按 coin/day 写入 JSONL（同步 + RLock）
-      - 90 天 GC（每小时触发一次）
+      - GC（每小时触发一次，默认 14 天，可由环境变量调整）
       - 磁盘高水位时跳过 + 日志告警
 
     使用：
@@ -117,6 +147,7 @@ class LiquidityWallArchiver:
 
         # 磁盘水位保护
         if self._is_disk_high():
+            self._gc_if_due(force=True)
             self._dropped_count += 1
             return False
 
@@ -177,6 +208,7 @@ class LiquidityWallArchiver:
                 "dropped_count": self._dropped_count,
                 "disk_high_until_ts": int(self._disk_full_until_ts),
                 "keep_days": self._keep_days,
+                "disk_high_watermark": _DISK_HIGH_WATERMARK,
                 "root": self._root,
             }
 
@@ -228,10 +260,10 @@ class LiquidityWallArchiver:
             return False
         return False
 
-    def _gc_if_due(self) -> None:
+    def _gc_if_due(self, force: bool = False) -> None:
         """每小时检查一次，删除 > keep_days 的日文件。"""
         now = int(time.time())
-        if now - self._last_gc_ts < 3600:
+        if not force and now - self._last_gc_ts < 3600:
             return
         self._last_gc_ts = now
         try:

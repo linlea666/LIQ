@@ -6,7 +6,7 @@
     - 需要立即按保留期清掉旧 jsonl，腾空间 + 让落盘恢复
 
 覆盖目录（按各 archiver 的 _KEEP_DAYS 默认值，与代码常量保持一致）：
-    1. data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl  ← 30 天
+    1. data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl  ← 默认 14 天
     2. data/sweep_watch/{COIN}/{YYYYMMDD}.jsonl            ← 7 天
 
 不会动：
@@ -41,9 +41,19 @@ _REPO_ROOT = os.path.abspath(
 )
 _DATA_ROOT = os.path.join(_REPO_ROOT, "data")
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 # 与 backend/processors/{liquidity_wall_archiver,sweep_watch_archiver}.py 的
 # _KEEP_DAYS 常量保持同步。改动那边时记得同步这里默认值。
-_DEFAULT_WALL_KEEP_DAYS = 30
+_DEFAULT_WALL_KEEP_DAYS = _env_int("LIQUIDITY_WALL_KEEP_DAYS", 14)
 _DEFAULT_SWEEP_KEEP_DAYS = 7
 
 
