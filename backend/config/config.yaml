@@ -84,6 +84,19 @@ sources:
     timeout_sec: 15
     rate_per_min: 60
     poll_interval: 90       # 与合约 orderbook_pressure 同节奏
+  # SMC · Nansen 聪明钱确认层（只从 NANSEN_API_KEY 读取 key）
+  # 低频确认：perp 15min、TGM 60min、市场宽度 4h；失败只降级 SMC 数据质量。
+  nansen:
+    enabled: true
+    base_url: "https://api.nansen.ai"
+    api_key_env: "NANSEN_API_KEY"
+    timeout_sec: 20
+    rate_limit_per_min: 30
+    chains: ["ethereum", "base", "solana"]
+    poll_intervals:
+      perp_screener: 900
+      flow_intelligence: 3600
+      market_breadth: 14400
 
 processors:
   cvd:

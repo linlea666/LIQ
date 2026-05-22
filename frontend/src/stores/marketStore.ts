@@ -4,6 +4,9 @@ import type {
   MarketActionReport,
   MarketUpdate,
   SourceHealth,
+  SMCMarketBreadth,
+  SMCHorizon,
+  SMCSnapshot,
   StrategicReport,
   TEAIInterpretation,
   TradingBrainSnapshot,
@@ -74,7 +77,19 @@ interface MarketStore {
   setTradingBrainLoading: (coin: string, loading: boolean) => void;
   setTradingBrainError: (coin: string, err: string | null) => void;
   loadTradingBrain: (coin: string, maxZones?: number) => Promise<void>;
+
+  smcByKey: Record<string, SMCSnapshot>;
+  smcLoadingByKey: Record<string, boolean>;
+  smcErrorByKey: Record<string, string | null>;
+  smcMarketBreadth: SMCMarketBreadth | null;
+  setSMCSnapshot: (snap: SMCSnapshot) => void;
+  setSMCLoading: (coin: string, horizon: SMCHorizon, loading: boolean) => void;
+  setSMCError: (coin: string, horizon: SMCHorizon, err: string | null) => void;
+  loadSMC: (coin: string, horizon: SMCHorizon) => Promise<void>;
+  loadSMCMarketBreadth: () => Promise<void>;
 }
+
+const smcKey = (coin: string, horizon: SMCHorizon) => `${coin.toUpperCase()}:${horizon}`;
 
 export const useMarketStore = create<MarketStore>((set, get) => ({
   coin: "BTC",
@@ -390,6 +405,68 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
       get().setTradingBrainError(c, e instanceof Error ? e.message : String(e));
     } finally {
       get().setTradingBrainLoading(c, false);
+    }
+  },
+
+  smcByKey: {},
+  smcLoadingByKey: {},
+  smcErrorByKey: {},
+  smcMarketBreadth: null,
+  setSMCSnapshot: (snap) =>
+    set((state) => {
+      const key = smcKey(snap.coin, snap.horizon);
+      return {
+        smcByKey: { ...state.smcByKey, [key]: snap },
+        smcLoadingByKey: { ...state.smcLoadingByKey, [key]: false },
+        smcErrorByKey: { ...state.smcErrorByKey, [key]: null },
+      };
+    }),
+  setSMCLoading: (coin, horizon, loading) =>
+    set((state) => {
+      const key = smcKey(coin, horizon);
+      return {
+        smcLoadingByKey: { ...state.smcLoadingByKey, [key]: loading },
+        smcErrorByKey: loading
+          ? { ...state.smcErrorByKey, [key]: null }
+          : state.smcErrorByKey,
+      };
+    }),
+  setSMCError: (coin, horizon, err) =>
+    set((state) => {
+      const key = smcKey(coin, horizon);
+      return {
+        smcErrorByKey: { ...state.smcErrorByKey, [key]: err },
+        smcLoadingByKey: { ...state.smcLoadingByKey, [key]: false },
+      };
+    }),
+  loadSMC: async (coin, horizon) => {
+    const c = coin.toUpperCase();
+    get().setSMCLoading(c, horizon, true);
+    try {
+      const q = new URLSearchParams({ horizon });
+      const resp = await fetch(`${API_BASE}/api/smc/${encodeURIComponent(c)}?${q}`);
+      if (!resp.ok) {
+        get().setSMCError(c, horizon, `HTTP ${resp.status}`);
+        return;
+      }
+      const data = (await resp.json()) as SMCSnapshot;
+      if (data?.coin) {
+        get().setSMCSnapshot(data);
+      }
+    } catch (e) {
+      get().setSMCError(c, horizon, e instanceof Error ? e.message : String(e));
+    } finally {
+      get().setSMCLoading(c, horizon, false);
+    }
+  },
+  loadSMCMarketBreadth: async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/smc/market-breadth`);
+      if (!resp.ok) return;
+      const data = (await resp.json()) as SMCMarketBreadth;
+      set({ smcMarketBreadth: data });
+    } catch {
+      // keep last snapshot
     }
   },
 

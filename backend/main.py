@@ -18,6 +18,7 @@ from api.routes import router, set_engine as set_routes_engine
 from api.roll_position import router as roll_router, set_service as set_roll_service
 from api.routes_market_action import router as maa_router, set_engine as set_maa_engine
 from api.routes_strategic import router as strategic_router, set_engine as set_strategic_engine
+from api.routes_smc import router as smc_router, set_engine as set_smc_engine
 from api.routes_scalp import (
     router as scalp_router,
     set_components as set_scalp_components,
@@ -243,6 +244,7 @@ async def lifespan(app: FastAPI):
     set_roll_service(engine.roll_service)
     set_maa_engine(engine)
     set_strategic_engine(engine)
+    set_smc_engine(engine)
 
     # P0-A Shadow Logger：启动后台 writer
     try:
@@ -318,6 +320,7 @@ app.include_router(router)
 app.include_router(roll_router)
 app.include_router(maa_router)
 app.include_router(strategic_router)
+app.include_router(smc_router)
 app.include_router(scalp_router)
 
 _socket_app = socketio.ASGIApp(sio, other_asgi_app=app)

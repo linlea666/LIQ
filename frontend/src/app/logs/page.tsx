@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { API_BASE } from "@/lib/constants";
 
 interface LogEntry {
@@ -26,6 +27,39 @@ export default function LogsPage() {
   const [health, setHealth] = useState<{
     status: string;
     sources: { name: string; status: string; latency_ms: number; error_count: number }[];
+    smc_monitor?: {
+      status: string;
+      nansen_enabled: boolean;
+      market_breadth: { status: string; score: number; ts: number };
+      coins: Array<{
+        coin: string;
+        nansen_perp_age_sec: number | null;
+        nansen_flow_age_sec: number | null;
+        nansen_errors: Record<string, string>;
+        intraday: null | {
+          observation: string;
+          setup_state: string;
+          confidence: number;
+          data_quality: string;
+          data_quality_score: number;
+          missing: string[];
+          degraded: string[];
+          zones: number;
+          liquidity_pools: number;
+        };
+        swing: null | {
+          observation: string;
+          setup_state: string;
+          confidence: number;
+          data_quality: string;
+          data_quality_score: number;
+          missing: string[];
+          degraded: string[];
+          zones: number;
+          liquidity_pools: number;
+        };
+      }>;
+    };
     strategic_available: boolean;
     ai_provider: string;
   } | null>(null);
@@ -51,20 +85,28 @@ export default function LogsPage() {
   }, []);
 
   useEffect(() => {
-    fetchLogs();
-    fetchHealth();
-    if (!autoRefresh) return;
+    const firstRun = window.setTimeout(() => {
+      void fetchLogs();
+      void fetchHealth();
+    }, 0);
+    if (!autoRefresh) {
+      return () => window.clearTimeout(firstRun);
+    }
     const t1 = setInterval(fetchLogs, 3000);
     const t2 = setInterval(fetchHealth, 10000);
-    return () => { clearInterval(t1); clearInterval(t2); };
+    return () => {
+      window.clearTimeout(firstRun);
+      clearInterval(t1);
+      clearInterval(t2);
+    };
   }, [fetchLogs, fetchHealth, autoRefresh]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-300">
       <header className="border-b border-slate-700 bg-slate-900/80 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <a href="/" className="text-blue-400 hover:text-blue-300 text-sm">← 返回大屏</a>
-          <h1 className="text-lg font-bold text-white">📋 LIQ 运行日志</h1>
+          <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">← 返回大屏</Link>
+          <h1 className="text-lg font-bold text-white">LIQ 运行日志</h1>
         </div>
         <div className="flex items-center gap-3 text-xs">
           <label className="flex items-center gap-1 cursor-pointer">
@@ -106,6 +148,65 @@ export default function LogsPage() {
                 </span>
               ))}
             </div>
+            {health.smc_monitor && (
+              <div className="mt-4 border-t border-slate-800 pt-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-semibold text-slate-200">SMC 落地监测</h3>
+                  <div className="text-[11px] text-slate-500">
+                    Nansen {health.smc_monitor.nansen_enabled ? "enabled" : "missing"} · breadth {health.smc_monitor.market_breadth.status}
+                    {typeof health.smc_monitor.market_breadth.score === "number" && (
+                      <span> ({health.smc_monitor.market_breadth.score.toFixed(1)})</span>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {health.smc_monitor.coins.map((c) => (
+                    <div key={c.coin} className="border border-slate-800 bg-slate-950/40 p-2">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-white">{c.coin}</span>
+                        <Link href={`/smc/${c.coin}`} className="text-[11px] text-blue-400 hover:text-blue-300">
+                          打开 SMC
+                        </Link>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        {(["intraday", "swing"] as const).map((h) => {
+                          const snap = c[h];
+                          return (
+                            <div key={h} className="bg-slate-900/70 p-2">
+                              <div className="mb-1 text-slate-500">{h === "intraday" ? "日内" : "波段"}</div>
+                              {snap ? (
+                                <>
+                                  <div>{snap.observation} · {snap.setup_state}</div>
+                                  <div className="text-slate-500">
+                                    conf {snap.confidence} · dq {snap.data_quality}/{snap.data_quality_score}
+                                  </div>
+                                  <div className="text-slate-500">
+                                    zones {snap.zones} · pools {snap.liquidity_pools}
+                                  </div>
+                                  {(snap.missing.length > 0 || snap.degraded.length > 0) && (
+                                    <div className="mt-1 truncate text-yellow-400" title={[...snap.missing, ...snap.degraded].join(", ")}>
+                                      {[...snap.missing, ...snap.degraded].join(", ")}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-red-400">未生成</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-2 text-[10px] text-slate-600">
+                        perp age {c.nansen_perp_age_sec ?? "-"}s · flow age {c.nansen_flow_age_sec ?? "-"}s
+                        {Object.keys(c.nansen_errors || {}).length > 0 && (
+                          <span className="text-yellow-400"> · {Object.entries(c.nansen_errors).map(([k, v]) => `${k}:${v}`).join(", ")}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

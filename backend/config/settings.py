@@ -84,6 +84,26 @@ class CoinbaseSourceConfig:
 
 
 @dataclass(frozen=True)
+class NansenSourceConfig:
+    """Nansen API source config for the SMC confirmation layer.
+
+    The key is resolved only from ``api_key_env`` at source construction time.
+    """
+
+    enabled: bool = True
+    base_url: str = "https://api.nansen.ai"
+    api_key_env: str = "NANSEN_API_KEY"
+    timeout_sec: int = 20
+    rate_limit_per_min: int = 30
+    poll_intervals: dict[str, int] = field(default_factory=lambda: {
+        "perp_screener": 900,
+        "flow_intelligence": 3600,
+        "market_breadth": 14400,
+    })
+    chains: list[str] = field(default_factory=lambda: ["ethereum", "base", "solana"])
+
+
+@dataclass(frozen=True)
 class ProcessorsConfig:
     cvd: dict[str, Any]
     percentile: dict[str, Any]
@@ -270,6 +290,7 @@ class Settings:
     strategic: StrategicConfig = field(default_factory=StrategicConfig)
     scalp_signal: ScalpSignalConfig = field(default_factory=ScalpSignalConfig)
     coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
+    nansen: NansenSourceConfig = field(default_factory=NansenSourceConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -336,6 +357,26 @@ def _build_settings(raw: dict) -> Settings:
         timeout_sec=int(cb_raw.get("timeout_sec", 15)),
         rate_per_min=int(cb_raw.get("rate_per_min", 60)),
         poll_interval=int(cb_raw.get("poll_interval", 90)),
+    )
+
+    nsn_raw = src.get("nansen", {}) or {}
+    nsn_intervals = nsn_raw.get("poll_intervals") or {}
+    nansen = NansenSourceConfig(
+        enabled=bool(nsn_raw.get("enabled", True)),
+        base_url=nsn_raw.get("base_url", "https://api.nansen.ai"),
+        api_key_env=nsn_raw.get("api_key_env", "NANSEN_API_KEY"),
+        timeout_sec=int(nsn_raw.get("timeout_sec", 20)),
+        rate_limit_per_min=int(nsn_raw.get("rate_limit_per_min", 30)),
+        poll_intervals={
+            "perp_screener": int(nsn_intervals.get("perp_screener", 900)),
+            "flow_intelligence": int(nsn_intervals.get("flow_intelligence", 3600)),
+            "market_breadth": int(nsn_intervals.get("market_breadth", 14400)),
+        },
+        chains=[
+            str(chain) for chain in nsn_raw.get(
+                "chains", ["ethereum", "base", "solana"],
+            )
+        ],
     )
 
     processors = ProcessorsConfig(**raw["processors"])
@@ -488,6 +529,7 @@ def _build_settings(raw: dict) -> Settings:
         binance=binance,
         bbx=bbx,
         coinbase=coinbase,
+        nansen=nansen,
         processors=processors,
         ai=ai,
         push=push,

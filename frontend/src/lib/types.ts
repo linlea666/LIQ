@@ -2650,3 +2650,136 @@ export interface TradingBrainSnapshot {
   /** W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志） */
   sweep_watch: BrainSweepWatch | null;
 }
+
+export type SMCHorizon = "intraday" | "swing";
+export type SMCObservation = "long_watch" | "short_watch" | "wait";
+export type SMCSetupState =
+  | "candidate"
+  | "raid_detected"
+  | "mss_confirmed"
+  | "entry_zone_active"
+  | "invalidated"
+  | "expired";
+
+export interface SMCDataQuality {
+  score: number;
+  status: "ok" | "partial" | "degraded";
+  missing: string[];
+  stale: string[];
+  degraded: string[];
+  source_status: Record<string, string>;
+  notes: string[];
+}
+
+export interface SMCStructureEvent {
+  event_id: string;
+  kind: "swing_high" | "swing_low" | "bos" | "mss" | "liquidity_raid";
+  direction: "bullish" | "bearish" | "neutral";
+  timeframe: string;
+  ts: number;
+  price: number;
+  strength: number;
+  note: string;
+}
+
+export interface SMCLiquidityPool {
+  pool_id: string;
+  side: "buy_side" | "sell_side";
+  source: string;
+  timeframe: string;
+  price: number;
+  price_from: number;
+  price_to: number;
+  strength: number;
+  swept: boolean;
+  distance_pct: number;
+  evidence: string[];
+}
+
+export interface SMCZone {
+  zone_id: string;
+  kind: "liquidity" | "order_block" | "fair_value_gap" | "breaker" | "po3" | "fib_ote" | "turnover_sr";
+  role:
+    | "buy_side_liquidity"
+    | "sell_side_liquidity"
+    | "bullish_demand"
+    | "bearish_supply"
+    | "support"
+    | "resistance"
+    | "neutral";
+  state: SMCSetupState;
+  timeframe: string;
+  price_from: number;
+  price_to: number;
+  midpoint: number;
+  strength: number;
+  distance_pct: number;
+  created_ts: number;
+  invalidation_price: number | null;
+  evidence: string[];
+  notes: string[];
+}
+
+export interface SMCTargetZone {
+  price: number;
+  kind: string;
+  side: "above" | "below" | "neutral";
+  distance_pct: number;
+  note: string;
+}
+
+export interface SMCConfirmation {
+  source: string;
+  direction: "bullish" | "bearish" | "neutral";
+  score_delta: number;
+  confidence: number;
+  note: string;
+}
+
+export interface SMCContradiction {
+  source: string;
+  severity: "low" | "medium" | "high";
+  note: string;
+}
+
+export interface SMCSmartMoneyContext {
+  status: "ok" | "partial" | "missing";
+  bias: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  perp: Record<string, unknown> | null;
+  flow: Record<string, unknown> | null;
+  market_breadth_score: number | null;
+  notes: string[];
+}
+
+export interface SMCSnapshot {
+  coin: string;
+  ts: number;
+  horizon: SMCHorizon;
+  last_price: number;
+  observation: SMCObservation;
+  setup_state: SMCSetupState;
+  confidence: number;
+  summary: string;
+  timeframe_map: Record<string, string[]>;
+  invalidation_price: number | null;
+  structure: SMCStructureEvent[];
+  liquidity_pools: SMCLiquidityPool[];
+  zones: SMCZone[];
+  targets: SMCTargetZone[];
+  confirmations: SMCConfirmation[];
+  contradictions: SMCContradiction[];
+  smart_money: SMCSmartMoneyContext;
+  data_quality: SMCDataQuality;
+  facts_version: string;
+}
+
+export interface SMCMarketBreadth {
+  ts: number;
+  status: "ok" | "partial" | "missing";
+  chains: string[];
+  smart_money_netflow: Record<string, unknown>[];
+  token_screener: Record<string, unknown>[];
+  breadth_score: number;
+  data_quality: SMCDataQuality;
+}

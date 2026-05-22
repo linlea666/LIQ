@@ -266,6 +266,11 @@ class CoinState:
         # 写回时按"当帧仍存在的 setup_id"做 GC，避免字典无限增长。
         from models.trading_brain import SetupState as _BrainSetupState
         self.brain_setup_states: dict[str, _BrainSetupState] = {}
+        # SMC · Nansen confirmation cache（仅 BTC/ETH 使用；失败只降级 SMC 数据质量）
+        self.nansen_perp: Optional[dict] = None
+        self.nansen_flow_intelligence: Optional[dict] = None
+        self.nansen_updated_at: dict[str, int] = {}
+        self.nansen_errors: dict[str, str] = {}
 
 
 class Engine:
@@ -286,6 +291,9 @@ class Engine:
             timeout_sec=self._settings.coinbase.timeout_sec,
             rate_per_min=self._settings.coinbase.rate_per_min,
         )
+        from sources.nansen import create_nansen_source
+        self._nansen = create_nansen_source()
+        self._nansen_market_breadth: Optional[dict] = None
         # PR-3 · self._analyzer 已下线（旧 Trader）。Strategic 通过 _get_strategic_arbiter 懒加载。
         # MAA arbiter（懒创建：只在需要时导入，不影响旧链路）
         self._maa_arbiter = None  # type: ignore[assignment]
@@ -575,6 +583,26 @@ class Engine:
                 3600, 36,
             )),
         ])
+
+        # SMC · Nansen 只做低频确认层：不影响 Coinglass 限流，不阻塞 SMC 主判断。
+        if self._nansen is not None:
+            nsn_cfg = self._settings.nansen.poll_intervals
+            for idx, ccy in enumerate(("BTC", "ETH")):
+                if ccy not in self._settings.supported_coins:
+                    continue
+                coin = self._settings.get_coin(ccy)
+                tasks.append(asyncio.create_task(self._poll_loop(
+                    f"nansen_perp_{ccy}", self._poll_nansen_perp, coin,
+                    nsn_cfg.get("perp_screener", 900), 42 + idx * 3,
+                )))
+                tasks.append(asyncio.create_task(self._poll_loop(
+                    f"nansen_flow_{ccy}", self._poll_nansen_flow_intelligence, coin,
+                    nsn_cfg.get("flow_intelligence", 3600), 48 + idx * 3,
+                )))
+            tasks.append(asyncio.create_task(self._poll_loop(
+                "nansen_breadth", self._poll_nansen_market_breadth, btc_coin,
+                nsn_cfg.get("market_breadth", 14400), 55,
+            )))
 
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
@@ -921,6 +949,8 @@ class Engine:
         await self._bn.close()
         await self._bbx.close()
         await self._cb.close()
+        if self._nansen is not None:
+            await self._nansen.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──
@@ -1354,6 +1384,56 @@ class Engine:
     async def _poll_onchain_cycle(self, _coin: CoinConfig):
         from polls.macro import poll_onchain_cycle
         await poll_onchain_cycle(self._cg, self._states, self._settings.supported_coins)
+
+    async def _poll_nansen_perp(self, coin: CoinConfig):
+        """SMC · Nansen perp screener（BTC/ETH 15min，确认层）。"""
+        if self._nansen is None or coin.ccy not in {"BTC", "ETH"}:
+            return
+        state = self._states[coin.ccy]
+        data = await self._nansen.fetch_perp_screener(coin.ccy)
+        if data:
+            state.nansen_perp = data
+            state.nansen_updated_at["perp_screener"] = int(time.time())
+            state.nansen_errors.pop("perp_screener", None)
+        else:
+            state.nansen_errors["perp_screener"] = self._nansen.last_error or "empty"
+
+    async def _poll_nansen_flow_intelligence(self, coin: CoinConfig):
+        """SMC · Nansen TGM flow-intelligence（WBTC/WETH 60min，确认层）。"""
+        if self._nansen is None or coin.ccy not in {"BTC", "ETH"}:
+            return
+        token_map = {
+            "BTC": ("WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"),
+            "ETH": ("WETH", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+        }
+        _symbol, token_address = token_map[coin.ccy]
+        state = self._states[coin.ccy]
+        data = await self._nansen.fetch_flow_intelligence(
+            chain="ethereum",
+            token_address=token_address,
+            timeframe="1d",
+        )
+        if data:
+            state.nansen_flow_intelligence = data
+            state.nansen_updated_at["flow_intelligence"] = int(time.time())
+            state.nansen_errors.pop("flow_intelligence", None)
+        else:
+            state.nansen_errors["flow_intelligence"] = self._nansen.last_error or "empty"
+
+    async def _poll_nansen_market_breadth(self, _coin: CoinConfig):
+        """SMC · low-frequency smart-money market breadth."""
+        if self._nansen is None:
+            return
+        chains = self._settings.nansen.chains
+        netflow = await self._nansen.fetch_smart_money_netflow(chains, per_page=50)
+        tokens = await self._nansen.fetch_token_screener(chains, per_page=50)
+        self._nansen_market_breadth = {
+            "ts": int(time.time()),
+            "chains": chains,
+            "smart_money_netflow": netflow,
+            "token_screener": tokens,
+            "last_error": self._nansen.last_error,
+        }
 
     # ── 重新计算 ──
 
@@ -1867,6 +1947,32 @@ class Engine:
 
     def get_waterfall(self, ccy: str) -> Optional[WaterfallData]:
         return self._states.get(ccy, CoinState(ccy)).waterfall
+
+    def get_smc_snapshot(self, ccy: str, horizon: str = "intraday"):
+        state = self._states.get(ccy)
+        if not state:
+            return None
+        from processors.smc import build_smc_snapshot
+        return build_smc_snapshot(
+            state,
+            horizon="swing" if horizon == "swing" else "intraday",
+            market_breadth=self._nansen_market_breadth,
+        )
+
+    def get_smc_facts(self, ccy: str, horizon: str = "intraday") -> dict:
+        state = self._states.get(ccy)
+        if not state:
+            return {}
+        from processors.smc import build_smc_facts
+        return build_smc_facts(
+            state,
+            horizon="swing" if horizon == "swing" else "intraday",
+            market_breadth=self._nansen_market_breadth,
+        )
+
+    def get_smc_market_breadth(self):
+        from processors.smc import build_smc_market_breadth
+        return build_smc_market_breadth(self._nansen_market_breadth)
 
     def get_last_ai_ts(self, ccy: str) -> float:
         return self._states.get(ccy, CoinState(ccy)).last_ai_ts
@@ -2778,6 +2884,17 @@ class Engine:
         ]
         if self._bbx:
             sources.append(self._bbx.health())
+        if self._nansen is not None:
+            sources.append(self._nansen.health().model_dump())
+        else:
+            sources.append({
+                "name": "nansen",
+                "status": "disconnected",
+                "latency_ms": 0,
+                "last_success_ts": 0,
+                "error_count": 0,
+                "reason": "NANSEN_API_KEY not set or source disabled",
+            })
         sources.append({
             "name": "market_readiness",
             "status": "connected",
@@ -2794,3 +2911,59 @@ class Engine:
             ],
         })
         return sources
+
+    def get_smc_monitor_status(self) -> dict:
+        """SMC rollout monitor for /api/health and the logs page."""
+        coins: list[dict] = []
+        now = int(time.time())
+        for ccy in ("BTC", "ETH"):
+            state = self._states.get(ccy)
+            if state is None:
+                continue
+            item = {
+                "coin": ccy,
+                "intraday": None,
+                "swing": None,
+                "nansen_perp_age_sec": None,
+                "nansen_flow_age_sec": None,
+                "nansen_errors": dict(getattr(state, "nansen_errors", {}) or {}),
+            }
+            updated = getattr(state, "nansen_updated_at", {}) or {}
+            if updated.get("perp_screener"):
+                item["nansen_perp_age_sec"] = max(0, now - int(updated["perp_screener"]))
+            if updated.get("flow_intelligence"):
+                item["nansen_flow_age_sec"] = max(0, now - int(updated["flow_intelligence"]))
+            for horizon in ("intraday", "swing"):
+                try:
+                    snap = self.get_smc_snapshot(ccy, horizon=horizon)
+                    if snap is None:
+                        continue
+                    item[horizon] = {
+                        "observation": snap.observation,
+                        "setup_state": snap.setup_state,
+                        "confidence": snap.confidence,
+                        "data_quality": snap.data_quality.status,
+                        "data_quality_score": snap.data_quality.score,
+                        "missing": snap.data_quality.missing,
+                        "degraded": snap.data_quality.degraded,
+                        "zones": len(snap.zones),
+                        "liquidity_pools": len(snap.liquidity_pools),
+                    }
+                except Exception as exc:
+                    item[horizon] = {"error": exc.__class__.__name__}
+            coins.append(item)
+
+        breadth = self.get_smc_market_breadth()
+        source_status = "connected"
+        if any((c.get("intraday") or {}).get("data_quality") == "degraded" for c in coins):
+            source_status = "degraded"
+        return {
+            "status": source_status,
+            "nansen_enabled": self._nansen is not None,
+            "market_breadth": {
+                "status": breadth.status,
+                "score": breadth.breadth_score,
+                "ts": breadth.ts,
+            },
+            "coins": coins,
+        }

@@ -791,6 +791,7 @@ async def health_check():
     return {
         "status": "running",
         "sources": _engine.get_source_health(),
+        "smc_monitor": _engine.get_smc_monitor_status(),
         "strategic_available": _engine.strategic_available,
         "ai_provider": get_settings().ai.active,
     }
