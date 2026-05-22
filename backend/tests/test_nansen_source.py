@@ -52,6 +52,34 @@ async def test_nansen_flow_intelligence_parses_first_row(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_nansen_tgm_flows_builds_label_query(monkeypatch):
+    source = NansenSource(NansenSourceConfig(), api_key="test")
+
+    async def fake_post(path, body, *, cache_ttl):
+        assert path == "tgm/flows"
+        assert cache_ttl == 14400
+        assert body["chain"] == "ethereum"
+        assert body["label"] == "exchange"
+        assert body["date"]["from"] == "2026-05-15"
+        assert body["date"]["to"] == "2026-05-22"
+        assert body["pagination"]["per_page"] == 20
+        return {"data": [{"date": "2026-05-22", "net_flow_usd": -456.0}]}
+
+    monkeypatch.setattr(source, "_post", fake_post)
+
+    rows = await source.fetch_tgm_flows(
+        chain="ethereum",
+        token_address="0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+        label="exchange",
+        from_date="2026-05-15",
+        to_date="2026-05-22",
+        per_page=20,
+    )
+
+    assert rows == [{"date": "2026-05-22", "net_flow_usd": -456.0}]
+
+
+@pytest.mark.asyncio
 async def test_nansen_missing_key_degrades_without_request():
     source = NansenSource(NansenSourceConfig(), api_key="")
 

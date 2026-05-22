@@ -166,6 +166,30 @@ class NansenSource(DataSource):
         rows = self._items(payload)
         return rows[0] if rows else None
 
+    async def fetch_tgm_flows(
+        self,
+        *,
+        chain: str,
+        token_address: str,
+        label: str,
+        from_date: str,
+        to_date: str,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        body = {
+            "chain": chain,
+            "token_address": token_address,
+            "date": {
+                "from": from_date,
+                "to": to_date,
+            },
+            "label": label,
+            "pagination": {"page": 1, "per_page": per_page},
+            "order_by": [{"field": "date", "direction": "ASC"}],
+        }
+        payload = await self._post("tgm/flows", body, cache_ttl=14400)
+        return self._items(payload)
+
     async def fetch_smart_money_netflow(
         self,
         chains: list[str],
