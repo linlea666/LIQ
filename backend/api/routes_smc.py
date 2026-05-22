@@ -65,6 +65,16 @@ def _compact_probe_row(row: dict[str, Any]) -> dict[str, Any]:
         "top_pnl_net_flow_usd",
         "whale_net_flow_usd",
         "exchange_net_flow_usd",
+        "price_usd",
+        "token_amount",
+        "value_usd",
+        "holders_count",
+        "total_inflows_cex",
+        "total_outflows_cex",
+        "total_inflows_dex",
+        "total_outflows_dex",
+        "total_inflows_count",
+        "total_outflows_count",
         "inflow",
         "outflow",
         "net_flow",
@@ -74,6 +84,49 @@ def _compact_probe_row(row: dict[str, Any]) -> dict[str, Any]:
     if out:
         return out
     return {k: row[k] for k in list(row)[:12]}
+
+
+def _probe_num(value: Any) -> float:
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _probe_sorted_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda r: str(r.get("date") or r.get("time") or ""))
+
+
+def _probe_flow_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows or not any("total_inflows_cex" in r or "total_outflows_cex" in r for r in rows):
+        return {}
+    ordered = _probe_sorted_rows(rows)
+    latest = ordered[-1]
+    latest_price = _probe_num(latest.get("price_usd"))
+    cex_in = sum(_probe_num(r.get("total_inflows_cex")) for r in ordered)
+    cex_out = sum(_probe_num(r.get("total_outflows_cex")) for r in ordered)
+    dex_in = sum(_probe_num(r.get("total_inflows_dex")) for r in ordered)
+    dex_out = sum(_probe_num(r.get("total_outflows_dex")) for r in ordered)
+    cex_net = cex_in - cex_out
+    dex_net = dex_in - dex_out
+    summary: dict[str, Any] = {
+        "from": ordered[0].get("date"),
+        "to": latest.get("date"),
+        "rows": len(ordered),
+        "latest_price_usd": latest_price,
+        "cex_in_token": cex_in,
+        "cex_out_token": cex_out,
+        "cex_net_token": cex_net,
+        "dex_in_token": dex_in,
+        "dex_out_token": dex_out,
+        "dex_net_token": dex_net,
+    }
+    if latest_price > 0:
+        summary["cex_net_usd_approx"] = cex_net * latest_price
+        summary["dex_net_usd_approx"] = dex_net * latest_price
+    return summary
 
 
 def _probe_items(payload: Any) -> list[dict[str, Any]]:
@@ -91,17 +144,22 @@ def _probe_items(payload: Any) -> list[dict[str, Any]]:
 def _log_probe_result(title: str, rows: list[dict[str, Any]], last_error: str = "") -> dict[str, Any]:
     status = "OK" if rows else f"EMPTY {last_error}".strip()
     fields = sorted(rows[0].keys()) if rows else []
-    sample = _compact_probe_row(rows[0]) if rows else {}
+    ordered = _probe_sorted_rows(rows) if rows else []
+    sample = _compact_probe_row(ordered[-1]) if ordered else {}
+    summary = _probe_flow_summary(rows)
     probe_logger.info("probe result | title=%s status=%s rows=%s", title, status, len(rows))
     if rows:
         probe_logger.info("probe fields | title=%s fields=%s", title, ",".join(fields))
         probe_logger.info("probe sample | title=%s sample=%s", title, sample)
+        if summary:
+            probe_logger.info("probe flow-summary | title=%s summary=%s", title, summary)
     return {
         "title": title,
         "status": status,
         "rows": len(rows),
         "fields": fields,
         "sample": sample,
+        "summary": summary,
     }
 
 
