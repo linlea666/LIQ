@@ -115,6 +115,38 @@ def test_service_builds_isolated_snapshot_and_persists_ath(tmp_path):
     assert reloaded.runtime.cycle_ath == 126_000
 
 
+def test_new_swing_observation_supersedes_previous_observation(tmp_path):
+    service = _service(tmp_path)
+    now = int(time.time())
+    common = dict(
+        stage="swing",
+        bucket="swing",
+        allocation_usdt=500,
+        status="observing",
+        trigger_price=50_000,
+        scores=EvidenceScore(valuation=70, capital_flow=50, acceptance=60),
+        created_at=now,
+        updated_at=now,
+        policy_version=service.config.policy_version,
+    )
+    old = SpotOpportunity(
+        opportunity_id="old-swing",
+        price_zone_low=48_000,
+        price_zone_high=49_000,
+        **common,
+    )
+    new = SpotOpportunity(
+        opportunity_id="new-swing",
+        price_zone_low=49_000,
+        price_zone_high=50_000,
+        **common,
+    )
+    service.runtime.opportunities[old.opportunity_id] = old
+    service._merge_opportunities([new], now + 1)
+    assert service.runtime.opportunities[old.opportunity_id].status == "invalidated"
+    assert service.runtime.opportunities[new.opportunity_id].status == "observing"
+
+
 def test_configured_total_capital_drives_api_budget_and_opportunity_amounts(tmp_path):
     service = _service(tmp_path)
     service.evaluate()
@@ -476,7 +508,7 @@ def test_monthly_archive_contains_replayable_full_fact_snapshot(tmp_path):
     records = service.store.load_facts_snapshots()
     assert records
     record = records[-1]
-    assert record["archive_schema_version"] == 2
+    assert record["archive_schema_version"] == 3
     assert record["record_type"] == "spot_accumulation_full_fact_snapshot"
     assert record["policy_version"] == service.config.policy_version
     assert record["facts"]["metric_facts"]["spot_netflow_24h_usd"]["source_timestamp"] > 0
@@ -505,6 +537,23 @@ def test_spot_evaluation_does_not_mutate_shared_old_module_state(tmp_path):
     assert state.footprint_last_ts == before["footprint_last_ts"]
     assert state.key_level_snapshot_v2 == before["key_levels"]
     assert state.orderbook_pressure_snapshot == before["orderbook"]
+
+
+def test_malformed_optional_footprint_degrades_view_without_503(tmp_path):
+    service = _service(tmp_path)
+    state = service._state_getter()
+    now = int(time.time())
+    state.footprint_spot = [{
+        "ts": now,
+        "buckets": [{"buy_quote": 1_000_000, "sell_quote": 1_000_000}],
+    }]
+    state.footprint_spot_last_ts = now
+    snapshot = service.evaluate_safe()
+    assert snapshot is not None
+    assert snapshot.view_warnings
+    assert "Footprint解析失败" in snapshot.view_warnings[0]
+    assert service.health()["status"] == "ready"
+    assert service.health()["view_degraded"] is True
 
 
 def test_real_key_level_behavior_is_nested_and_does_not_crash(tmp_path):

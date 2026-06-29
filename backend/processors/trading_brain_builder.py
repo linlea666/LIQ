@@ -758,7 +758,7 @@ def _trim_brackets(items: list[BrainSpotBookItem]) -> list[BrainSpotBookItem]:
     return grouped["near"] + grouped["mid"] + grouped["far"]
 
 
-def _build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainSpotBook]:
+def build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainSpotBook]:
     """从 OrderbookPressureSnapshot 抽出现货订单簿视图。
 
     数据源缺失或无 wall_zone 时返回 None（前端隐藏模块）。
@@ -786,6 +786,11 @@ def _build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainS
         bids=bids,
         bracket_caps=dict(_BRACKET_CAP),
     )
+
+
+def _build_spot_book(op: Optional[OrderbookPressureSnapshot]) -> Optional[BrainSpotBook]:
+    """向后兼容旧私有入口；新消费者使用 build_spot_book。"""
+    return build_spot_book(op)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -943,6 +948,43 @@ def _build_fut_book(
     )
 
 
+def build_price_zones(
+    *,
+    coin: str,
+    last_price: float,
+    atr: float,
+    kl: Optional[KeyLevelSnapshotV2],
+    op: Optional[OrderbookPressureSnapshot],
+    liq: Optional[LiquidationMap],
+    max_zones: int = 24,
+) -> list[BrainPriceZone]:
+    """公开的纯价格区视图；与 TradingBrain 共用同一聚类和评分语义。"""
+    tol = merge_tolerance(last_price, atr)
+    pieces = _collect_pieces(
+        walls_above=list(getattr(op, "walls_above", None) or []),
+        walls_below=list(getattr(op, "walls_below", None) or []),
+        levels=list(getattr(kl, "levels", None) or []),
+        liq_above=list(getattr(liq, "clusters_above", None) or []),
+        liq_below=list(getattr(liq, "clusters_below", None) or []),
+        magnets=list(getattr(kl, "magnet_levels", None) or []),
+        merge_tol=tol,
+        last_price=last_price,
+    )
+    clusters = _cluster_pieces(pieces, tol)
+    zones = [
+        _build_zone_from_cluster(c, coin=coin, last_price=last_price, atr=atr)
+        for c in clusters
+    ]
+    by_id: dict[str, BrainPriceZone] = {}
+    for zone in zones:
+        previous = by_id.get(zone.zone_id)
+        if previous is None or abs(zone.distance_pct) < abs(previous.distance_pct):
+            by_id[zone.zone_id] = zone
+    result = list(by_id.values())
+    result.sort(key=lambda zone: abs(zone.distance_pct))
+    return result[:max_zones] if max_zones > 0 else result
+
+
 def build_trading_brain_snapshot(
     *,
     coin: str,
@@ -967,41 +1009,15 @@ def build_trading_brain_snapshot(
         调用方需在 build 完后从返回的 snap.opportunities 重新抽出最新 state 写回。
     """
     now_sec = int(time.time())
-    tol = merge_tolerance(last_price, atr)
-
-    walls_above = list(op.walls_above) if op else []
-    walls_below = list(op.walls_below) if op else []
-    levels = list(kl.levels) if kl else []
-    liq_a = list(liq.clusters_above) if liq else []
-    liq_b = list(liq.clusters_below) if liq else []
-    magnets = list(kl.magnet_levels) if kl else []
-
-    pieces = _collect_pieces(
-        walls_above=walls_above,
-        walls_below=walls_below,
-        levels=levels,
-        liq_above=liq_a,
-        liq_below=liq_b,
-        magnets=magnets,
-        merge_tol=tol,
+    zones = build_price_zones(
+        coin=coin,
         last_price=last_price,
+        atr=atr,
+        kl=kl,
+        op=op,
+        liq=liq,
+        max_zones=max_zones,
     )
-    clusters = _cluster_pieces(pieces, tol)
-    zones = [
-        _build_zone_from_cluster(c, coin=coin, last_price=last_price, atr=atr)
-        for c in clusters
-    ]
-    # P1-B：zone_id 已基于价格桶稳定哈希；同桶若被聚类拆出多个 _Cluster
-    # （罕见，但理论上会发生），需保留唯一一个（取距现价最近的）。
-    _by_id: dict[str, BrainPriceZone] = {}
-    for z in zones:
-        prev = _by_id.get(z.zone_id)
-        if prev is None or abs(z.distance_pct) < abs(prev.distance_pct):
-            _by_id[z.zone_id] = z
-    zones = list(_by_id.values())
-    zones.sort(key=lambda z: abs(z.distance_pct))
-    if max_zones > 0:
-        zones = zones[:max_zones]
 
     rankings = _rankings(zones)
     events = _build_events(op, now_sec=now_sec)

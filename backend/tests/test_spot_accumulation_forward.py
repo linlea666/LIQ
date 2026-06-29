@@ -4,7 +4,12 @@ from processors.spot_accumulation_forward import build_forward_report
 DAY = 86_400
 
 
-def _record(day: int, price: float, status: str = "invalidated") -> dict:
+def _record(
+    day: int,
+    price: float,
+    status: str = "invalidated",
+    archive_version: int = 2,
+) -> dict:
     metrics = {
         name: {"included_in_score": True}
         for name in (
@@ -15,7 +20,7 @@ def _record(day: int, price: float, status: str = "invalidated") -> dict:
         )
     }
     return {
-        "archive_schema_version": 2,
+        "archive_schema_version": archive_version,
         "record_type": "spot_accumulation_full_fact_snapshot",
         "timestamp": 1_700_000_000 + day * DAY,
         "policy_version": 3,
@@ -74,3 +79,16 @@ def test_forward_report_does_not_invent_missing_horizon_prices():
     assert outcome["return_30d_pct"] is None
     assert outcome["return_90d_pct"] is None
     assert report["horizons"]["7d"]["sample_count"] == 0
+
+
+def test_forward_report_accepts_mixed_v2_v3_and_reports_unknown_versions():
+    records = [
+        _record(0, 100, "eligible", 2),
+        _record(1, 101, "invalidated", 3),
+        _record(2, 102, "invalidated", 99),
+    ]
+    report = build_forward_report(records)
+    assert report["record_count"] == 2
+    assert report["legacy_record_count"] == 1
+    assert report["opportunity_count"] == 1
+    assert report["unsupported_archive_versions"] == [99]

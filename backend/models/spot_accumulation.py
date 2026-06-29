@@ -360,6 +360,96 @@ class SpotAccumulationRuntimeState(BaseModel):
     updated_at: int = 0
 
 
+DecisionState = Literal["blocked", "conditional", "eligible", "accepted", "complete"]
+LadderState = Literal[
+    "waiting_anchor", "waiting_event", "conditional", "eligible", "accepted",
+    "partial", "filled",
+]
+PricingMode = Literal["price_ladder", "event_driven"]
+
+
+class SpotDecisionSummary(BaseModel):
+    """小白版确定性结论；只解释规则状态，不产生资金副作用。"""
+
+    state: DecisionState = "blocked"
+    headline: str = "当前不买"
+    detail: str = "等待估值、资金和现货承接共同确认"
+    opportunity_id: Optional[str] = None
+    stage: Optional[OpportunityStage] = None
+    bucket: Optional[BudgetBucket] = None
+    amount_usdt: Optional[float] = Field(default=None, ge=0.0)
+    price_low: Optional[float] = Field(default=None, gt=0.0)
+    price_high: Optional[float] = Field(default=None, gt=0.0)
+    estimated_btc: Optional[float] = Field(default=None, ge=0.0)
+    blockers: list[str] = Field(default_factory=list)
+    grace_expires_at: Optional[int] = None
+    updated_at: int = 0
+
+
+class SpotConditionalLadderItem(BaseModel):
+    """一档动态条件计划；conditional 状态绝不等价于买入授权。"""
+
+    stage: OpportunityStage
+    target_usdt: float = Field(ge=0.0)
+    filled_usdt: float = Field(ge=0.0)
+    remaining_usdt: float = Field(ge=0.0)
+    planned_usdt: float = Field(default=0.0, ge=0.0)
+    cash_shortfall_usdt: float = Field(default=0.0, ge=0.0)
+    status: LadderState = "waiting_anchor"
+    pricing_mode: PricingMode = "price_ladder"
+    is_actionable: bool = False
+    opportunity_id: Optional[str] = None
+    reference_price_low: Optional[float] = Field(default=None, gt=0.0)
+    reference_price_high: Optional[float] = Field(default=None, gt=0.0)
+    reference_price_mid: Optional[float] = Field(default=None, gt=0.0)
+    anchor_source: str = ""
+    anchor_label: str = ""
+    support_trust: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    blockers: list[str] = Field(default_factory=list)
+    invalidation_reasons: list[str] = Field(default_factory=list)
+    historical_quantity_btc: float = Field(default=0.0, ge=0.0)
+    historical_average_price: Optional[float] = Field(default=None, ge=0.0)
+    estimated_btc: Optional[float] = Field(default=None, ge=0.0)
+    projected_total_btc: Optional[float] = Field(default=None, ge=0.0)
+    projected_average_cost: Optional[float] = Field(default=None, ge=0.0)
+    projected_cash_remaining: float = Field(ge=0.0)
+    projected_core_cash_remaining: float = Field(default=0.0, ge=0.0)
+    projected_total_cash_remaining: float = Field(default=0.0, ge=0.0)
+
+
+class SpotSupportMapItem(BaseModel):
+    """近场现货承接事实；挂单意图和已成交吸收严格分栏。"""
+
+    support_id: str
+    price_low: float = Field(gt=0.0)
+    price_high: float = Field(gt=0.0)
+    price_mid: float = Field(gt=0.0)
+    distance_pct: float
+    binance_spot_usd: float = Field(default=0.0, ge=0.0)
+    coinbase_spot_usd: float = Field(default=0.0, ge=0.0)
+    spot_wall_usd: float = Field(default=0.0, ge=0.0)
+    absorption_usd: float = Field(default=0.0, ge=0.0)
+    absorption_bar_count: int = Field(default=0, ge=0)
+    absorption_age_hours: Optional[float] = Field(default=None, ge=0.0)
+    persistence_1h: float = Field(default=0.0, ge=0.0, le=1.0)
+    persistence_8h: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_usd_1h: float = Field(default=0.0, ge=0.0)
+    max_usd_8h: float = Field(default=0.0, ge=0.0)
+    support_trust: float = Field(default=0.0, ge=0.0, le=1.0)
+    support_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    support_fragility: float = Field(default=0.0, ge=0.0, le=1.0)
+    dominant_role: str = "other"
+    label: str = "观察区"
+    wall_source_timestamp: int = Field(default=0, ge=0)
+    wall_fresh: bool = False
+    absorption_source_timestamp: int = Field(default=0, ge=0)
+    absorption_fresh: bool = False
+    source_timestamp: int = Field(default=0, ge=0)
+    is_fresh: bool = False
+    anchor_eligible: bool = False
+    evidence: list[str] = Field(default_factory=list)
+
+
 class SpotOpportunityJournalEvent(BaseModel):
     """机会状态的只追加检查点；state.json 只是该日志的可重建缓存。"""
 
@@ -381,3 +471,7 @@ class SpotAccumulationSnapshot(BaseModel):
     next_action: str = "等待数据"
     warnings: list[str] = Field(default_factory=list)
     ai_explanation: Optional[str] = None
+    decision_summary: Optional[SpotDecisionSummary] = None
+    conditional_ladder: list[SpotConditionalLadderItem] = Field(default_factory=list)
+    spot_support_map: list[SpotSupportMapItem] = Field(default_factory=list)
+    view_warnings: list[str] = Field(default_factory=list)

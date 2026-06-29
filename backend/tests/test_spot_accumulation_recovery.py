@@ -187,6 +187,92 @@ def test_crash_after_ledger_append_is_reconciled_on_restart(tmp_path):
     assert restarted.runtime.last_filled_price == 50_000
 
 
+def test_missing_runtime_opportunity_is_rebuilt_from_complete_ledger_metadata(tmp_path):
+    service = _service(tmp_path)
+    now = int(time.time())
+    event = SpotLedgerEvent(
+        event_id="rebuild-fill",
+        client_event_id="rebuild-fill-client",
+        side="buy",
+        bucket="core",
+        quantity_btc=0.02,
+        price_usdt=50_000,
+        fee_usdt=0,
+        executed_at=now,
+        created_at=now,
+        opportunity_id="pruned-opportunity",
+        opportunity_stage="insurance",
+        opportunity_allocation_usdt=1_000,
+        policy_version=1,
+    )
+    service.store.commit_event(event, service.config)
+    restarted = _service(tmp_path)
+    restored = restarted.runtime.opportunities["pruned-opportunity"]
+    assert restarted.recovery_required is False
+    assert restored.status == "filled"
+    assert restored.filled_usdt == 1_000
+    assert restored.price_zone_low == 50_000
+    restarted_again = _service(tmp_path)
+    assert "pruned-opportunity" in restarted_again.runtime.opportunities
+    assert restarted_again.recovery_required is False
+
+
+def test_old_ledger_stage_is_resolved_from_runtime_opportunity(tmp_path):
+    service = _service(tmp_path)
+    now = int(time.time())
+    opportunity = _accepted_opportunity(now)
+    service.runtime.opportunities[opportunity.opportunity_id] = opportunity
+    event = SpotLedgerEvent(
+        event_id="legacy-linked-fill",
+        client_event_id="legacy-linked-fill-client",
+        side="buy",
+        bucket="core",
+        quantity_btc=0.01,
+        price_usdt=50_000,
+        fee_usdt=0,
+        executed_at=now,
+        created_at=now,
+        opportunity_id=opportunity.opportunity_id,
+        opportunity_stage=None,
+        opportunity_allocation_usdt=None,
+    )
+    service.store.commit_event(event, service.config)
+
+    summary = service.store.build_execution_summary(
+        opportunity_stage_lookup={opportunity.opportunity_id: opportunity.stage},
+    )
+    assert summary.stages["insurance"].spent_usdt == 500
+    assert summary.unassigned_core_buy_usdt == 0
+
+
+def test_terminal_pruning_keeps_every_ledger_referenced_opportunity(tmp_path):
+    service = _service(tmp_path)
+    now = int(time.time())
+    linked = _accepted_opportunity(now)
+    service.runtime.opportunities[linked.opportunity_id] = linked
+    service._journal_runtime("decision", "before fill")
+    service.record_fill({
+        "client_event_id": "full-linked-fill",
+        "side": "buy",
+        "bucket": "core",
+        "quantity_btc": 0.02,
+        "price_usdt": 50_000,
+        "fee_usdt": 0,
+        "opportunity_id": linked.opportunity_id,
+    })
+    for index in range(201):
+        item = _accepted_opportunity(now + index + 1).model_copy(update={
+            "opportunity_id": f"invalidated-{index}",
+            "status": "invalidated",
+            "reserved_usdt": 0.0,
+            "updated_at": now + index + 1,
+        })
+        service.runtime.opportunities[item.opportunity_id] = item
+    service._merge_opportunities([], now + 500)
+    assert linked.opportunity_id in service.runtime.opportunities
+    assert service.runtime.opportunities[linked.opportunity_id].status == "filled"
+
+
 def test_corrupt_state_cache_is_rebuilt_from_journal(tmp_path):
     service = _service(tmp_path)
     service.runtime.tail_mode = "extreme"

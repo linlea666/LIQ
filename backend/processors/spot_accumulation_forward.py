@@ -12,6 +12,7 @@ from typing import Any, Iterable, Optional
 DAY_SECONDS = 86_400
 FORWARD_DAYS = (7, 30, 90)
 TERMINAL_STATUSES = {"invalidated", "expired", "skipped", "filled"}
+SUPPORTED_ARCHIVE_VERSIONS = {2, 3}
 M_METRICS = {
     "etf_flow_5d_usd", "exchange_balance_7d_pct", "spot_netflow_24h_usd",
     "stablecoin_change_7d_pct", "coinbase_premium",
@@ -88,9 +89,15 @@ def build_forward_report(
     )
     full_records = [
         record for record in records
-        if record.get("archive_schema_version") == 2
+        if record.get("archive_schema_version") in SUPPORTED_ARCHIVE_VERSIONS
         and record.get("record_type") == "spot_accumulation_full_fact_snapshot"
     ]
+    unsupported_versions = sorted({
+        record.get("archive_schema_version")
+        for record in records
+        if record.get("record_type") == "spot_accumulation_full_fact_snapshot"
+        and record.get("archive_schema_version") not in SUPPORTED_ARCHIVE_VERSIONS
+    }, key=str)
     legacy_count = len(records) - len(full_records)
     first_entries: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for record in full_records:
@@ -185,6 +192,7 @@ def build_forward_report(
         "disclaimer": "订单簿与Footprint历史有限；本报告是前向影子验证，不是全栈历史回测。",
         "record_count": len(full_records),
         "legacy_record_count": legacy_count,
+        "unsupported_archive_versions": unsupported_versions,
         "opportunity_count": len(outcomes),
         "ma_layers_ready_rate": (
             round(sum(bool(item["ma_layers_ready"]) for item in outcomes) / len(outcomes), 4)

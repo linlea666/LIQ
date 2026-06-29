@@ -436,9 +436,12 @@ def build_swing_opportunity(
         creation = runtime.creation_sequence
     else:
         creation = 0
-    oid = hashlib.sha1(
-        f"BTC|p{config.policy_version}|swing|{seq}|{creation}|{round(support_price or facts.price)}".encode()
-    ).hexdigest()[:16]
+    oid_source = (
+        f"BTC|p{config.policy_version}|swing|{seq}|{creation}"
+        if status == "eligible"
+        else f"BTC|p{config.policy_version}|swing|observing"
+    )
+    oid = hashlib.sha1(oid_source.encode()).hexdigest()[:16]
     now = int(time.time())
     return [SpotOpportunity(
         opportunity_id=oid,

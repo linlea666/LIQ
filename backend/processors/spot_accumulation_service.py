@@ -11,6 +11,7 @@ import uuid
 from typing import Any, Callable, Optional
 
 from models.spot_accumulation import (
+    EvidenceScore,
     SpotAccumulationConfig,
     SpotAccumulationFacts,
     SpotAccumulationRuntimeState,
@@ -19,6 +20,7 @@ from models.spot_accumulation import (
     SpotLayerQuality,
     SpotLedgerEvent,
     SpotMetricFact,
+    SpotOpportunity,
     SpotOpportunityJournalEvent,
 )
 from processors.spot_accumulation import (
@@ -26,6 +28,11 @@ from processors.spot_accumulation import (
     build_swing_opportunity,
     build_tail_opportunities,
     score_facts,
+)
+from processors.spot_accumulation_view import (
+    build_conditional_ladder,
+    build_decision_summary,
+    build_support_map,
 )
 from storage.spot_accumulation_store import (
     SpotAccumulationStore,
@@ -58,8 +65,9 @@ class SpotAccumulationService:
             journal_state = None
             self.recovery_errors.append(str(exc))
         self.runtime = self._merge_recovery_state(cached_state, journal_state)
+        ledger_reconstructed_runtime = False
         try:
-            self._reconcile_runtime_from_ledger()
+            ledger_reconstructed_runtime = self._reconcile_runtime_from_ledger()
         except (SpotStorageCorruption, ValueError) as exc:
             self.recovery_errors.append(str(exc))
         if not self.store.config_path.exists():
@@ -72,6 +80,9 @@ class SpotAccumulationService:
         if not self.recovery_errors and not self.store.journal_path.exists():
             self.store.backup_legacy_files_once()
             self._journal_runtime("migration", "初始化机会事件日志")
+        elif ledger_reconstructed_runtime and not self.recovery_errors:
+            self._journal_runtime("migration", "从账本元数据重建被裁剪机会")
+            self.store.save_state(self.runtime)
         self.long_term = self.store.load_long_term_facts()
         self._state_getter = state_getter
         self._latest_snapshot: Optional[SpotAccumulationSnapshot] = None
@@ -80,6 +91,7 @@ class SpotAccumulationService:
         self._ai_explanation: Optional[str] = None
         self.last_evaluation_error = ""
         self.last_evaluation_error_at = 0
+        self._last_view_warnings: list[str] = []
 
     @property
     def recovery_required(self) -> bool:
@@ -101,17 +113,11 @@ class SpotAccumulationService:
             return cached.model_copy(deep=True)
         return SpotAccumulationRuntimeState()
 
-    def _reconcile_runtime_from_ledger(self) -> None:
+    def _reconcile_runtime_from_ledger(self) -> bool:
         events = self.store.load_events()
-        reversed_ids = {
-            event.reverses_event_id for event in events
-            if event.event_type == "reversal" and event.reverses_event_id
-        }
-        active = [
-            event for event in events
-            if event.event_type == "fill" and event.event_id not in reversed_ids
-        ]
+        active = self.store.active_fills_from_events(events)
         spent_by_opportunity: dict[str, float] = {}
+        reconstructed = False
         for event in active:
             if event.side != "buy" or not event.opportunity_id:
                 continue
@@ -120,9 +126,27 @@ class SpotAccumulationService:
                 + event.quantity_btc * event.price_usdt + event.fee_usdt
             )
             if event.opportunity_id not in self.runtime.opportunities:
-                raise SpotStorageCorruption(
-                    f"账本机会 {event.opportunity_id} 无法从机会日志恢复"
+                if not event.opportunity_stage or not event.opportunity_allocation_usdt:
+                    raise SpotStorageCorruption(
+                        f"账本机会 {event.opportunity_id} 缺少阶段或额度，无法重建"
+                    )
+                self.runtime.opportunities[event.opportunity_id] = SpotOpportunity(
+                    opportunity_id=event.opportunity_id,
+                    stage=event.opportunity_stage,
+                    bucket=event.bucket or "core",
+                    allocation_usdt=event.opportunity_allocation_usdt,
+                    status="invalidated",
+                    price_zone_low=event.price_usdt,
+                    price_zone_high=event.price_usdt,
+                    trigger_price=event.price_usdt,
+                    scores=EvidenceScore(),
+                    reasons=["由账本元数据重建的历史机会"],
+                    created_at=event.executed_at,
+                    updated_at=event.executed_at,
+                    policy_version=event.policy_version,
+                    batch_id=event.batch_id,
                 )
+                reconstructed = True
         for oid, item in self.runtime.opportunities.items():
             if oid not in spent_by_opportunity:
                 continue
@@ -143,6 +167,7 @@ class SpotAccumulationService:
         ]
         buys.sort(key=lambda event: (event.executed_at, event.sequence or 0))
         self.runtime.last_filled_price = buys[-1].price_usdt if buys else None
+        return reconstructed
 
     def _journal_runtime(self, event_type: str, note: str = "") -> None:
         now = int(time.time())
@@ -338,10 +363,16 @@ class SpotAccumulationService:
         updated, clean, changed = self._config_candidate(patch, base)
         portfolio = self.store.build_portfolio(updated)
         stage_allocations = updated.core_stage_allocations()
-        filled_by_stage: dict[str, float] = {}
-        for item in self.runtime.opportunities.values():
-            if item.stage in stage_allocations:
-                filled_by_stage[item.stage] = filled_by_stage.get(item.stage, 0.0) + item.filled_usdt
+        execution_summary = self.store.build_execution_summary(
+            opportunity_stage_lookup={
+                oid: item.stage for oid, item in self.runtime.opportunities.items()
+            },
+        )
+        filled_by_stage = {
+            stage: execution_summary.stages.get(stage).spent_usdt
+            if execution_summary.stages.get(stage) else 0.0
+            for stage in stage_allocations
+        }
         for stage, filled in filled_by_stage.items():
             if filled > stage_allocations[stage] + 0.01:
                 raise ValueError(
@@ -677,6 +708,8 @@ class SpotAccumulationService:
             "latest_snapshot_at": self._latest_snapshot.timestamp if self._latest_snapshot else None,
             "schema_version": int(self.config.schema_version),
             "policy_version": int(self.config.policy_version),
+            "view_degraded": bool(self._last_view_warnings),
+            "view_warnings": list(self._last_view_warnings),
             "data_quality": (
                 self._latest_snapshot.facts.data_quality.model_dump(mode="json")
                 if self._latest_snapshot else None
@@ -692,8 +725,14 @@ class SpotAccumulationService:
         now = int(time.time())
         price = float(state.ticker.last)
         self._update_cycle_ath(state, price)
-        facts = self._build_facts(state, now, price)
+        spot_absorption, absorption_warning = self._spot_absorption_snapshot(state, price, now)
+        facts = self._build_facts(state, now, price, spot_absorption)
         portfolio = self.store.build_portfolio(self.config)
+        execution_summary = self.store.build_execution_summary(
+            opportunity_stage_lookup={
+                oid: item.stage for oid, item in self.runtime.opportunities.items()
+            },
+        )
         daily_atr_pct = self._daily_atr_pct(state)
         capitulation_confirmed = self._capitulation_confirmed(state)
         weekly_reclaim_confirmed = self._weekly_reclaim_confirmed(
@@ -744,7 +783,11 @@ class SpotAccumulationService:
             min_rr=self.config.min_swing_rr,
             config=self.config,
         ))
-        self._merge_opportunities(opportunities, now)
+        self._merge_opportunities(
+            opportunities,
+            now,
+            protected_opportunity_ids=execution_summary.linked_opportunity_ids,
+        )
         if self._runtime_market_signature() != market_signature_before:
             self._journal_runtime("market", "市场条件驱动机会状态变化")
         current = sorted(
@@ -756,6 +799,42 @@ class SpotAccumulationService:
             f"可评估 {eligible[0].stage}，上限 {eligible[0].allocation_usdt:.0f} U"
             if eligible else "等待估值、资金和现货承接共同确认"
         )
+        view_warnings = [absorption_warning] if absorption_warning else []
+        try:
+            support_map, price_zones = build_support_map(
+                state, facts, now=now, absorption=spot_absorption,
+            )
+        except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
+            logger.warning("spot support view degraded", exc_info=True)
+            support_map, price_zones = [], []
+            view_warnings.append(f"承接地图降级: {type(exc).__name__}: {exc}")
+        try:
+            conditional_ladder = build_conditional_ladder(
+                state,
+                self.config,
+                facts,
+                portfolio,
+                current,
+                price_zones,
+                execution_summary,
+                capitulation_confirmed=capitulation_confirmed,
+                weekly_reclaim_confirmed=weekly_reclaim_confirmed,
+            )
+        except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
+            logger.warning("spot ladder view degraded", exc_info=True)
+            conditional_ladder = []
+            view_warnings.append(f"条件阶梯降级: {type(exc).__name__}: {exc}")
+        try:
+            decision_summary = build_decision_summary(
+                facts,
+                conditional_ladder,
+                current,
+                now=now,
+            )
+        except Exception as exc:  # noqa: BLE001 - 保留核心快照
+            logger.warning("spot decision summary degraded", exc_info=True)
+            decision_summary = None
+            view_warnings.append(f"决策摘要降级: {type(exc).__name__}: {exc}")
         snapshot = SpotAccumulationSnapshot(
             timestamp=now,
             facts=facts,
@@ -765,14 +844,25 @@ class SpotAccumulationService:
             next_action=next_action,
             warnings=list(facts.hard_vetoes) + list(facts.data_quality.notes),
             ai_explanation=self._ai_explanation,
+            decision_summary=decision_summary,
+            conditional_ladder=conditional_ladder,
+            spot_support_map=support_map,
+            view_warnings=view_warnings,
         )
+        self._last_view_warnings = view_warnings
         self._latest_snapshot = snapshot
         self.runtime.updated_at = now
         self.store.save_state(self.runtime)
         self._archive_if_changed(snapshot)
         return snapshot
 
-    def _build_facts(self, state: Any, now: int, price: float) -> SpotAccumulationFacts:
+    def _build_facts(
+        self,
+        state: Any,
+        now: int,
+        price: float,
+        spot_absorption: Any,
+    ) -> SpotAccumulationFacts:
         raw_timestamps_value = self.long_term.get("timestamps") or {}
         raw_timestamps = raw_timestamps_value if isinstance(raw_timestamps_value, dict) else {}
         timestamps = {
@@ -809,7 +899,7 @@ class SpotAccumulationService:
         stablecoin_change = self._stablecoin_change(state)
         premium = self._float(getattr(getattr(state, "coinbase_premium", None), "current_premium", None))
 
-        absorption = self._has_spot_absorption(state, price)
+        absorption = self._has_spot_absorption(spot_absorption, price)
         persistent_wall, coinbase_wall = self._wall_evidence(state, price)
         reclaimed = self._key_level_reclaimed(state, price)
         taker_series = list(getattr(state, "taker_spot_series", None) or [])[-12:]
@@ -1183,12 +1273,31 @@ class SpotAccumulationService:
                 item.reserved_usdt = 0.0
                 item.updated_at = now
 
-    def _merge_opportunities(self, generated: list[Any], now: int) -> None:
+    def _merge_opportunities(
+        self,
+        generated: list[Any],
+        now: int,
+        *,
+        protected_opportunity_ids: Optional[set[str]] = None,
+    ) -> None:
+        if protected_opportunity_ids is None:
+            protected_opportunity_ids = self.store.build_execution_summary().linked_opportunity_ids
         for old in self.runtime.opportunities.values():
             if old.expires_at and old.expires_at < now and old.status in {"observing", "eligible"}:
                 old.status = "expired"
                 old.reserved_usdt = 0
         for item in generated:
+            if item.stage == "swing":
+                for old in self.runtime.opportunities.values():
+                    if (
+                        old.stage == "swing"
+                        and old.policy_version == self.config.policy_version
+                        and old.status == "observing"
+                        and old.opportunity_id != item.opportunity_id
+                    ):
+                        old.status = "invalidated"
+                        old.reserved_usdt = 0.0
+                        old.updated_at = now
             if item.batch_id and item.bucket == "core":
                 for old in self.runtime.opportunities.values():
                     if (
@@ -1214,7 +1323,9 @@ class SpotAccumulationService:
         keep_terminal = {item.opportunity_id for item in terminal[:200]}
         self.runtime.opportunities = {
             oid: item for oid, item in self.runtime.opportunities.items()
-            if item.status in {"observing", "eligible", "accepted"} or oid in keep_terminal
+            if item.status in {"observing", "eligible", "accepted"}
+            or oid in keep_terminal
+            or oid in protected_opportunity_ids
         }
 
     def _reserved_by_bucket(self) -> dict[str, float]:
@@ -1278,7 +1389,7 @@ class SpotAccumulationService:
             + [reason for item in snapshot.opportunities for reason in item.blocked_by]
         ))
         payload = {
-            "archive_schema_version": 2,
+            "archive_schema_version": 3,
             "record_type": "spot_accumulation_full_fact_snapshot",
             "capability": "live_full_stack_shadow",
             "timestamp": snapshot.timestamp,
@@ -1296,6 +1407,17 @@ class SpotAccumulationService:
             "budget_reserved_usdt": snapshot.budget_reserved_usdt,
             "next_action": snapshot.next_action,
             "warnings": snapshot.warnings,
+            "decision_summary": (
+                snapshot.decision_summary.model_dump(mode="json")
+                if snapshot.decision_summary else None
+            ),
+            "conditional_ladder": [
+                item.model_dump(mode="json") for item in snapshot.conditional_ladder
+            ],
+            "spot_support_map": [
+                item.model_dump(mode="json") for item in snapshot.spot_support_map
+            ],
+            "view_warnings": list(snapshot.view_warnings),
         }
         digest_source = {
             "policy_version": payload["policy_version"],
@@ -1312,6 +1434,27 @@ class SpotAccumulationService:
                 }
                 for item in snapshot.opportunities
             ],
+            "conditional_ladder": [
+                {
+                    "stage": item.stage,
+                    "status": item.status,
+                    "price": item.reference_price_mid,
+                    "remaining": item.remaining_usdt,
+                    "actionable": item.is_actionable,
+                }
+                for item in snapshot.conditional_ladder
+            ],
+            "spot_support_map": [
+                {
+                    "id": item.support_id,
+                    "price": item.price_mid,
+                    "wall": item.spot_wall_usd,
+                    "absorption": item.absorption_usd,
+                    "fresh": item.is_fresh,
+                }
+                for item in snapshot.spot_support_map
+            ],
+            "view_warnings": list(snapshot.view_warnings),
         }
         digest = hashlib.sha1(
             json.dumps(digest_source, sort_keys=True, default=str).encode()
@@ -1451,22 +1594,33 @@ class SpotAccumulationService:
         last = self._float(getattr(history[-1], "total_mcap", None))
         return (last - first) / first * 100 if first and last is not None else None
 
-    def _has_spot_absorption(self, state: Any, price: float) -> Optional[bool]:
+    @staticmethod
+    def _spot_absorption_snapshot(
+        state: Any,
+        price: float,
+        now: int,
+    ) -> tuple[Any, Optional[str]]:
         spot_bars = list(getattr(state, "footprint_spot", None) or [])
         if not spot_bars:
-            return None
+            return None, None
         try:
             from processors.absorption_detector import detect_absorption_zones
-            snap = detect_absorption_zones(
+            return detect_absorption_zones(
                 footprint_contract=None,
                 footprint_spot=spot_bars,
                 current_price=price,
-            )
-            zone = snap.strongest_support
-            return bool(zone and 0 <= (price - zone.price) / price * 100 <= 5)
-        except Exception:
+                now_ts=now,
+            ), None
+        except Exception as exc:  # noqa: BLE001 - 单源异常只降级该视图
             logger.warning("spot accumulation spot absorption parse failed", exc_info=True)
+            return None, f"现货Footprint解析失败: {type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _has_spot_absorption(snapshot: Any, price: float) -> Optional[bool]:
+        if snapshot is None:
             return None
+        zone = getattr(snapshot, "strongest_support", None)
+        return bool(zone and 0 <= (price - zone.price) / price * 100 <= 5)
 
     @staticmethod
     def _wall_evidence(state: Any, price: float) -> tuple[Optional[bool], Optional[bool]]:

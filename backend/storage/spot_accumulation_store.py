@@ -9,6 +9,7 @@ import os
 import shutil
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -22,6 +23,25 @@ from models.spot_accumulation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SpotStageExecution:
+    spent_usdt: float = 0.0
+    quantity_btc: float = 0.0
+    fee_usdt: float = 0.0
+
+    @property
+    def average_price(self) -> float:
+        gross = max(0.0, self.spent_usdt - self.fee_usdt)
+        return gross / self.quantity_btc if self.quantity_btc > 0 else 0.0
+
+
+@dataclass
+class SpotLedgerExecutionSummary:
+    stages: dict[str, SpotStageExecution] = field(default_factory=dict)
+    unassigned_core_buy_usdt: float = 0.0
+    linked_opportunity_ids: set[str] = field(default_factory=set)
 
 
 class SpotStorageCorruption(ValueError):
@@ -153,6 +173,50 @@ class SpotAccumulationStore:
     def load_events(self) -> list[SpotLedgerEvent]:
         with self._exclusive_lock(self.ledger_lock_path):
             return self._load_events_unlocked()
+
+    @staticmethod
+    def active_fills_from_events(events: list[SpotLedgerEvent]) -> list[SpotLedgerEvent]:
+        """统一的未冲正成交事实；组合、恢复与规划必须共用该口径。"""
+        reversed_ids = {
+            event.reverses_event_id
+            for event in events
+            if event.event_type == "reversal" and event.reverses_event_id
+        }
+        return [
+            event for event in events
+            if event.event_type == "fill" and event.event_id not in reversed_ids
+        ]
+
+    def build_execution_summary(
+        self,
+        events: Optional[list[SpotLedgerEvent]] = None,
+        opportunity_stage_lookup: Optional[dict[str, str]] = None,
+    ) -> SpotLedgerExecutionSummary:
+        events = self.load_events() if events is None else list(events)
+        result = SpotLedgerExecutionSummary()
+        core_stages = {
+            "insurance", "value_1", "deep_value", "capitulation", "bottom_confirmed",
+        }
+        for event in self.active_fills_from_events(events):
+            stage_name = event.opportunity_stage or (
+                (opportunity_stage_lookup or {}).get(event.opportunity_id or "")
+            )
+            if event.opportunity_id:
+                result.linked_opportunity_ids.add(event.opportunity_id)
+            if event.side != "buy":
+                continue
+            spent = event.quantity_btc * event.price_usdt + event.fee_usdt
+            if event.bucket == "core" and stage_name not in core_stages:
+                result.unassigned_core_buy_usdt += spent
+                continue
+            if event.bucket != "core" or stage_name not in core_stages:
+                continue
+            stage = result.stages.setdefault(stage_name, SpotStageExecution())
+            stage.spent_usdt += spent
+            stage.quantity_btc += event.quantity_btc
+            stage.fee_usdt += event.fee_usdt
+        result.unassigned_core_buy_usdt = round(result.unassigned_core_buy_usdt, 8)
+        return result
 
     def get_by_client_event_id(self, client_event_id: str) -> Optional[SpotLedgerEvent]:
         return next(
@@ -354,15 +418,7 @@ class SpotAccumulationStore:
         events: Optional[list[SpotLedgerEvent]] = None,
     ) -> SpotPortfolio:
         events = self.load_events() if events is None else list(events)
-        reversed_ids = {
-            event.reverses_event_id
-            for event in events
-            if event.event_type == "reversal" and event.reverses_event_id
-        }
-        active = [
-            event for event in events
-            if event.event_type == "fill" and event.event_id not in reversed_ids
-        ]
+        active = self.active_fills_from_events(events)
         buckets: dict[str, BucketPosition] = {
             "core": BucketPosition(bucket="core", cash_usdt=config.core_budget_usdt),
             "swing": BucketPosition(bucket="swing", cash_usdt=config.swing_budget_usdt),

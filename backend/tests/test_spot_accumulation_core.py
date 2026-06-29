@@ -297,3 +297,22 @@ def test_swing_position_is_capped_by_200_usdt_risk():
     assert swing[0].status == "eligible"
     assert swing[0].allocation_usdt == pytest.approx(4_000)
     assert swing[0].expected_rr == pytest.approx(2.0)
+
+
+def test_observing_swing_id_is_stable_when_support_price_moves():
+    facts = _facts()
+    facts.scores = EvidenceScore(valuation=50, capital_flow=40, acceptance=20)
+    runtime = SpotAccumulationRuntimeState()
+    first = build_swing_opportunity(
+        facts, runtime, 4_000, 0,
+        support_price=49_500, stop_price=47_500, target_price=55_000,
+        has_open_position=False,
+    )[0]
+    second = build_swing_opportunity(
+        facts, runtime, 4_000, 0,
+        support_price=49_000, stop_price=47_000, target_price=55_000,
+        has_open_position=False,
+    )[0]
+    assert first.status == second.status == "observing"
+    assert first.opportunity_id == second.opportunity_id
+    assert first.price_zone_low != second.price_zone_low
