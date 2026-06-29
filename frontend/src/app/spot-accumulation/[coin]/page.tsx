@@ -334,7 +334,7 @@ export default function SpotAccumulationPage() {
   if (loading) return <div className="p-8 text-slate-400">正在装配现货抄底事实…</div>;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-5 text-slate-100 lg:px-8">
+    <main className="h-dvh overflow-y-auto overscroll-contain bg-slate-950 px-4 py-5 text-slate-100 lg:px-8">
       <div className="mx-auto max-w-[1500px] space-y-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
