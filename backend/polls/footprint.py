@@ -110,6 +110,7 @@ async def poll_footprint(
     """合约 + 现货足迹图一次拉取，写入 state.footprint_contract / state.footprint_spot。"""
     contract_bars: list[dict] = []
     spot_bars: list[dict] = []
+    spot_payload_seen = False
 
     # ── 合约 ──
     try:
@@ -133,10 +134,21 @@ async def poll_footprint(
             interval=interval, limit=limit,
         )
         if isinstance(raw, list):
+            spot_payload_seen = bool(raw)
+            interval_sec = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14_400}.get(
+                interval, 3600,
+            )
+            now = int(time.time())
+            max_age = max(3600, (limit + 1) * interval_sec)
             for rb in raw:
                 parsed = _parse_bar(rb)
                 if parsed:
-                    spot_bars.append(parsed)
+                    ts = int(parsed["ts"])
+                    if ts > 10_000_000_000:
+                        ts //= 1000
+                    if ts > 0 and 0 <= now - ts <= max_age:
+                        parsed["ts"] = ts
+                        spot_bars.append(parsed)
     except Exception:
         logger.warning("poll_footprint spot failed | coin=%s", coin.ccy, exc_info=True)
         state.poll_failures["footprint_spot"] = "API调用失败"
@@ -151,7 +163,10 @@ async def poll_footprint(
     if spot_bars:
         dq_s = _ensure_deque(state, "footprint_spot", maxlen=max(3, limit))
         _merge_bars(dq_s, spot_bars)
+        state.footprint_spot_last_ts = int(time.time())
         state.poll_failures.pop("footprint_spot", None)
+    elif spot_payload_seen:
+        state.poll_failures["footprint_spot"] = "无有效或新鲜的现货Footprint"
 
     if "footprint_ready" not in state._log_once_keys and (contract_bars or spot_bars):
         state._log_once_keys.add("footprint_ready")

@@ -19,16 +19,47 @@ OpportunityStage = Literal[
     "insurance", "value_1", "deep_value", "capitulation", "bottom_confirmed",
     "tail_extreme", "tail_catch_up", "swing",
 ]
+MetricFreshness = Literal["fresh", "stale", "missing", "invalid"]
+MetricParseStatus = Literal[
+    "ok", "missing", "empty", "invalid_type", "missing_field", "invalid_timestamp",
+    "non_finite", "request_error",
+]
 
 
 class SpotAccumulationConfig(BaseModel):
-    version: int = 2
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    schema_version: int = 3
+    policy_version: int = Field(default=1, ge=1)
     coin: str = "BTC"
     initial_capital_usdt: float = 20_000.0
     core_ratio: float = 0.65
     swing_ratio: float = 0.20
     tail_ratio: float = 0.15
     insurance_ratio: float = 0.05
+    core_stage_ratios: dict[str, float] = Field(default_factory=lambda: {
+        "insurance": 0.05,
+        "value_1": 0.10,
+        "deep_value": 0.15,
+        "capitulation": 0.15,
+        "bottom_confirmed": 0.20,
+    })
+    core_thresholds: dict[str, dict[str, float]] = Field(default_factory=lambda: {
+        "insurance": {"v": 55.0, "m": 40.0, "a": 65.0},
+        "value_1": {"v": 65.0, "m": 45.0, "a": 60.0},
+        "deep_value": {"v": 75.0, "m": 45.0, "a": 60.0},
+        "capitulation": {"v": 80.0, "m": 0.0, "a": 65.0},
+        "bottom_confirmed": {"v": 60.0, "m": 65.0, "a": 75.0},
+    })
+    tail_extreme_v: float = 90.0
+    tail_extreme_a: float = 65.0
+    tail_catch_up_v: float = 60.0
+    tail_catch_up_m: float = 65.0
+    tail_catch_up_a: float = 75.0
+    min_price_gap_ratio: float = 0.05
+    atr_gap_multiplier: float = 1.5
+    acceptance_grace_seconds: int = 900
+    weekly_reclaim_weeks: int = 2
     max_swing_loss_ratio: float = 0.01
     min_swing_rr: float = 2.0
     cycle_ath_override: Optional[float] = None
@@ -42,6 +73,8 @@ class SpotAccumulationConfig(BaseModel):
         if not isinstance(value, dict):
             return value
         migrated = dict(value)
+        migrated.pop("version", None)
+        migrated["schema_version"] = 3
         capital = float(migrated.get("initial_capital_usdt") or 0)
         legacy = (
             "core_budget_usdt" in migrated
@@ -59,6 +92,20 @@ class SpotAccumulationConfig(BaseModel):
                     "max_swing_loss_ratio",
                     float(migrated["max_swing_loss_usdt"]) / capital,
                 )
+        if "core_stage_ratios" not in migrated:
+            insurance = float(migrated.get("insurance_ratio", 0.05))
+            remaining = max(0.0, float(migrated.get("core_ratio", 0.65)) - insurance)
+            migrated["core_stage_ratios"] = {
+                "insurance": insurance,
+                "value_1": remaining * (10 / 60),
+                "deep_value": remaining * (15 / 60),
+                "capitulation": remaining * (15 / 60),
+                "bottom_confirmed": remaining * (20 / 60),
+            }
+        else:
+            ratios = migrated.get("core_stage_ratios")
+            if isinstance(ratios, dict) and "insurance" in ratios:
+                migrated["insurance_ratio"] = ratios["insurance"]
         return migrated
 
     @model_validator(mode="after")
@@ -75,7 +122,42 @@ class SpotAccumulationConfig(BaseModel):
             raise ValueError("踏空保险不能超过核心预算")
         if not 0 < self.max_swing_loss_ratio <= self.swing_ratio:
             raise ValueError("波段单笔风险比例必须大于0且不超过波段预算比例")
+        stages = {"insurance", "value_1", "deep_value", "capitulation", "bottom_confirmed"}
+        if set(self.core_stage_ratios) != stages:
+            raise ValueError("core_stage_ratios 必须包含五个核心档位且不能有未知档位")
+        if any(value < 0 for value in self.core_stage_ratios.values()):
+            raise ValueError("核心档位比例不能为负数")
+        if abs(sum(self.core_stage_ratios.values()) - self.core_ratio) > 1e-9:
+            raise ValueError("五个核心档位比例之和必须等于core_ratio")
+        if abs(self.insurance_ratio - self.core_stage_ratios["insurance"]) > 1e-9:
+            raise ValueError("insurance_ratio必须与insurance档位比例一致")
+        if set(self.core_thresholds) != stages:
+            raise ValueError("core_thresholds 必须包含五个核心档位")
+        for stage, thresholds in self.core_thresholds.items():
+            if set(thresholds) != {"v", "m", "a"}:
+                raise ValueError(f"{stage}阈值必须包含v/m/a")
+            if any(value < 0 or value > 100 for value in thresholds.values()):
+                raise ValueError(f"{stage}阈值必须在0-100")
+        for value in (
+            self.tail_extreme_v, self.tail_extreme_a, self.tail_catch_up_v,
+            self.tail_catch_up_m, self.tail_catch_up_a,
+        ):
+            if value < 0 or value > 100:
+                raise ValueError("尾部阈值必须在0-100")
+        if not 0 <= self.min_price_gap_ratio <= 1:
+            raise ValueError("min_price_gap_ratio必须在0-1")
+        if self.atr_gap_multiplier < 0:
+            raise ValueError("atr_gap_multiplier不能为负")
+        if not 60 <= self.acceptance_grace_seconds <= 86_400:
+            raise ValueError("acceptance_grace_seconds必须在60-86400秒")
+        if not 1 <= self.weekly_reclaim_weeks <= 8:
+            raise ValueError("weekly_reclaim_weeks必须在1-8")
         return self
+
+    @property
+    def version(self) -> int:
+        """兼容旧调用方；新代码应区分schema_version与policy_version。"""
+        return self.schema_version
 
     @property
     def core_budget_usdt(self) -> float:
@@ -102,22 +184,15 @@ class SpotAccumulationConfig(BaseModel):
         return round(self.tail_budget_usdt / 3.0, 8)
 
     def core_stage_allocations(self) -> dict[str, float]:
-        remaining = self.core_ratio - self.insurance_ratio
-        ratios = {
-            "insurance": self.insurance_ratio,
-            "value_1": remaining * (10 / 60),
-            "deep_value": remaining * (15 / 60),
-            "capitulation": remaining * (15 / 60),
-            "bottom_confirmed": remaining * (20 / 60),
-        }
         return {
             stage: round(self.initial_capital_usdt * ratio, 8)
-            for stage, ratio in ratios.items()
+            for stage, ratio in self.core_stage_ratios.items()
         }
 
     def public_dump(self) -> dict[str, Any]:
         """API返回比例配置及当前总资金派生出的明确金额。"""
         payload = self.model_dump(mode="json")
+        payload["version"] = self.schema_version
         payload.update({
             "core_budget_usdt": self.core_budget_usdt,
             "swing_budget_usdt": self.swing_budget_usdt,
@@ -130,12 +205,34 @@ class SpotAccumulationConfig(BaseModel):
         return payload
 
 
+class SpotMetricFact(BaseModel):
+    """单个可审计指标；过期值可展示但不得参与评分。"""
+
+    value: Union[float, bool, str, None] = None
+    source_timestamp: int = Field(default=0, ge=0)
+    freshness: MetricFreshness = "missing"
+    parse_status: MetricParseStatus = "missing"
+    included_in_score: bool = False
+    score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    source: str = ""
+
+
+class SpotLayerQuality(BaseModel):
+    fresh_count: int = Field(default=0, ge=0)
+    total_count: int = Field(default=0, ge=0)
+    required_count: int = Field(default=0, ge=0)
+    required_metrics: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    passed: bool = False
+
+
 class SpotDataQuality(BaseModel):
     completeness: float = Field(0.0, ge=0.0, le=1.0)
     stale_sources: list[str] = Field(default_factory=list)
     missing_sources: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     can_open_new_opportunity: bool = False
+    layer_quality: dict[str, SpotLayerQuality] = Field(default_factory=dict)
 
 
 class EvidenceScore(BaseModel):
@@ -154,6 +251,7 @@ class SpotAccumulationFacts(BaseModel):
     capital_inputs: dict[str, Optional[float]] = Field(default_factory=dict)
     acceptance_inputs: dict[str, Union[float, bool, str, None]] = Field(default_factory=dict)
     source_timestamps: dict[str, int] = Field(default_factory=dict)
+    metric_facts: dict[str, SpotMetricFact] = Field(default_factory=dict)
     data_quality: SpotDataQuality = Field(default_factory=SpotDataQuality)
     scores: EvidenceScore = Field(default_factory=EvidenceScore)
     hard_vetoes: list[str] = Field(default_factory=list)
@@ -181,6 +279,13 @@ class SpotOpportunity(BaseModel):
     structural_stop: Optional[float] = None
     target_price: Optional[float] = None
     expected_rr: Optional[float] = None
+    policy_version: int = Field(default=1, ge=1)
+    batch_id: Optional[str] = None
+    batch_sequence: Optional[int] = Field(default=None, ge=1)
+    creation_sequence: int = Field(default=0, ge=0)
+    accepted_at: Optional[int] = None
+    grace_expires_at: Optional[int] = None
+    notification_sent_at: Optional[int] = None
 
 
 class SpotLedgerEvent(BaseModel):
@@ -245,12 +350,13 @@ class SpotPortfolio(BaseModel):
 
 
 class SpotAccumulationRuntimeState(BaseModel):
-    version: int = 1
+    version: int = 2
     cycle_ath: float = 0.0
     opportunities: dict[str, SpotOpportunity] = Field(default_factory=dict)
     tail_mode: Optional[Literal["extreme", "catch_up"]] = None
     last_filled_price: Optional[float] = None
     weekly_reclaim_count: int = 0
+    creation_sequence: int = 0
     updated_at: int = 0
 
 
@@ -259,7 +365,7 @@ class SpotOpportunityJournalEvent(BaseModel):
 
     event_id: str
     sequence: int = Field(ge=1)
-    event_type: Literal["migration", "decision", "fill", "reversal", "config"]
+    event_type: Literal["migration", "market", "decision", "fill", "reversal", "config"]
     created_at: int
     runtime: SpotAccumulationRuntimeState
     note: str = ""

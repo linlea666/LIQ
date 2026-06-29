@@ -3,7 +3,7 @@
 #
 # 用法（在服务器上）：
 #   cd /www/wwwroot/LIQ
-#   ./deploy.sh                # 完整流程：down → git pull → build → up
+#   ./deploy.sh                # 完整流程：git pull → 预检 → down → build → up
 #   ./deploy.sh --no-pull      # 跳过 git pull（只重 build 当前代码）
 #   ./deploy.sh --no-build     # 跳过重 build（只 down + up，用于快速重启）
 #
@@ -37,22 +37,29 @@ echo "==================================================="
 echo "  LIQ 部署开始 @ $(date '+%Y-%m-%d %H:%M:%S')"
 echo "==================================================="
 
-echo
-echo "==> [1/4] 停止旧容器，释放内存..."
-# down 会停 + 删容器，但 volumes 保留（数据安全）
-docker compose down --remove-orphans
-
 if [ "$DO_PULL" = true ]; then
   echo
-  echo "==> [2/4] 拉取最新代码..."
+  echo "==> [1/5] 拉取最新代码（旧容器继续服务）..."
   git pull --rebase --autostash
 else
   echo
-  echo "==> [2/4] 跳过 git pull"
+  echo "==> [1/5] 跳过 git pull"
 fi
 
 echo
-echo "==> [3/4] 构建并启动容器..."
+echo "==> [2/5] 校验运行环境和CoinGlass代理..."
+python3 backend/scripts/preflight_coinglass.py
+
+export APP_GIT_SHA="$(git rev-parse HEAD)"
+export APP_BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+echo
+echo "==> [3/5] 停止旧容器，释放内存..."
+# down 会停 + 删容器，但 bind volumes 保留（数据安全）
+docker compose down --remove-orphans
+
+echo
+echo "==> [4/5] 构建并启动容器..."
 if [ "$DO_BUILD" = true ]; then
   docker compose up -d --build
 else
@@ -60,7 +67,7 @@ else
 fi
 
 echo
-echo "==> [4/4] 部署完成，查看状态..."
+echo "==> [5/5] 部署完成，查看状态..."
 sleep 2
 docker compose ps
 echo

@@ -201,7 +201,9 @@ def test_high_quality_facts_release_only_one_core_stage_at_a_time():
     assert [item.stage for item in eligible] == ["insurance"]
     assert sum(item.reserved_usdt for item in eligible) == 1_000
     later = [item for item in opportunities if item.stage != "insurance"]
-    assert all("需先完成或跳过前一核心档位" in item.blocked_by for item in later)
+    assert all("等待同批次前序子档完成或跳过" in item.blocked_by for item in later)
+    assert len({item.batch_id for item in opportunities}) == 1
+    assert [item.batch_sequence for item in opportunities] == [1, 2, 3, 4, 5]
 
 
 def test_core_and_tail_opportunities_use_configured_capital():
@@ -230,25 +232,25 @@ def test_core_and_tail_opportunities_use_configured_capital():
     assert tail[0].allocation_usdt == 1_500
 
 
-def test_after_insurance_fill_next_stage_needs_lower_price_gap():
+def test_new_downside_batch_needs_lower_price_gap():
     facts = _facts()
     facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)
     runtime = SpotAccumulationRuntimeState(last_filled_price=50_000)
-    first = build_opportunities(
-        facts, runtime,
-        {"core": 12_000, "swing": 4_000, "tail": 3_000},
-        {"core": 0, "swing": 0, "tail": 0},
-    )[0]
-    first.status = "filled"
-    runtime.opportunities[first.opportunity_id] = first
     same_price = build_opportunities(
         facts, runtime,
         {"core": 12_000, "swing": 4_000, "tail": 3_000},
         {"core": 0, "swing": 0, "tail": 0},
     )
-    value = next(item for item in same_price if item.stage == "value_1")
-    assert value.status == "observing"
-    assert "与上一笔成交价差不足" in value.blocked_by
+    assert [item.stage for item in same_price] == ["insurance"]
+
+    lower = facts.model_copy(deep=True)
+    lower.price = 45_000
+    next_items = build_opportunities(
+        lower, SpotAccumulationRuntimeState(last_filled_price=50_000),
+        {"core": 12_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+    )
+    assert any(item.stage == "deep_value" for item in next_items)
 
 
 def test_tail_mode_is_three_sequential_tranches():

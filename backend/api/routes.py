@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Optional
 
@@ -786,10 +787,15 @@ async def news_brief_history(
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""
+    build = {
+        "commit": os.getenv("APP_GIT_SHA", "unknown"),
+        "built_at": os.getenv("APP_BUILD_TIME", "unknown"),
+    }
     if not _engine:
-        return {"status": "starting"}
+        return {"status": "starting", "build": build}
     return {
         "status": "running",
+        "build": build,
         "sources": _engine.get_source_health(),
         "smc_monitor": _engine.get_smc_monitor_status(),
         "strategic_available": _engine.strategic_available,

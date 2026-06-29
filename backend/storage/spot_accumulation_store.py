@@ -53,6 +53,8 @@ class SpotAccumulationStore:
         self.journal_path = self.root / "opportunity_journal.jsonl"
         self.ledger_lock_path = self.root / ".ledger.lock"
         self.journal_lock_path = self.root / ".journal.lock"
+        self.config_lock_path = self.root / ".config.lock"
+        self.facts_lock_path = self.root / ".facts.lock"
         self.migration_lock_path = self.root / ".migration.lock"
 
     @staticmethod
@@ -79,6 +81,27 @@ class SpotAccumulationStore:
 
     def save_config(self, config: SpotAccumulationConfig) -> None:
         _atomic_write_json(self.config_path, config.model_dump(mode="json"))
+
+    @contextmanager
+    def config_transaction(self) -> Iterator[None]:
+        with self._exclusive_lock(self.config_lock_path):
+            yield
+
+    def config_needs_v3_migration(self) -> bool:
+        if not self.config_path.exists():
+            return False
+        raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return False
+        return int(raw.get("schema_version", raw.get("version", 1)) or 1) < 3
+
+    def backup_config_v2_once(self) -> None:
+        with self._exclusive_lock(self.migration_lock_path):
+            backup = self.root / "migration_backup_v2"
+            backup.mkdir(parents=True, exist_ok=True)
+            target = backup / "config.json"
+            if self.config_path.exists() and not target.exists():
+                shutil.copy2(self.config_path, target)
 
     def load_state(self) -> SpotAccumulationRuntimeState:
         if not self.state_path.exists():
@@ -227,7 +250,10 @@ class SpotAccumulationStore:
                 None,
             )
             if prior_reversal is not None:
-                return prior_reversal, target
+                existing = self._existing_or_conflict(events, reversal)
+                if existing is not None and existing.event_id == prior_reversal.event_id:
+                    return prior_reversal, target
+                raise SpotIdempotencyConflict(f"成交事件 {event_id} 已被冲正")
             existing = self._existing_or_conflict(events, reversal)
             if existing is not None:
                 raise SpotIdempotencyConflict(
@@ -292,11 +318,35 @@ class SpotAccumulationStore:
         month = time.strftime("%Y-%m", time.gmtime(timestamp))
         path = self.root / f"facts_{month}.jsonl"
         line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-        fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
-        try:
-            os.write(fd, line.encode("utf-8"))
-        finally:
-            os.close(fd)
+        with self._exclusive_lock(self.facts_lock_path):
+            fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, line.encode("utf-8"))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+
+    def load_facts_snapshots(self) -> list[dict]:
+        """严格读取全部月度事实；损坏行不得被静默用于回放报告。"""
+        records: list[dict] = []
+        with self._exclusive_lock(self.facts_lock_path):
+            for path in sorted(self.root.glob("facts_*.jsonl")):
+                with open(path, "r", encoding="utf-8") as f:
+                    for line_no, line in enumerate(f, 1):
+                        if not line.strip():
+                            continue
+                        try:
+                            payload = json.loads(line)
+                        except json.JSONDecodeError as exc:
+                            raise SpotStorageCorruption(
+                                f"{path.name} 第{line_no}行损坏: {exc}"
+                            ) from exc
+                        if not isinstance(payload, dict):
+                            raise SpotStorageCorruption(
+                                f"{path.name} 第{line_no}行必须是JSON对象"
+                            )
+                        records.append(payload)
+        return records
 
     def build_portfolio(
         self,

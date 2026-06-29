@@ -100,6 +100,10 @@ class SourceHealth(BaseModel):
     latency_ms: float = 0
     last_success_ts: int = 0
     error_count: int = 0
+    # 可选诊断字段；旧数据源无需填充，保持现有 API 向后兼容。
+    reason: Optional[str] = None
+    last_http_status: Optional[int] = None
+    auth_blocked_until: Optional[int] = None
 
 
 class AISnapshot(BaseModel):

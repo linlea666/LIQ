@@ -79,6 +79,7 @@ class CoinglassSource(DataSource):
     })
 
     _MIN_CACHE_TTL = 300
+    _AUTH_FAILURE_COOLDOWN_SEC = 300
     _LONG_CACHE_PREFIXES: tuple[str, ...] = (
         "/api/etf/",
         "/api/index/",
@@ -91,9 +92,13 @@ class CoinglassSource(DataSource):
                  rate_per_min: int = 10):
         super().__init__(name="coinglass", timeout_sec=timeout_sec, max_retries=2)
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._api_key = (api_key or "").strip()
         self._limiter = FixedIntervalLimiter(rate_per_min)
-        self._headers = {"X-Api-Key": api_key}
+        self._headers = {"X-Api-Key": self._api_key}
+        self._health_reason = "missing_api_key" if not self._api_key else ""
+        self._last_http_status: Optional[int] = None
+        self._auth_blocked_until = 0
+        self._missing_key_logged = False
         self._cache: dict[str, tuple[float, Any]] = {}  # key → (expire_ts, data)
         self._cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         self._cache_file = os.path.join(self._cache_dir, "api_cache.json")
@@ -108,6 +113,18 @@ class CoinglassSource(DataSource):
     @property
     def daily_request_count(self) -> int:
         return self._limiter.daily_count
+
+    def health(self):
+        """在通用健康状态上补充鉴权原因，不暴露密钥。"""
+        base = super().health()
+        now = int(time.time())
+        blocked_until = self._auth_blocked_until if self._auth_blocked_until > now else None
+        if not self._api_key or blocked_until is not None:
+            base.status = "disconnected"
+        base.reason = self._health_reason or None
+        base.last_http_status = self._last_http_status
+        base.auth_blocked_until = blocked_until
+        return base
 
     # ── 磁盘缓存持久化 ──
 
@@ -183,6 +200,20 @@ class CoinglassSource(DataSource):
             if cached and cached[0] > time.time():
                 return cached[1]
 
+        if not self._api_key:
+            self._health_reason = "missing_api_key"
+            if not self._missing_key_logged:
+                self._missing_key_logged = True
+                logger.error(
+                    "Coinglass disabled: COINGLASS_API_KEY is missing; "
+                    "no unauthenticated request will be sent"
+                )
+            return None
+
+        now = int(time.time())
+        if self._auth_blocked_until > now:
+            return None
+
         await self._limiter.acquire()
 
         url = f"{self._base_url}/{version}{path}"
@@ -200,18 +231,24 @@ class CoinglassSource(DataSource):
         try:
             async with session.get(url, params=params, headers=self._headers) as resp:
                 latency = (time.time() - t0) * 1000
+                self._last_http_status = resp.status
                 if resp.status == 429:
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
                     self._mark_failure()
+                    self._health_reason = "rate_limited"
                     _record_metric(ok=False)
                     await asyncio.sleep(15)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
                 self._mark_success(latency)
+                self._health_reason = ""
+                self._auth_blocked_until = 0
 
                 code = data.get("code")
                 if code not in (None, "0", 0, "20000", 20000):
+                    self._mark_failure()
+                    self._health_reason = f"api_code_{code}"
                     logger.warning("Coinglass API error | path=%s code=%s msg=%s",
                                    path, code, data.get("msg", ""))
                     _record_metric(ok=False)
@@ -230,11 +267,23 @@ class CoinglassSource(DataSource):
         except aiohttp.ClientResponseError as e:
             self._mark_failure()
             _record_metric(ok=False)
-            logger.error("Coinglass HTTP %d | path=%s | %s", e.status, path, str(e))
+            self._last_http_status = e.status
+            if e.status == 401:
+                self._health_reason = "unauthorized"
+                self._auth_blocked_until = int(time.time()) + self._AUTH_FAILURE_COOLDOWN_SEC
+                logger.error(
+                    "Coinglass HTTP 401 | path=%s | auth cooldown=%ds",
+                    path,
+                    self._AUTH_FAILURE_COOLDOWN_SEC,
+                )
+            else:
+                self._health_reason = f"http_{e.status}"
+                logger.error("Coinglass HTTP %d | path=%s | %s", e.status, path, str(e))
             return None
         except Exception:
             self._mark_failure()
             _record_metric(ok=False)
+            self._health_reason = "request_failed"
             logger.error("Coinglass request failed | path=%s", path, exc_info=True)
             return None
 
@@ -1123,7 +1172,7 @@ def create_coinglass_source() -> CoinglassSource:
     """从环境变量/配置创建 Coinglass 数据源实例。"""
     from config.settings import get_settings
     cfg = get_settings().coinglass
-    api_key = os.getenv(cfg.api_key_env, cfg.api_key_default)
+    api_key = (os.getenv(cfg.api_key_env, cfg.api_key_default) or "").strip()
     return CoinglassSource(
         base_url=cfg.base_url,
         api_key=api_key,

@@ -215,3 +215,60 @@ def test_corrupt_ledger_fails_closed_instead_of_skipping_line(tmp_path):
             "quantity_btc": 0.01,
             "price_usdt": 50_000,
         })
+
+
+def test_partial_fill_invalidated_by_market_stays_invalidated_after_restart(tmp_path):
+    service = _service(tmp_path)
+    now = int(time.time())
+    opportunity = _accepted_opportunity(now)
+    service.runtime.opportunities[opportunity.opportunity_id] = opportunity
+    service._journal_runtime("decision", "accepted")
+    service.record_fill({
+        "client_event_id": "partial-before-invalidation",
+        "side": "buy",
+        "bucket": "core",
+        "quantity_btc": 0.01,
+        "price_usdt": 50_000,
+        "opportunity_id": opportunity.opportunity_id,
+    })
+    current = service.runtime.opportunities[opportunity.opportunity_id]
+    current.status = "invalidated"
+    current.reserved_usdt = 0
+    service._journal_runtime("market", "conditions deteriorated")
+    service.store.save_state(service.runtime)
+
+    restarted = _service(tmp_path)
+    restored = restarted.runtime.opportunities[opportunity.opportunity_id]
+    assert restored.filled_usdt == 500
+    assert restored.status == "invalidated"
+    assert restored.reserved_usdt == 0
+
+
+def test_second_reversal_with_different_key_is_rejected(tmp_path):
+    service = _service(tmp_path)
+    fill = service.record_fill({
+        "client_event_id": "buy-once",
+        "side": "buy",
+        "bucket": "core",
+        "quantity_btc": 0.01,
+        "price_usdt": 50_000,
+    })
+    first = service.reverse_fill(fill.event_id, "reverse-once")
+    assert service.reverse_fill(fill.event_id, "reverse-once").event_id == first.event_id
+    with pytest.raises(SpotIdempotencyConflict, match="已被冲正"):
+        service.reverse_fill(fill.event_id, "reverse-again")
+    assert len(service.get_events()) == 2
+
+
+def test_v1_config_is_backed_up_once_and_persisted_as_v3(tmp_path):
+    root = tmp_path / "spot_accumulation"
+    root.mkdir()
+    (root / "config.json").write_text(
+        '{"version":1,"initial_capital_usdt":20000,"core_budget_usdt":13000,'
+        '"swing_budget_usdt":4000,"tail_budget_usdt":3000}',
+        encoding="utf-8",
+    )
+    service = _service(tmp_path)
+    assert service.config.schema_version == 3
+    assert (root / "migration_backup_v2" / "config.json").exists()
+    assert '"schema_version": 3' in (root / "config.json").read_text(encoding="utf-8")

@@ -34,11 +34,38 @@ def _btc(coin: str) -> None:
         raise HTTPException(400, "首版仅支持 BTC")
 
 
-class ConfigPatch(BaseModel):
+class ConfigMutation(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    expected_policy_version: Optional[int] = Field(default=None, ge=1)
+    preview_hash: Optional[str] = Field(default=None, min_length=16, max_length=128)
     initial_capital_usdt: Optional[float] = Field(default=None, gt=0)
+    core_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    swing_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    tail_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    insurance_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    core_stage_ratios: Optional[dict[str, float]] = None
+    core_thresholds: Optional[dict[str, dict[str, float]]] = None
+    tail_extreme_v: Optional[float] = Field(default=None, ge=0, le=100)
+    tail_extreme_a: Optional[float] = Field(default=None, ge=0, le=100)
+    tail_catch_up_v: Optional[float] = Field(default=None, ge=0, le=100)
+    tail_catch_up_m: Optional[float] = Field(default=None, ge=0, le=100)
+    tail_catch_up_a: Optional[float] = Field(default=None, ge=0, le=100)
+    min_price_gap_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    atr_gap_multiplier: Optional[float] = Field(default=None, ge=0)
+    acceptance_grace_seconds: Optional[int] = Field(default=None, ge=60, le=86_400)
+    weekly_reclaim_weeks: Optional[int] = Field(default=None, ge=1, le=8)
+    max_swing_loss_ratio: Optional[float] = Field(default=None, gt=0, le=1)
+    min_swing_rr: Optional[float] = Field(default=None, gt=0)
     cycle_ath_override: Optional[float] = Field(default=None, gt=0)
     email_notifications: Optional[bool] = None
     ai_explanation_enabled: Optional[bool] = None
+
+    def patch_payload(self) -> dict:
+        return self.model_dump(
+            exclude_unset=True,
+            exclude={"expected_policy_version", "preview_hash"},
+        )
 
 
 class FillRequest(BaseModel):
@@ -67,8 +94,17 @@ async def get_snapshot(coin: str):
     _btc(coin)
     snapshot = _require_service().get_snapshot()
     if snapshot is None:
-        raise HTTPException(503, "BTC行情尚未就绪")
+        raise HTTPException(503, {
+            "message": "BTC现货抄底行情尚未就绪",
+            "health": _require_service().health(),
+        })
     return snapshot.model_dump(mode="json")
+
+
+@router.get("/{coin}/health")
+async def get_health(coin: str):
+    _btc(coin)
+    return _require_service().health()
 
 
 @router.get("/config")
@@ -76,12 +112,31 @@ async def get_config():
     return _require_service().config.public_dump()
 
 
-@router.patch("/config")
-async def patch_config(patch: ConfigPatch):
-    payload = patch.model_dump(exclude_none=True)
+@router.post("/config/preview")
+async def preview_config(request: ConfigMutation):
+    service = _require_service()
+    if (
+        request.expected_policy_version is not None
+        and request.expected_policy_version != service.config.policy_version
+    ):
+        raise HTTPException(409, "策略版本已变化，请重新加载配置")
     try:
-        return _require_service().update_config(payload).public_dump()
-    except SpotStorageCorruption as exc:
+        return service.preview_config(request.patch_payload())
+    except (SpotStorageCorruption, ValueError) as exc:
+        return {"errors": [str(exc)], "preview_hash": None}
+
+
+@router.patch("/config")
+async def patch_config(request: ConfigMutation):
+    if request.expected_policy_version is None or not request.preview_hash:
+        raise HTTPException(400, "保存配置必须提供expected_policy_version和preview_hash")
+    try:
+        return _require_service().update_config(
+            request.patch_payload(),
+            expected_policy_version=request.expected_policy_version,
+            preview_hash=request.preview_hash,
+        ).public_dump()
+    except (SpotStorageCorruption, SpotIdempotencyConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

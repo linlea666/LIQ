@@ -400,6 +400,11 @@ def _strip_unclosed_last(
     return candles
 
 
+def strip_unclosed_last(candles: list[CandleData], bar_seconds: int) -> list[CandleData]:
+    """公开的纯计算入口，供需要闭合K线语义的模块直接复用。"""
+    return _strip_unclosed_last(candles, bar_seconds)
+
+
 def recompute_market_structure_daily(state: "CoinState") -> None:
     """基于 state.candles_daily 刷新 state.market_structure_1d。
 

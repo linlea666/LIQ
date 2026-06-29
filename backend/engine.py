@@ -223,6 +223,8 @@ class CoinState:
         self.footprint_contract: deque = deque(maxlen=3)    # 原始 footprint bars（dict 结构，含 buckets）
         self.footprint_spot: deque = deque(maxlen=3)
         self.footprint_last_ts: Optional[int] = None
+        # 现货抄底独立新鲜度；旧 footprint_last_ts 继续保持 MAA 的合约语义。
+        self.footprint_spot_last_ts: Optional[int] = None
         # ── MAA P0 增强：funding 8h 结算点历史 + OI 30d hourly 历史 ──
         # funding_history_8h：[{ts_sec, rate}]，由 poll_funding_history_8h 写入（5min 调用一次）
         #   - 21 点 = 7 天 × 3 次 8h 结算
@@ -385,6 +387,7 @@ class Engine:
             state_getter=lambda: self._states.get("BTC"),
         )
         self._spot_accumulation_push_signature = ""
+        self._spot_email_dedup = AlertDedup(cooldown_seconds=900)
 
     # PR-3 · ai_available / _load_ai_history / _save_ai_history 已下线
     # （旧 Trader 历史持久化）。Strategic 走独立 _save_strategic_history。
@@ -1418,7 +1421,7 @@ class Engine:
         await self.spot_accumulation_service.poll_slow(self._cg)
 
     async def _poll_spot_accumulation_evaluate(self, _coin: CoinConfig):
-        snapshot = self.spot_accumulation_service.evaluate()
+        snapshot = self.spot_accumulation_service.evaluate_safe()
         if snapshot is None:
             return
         signature_payload = {
@@ -1438,6 +1441,17 @@ class Engine:
             await push_to_coin(
                 "BTC", "spot_accumulation_update", snapshot.model_dump(mode="json")
             )
+        if self._notif_cfg.enabled and self.spot_accumulation_service.config.email_notifications:
+            from notifications.email_alert import send_spot_accumulation_email
+            for opportunity in self.spot_accumulation_service.pending_email_notifications():
+                key = f"spot_accumulation:{opportunity.opportunity_id}"
+                if not self._spot_email_dedup.should_send(key):
+                    continue
+                if await send_spot_accumulation_email(opportunity, snapshot, self._notif_cfg):
+                    self._spot_email_dedup.mark_sent(key)
+                    self.spot_accumulation_service.mark_email_notification_sent(
+                        opportunity.opportunity_id,
+                    )
 
     async def _poll_nansen_perp(self, coin: CoinConfig):
         """SMC · Nansen perp screener（BTC/ETH 15min，确认层）。"""
@@ -2961,11 +2975,12 @@ class Engine:
         limit = self._settings.coinglass.daily_limit
         usage_pct = round(daily / limit * 100, 1) if limit > 0 else 0
         sources = [
-            self._cg.health().model_dump(),
-            self._bn.health().model_dump(),
+            self._cg.health().model_dump(exclude_none=True),
+            self._bn.health().model_dump(exclude_none=True),
             {
                 "name": "coinglass_daily_usage",
                 "status": "degraded" if usage_pct > 80 else "connected",
+                "reason": "quota_only_not_connectivity",
                 "daily_requests": daily,
                 "daily_limit": limit,
                 "usage_pct": usage_pct,
@@ -2975,7 +2990,7 @@ class Engine:
         if self._bbx:
             sources.append(self._bbx.health())
         if self._nansen is not None:
-            sources.append(self._nansen.health().model_dump())
+            sources.append(self._nansen.health().model_dump(exclude_none=True))
         else:
             sources.append({
                 "name": "nansen",

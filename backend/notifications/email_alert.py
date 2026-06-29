@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import smtplib
 import ssl
@@ -418,6 +419,19 @@ async def send_alert_email(
     config: "EmailNotificationConfig",
 ) -> bool:
     """异步发送信号通知邮件。在线程池中执行 SMTP 操作，不阻塞事件循环。"""
+    subject = _build_subject(event)
+    html_body = _build_html(event)
+    return await send_html_email(subject, html_body, config, log_context=event.coin)
+
+
+async def send_html_email(
+    subject: str,
+    html_body: str,
+    config: "EmailNotificationConfig",
+    *,
+    log_context: str = "",
+) -> bool:
+    """复用现有SMTP传输；调用方仅负责主题和HTML，不改变旧通知语义。"""
     global _warned_missing_config
     if not config.to or not config.smtp_user:
         if not _warned_missing_config:
@@ -427,14 +441,11 @@ async def send_alert_email(
     # 配置已恢复，重置抑制标志，确保未来再次丢失时能提醒
     _warned_missing_config = False
 
-    subject = _build_subject(event)
-    html = _build_html(event)
-
     msg = MIMEMultipart("alternative")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header(config.from_name, "utf-8")), config.smtp_user))
     msg["To"] = ", ".join(config.to)
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     def _send():
         try:
@@ -450,8 +461,32 @@ async def send_alert_email(
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _send)
     if result:
-        logger.info("Alert email sent | %s | %s", event.coin, subject)
+        logger.info("Alert email sent | %s | %s", log_context, subject)
     return result
+
+
+async def send_spot_accumulation_email(opportunity: Any, snapshot: Any, config: Any) -> bool:
+    stage_labels = {
+        "insurance": "踏空保险", "value_1": "价值一档", "deep_value": "深度价值",
+        "capitulation": "恐慌出清", "bottom_confirmed": "底部确认",
+        "tail_extreme": "极端尾部", "tail_catch_up": "右侧纠错", "swing": "波段机动",
+    }
+    stage = stage_labels.get(opportunity.stage, opportunity.stage)
+    subject = f"[BTC现货抄底] {stage} 可接受 · {opportunity.allocation_usdt:,.0f} U"
+    reasons = "".join(
+        f"<li>{html.escape(str(reason))}</li>" for reason in opportunity.reasons[:6]
+    ) or "<li>规则条件已满足</li>"
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#0f172a">
+      <h2>BTC现货动态抄底 · {html.escape(stage)}</h2>
+      <p>当前价格：<b>${snapshot.facts.price:,.2f}</b></p>
+      <p>建议额度：<b>{opportunity.allocation_usdt:,.2f} USDT</b>（仅建议，需手工接受与成交）</p>
+      <p>V/M/A：{opportunity.scores.valuation:.1f} / {opportunity.scores.capital_flow:.1f} / {opportunity.scores.acceptance:.1f}</p>
+      <ul>{reasons}</ul>
+      <p style="color:#64748b">策略版本：{opportunity.policy_version} · 机会ID：{html.escape(opportunity.opportunity_id)}</p>
+    </div>
+    """
+    return await send_html_email(subject, html_body, config, log_context="BTC spot accumulation")
 
 
 def _build_digest_html(stats_map: dict[str, Any], period: str = "日报") -> str:
