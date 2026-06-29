@@ -24,6 +24,8 @@ backend/data/plan_backtest.json
 backend/data/replay/
 # 滚仓模块用户状态（运行时生成：持仓/事件/模板/设置）
 backend/data/roll/
+# BTC现货抄底模块用户资金账本、机会状态与事实快照
+backend/data/spot_accumulation/
 # W1-T2 · 流动性墙引擎历史落盘（90 天保留，运行时生成）
 backend/data/liquidity_wall_history/
 # W4-T1 · 流动性墙后验报告输出（CLI 生成）

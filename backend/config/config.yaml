@@ -25,9 +25,10 @@ coins:
 
 sources:
   coinglass:
+    # 旧代理由 CoinglassSource 固定拼接 /v4/api/... 路径。
     base_url: "https://www.keystore.com.cn/api/v1/proxy/coinglass"
     api_key_env: "COINGLASS_API_KEY"
-    api_key_default: "ks_live_eab38da3fef4c429848d11b1fda6bf2b"
+    api_key_default: ""
     timeout_sec: 15
     rate_limit_per_min: 10
     daily_limit: 50000

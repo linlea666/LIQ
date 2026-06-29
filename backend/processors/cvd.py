@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from models.flow import CVDData, CVDPoint
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CVDPriceDivergence:
+    has_divergence: bool = False
+    note: str = ""
 
 
 def build_cvd(
@@ -43,10 +50,22 @@ def detect_cvd_price_divergence(
     CVD 为 5 分钟级别, price_series 为 1H K 线。
     用 CVD 时间窗口去匹配同期 K 线价格, 避免因时间粒度不同导致错位。
     """
+    result = compute_cvd_price_divergence(cvd, price_series, price_ts)
+    cvd.has_divergence = result.has_divergence
+    cvd.divergence_note = result.note
+    return cvd
+
+
+def compute_cvd_price_divergence(
+    cvd: CVDData,
+    price_series: list[float],
+    price_ts: list[int],
+) -> CVDPriceDivergence:
+    """纯计算版本，供期货和现货共同复用，不修改输入对象。"""
     if len(cvd.series) < 12:
-        return cvd
+        return CVDPriceDivergence()
     if len(price_series) < 2 or len(price_ts) != len(price_series):
-        return cvd
+        return CVDPriceDivergence()
 
     cvd_start_ts = cvd.series[0].ts
     cvd_end_ts = cvd.series[-1].ts
@@ -57,7 +76,7 @@ def detect_cvd_price_divergence(
                if cvd_start_ts - one_hour_ms <= t <= cvd_end_ts + one_hour_ms]
 
     if len(aligned) < 2:
-        return cvd
+        return CVDPriceDivergence()
 
     earlier_prices = [p for p, t in aligned if t <= cvd_mid_ts]
     recent_prices = [p for p, t in aligned if t > cvd_mid_ts]
@@ -68,7 +87,7 @@ def detect_cvd_price_divergence(
         recent_prices = [p for p, _ in aligned[mid:]]
 
     if not earlier_prices or not recent_prices:
-        return cvd
+        return CVDPriceDivergence()
 
     half = len(cvd.series) // 2
     earlier_cvd = [p.cvd for p in cvd.series[:half]]
@@ -89,16 +108,10 @@ def detect_cvd_price_divergence(
     cvd_new_low = min(recent_cvd) < min(earlier_cvd)
 
     if price_new_high and not cvd_new_high:
-        cvd.has_divergence = True
-        cvd.divergence_note = "顶背离: 价格创新高但CVD未跟随，主力可能在派发"
+        return CVDPriceDivergence(True, "顶背离: 价格创新高但CVD未跟随，主力可能在派发")
     elif price_new_low and not cvd_new_low:
-        cvd.has_divergence = True
-        cvd.divergence_note = "底背离: 价格创新低但CVD未跟随，抛压可能衰竭"
-    else:
-        cvd.has_divergence = False
-        cvd.divergence_note = ""
-
-    return cvd
+        return CVDPriceDivergence(True, "底背离: 价格创新低但CVD未跟随，抛压可能衰竭")
+    return CVDPriceDivergence()
 
 
 def _calc_trend(points: list[CVDPoint], lookback_points: int = 12) -> tuple[str, float]:

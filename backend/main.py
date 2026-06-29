@@ -25,6 +25,10 @@ from api.routes_scalp import (
     push_signal_created as scalp_push_created,
     push_signal_settled as scalp_push_settled,
 )
+from api.routes_spot_accumulation import (
+    router as spot_accumulation_router,
+    set_components as set_spot_accumulation_components,
+)
 from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
@@ -245,6 +249,11 @@ async def lifespan(app: FastAPI):
     set_maa_engine(engine)
     set_strategic_engine(engine)
     set_smc_engine(engine)
+    from ai.spot_accumulation_explainer import SpotAccumulationExplainer
+    set_spot_accumulation_components(
+        engine.spot_accumulation_service,
+        SpotAccumulationExplainer(),
+    )
 
     # P0-A Shadow Logger：启动后台 writer
     try:
@@ -322,6 +331,7 @@ app.include_router(maa_router)
 app.include_router(strategic_router)
 app.include_router(smc_router)
 app.include_router(scalp_router)
+app.include_router(spot_accumulation_router)
 
 _socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)

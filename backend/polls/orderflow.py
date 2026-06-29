@@ -108,6 +108,10 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
                 coin=coin.ccy, inst_type="SPOT",
                 series=points, trend_1h=trend, delta_1h=delta,
             )
+            if state.candle_prices:
+                state.cvd_spot = detect_cvd_price_divergence(
+                    state.cvd_spot, state.candle_prices, state.candle_ts,
+                )
 
 
 async def poll_taker_volume(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> None:

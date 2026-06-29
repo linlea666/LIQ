@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -377,6 +378,14 @@ class Engine:
         )
         self._roll_eval_interval_sec: int = 10
 
+        # BTC现货动态抄底：独立服务仅读CoinState，不向旧模块回写任何字段。
+        from processors.spot_accumulation_service import SpotAccumulationService
+        self.spot_accumulation_service = SpotAccumulationService(
+            data_dir=self._data_dir,
+            state_getter=lambda: self._states.get("BTC"),
+        )
+        self._spot_accumulation_push_signature = ""
+
     # PR-3 · ai_available / _load_ai_history / _save_ai_history 已下线
     # （旧 Trader 历史持久化）。Strategic 走独立 _save_strategic_history。
 
@@ -582,6 +591,18 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 "cg_stablecoin", self._poll_stablecoin_mcap, btc_coin,
                 3600, 36,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_spot_accumulation_fast", self._poll_spot_accumulation_fast, btc_coin,
+                300, 39,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cg_spot_accumulation_slow", self._poll_spot_accumulation_slow, btc_coin,
+                21600, 72,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "spot_accumulation_evaluate", self._poll_spot_accumulation_evaluate, btc_coin,
+                60, 90,
             )),
         ])
 
@@ -1389,6 +1410,34 @@ class Engine:
     async def _poll_onchain_cycle(self, _coin: CoinConfig):
         from polls.macro import poll_onchain_cycle
         await poll_onchain_cycle(self._cg, self._states, self._settings.supported_coins)
+
+    async def _poll_spot_accumulation_fast(self, _coin: CoinConfig):
+        await self.spot_accumulation_service.poll_fast(self._cg)
+
+    async def _poll_spot_accumulation_slow(self, _coin: CoinConfig):
+        await self.spot_accumulation_service.poll_slow(self._cg)
+
+    async def _poll_spot_accumulation_evaluate(self, _coin: CoinConfig):
+        snapshot = self.spot_accumulation_service.evaluate()
+        if snapshot is None:
+            return
+        signature_payload = {
+            "scores": snapshot.facts.scores.model_dump(),
+            "opportunities": [
+                (item.opportunity_id, item.status, item.reserved_usdt, item.filled_usdt)
+                for item in snapshot.opportunities
+            ],
+            "btc": snapshot.portfolio.total_btc,
+            "cash": snapshot.portfolio.total_cash_usdt,
+        }
+        signature = hashlib.sha1(
+            json.dumps(signature_payload, sort_keys=True).encode()
+        ).hexdigest()
+        if signature != self._spot_accumulation_push_signature:
+            self._spot_accumulation_push_signature = signature
+            await push_to_coin(
+                "BTC", "spot_accumulation_update", snapshot.model_dump(mode="json")
+            )
 
     async def _poll_nansen_perp(self, coin: CoinConfig):
         """SMC · Nansen perp screener（BTC/ETH 15min，确认层）。"""

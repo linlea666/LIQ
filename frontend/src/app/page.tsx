@@ -209,6 +209,12 @@ function ToolsMenu() {
         icon: "⚡",
         desc: "10/30/60min 预测合约 · 仅测试统计",
       },
+      {
+        href: "/spot-accumulation/BTC",
+        label: "现货抄底",
+        icon: "₿",
+        desc: "2万U动态预算 · 手工成交账本",
+      },
     ],
     [coin, urgentCount, activeCount],
   );

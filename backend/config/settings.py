@@ -13,10 +13,12 @@ from typing import Any, Optional
 import yaml
 from dotenv import load_dotenv
 
-load_dotenv()
-
 _CONFIG_DIR = Path(__file__).resolve().parent
 _CONFIG_FILE = _CONFIG_DIR / "config.yaml"
+_ENV_FILE = _CONFIG_DIR.parent / ".env"
+
+# 始终从 backend/.env 加载，避免启动目录不同导致密钥配置被静默跳过。
+load_dotenv(_ENV_FILE)
 
 
 @dataclass(frozen=True)
