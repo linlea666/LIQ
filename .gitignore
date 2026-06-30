@@ -14,6 +14,10 @@ backend/data/api_cache.json
 backend/data/api_cache.json.tmp
 backend/data/ai_history.json
 backend/data/ai_history.json.tmp
+# 本机/服务器实时生成的历史状态，不得纳入版本控制
+backend/data/kl_history.json
+backend/data/market_action_history.json
+backend/data/strategic_history.json
 # 运行时生成数据（P1/P2）
 backend/data/news_ledger.json
 backend/data/signal_pnl.json
