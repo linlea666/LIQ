@@ -390,17 +390,20 @@ def _flow_behavior_metrics(
     oi_end_coin = float(oi_rows[-1]["close"]) / end_price
     oi_change = oi_end_coin / oi_start_coin - 1.0 if oi_start_coin > 0 else 0.0
     price_change = end_price / start_price - 1.0
+    # Keep decision inputs at full precision.  Formatting belongs to the API
+    # consumer; rounding here can move exact boundary observations (for
+    # example 7/12 sub-bars) below their configured thresholds.
     return FlowBehaviorMetrics(
         timeframe=timeframe,
-        price_change_pct=round(price_change, 8),
-        price_change_atr=round((end_price - start_price) / atr, 6),
-        spot_net_ratio=round(spot_ratio, 8),
-        futures_net_ratio=round(futures_ratio, 8),
-        oi_change_pct=round(oi_change, 8),
-        spot_positive_share=round(spot_positive, 6),
-        spot_negative_share=round(spot_negative, 6),
-        futures_positive_share=round(futures_positive, 6),
-        futures_negative_share=round(futures_negative, 6),
+        price_change_pct=price_change,
+        price_change_atr=(end_price - start_price) / atr,
+        spot_net_ratio=spot_ratio,
+        futures_net_ratio=futures_ratio,
+        oi_change_pct=oi_change,
+        spot_positive_share=spot_positive,
+        spot_negative_share=spot_negative,
+        futures_positive_share=futures_positive,
+        futures_negative_share=futures_negative,
     )
 
 

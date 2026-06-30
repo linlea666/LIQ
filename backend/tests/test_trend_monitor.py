@@ -407,6 +407,36 @@ def test_flow_behavior_flags_absorption_and_one_off_spike_without_calling_it_fac
     assert spike.evidence_grade == "weak"
 
 
+@pytest.mark.parametrize(
+    ("positive_subbars", "expected_code"),
+    [
+        (6, "one_off_spike"),
+        (7, "buy_absorption_risk"),
+        (8, "buy_absorption_risk"),
+    ],
+)
+def test_flow_behavior_persistence_boundary_uses_unrounded_subbar_share(
+    positive_subbars: int, expected_code: str,
+):
+    timeframes, inputs, config = _behavior_case(price_end=100.0)
+    futures_rows = inputs["1h"][2]
+    for idx, row in enumerate(futures_rows):
+        delta = 10.0 if idx < positive_subbars else -1.0
+        row.update({
+            "buy": (100.0 + delta) / 2,
+            "sell": (100.0 - delta) / 2,
+            "delta": delta,
+        })
+
+    result = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+
+    assert result.code == expected_code
+    assert result.metrics["1h"].futures_positive_share == positive_subbars / 12
+    assert result.score_weight == 0
+
+
 def test_flow_behavior_zero_subbars_do_not_count_as_persistent_selling():
     timeframes, inputs, config = _behavior_case(
         price_end=98.0, futures_ratio=-0.02,
