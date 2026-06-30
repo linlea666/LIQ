@@ -45,6 +45,8 @@ class CoinglassSourceConfig:
     api_key_default: str
     timeout_sec: int
     rate_limit_per_min: int
+    provider_limit_per_min: int
+    operational_limit_per_min: int
     daily_limit: int
     poll_intervals: dict[str, int]
 
@@ -277,6 +279,34 @@ class ScalpSignalConfig:
 
 
 @dataclass(frozen=True)
+class TrendMonitorConfig:
+    """BTC 原生趋势与资金流模块；只读分析，不含任何交易执行语义。"""
+    enabled: bool = True
+    evaluation_interval_sec: int = 300
+    data_dir: str = "data/trend"
+    algorithm_version: str = "btc-native-v2"
+    email_enabled: bool = True
+    footprint_enabled: bool = True
+    ai_review_enabled: bool = True
+    component_weights: dict[str, tuple[float, float, float]] = field(default_factory=lambda: {
+        "15m": (0.35, 0.45, 0.20), "1h": (0.40, 0.40, 0.20),
+        "4h": (0.50, 0.30, 0.20), "1d": (0.55, 0.25, 0.20),
+    })
+    core_weights: tuple[float, float, float] = (0.30, 0.50, 0.20)
+    direction_threshold: float = 25.0
+    confirm_4h_threshold: float = 45.0
+    confirm_1h_threshold: float = 25.0
+    strong_opposite_1d_threshold: float = 45.0
+    confirmation_bars: int = 3
+    modifier_cap: float = 12.0
+    wallet_modifier_scale_btc: float = 5000.0
+    snapshot_retention_days: int = 400
+    active_flow_1h_percentile: float = 99.0
+    active_flow_24h_percentile: float = 97.5
+    active_flow_1h_min_ratio: float = 0.10
+
+
+@dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
@@ -292,6 +322,7 @@ class Settings:
     market_action: MarketActionConfig = field(default_factory=MarketActionConfig)
     strategic: StrategicConfig = field(default_factory=StrategicConfig)
     scalp_signal: ScalpSignalConfig = field(default_factory=ScalpSignalConfig)
+    trend_monitor: TrendMonitorConfig = field(default_factory=TrendMonitorConfig)
     coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
     nansen: NansenSourceConfig = field(default_factory=NansenSourceConfig)
     default_coin: str = "BTC"
@@ -333,7 +364,26 @@ def _build_settings(raw: dict) -> Settings:
             default_coin = ccy
 
     src = raw["sources"]
-    coinglass = CoinglassSourceConfig(**src["coinglass"])
+    cg_raw = src["coinglass"]
+    operational_limit = int(
+        cg_raw.get("operational_limit_per_min", cg_raw.get("rate_limit_per_min", 10))
+    )
+    provider_limit = int(cg_raw.get("provider_limit_per_min", 11))
+    if operational_limit < 1 or provider_limit < 1 or operational_limit > provider_limit:
+        raise ValueError(
+            "sources.coinglass requires 1 <= operational_limit_per_min <= provider_limit_per_min"
+        )
+    coinglass = CoinglassSourceConfig(
+        base_url=cg_raw["base_url"],
+        api_key_env=cg_raw["api_key_env"],
+        api_key_default=cg_raw.get("api_key_default", ""),
+        timeout_sec=int(cg_raw.get("timeout_sec", 15)),
+        rate_limit_per_min=operational_limit,
+        provider_limit_per_min=provider_limit,
+        operational_limit_per_min=operational_limit,
+        daily_limit=int(cg_raw.get("daily_limit", 50000)),
+        poll_intervals=dict(cg_raw.get("poll_intervals", {})),
+    )
     bbx_raw = src.get("bbx", {})
     bbx = BBXSourceConfig(
         url=bbx_raw.get("url", "https://bbx.com/api/pc?module=v1/market/index"),
@@ -527,6 +577,48 @@ def _build_settings(raw: dict) -> Settings:
         data_dir=str(scalp_raw.get("data_dir", "data/scalp_signal") or "data/scalp_signal"),
     )
 
+    trend_raw = raw.get("trend_monitor", {}) or {}
+    default_component_weights = {
+        "15m": (0.35, 0.45, 0.20), "1h": (0.40, 0.40, 0.20),
+        "4h": (0.50, 0.30, 0.20), "1d": (0.55, 0.25, 0.20),
+    }
+    component_weights = {}
+    for tf, fallback in default_component_weights.items():
+        values = (trend_raw.get("component_weights", {}) or {}).get(tf, fallback)
+        parsed = tuple(float(value) for value in values)
+        if len(parsed) != 3 or abs(sum(parsed) - 1.0) > 1e-6 or min(parsed) < 0:
+            raise ValueError(f"trend_monitor.component_weights.{tf} must contain 3 non-negative values summing to 1")
+        component_weights[tf] = parsed
+    core_weights = tuple(float(value) for value in trend_raw.get("core_weights", (0.30, 0.50, 0.20)))
+    if len(core_weights) != 3 or abs(sum(core_weights) - 1.0) > 1e-6 or min(core_weights) < 0:
+        raise ValueError("trend_monitor.core_weights must contain 3 non-negative values summing to 1")
+    trend_cfg = TrendMonitorConfig(
+        enabled=bool(trend_raw.get("enabled", True)),
+        evaluation_interval_sec=max(
+            300, int(trend_raw.get("evaluation_interval_sec", 300) or 300),
+        ),
+        data_dir=str(trend_raw.get("data_dir", "data/trend") or "data/trend"),
+        algorithm_version=str(
+            trend_raw.get("algorithm_version", "btc-native-v2") or "btc-native-v2"
+        ),
+        email_enabled=bool(trend_raw.get("email_enabled", True)),
+        footprint_enabled=bool(trend_raw.get("footprint_enabled", True)),
+        ai_review_enabled=bool(trend_raw.get("ai_review_enabled", True)),
+        component_weights=component_weights,
+        core_weights=core_weights,
+        direction_threshold=max(1.0, float(trend_raw.get("direction_threshold", 25.0))),
+        confirm_4h_threshold=max(1.0, float(trend_raw.get("confirm_4h_threshold", 45.0))),
+        confirm_1h_threshold=max(1.0, float(trend_raw.get("confirm_1h_threshold", 25.0))),
+        strong_opposite_1d_threshold=max(1.0, float(trend_raw.get("strong_opposite_1d_threshold", 45.0))),
+        confirmation_bars=max(1, int(trend_raw.get("confirmation_bars", 3))),
+        modifier_cap=max(0.0, min(12.0, float(trend_raw.get("modifier_cap", 12.0)))),
+        wallet_modifier_scale_btc=max(1.0, float(trend_raw.get("wallet_modifier_scale_btc", 5000.0))),
+        snapshot_retention_days=max(30, int(trend_raw.get("snapshot_retention_days", 400))),
+        active_flow_1h_percentile=max(90.0, min(100.0, float(trend_raw.get("active_flow_1h_percentile", 99.0)))),
+        active_flow_24h_percentile=max(90.0, min(100.0, float(trend_raw.get("active_flow_24h_percentile", 97.5)))),
+        active_flow_1h_min_ratio=max(0.0, min(1.0, float(trend_raw.get("active_flow_1h_min_ratio", 0.10)))),
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -543,6 +635,7 @@ def _build_settings(raw: dict) -> Settings:
         market_action=maa_cfg,
         strategic=strat_cfg,
         scalp_signal=scalp_cfg,
+        trend_monitor=trend_cfg,
         default_coin=default_coin,
     )
 

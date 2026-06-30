@@ -30,7 +30,10 @@ sources:
     api_key_env: "COINGLASS_API_KEY"
     api_key_default: ""
     timeout_sec: 15
-    rate_limit_per_min: 10
+    # 服务商硬上限 11/min；自动调度只用 10/min，保留 1 次给抖动/诊断。
+    provider_limit_per_min: 11
+    operational_limit_per_min: 10
+    rate_limit_per_min: 10       # 兼容旧配置读取；等于 operational_limit
     daily_limit: 50000
     # ── 缓存策略全局基线（见 sources/coinglass.py:_MIN_CACHE_TTL）──
     # 所有非 _FAST_PATHS 端点强制 cache_ttl ≥ 300s。下面 poll_interval 应当
@@ -62,6 +65,7 @@ sources:
       macro_index: 600
       whale: 600
       news: 1800
+
   bbx:
     url: "https://bbx.com/api/pc?module=v1/market/index"
     cache_ttl: 120            # 两次实际请求间最小间隔（秒）
@@ -99,6 +103,32 @@ sources:
       flow_intelligence: 3600
       exchange_flows: 14400
       market_breadth: 14400
+
+trend_monitor:
+  enabled: true
+  evaluation_interval_sec: 300
+  data_dir: "data/trend"
+  algorithm_version: "btc-native-v2"
+  email_enabled: true
+  footprint_enabled: true       # 首版只采集/展示健康，评分权重固定为 0
+  ai_review_enabled: true       # AI仅 accept/downgrade/veto，绝不反向或升级
+  component_weights:
+    15m: [0.35, 0.45, 0.20]
+    1h:  [0.40, 0.40, 0.20]
+    4h:  [0.50, 0.30, 0.20]
+    1d:  [0.55, 0.25, 0.20]
+  core_weights: [0.30, 0.50, 0.20]   # 1h / 4h / 1d
+  direction_threshold: 25
+  confirm_4h_threshold: 45
+  confirm_1h_threshold: 25
+  strong_opposite_1d_threshold: 45
+  confirmation_bars: 3
+  modifier_cap: 12
+  wallet_modifier_scale_btc: 5000
+  snapshot_retention_days: 400
+  active_flow_1h_percentile: 99
+  active_flow_24h_percentile: 97.5
+  active_flow_1h_min_ratio: 0.10
 
 processors:
   cvd:

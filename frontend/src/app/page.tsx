@@ -204,6 +204,12 @@ function ToolsMenu() {
               : undefined,
       },
       {
+        href: "/trend/BTC",
+        label: "BTC趋势与资金流",
+        icon: "〽️",
+        desc: "原生数据独立算法 · 只读趋势监控",
+      },
+      {
         href: "/scalp",
         label: "短线信号",
         icon: "⚡",

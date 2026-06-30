@@ -1,17 +1,20 @@
 """Coinglass 统一数据源：通过 keystore 代理访问 Coinglass V4/V3 API。
 
-包含 Token Bucket 限流器（10 次/分钟）、自动 V3/V4 路径分发、
+包含优先级滑动窗口限流器（运营 10 次/分钟）、自动 V3/V4 路径分发、
 分类方法组（Futures/Spot/Options/OnChain/Indicator/ETF/Other）。
 """
 
 from __future__ import annotations
 
 import asyncio
+import heapq
 import hashlib
 import json
 import logging
+import math
 import os
 import time
+from collections import deque
 from typing import Any, Optional
 
 import aiohttp
@@ -21,47 +24,187 @@ from sources.base import DataSource, CoinConfig
 logger = logging.getLogger(__name__)
 
 
-class FixedIntervalLimiter:
-    """固定间隔限流器：每两次请求之间强制等待 min_interval 秒。
+class PriorityRateLimiter:
+    """严格滚动 60 秒限额 + 优先级队列。
 
-    与 Token Bucket 不同，不允许突发——彻底避免滑动窗口 429。
-    rate_per_min=10 → min_interval=7s（留 ~15% 余量）。
+    P0/P1/P2 仅决定排队次序，不能突破 operational limit。请求同时到达时
+    核心趋势数据先于慢数据；任意连续 60 秒实际放行不超过配置值。
     """
 
+    _RANK = {"P0": 0, "P1": 1, "P2": 2}
+    _BUDGET = {"P0": 3, "P1": 5, "P2": 2}
+
     def __init__(self, rate_per_min: int = 10):
-        self._min_interval = 60.0 / rate_per_min + 1.0
+        self._rate_per_min = max(1, int(rate_per_min))
+        self._min_interval = 60.0 / self._rate_per_min
         self._last_request: float = 0.0
-        self._lock = asyncio.Lock()
+        self._not_before: float = 0.0
+        self._queue_lock = asyncio.Lock()
+        self._queue: list[tuple[int, int, float, asyncio.Future, str]] = []
+        self._sequence = 0
+        self._drain_task: Optional[asyncio.Task] = None
+        self._recent: deque[tuple[float, str]] = deque()
         self._daily_count = 0
         self._daily_reset_ts = time.time()
+        self._released_by_priority = {"P0": 0, "P1": 0, "P2": 0}
+        self._queue_wait_by_endpoint: dict[str, deque[tuple[float, float]]] = {}
+        scale = self._rate_per_min / 10.0
+        budget = {key: int(math.floor(value * scale)) for key, value in self._BUDGET.items()}
+        if self._rate_per_min >= 3:
+            budget = {key: max(1, value) for key, value in budget.items()}
+        else:
+            budget = {"P0": 1, "P1": max(0, self._rate_per_min - 1), "P2": 0}
+        while sum(budget.values()) > self._rate_per_min:
+            key = max(budget, key=budget.get)
+            budget[key] = max(0, budget[key] - 1)
+        for key in ("P0", "P1", "P2"):
+            if sum(budget.values()) >= self._rate_per_min:
+                break
+            budget[key] += 1
+        self._budget = budget
 
-    async def acquire(self):
-        async with self._lock:
+    async def acquire(self, priority: str = "P1", endpoint: str = ""):
+        priority = priority if priority in self._RANK else "P1"
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        async with self._queue_lock:
+            self._sequence += 1
+            heapq.heappush(
+                self._queue,
+                (self._RANK[priority], self._sequence, time.monotonic(), future, endpoint),
+            )
+            if self._drain_task is None or self._drain_task.done():
+                self._drain_task = asyncio.create_task(self._drain(), name="coinglass-priority-limiter")
+        await asyncio.shield(future)
+
+    async def _drain(self) -> None:
+        while True:
+            async with self._queue_lock:
+                while self._queue and self._queue[0][3].cancelled():
+                    heapq.heappop(self._queue)
+                if not self._queue:
+                    return
             now = time.monotonic()
-            elapsed = now - self._last_request
-            wait = 0.0
-            if elapsed < self._min_interval:
-                wait = self._min_interval - elapsed
-                logger.debug("Rate limiter: spacing %.1fs", wait)
+            while self._recent and now - self._recent[0][0] >= 60.0:
+                self._recent.popleft()
+            counts = {
+                key: sum(priority == key for _, priority in self._recent)
+                for key in self._BUDGET
+            }
+            total_recent = len(self._recent)
+            waiting_priorities = {f"P{item[0]}" for item in self._queue}
+
+            def _eligible(item) -> bool:
+                priority = f"P{item[0]}"
+                if total_recent >= self._rate_per_min:
+                    return False
+                if counts[priority] < self._budget.get(priority, 0):
+                    return True
+                # 本优先级已用完份额时，只有其他等待队列均无未使用份额才可借用。
+                return not any(
+                    other != priority
+                    and other in waiting_priorities
+                    and counts[other] < self._budget.get(other, 0)
+                    for other in self._budget
+                )
+
+            eligible = [
+                (item, idx) for idx, item in enumerate(self._queue)
+                if _eligible(item)
+            ]
+            selected_index = min(eligible)[1] if eligible else None
+            if selected_index is None:
+                wait = min((ts + 60.0 - now for ts, _ in self._recent), default=0.05)
+                await asyncio.sleep(max(0.01, wait))
+                continue
+            rank, _, enqueued_at, future, endpoint = self._queue[selected_index]
+            self._queue[selected_index] = self._queue[-1]
+            self._queue.pop()
+            if selected_index < len(self._queue):
+                heapq.heapify(self._queue)
+
+            spacing_wait = max(0.0, self._last_request + self._min_interval - now)
+            window_wait = (
+                max(0.0, self._recent[0][0] + 60.0 - now)
+                if len(self._recent) >= self._rate_per_min else 0.0
+            )
+            wait = max(spacing_wait, window_wait)
+            if wait > 0:
+                logger.debug("Rate limiter: priority=P%d spacing %.1fs", rank, wait)
                 await asyncio.sleep(wait)
-            self._last_request = time.monotonic()
+            # HTTP 429 可在本次 spacing sleep 期间由上一请求触发，放行前再检查一次。
+            cooldown_wait = max(0.0, self._not_before - time.monotonic())
+            if cooldown_wait > 0:
+                await asyncio.sleep(cooldown_wait)
+            released_at = time.monotonic()
+            observed_wait = max(0.0, released_at - enqueued_at)
+            self._last_request = released_at
+            priority = f"P{rank}"
+            self._recent.append((released_at, priority))
             self._daily_count += 1
+            self._released_by_priority[priority] += 1
+            if endpoint:
+                series = self._queue_wait_by_endpoint.setdefault(endpoint, deque())
+                series.append((time.monotonic(), observed_wait * 1000.0))
+                while series and time.monotonic() - series[0][0] >= 300:
+                    series.popleft()
 
             if time.time() - self._daily_reset_ts > 86400:
                 self._daily_count = 0
                 self._daily_reset_ts = time.time()
 
             # W1-T1：上报排队等待（best-effort，绝不影响主路径）
-            if wait > 0:
+            if observed_wait > 0:
                 try:
                     from processors.liquidity_wall_metrics import get_metrics
-                    get_metrics().record_coinglass_queue_wait(wait * 1000.0)
+                    get_metrics().record_coinglass_queue_wait(observed_wait * 1000.0)
                 except Exception:
                     pass
+            if not future.done():
+                future.set_result(None)
 
     @property
     def daily_count(self) -> int:
+        if time.time() - self._daily_reset_ts > 86400:
+            self._daily_count = 0
+            self._daily_reset_ts = time.time()
         return self._daily_count
+
+    def defer(self, seconds: float) -> None:
+        self._not_before = max(self._not_before, time.monotonic() + max(0.0, seconds))
+
+    def snapshot(self) -> dict[str, Any]:
+        now = time.monotonic()
+        recent = sum(1 for ts, _ in self._recent if now - ts < 60.0)
+        return {
+            "operational_limit_per_min": self._rate_per_min,
+            "requests_last_60s": recent,
+            "queue_depth": len(self._queue),
+            "released_by_priority": dict(self._released_by_priority),
+            "priority_budget_per_min": dict(self._budget),
+            "queue_wait_ms_by_endpoint": {
+                endpoint: {
+                    "last": round(series[-1][1], 2),
+                    "max_5m": round(max(value for _, value in series), 2),
+                }
+                for endpoint, series in self._queue_wait_by_endpoint.items() if series
+            },
+        }
+
+    async def close(self) -> None:
+        if self._drain_task and not self._drain_task.done():
+            self._drain_task.cancel()
+            await asyncio.gather(self._drain_task, return_exceptions=True)
+        async with self._queue_lock:
+            for item in self._queue:
+                future = item[3]
+                if not future.done():
+                    future.cancel()
+            self._queue.clear()
+
+
+# 保留旧名称，避免外部测试/导入断裂。
+FixedIntervalLimiter = PriorityRateLimiter
 
 
 class CoinglassSource(DataSource):
@@ -89,17 +232,32 @@ class CoinglassSource(DataSource):
     )
 
     def __init__(self, base_url: str, api_key: str, timeout_sec: int = 15,
-                 rate_per_min: int = 10):
+                 rate_per_min: int = 10, provider_limit_per_min: int = 11,
+                 daily_limit: int = 50000):
         super().__init__(name="coinglass", timeout_sec=timeout_sec, max_retries=2)
         self._base_url = base_url.rstrip("/")
         self._api_key = (api_key or "").strip()
-        self._limiter = FixedIntervalLimiter(rate_per_min)
+        provider_limit = max(1, int(provider_limit_per_min))
+        operational_limit = max(1, min(int(rate_per_min), provider_limit))
+        if operational_limit != int(rate_per_min):
+            logger.warning(
+                "Coinglass operational limit clamped | requested=%s provider=%s",
+                rate_per_min, provider_limit,
+            )
+        self._limiter = FixedIntervalLimiter(operational_limit)
+        self._provider_limit_per_min = provider_limit
+        self._daily_limit = max(1, int(daily_limit))
         self._headers = {"X-Api-Key": self._api_key}
         self._health_reason = "missing_api_key" if not self._api_key else ""
         self._last_http_status: Optional[int] = None
         self._auth_blocked_until = 0
         self._missing_key_logged = False
         self._cache: dict[str, tuple[float, Any]] = {}  # key → (expire_ts, data)
+        self._singleflight: dict[str, asyncio.Task] = {}
+        self._cache_hits_by_path: dict[str, int] = {}
+        self._http_429_by_path: dict[str, int] = {}
+        self._calls_recent_by_path: dict[str, deque[float]] = {}
+        self._cache_hits_recent_by_path: dict[str, deque[float]] = {}
         self._cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         self._cache_file = os.path.join(self._cache_dir, "api_cache.json")
         self._load_disk_cache()
@@ -110,9 +268,50 @@ class CoinglassSource(DataSource):
     async def fetch(self, coin: CoinConfig) -> Any:
         return None
 
+    async def close(self) -> None:
+        tasks = list({task for task in self._singleflight.values() if not task.done()})
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._singleflight.clear()
+        await self._limiter.close()
+        await super().close()
+
     @property
     def daily_request_count(self) -> int:
         return self._limiter.daily_count
+
+    def request_diagnostics(self) -> dict[str, Any]:
+        """返回实际额度、排队与缓存命中；不包含 API key。"""
+        now = time.monotonic()
+        for mapping in (self._calls_recent_by_path, self._cache_hits_recent_by_path):
+            for series in mapping.values():
+                while series and now - series[0] >= 60.0:
+                    series.popleft()
+        endpoints = set(self._calls_recent_by_path) | set(self._cache_hits_recent_by_path)
+        return {
+            **self._limiter.snapshot(),
+            "provider_limit_per_min": self._provider_limit_per_min,
+            "cache_entries": len(self._cache),
+            "singleflight_inflight": len(self._singleflight),
+            "cache_hits_by_endpoint": dict(self._cache_hits_by_path),
+            "http_429_by_endpoint": dict(self._http_429_by_path),
+            "daily_limit": self._daily_limit,
+            "daily_remaining": max(0, self._daily_limit - self.daily_request_count),
+            "endpoint_last_60s": {
+                endpoint: {
+                    "external_calls": len(self._calls_recent_by_path.get(endpoint, ())),
+                    "cache_hits": len(self._cache_hits_recent_by_path.get(endpoint, ())),
+                    "cache_hit_ratio": round(
+                        len(self._cache_hits_recent_by_path.get(endpoint, ())) /
+                        max(1, len(self._calls_recent_by_path.get(endpoint, ())) +
+                            len(self._cache_hits_recent_by_path.get(endpoint, ()))), 4,
+                    ),
+                }
+                for endpoint in sorted(endpoints)
+            },
+        }
 
     def health(self):
         """在通用健康状态上补充鉴权原因，不暴露密钥。"""
@@ -129,7 +328,7 @@ class CoinglassSource(DataSource):
     # ── 磁盘缓存持久化 ──
 
     def _load_disk_cache(self):
-        """启动时从磁盘恢复缓存，所有条目 TTL 延长 grace period 以确保首轮 poll 命中。"""
+        """启动时仅恢复仍在原始TTL内的缓存；过期市场数据绝不延寿。"""
         if not os.path.exists(self._cache_file):
             logger.info("No disk cache found at %s, cold start", self._cache_file)
             return
@@ -137,18 +336,15 @@ class CoinglassSource(DataSource):
             with open(self._cache_file, "r", encoding="utf-8") as f:
                 raw: dict = json.load(f)
             now = time.time()
-            grace = self._MIN_CACHE_TTL
             loaded = 0
             for key, entry in raw.items():
                 expire_ts = entry.get("expire_ts", 0)
                 data = entry.get("data")
-                if data is None:
+                if data is None or expire_ts <= now:
                     continue
-                new_expire = max(expire_ts, now + grace)
-                self._cache[key] = (new_expire, data)
+                self._cache[key] = (expire_ts, data)
                 loaded += 1
-            logger.info("Disk cache loaded | entries=%d grace=%ds file=%s",
-                        loaded, grace, self._cache_file)
+            logger.info("Disk cache loaded | fresh_entries=%d file=%s", loaded, self._cache_file)
         except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.warning("Failed to load disk cache: %s", e)
 
@@ -173,13 +369,76 @@ class CoinglassSource(DataSource):
 
     # ── 核心请求方法 ──
 
-    def _cache_key(self, path: str, params: Optional[dict]) -> str:
+    def _cache_key(
+        self, path: str, params: Optional[dict], version: str = "v4",
+        raw_response: bool = False,
+    ) -> str:
+        raw = "|".join((
+            version,
+            path,
+            json.dumps(params, sort_keys=True) if params else "",
+            "raw" if raw_response else "data",
+        ))
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    @staticmethod
+    def _legacy_cache_key(path: str, params: Optional[dict]) -> str:
         raw = path + (json.dumps(params, sort_keys=True) if params else "")
         return hashlib.md5(raw.encode()).hexdigest()
 
+    def _read_cache(self, key: str, path: str, params: Optional[dict],
+                    version: str, raw_response: bool) -> Optional[Any]:
+        cached = self._cache.get(key)
+        if not cached and version == "v4" and not raw_response:
+            legacy_key = self._legacy_cache_key(path, params)
+            cached = self._cache.get(legacy_key)
+            if cached:
+                self._cache[key] = cached
+        if cached and cached[0] > time.time():
+            self._cache_hits_by_path[path] = self._cache_hits_by_path.get(path, 0) + 1
+            self._append_recent(self._cache_hits_recent_by_path, path)
+            return cached[1]
+        if cached:
+            self._cache.pop(key, None)
+        return None
+
+    @staticmethod
+    def _append_recent(mapping: dict[str, deque[float]], path: str) -> None:
+        now = time.monotonic()
+        series = mapping.setdefault(path, deque())
+        series.append(now)
+        while series and now - series[0] >= 60.0:
+            series.popleft()
+
     async def _request(self, path: str, params: Optional[dict] = None,
                        version: str = "v4", cache_ttl: int = 0,
-                       raw_response: bool = False) -> Optional[dict]:
+                       raw_response: bool = False,
+                       priority: str = "P1") -> Optional[dict]:
+        """带缓存与 single-flight 的入口；同一完整请求键只产生一次外部调用。"""
+        ck = self._cache_key(path, params, version, raw_response)
+        cached_value = self._read_cache(ck, path, params, version, raw_response)
+        if cached_value is not None:
+            return cached_value
+
+        task = self._singleflight.get(ck)
+        if task is None or task.done():
+            task = asyncio.create_task(
+                self._request_once(
+                    path, params, version, cache_ttl, raw_response, priority,
+                ),
+                name=f"coinglass:{path}",
+            )
+            self._singleflight[ck] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and self._singleflight.get(ck) is task:
+                self._singleflight.pop(ck, None)
+
+    async def _request_once(self, path: str, params: Optional[dict] = None,
+                            version: str = "v4", cache_ttl: int = 0,
+                            raw_response: bool = False,
+                            priority: str = "P1") -> Optional[dict]:
         """发起单次 API 请求，自动限流、TTL 缓存、错误处理。
 
         Args:
@@ -195,10 +454,10 @@ class CoinglassSource(DataSource):
             cache_ttl = max(cache_ttl, 900)
 
         if cache_ttl > 0:
-            ck = self._cache_key(path, params)
-            cached = self._cache.get(ck)
-            if cached and cached[0] > time.time():
-                return cached[1]
+            ck = self._cache_key(path, params, version, raw_response)
+            cached_value = self._read_cache(ck, path, params, version, raw_response)
+            if cached_value is not None:
+                return cached_value
 
         if not self._api_key:
             self._health_reason = "missing_api_key"
@@ -214,7 +473,12 @@ class CoinglassSource(DataSource):
         if self._auth_blocked_until > now:
             return None
 
-        await self._limiter.acquire()
+        if self.daily_request_count >= self._daily_limit:
+            self._health_reason = "daily_quota_exhausted"
+            return None
+
+        await self._limiter.acquire(priority, path)
+        self._append_recent(self._calls_recent_by_path, path)
 
         url = f"{self._base_url}/{version}{path}"
         session = await self.get_session()
@@ -233,11 +497,12 @@ class CoinglassSource(DataSource):
                 latency = (time.time() - t0) * 1000
                 self._last_http_status = resp.status
                 if resp.status == 429:
+                    self._http_429_by_path[path] = self._http_429_by_path.get(path, 0) + 1
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
                     self._mark_failure()
                     self._health_reason = "rate_limited"
                     _record_metric(ok=False)
-                    await asyncio.sleep(15)
+                    self._limiter.defer(15)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
@@ -259,7 +524,7 @@ class CoinglassSource(DataSource):
                 else:
                     result = data.get("data") if "data" in data else data
                 if cache_ttl > 0 and result is not None:
-                    self._cache[self._cache_key(path, params)] = (
+                    self._cache[self._cache_key(path, params, version, raw_response)] = (
                         time.time() + cache_ttl, result,
                     )
                 _record_metric(ok=True)
@@ -336,10 +601,11 @@ class CoinglassSource(DataSource):
 
     async def fetch_oi_aggregated_history(self, symbol: str, interval: str = "1h",
                                           limit: int = 200, unit: str = "usd") -> Optional[list]:
+        ttl = 3600 if interval == "1h" else 300
         return await self._request("/api/futures/open-interest/aggregated-history", {
             "symbol": symbol, "interval": interval,
             "limit": str(limit), "unit": unit,
-        })
+        }, cache_ttl=ttl, priority="P0")
 
     async def fetch_oi_aggregated_stablecoin_history(self, symbol: str, interval: str = "1h",
                                                      limit: int = 200) -> Optional[list]:
@@ -378,7 +644,7 @@ class CoinglassSource(DataSource):
                                          limit: int = 200) -> Optional[list]:
         return await self._request("/api/futures/funding-rate/oi-weight-history", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
-        })
+        }, cache_ttl=3600, priority="P2")
 
     async def fetch_fr_vol_weight_history(self, symbol: str, interval: str = "1h",
                                           limit: int = 200) -> Optional[list]:
@@ -650,10 +916,11 @@ class CoinglassSource(DataSource):
                                            limit: int = 200,
                                            unit: str = "usd",
                                            exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
+        ttl = 3600 if interval == "1h" else 300
         return await self._request("/api/futures/aggregated-cvd/history", {
             "symbol": symbol, "interval": interval,
             "limit": str(limit), "unit": unit, "exchange_list": exchange_list,
-        }, cache_ttl=60)
+        }, cache_ttl=ttl, priority="P0")
 
     async def fetch_footprint_history(self, exchange: str, symbol: str,
                                       interval: str = "1h",
@@ -661,7 +928,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/futures/volume/footprint-history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
-        })
+        }, cache_ttl=300, priority="P1")
 
     async def fetch_futures_netflow_list(self, per_page: int = 20,
                                          page: int = 1) -> Optional[list]:
@@ -720,6 +987,16 @@ class CoinglassSource(DataSource):
             "exchange_list": exchange_list,
         }, cache_ttl=60)
 
+    async def fetch_spot_taker_history_baseline(
+        self, symbol: str, interval: str = "1d", limit: int = 200,
+        exchange_list: str = "Binance,OKX,Bybit",
+    ) -> Optional[list]:
+        """趋势告警历史基线；P2 慢请求，不参与方向评分。"""
+        return await self._request("/api/spot/aggregated-taker-buy-sell-volume/history", {
+            "symbol": symbol, "interval": interval, "limit": str(limit),
+            "exchange_list": exchange_list,
+        }, cache_ttl=21600, priority="P2")
+
     async def fetch_spot_cvd_history(self, exchange: str, symbol: str,
                                      interval: str = "1h",
                                      limit: int = 200) -> Optional[list]:
@@ -731,10 +1008,11 @@ class CoinglassSource(DataSource):
     async def fetch_spot_aggregated_cvd(self, symbol: str, interval: str = "1h",
                                         limit: int = 200,
                                         exchange_list: str = "Binance,OKX,Bybit") -> Optional[list]:
+        ttl = 3600 if interval == "1h" else 300
         return await self._request("/api/spot/aggregated-cvd/history", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
             "exchange_list": exchange_list,
-        }, cache_ttl=60)
+        }, cache_ttl=ttl, priority="P0")
 
     async def fetch_spot_footprint_history(self, exchange: str, symbol: str,
                                            interval: str = "1h",
@@ -743,7 +1021,7 @@ class CoinglassSource(DataSource):
         return await self._request("/api/spot/volume/footprint-history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
-        }, cache_ttl=120)
+        }, cache_ttl=120, priority="P1")
 
     async def fetch_futures_footprint_history(self, exchange: str, symbol: str,
                                               interval: str = "1h",
@@ -752,7 +1030,13 @@ class CoinglassSource(DataSource):
         return await self._request("/api/futures/volume/footprint-history", {
             "exchange": exchange, "symbol": symbol,
             "interval": interval, "limit": str(limit),
-        }, cache_ttl=120)
+        }, cache_ttl=120, priority="P1")
+
+    async def fetch_trend_futures_footprint_history(
+        self, exchange: str, symbol: str, interval: str = "1h", limit: int = 3,
+    ) -> Optional[list]:
+        """直接复用原Footprint请求和缓存，避免趋势模块改变旧页面刷新语义。"""
+        return await self.fetch_futures_footprint_history(exchange, symbol, interval, limit)
 
     async def fetch_spot_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
         return await self._request("/api/spot/orderbook/large-limit-order", {
@@ -769,9 +1053,16 @@ class CoinglassSource(DataSource):
 
     async def fetch_spot_coin_netflow(self, symbol: str,
                                       exchange_list: str = "Binance,OKX,Bybit") -> Optional[dict]:
+        """兼容旧调用：现货 taker 主动买量减主动卖量，非链上转账。"""
         return await self._request("/api/spot/coin/netflow", {
             "symbol": symbol, "exchange_list": exchange_list,
-        })
+        }, cache_ttl=300, priority="P1")
+
+    async def fetch_spot_taker_netflow_snapshot(
+        self, symbol: str, exchange_list: str = "Binance,OKX,Bybit",
+    ) -> Optional[dict]:
+        """语义明确的现货主动成交净流快照；不代表钱包充值/提现。"""
+        return await self.fetch_spot_coin_netflow(symbol, exchange_list)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Options
@@ -807,10 +1098,16 @@ class CoinglassSource(DataSource):
         return await self._request("/api/exchange/assets", {"exchange": exchange})
 
     async def fetch_exchange_balance_list(self, symbol: str = "BTC") -> Optional[list]:
-        return await self._request("/api/exchange/balance/list", {"symbol": symbol})
+        return await self._request(
+            "/api/exchange/balance/list", {"symbol": symbol},
+            cache_ttl=21600, priority="P2",
+        )
 
     async def fetch_exchange_balance_chart(self, symbol: str = "BTC") -> Optional[dict]:
-        return await self._request("/api/exchange/balance/chart", {"symbol": symbol})
+        return await self._request(
+            "/api/exchange/balance/chart", {"symbol": symbol},
+            cache_ttl=21600, priority="P2",
+        )
 
     async def fetch_whale_transfer(self, symbol: str = "") -> Optional[list]:
         params = {}
@@ -1136,10 +1433,29 @@ class CoinglassSource(DataSource):
 
     async def fetch_futures_coin_netflow(self, symbol: str,
                                          interval: str = "1h",
-                                         limit: int = 200) -> Optional[list]:
+                                         limit: int = 200) -> Optional[Any]:
+        """兼容旧签名；上游快照端点会忽略 interval/limit。"""
         return await self._request("/api/futures/coin/netflow", {
             "symbol": symbol, "interval": interval, "limit": str(limit),
-        })
+        }, cache_ttl=300, priority="P1")
+
+    async def fetch_futures_taker_netflow_snapshot(
+        self, symbol: str, exchange_list: str = "Binance,OKX,Bybit",
+    ) -> Optional[dict]:
+        """语义明确的合约主动成交净流快照；不代表链上资金。"""
+        return await self._request("/api/futures/coin/netflow", {
+            "symbol": symbol, "exchange_list": exchange_list,
+        }, cache_ttl=300, priority="P1")
+
+    async def fetch_futures_taker_history_baseline(
+        self, symbol: str, interval: str = "1d", limit: int = 200,
+        exchange_list: str = "Binance,OKX,Bybit",
+    ) -> Optional[list]:
+        """趋势告警历史基线；P2 慢请求，不参与方向评分。"""
+        return await self._request("/api/futures/aggregated-taker-buy-sell-volume/history", {
+            "symbol": symbol, "interval": interval, "limit": str(limit),
+            "unit": "usd", "exchange_list": exchange_list,
+        }, cache_ttl=21600, priority="P2")
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Indicators > TD Sequential
@@ -1178,4 +1494,6 @@ def create_coinglass_source() -> CoinglassSource:
         api_key=api_key,
         timeout_sec=cfg.timeout_sec,
         rate_per_min=cfg.rate_limit_per_min,
+        provider_limit_per_min=cfg.provider_limit_per_min,
+        daily_limit=cfg.daily_limit,
     )

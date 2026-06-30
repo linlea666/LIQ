@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import logging
 import smtplib
@@ -430,6 +431,7 @@ async def send_html_email(
     config: "EmailNotificationConfig",
     *,
     log_context: str = "",
+    idempotency_key: str = "",
 ) -> bool:
     """复用现有SMTP传输；调用方仅负责主题和HTML，不改变旧通知语义。"""
     global _warned_missing_config
@@ -445,6 +447,9 @@ async def send_html_email(
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header(config.from_name, "utf-8")), config.smtp_user))
     msg["To"] = ", ".join(config.to)
+    if idempotency_key:
+        digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
+        msg["Message-ID"] = f"<{digest}@liq.local>"
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     def _send():

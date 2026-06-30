@@ -29,6 +29,7 @@ from api.routes_spot_accumulation import (
     router as spot_accumulation_router,
     set_components as set_spot_accumulation_components,
 )
+from api.routes_trend import router as trend_router, set_service as set_trend_service
 from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
@@ -254,6 +255,7 @@ async def lifespan(app: FastAPI):
         engine.spot_accumulation_service,
         SpotAccumulationExplainer(),
     )
+    set_trend_service(engine.trend_service)
 
     # P0-A Shadow Logger：启动后台 writer
     try:
@@ -332,6 +334,7 @@ app.include_router(strategic_router)
 app.include_router(smc_router)
 app.include_router(scalp_router)
 app.include_router(spot_accumulation_router)
+app.include_router(trend_router)
 
 _socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)
