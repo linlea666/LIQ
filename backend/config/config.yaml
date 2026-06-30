@@ -103,12 +103,24 @@ sources:
       flow_intelligence: 3600
       exchange_flows: 14400
       market_breadth: 14400
+  # Looknode 七家主要交易所 BTC 日级流入/流出；独立于 CoinGlass 配额。
+  looknode:
+    enabled: true
+    base_url: "https://www.looknode.com"
+    timeout_sec: 15
+    cache_ttl_sec: 21600       # 日级源每6小时最多拉取流入/流出各一次
+    stale_after_sec: 216000    # 超过60小时停止告警与跨源验证
+    history_days: 730
+    alert_daily_percentile: 99
+    alert_multiday_percentile: 98
+    crosscheck_abs_percentile: 75
+    crosscheck_min_net_ratio: 0.03
 
 trend_monitor:
   enabled: true
   evaluation_interval_sec: 300
   data_dir: "data/trend"
-  algorithm_version: "btc-native-v2"
+  algorithm_version: "btc-native-v3"
   email_enabled: true
   footprint_enabled: true       # 首版只采集/展示健康，评分权重固定为 0
   ai_review_enabled: true       # AI仅 accept/downgrade/veto，绝不反向或升级

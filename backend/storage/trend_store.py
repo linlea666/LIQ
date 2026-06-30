@@ -34,6 +34,16 @@ class TrendStore:
                 CREATE TABLE IF NOT EXISTS wallet_state (
                     coin TEXT PRIMARY KEY, ts INTEGER NOT NULL, payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS exchange_transfer_state (
+                    coin TEXT PRIMARY KEY, ts INTEGER NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS exchange_transfer_flows (
+                    day_ts INTEGER PRIMARY KEY, inflow_btc REAL NOT NULL,
+                    outflow_btc REAL NOT NULL, netflow_btc REAL NOT NULL,
+                    fetched_at_ts INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_exchange_transfer_day
+                    ON exchange_transfer_flows(day_ts DESC);
                 CREATE TABLE IF NOT EXISTS ai_reviews (
                     coin TEXT NOT NULL, closed_5m_ts INTEGER NOT NULL,
                     verdict TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL,
@@ -69,7 +79,7 @@ class TrendStore:
                 CREATE TABLE IF NOT EXISTS schema_meta (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
-                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','3');
+                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','4');
                 CREATE TABLE IF NOT EXISTS source_availability (
                     source TEXT NOT NULL, closed_ts INTEGER NOT NULL, available INTEGER NOT NULL,
                     PRIMARY KEY(source,closed_ts)
@@ -97,10 +107,17 @@ class TrendStore:
     ) -> None:
         # 钱包 400 日 × 多交易所曲线只保留一份 latest，避免每个5m快照重复写入。
         wallet_payload = snapshot.wallet_flow.model_dump_json()
+        transfer_payload = snapshot.exchange_transfer_flow.model_dump_json()
         compact = snapshot.model_copy(deep=True)
         compact.wallet_flow.chart = []
         compact.wallet_flow.exchange_charts = {}
+        compact.exchange_transfer_flow.chart = []
         payload = compact.model_dump_json()
+        self._conn.execute(
+            """INSERT INTO exchange_transfer_state(coin,ts,payload) VALUES(?,?,?)
+               ON CONFLICT(coin) DO UPDATE SET ts=excluded.ts,payload=excluded.payload""",
+            (snapshot.coin, snapshot.ts, transfer_payload),
+        )
         self._conn.execute(
             """INSERT INTO wallet_state(coin,ts,payload) VALUES(?,?,?)
                ON CONFLICT(coin) DO UPDATE SET ts=excluded.ts,payload=excluded.payload""",
@@ -183,12 +200,20 @@ class TrendStore:
             wallet_row = self._conn.execute(
                 "SELECT payload FROM wallet_state WHERE coin='BTC'"
             ).fetchone()
+            transfer_row = self._conn.execute(
+                "SELECT payload FROM exchange_transfer_state WHERE coin='BTC'"
+            ).fetchone()
         if not row:
             return None
         snapshot = TrendSnapshot.model_validate_json(row["payload"])
         if wallet_row:
             from models.trend_monitor import WalletFlowSnapshot
             snapshot.wallet_flow = WalletFlowSnapshot.model_validate_json(wallet_row["payload"])
+        if transfer_row:
+            from models.trend_monitor import ExchangeTransferFlowSnapshot
+            snapshot.exchange_transfer_flow = ExchangeTransferFlowSnapshot.model_validate_json(
+                transfer_row["payload"],
+            )
         return snapshot
 
     def history(self, limit: int = 200) -> list[dict[str, Any]]:
@@ -242,6 +267,22 @@ class TrendStore:
             item["id"] = row["id"]
             result.append(item)
         return result
+
+    def has_unrecovered_source_failure(self, source: str) -> bool:
+        invalid_pattern = f"BTC:data_source_invalid:{source}:down:*"
+        recovered_pattern = f"BTC:data_source_recovered:{source}:up:*"
+        with self._lock:
+            invalid = self._conn.execute(
+                """SELECT ts FROM events WHERE event_type='data_source_invalid'
+                   AND dedup_key GLOB ? ORDER BY ts DESC LIMIT 1""",
+                (invalid_pattern,),
+            ).fetchone()
+            recovered = self._conn.execute(
+                """SELECT ts FROM events WHERE event_type='data_source_recovered'
+                   AND dedup_key GLOB ? ORDER BY ts DESC LIMIT 1""",
+                (recovered_pattern,),
+            ).fetchone()
+        return bool(invalid and (not recovered or int(invalid["ts"]) > int(recovered["ts"])))
 
     def enqueue_email(self, dedup_key: str, subject: str, html: str) -> bool:
         now = int(time.time())
@@ -333,18 +374,56 @@ class TrendStore:
         return int(row["n"] if row else 0)
 
     def flow_abs_percentile(self, market: str, window: str, value: float,
-                            lookback_days: int, min_samples: int = 30) -> Optional[float]:
-        cutoff = int(time.time()) - lookback_days * 86400
+                            lookback_days: int, min_samples: int = 30,
+                            as_of_ts: Optional[int] = None) -> Optional[float]:
+        end_ts = int(as_of_ts or time.time())
+        cutoff = end_ts - lookback_days * 86400
         with self._lock:
             rows = self._conn.execute(
                 """SELECT ABS(net_usd) AS value FROM flow_observations
-                   WHERE market=? AND window=? AND closed_ts>=?""",
-                (market, window, cutoff),
+                   WHERE market=? AND window=? AND closed_ts>=? AND closed_ts<?""",
+                (market, window, cutoff, end_ts),
             ).fetchall()
         values = sorted(float(row["value"]) for row in rows)
         if len(values) < min_samples:
             return None
         return 100.0 * sum(v <= abs(value) for v in values) / len(values)
+
+    def upsert_exchange_transfer_flows(
+        self, rows: list[tuple[int, float, float, float]], fetched_at_ts: int,
+    ) -> None:
+        if not rows:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany(
+                """INSERT INTO exchange_transfer_flows
+                   (day_ts,inflow_btc,outflow_btc,netflow_btc,fetched_at_ts)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(day_ts) DO UPDATE SET
+                     inflow_btc=excluded.inflow_btc,
+                     outflow_btc=excluded.outflow_btc,
+                     netflow_btc=excluded.netflow_btc,
+                     fetched_at_ts=excluded.fetched_at_ts""",
+                [(ts, inflow, outflow, net, fetched_at_ts)
+                 for ts, inflow, outflow, net in rows],
+            )
+
+    def load_exchange_transfer_flows(self, limit: int = 730) -> Optional[dict[str, Any]]:
+        limit = max(1, min(int(limit), 5000))
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT day_ts,inflow_btc,outflow_btc,fetched_at_ts
+                   FROM exchange_transfer_flows ORDER BY day_ts DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        if not rows:
+            return None
+        ordered = list(reversed(rows))
+        return {
+            "inflow": [{"t": row["day_ts"] * 1000, "v": row["inflow_btc"]} for row in ordered],
+            "outflow": [{"t": row["day_ts"] * 1000, "v": row["outflow_btc"]} for row in ordered],
+            "fetched_at": max(int(row["fetched_at_ts"]) for row in ordered),
+        }
 
     def prune(self, snapshot_retention_days: int = 400) -> None:
         now = int(time.time())
@@ -355,6 +434,10 @@ class TrendStore:
             self._conn.execute("DELETE FROM ai_reviews WHERE ts<?", (snapshot_cutoff,))
             self._conn.execute("DELETE FROM quality_history WHERE ts<?", (snapshot_cutoff,))
             self._conn.execute("DELETE FROM flow_observations WHERE closed_ts<?", (flow_cutoff,))
+            self._conn.execute(
+                "DELETE FROM exchange_transfer_flows WHERE day_ts<?",
+                (now - 730 * 86400,),
+            )
             self._conn.execute("DELETE FROM source_availability WHERE closed_ts<?", (flow_cutoff,))
             self._conn.execute(
                 "DELETE FROM outbox WHERE status='sent' AND sent_ts IS NOT NULL AND sent_ts<?",

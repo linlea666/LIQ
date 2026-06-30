@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Literal, Optional
 
 from openai import AsyncOpenAI
@@ -20,6 +21,8 @@ class TrendAIReviewer:
         self._model = ai_config.model
         self._timeout = ai_config.timeout_sec
         self._client: Optional[AsyncOpenAI] = None
+        self._blocked_until = 0.0
+        self._blocked_reason = ""
         if ai_config.api_key:
             kwargs = {"api_key": ai_config.api_key}
             if ai_config.api_base:
@@ -30,10 +33,22 @@ class TrendAIReviewer:
     def available(self) -> bool:
         return self._client is not None
 
+    def suspension_message(self) -> str:
+        if time.time() >= self._blocked_until:
+            return ""
+        remaining = max(1, int((self._blocked_until - time.time()) / 60))
+        return (
+            f"AI复核暂停（{self._blocked_reason}，约{remaining}分钟后重试），"
+            "不影响原生算法"
+        )
+
     async def review(self, snapshot) -> tuple[Literal["not_run", "accept", "downgrade", "veto"], str]:
         if (not self._client or not snapshot.core_direction_immutable
                 or snapshot.direction not in ("bullish", "bearish")):
             return "not_run", "AI未配置或核心方向无须复核"
+        suspension = self.suspension_message()
+        if suspension:
+            return "not_run", suspension
         facts = {
             "state": snapshot.state, "direction_locked": snapshot.direction,
             "core_score": snapshot.core_score, "confidence": snapshot.confidence,
@@ -72,5 +87,16 @@ class TrendAIReviewer:
                 raise ValueError(f"invalid verdict: {verdict}")
             return verdict, str(payload.get("reason", ""))[:500]
         except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            if status_code in (401, 402, 403):
+                self._blocked_until = time.time() + 6 * 3600
+                self._blocked_reason = f"HTTP {status_code}"
+                logger.warning(
+                    "trend AI review suspended for 6h | status=%s", status_code,
+                )
+                return (
+                    "not_run",
+                    f"AI复核暂停（HTTP {status_code}），不影响原生算法",
+                )
             logger.warning("trend AI review failed: %s", exc)
             return "not_run", f"AI复核失败: {type(exc).__name__}"

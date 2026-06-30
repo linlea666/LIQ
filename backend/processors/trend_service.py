@@ -10,14 +10,15 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from models.trend_monitor import (
-    DataQuality, FootprintStatus, TrendMachineContext, TrendSnapshot,
+    DataQuality, ExchangeTransferFlowSnapshot, FootprintStatus, ModifierBreakdown,
+    TrendMachineContext, TrendSnapshot,
 )
 from notifications.email_alert import send_html_email
 from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
     build_funding_snapshot, calculate_core_direction, calculate_timeframe,
     parse_active_flow, parse_closed_klines, parse_cvd_deltas, parse_etf_flow,
-    parse_oi, parse_wallet_flow,
+    parse_exchange_transfer_flow, parse_oi, parse_wallet_flow,
 )
 from sources.funding_official import fetch_official_pair
 from storage.trend_store import TrendStore
@@ -31,13 +32,15 @@ class TrendService:
     _AUX_MAX_AGE = {
         "spot_net": 900, "fut_net": 900, "fund_hist": 7200,
         "wallet_list": 8 * 3600, "wallet_chart": 8 * 3600,
-        "etf": 2 * 3600, "footprint": 1800,
+        "etf": 2 * 3600, "footprint": 1800, "looknode_flow": 8 * 3600,
     }
 
-    def __init__(self, *, coinglass, binance, settings,
+    def __init__(self, *, coinglass, binance, settings, looknode=None,
                  push_callback: Optional[Callable[[str, dict], Awaitable[None]]] = None):
         self._cg = coinglass
         self._bn = binance
+        self._looknode = looknode
+        self._looknode_cfg = getattr(settings, "looknode", None)
         self._cfg = settings.trend_monitor
         self._email_cfg = settings.notifications.email
         data_dir = self._cfg.data_dir
@@ -56,6 +59,7 @@ class TrendService:
         self._outbox_task: Optional[asyncio.Task] = None
         self._aux_task: Optional[asyncio.Task] = None
         self._aux_data: dict[str, dict[str, Any]] = {}
+        self._aux_bootstrapped = False
         self._latest = self._store.latest_snapshot()
         persisted = self._store.load_machine_context()
         if persisted and persisted.algorithm_version != self._cfg.algorithm_version:
@@ -79,7 +83,16 @@ class TrendService:
         return self._latest
 
     def source_diagnostics(self) -> dict[str, Any]:
-        return self._cg.request_diagnostics()
+        diagnostics = self._cg.request_diagnostics()
+        if self._looknode is not None:
+            diagnostics = {
+                **diagnostics,
+                "looknode": {
+                    **self._looknode.health().model_dump(),
+                    "last_error": self._looknode.last_error,
+                },
+            }
+        return diagnostics
 
     @property
     def enabled(self) -> bool:
@@ -93,6 +106,9 @@ class TrendService:
         if self._running or not self._cfg.enabled:
             return
         self._running = True
+        self._aux_task = asyncio.create_task(
+            self._refresh_auxiliary_data(), name="btc-trend-auxiliary-refresh",
+        )
         self._task = asyncio.create_task(self._run(), name="btc-trend-monitor")
         self._outbox_task = asyncio.create_task(self._run_outbox(), name="btc-trend-outbox")
         logger.info("BTC trend monitor started | interval=%ds", self._cfg.evaluation_interval_sec)
@@ -228,6 +244,11 @@ class TrendService:
                 active_flows[market] = parse_active_flow(
                     data.get(key), market, sign, fetched_at=aux_fetched_at.get(key),
                 )
+            elif not self._aux_bootstrapped and self._latest and market in self._latest.active_flows:
+                active_flows[market] = self._latest.active_flows[market].model_copy(deep=True)
+                self._set_pending(
+                    active_flows[market].quality, "启动加载主动成交净流",
+                )
             elif self._latest and market in self._latest.active_flows:
                 active_flows[market] = self._latest.active_flows[market].model_copy(deep=True)
                 active_flows[market].quality.valid = False
@@ -235,6 +256,10 @@ class TrendService:
                 active_flows[market].quality.reason = "主动成交净流超过缓存时效，停止告警"
             else:
                 active_flows[market] = parse_active_flow(None, market, sign)
+                if not self._aux_bootstrapped:
+                    self._set_pending(
+                        active_flows[market].quality, "启动加载主动成交净流",
+                    )
         if "wallet_list" in data and "wallet_chart" in data:
             wallet = parse_wallet_flow(
                 data.get("wallet_list"), data.get("wallet_chart"), now,
@@ -243,6 +268,11 @@ class TrendService:
             wallet.quality.fetched_at_ts = min(
                 aux_fetched_at.get("wallet_list", now), aux_fetched_at.get("wallet_chart", now),
             )
+        elif not self._aux_bootstrapped and self._latest:
+            wallet = self._latest.wallet_flow.model_copy(deep=True)
+            wallet.confidence_modifier = 0.0
+            wallet.modifier_reason = "启动加载钱包余额数据，本轮不修正趋势"
+            self._set_pending(wallet.quality, "启动加载钱包余额数据")
         elif self._latest:
             wallet = self._latest.wallet_flow.model_copy(deep=True)
             wallet.confidence_modifier = 0.0
@@ -252,6 +282,24 @@ class TrendService:
             wallet.modifier_reason = wallet.quality.reason
         else:
             wallet = parse_wallet_flow(None, None, now)
+            if not self._aux_bootstrapped:
+                self._set_pending(wallet.quality, "启动加载钱包余额数据")
+
+        looknode_raw = data.get("looknode_flow")
+        if not isinstance(looknode_raw, dict):
+            looknode_raw = self._store.load_exchange_transfer_flows(
+                int(getattr(self._looknode_cfg, "history_days", 730)),
+            )
+        exchange_transfer = parse_exchange_transfer_flow(
+            looknode_raw,
+            now,
+            stale_after_sec=int(getattr(self._looknode_cfg, "stale_after_sec", 60 * 3600)),
+            history_days=int(getattr(self._looknode_cfg, "history_days", 730)),
+        )
+        if looknode_raw is None and not self._aux_bootstrapped and self._looknode is not None:
+            self._set_pending(
+                exchange_transfer.quality, "启动加载Looknode交易所流入流出",
+            )
 
         premium = data.get("premium") if isinstance(data.get("premium"), dict) else {}
         mark = self._safe_float(premium.get("markPrice"))
@@ -277,6 +325,12 @@ class TrendService:
                 bn_rate, okx_rate, data.get("fund_hist"), basis, oi_near_high,
                 basis_expanding, direction, now,
             )
+        elif not self._aux_bootstrapped and self._latest:
+            funding = self._latest.funding.model_copy(deep=True)
+            funding.binance_rate, funding.okx_rate, funding.basis_pct = bn_rate, okx_rate, basis
+            funding.confidence_modifier = 0.0
+            funding.modifier_reason = "启动加载Funding历史，本轮不修正置信度"
+            self._set_pending(funding.quality, "启动加载Funding历史")
         elif self._latest:
             funding = self._latest.funding.model_copy(deep=True)
             funding.binance_rate, funding.okx_rate, funding.basis_pct = bn_rate, okx_rate, basis
@@ -290,10 +344,16 @@ class TrendService:
                 bn_rate, okx_rate, None, basis, oi_near_high,
                 core_direction=direction, now_sec=now,
             )
+            if not self._aux_bootstrapped:
+                self._set_pending(funding.quality, "启动加载Funding历史")
         etf_direction = timeframes["1d"].direction
         etf_modifier_direction = direction if etf_direction == direction else "range"
         if "etf" in data:
             etf = parse_etf_flow(data.get("etf"), etf_modifier_direction, now)
+        elif not self._aux_bootstrapped and self._latest:
+            etf = self._latest.etf_flow.model_copy(deep=True)
+            etf.confidence_modifier = 0.0
+            self._set_pending(etf.quality, "启动加载ETF资金流")
         elif self._latest:
             etf = self._latest.etf_flow.model_copy(deep=True)
             etf.confidence_modifier = 0.0
@@ -302,20 +362,29 @@ class TrendService:
             etf.quality.reason = "ETF采集缓存过期，本轮不修正趋势"
         else:
             etf = parse_etf_flow(None, "range", now)
+            if not self._aux_bootstrapped:
+                self._set_pending(etf.quality, "启动加载ETF资金流")
 
         qualifies = self._core_qualifies(timeframes, direction)
         state, count, proposed_machine = self._propose_state(direction, qualifies, closed_5m_ts)
-        modifier_parts = []
+        funding_applied = 0.0
+        wallet_applied = 0.0
+        etf_applied = 0.0
         if direction in ("bullish", "bearish"):
-            modifier_parts.append(funding.confidence_modifier)
+            funding_applied = funding.confidence_modifier
             wallet_allowed = any(
                 timeframes[tf].direction == direction for tf in ("4h", "1d")
             )
             if wallet_allowed:
-                modifier_parts.append(
-                    wallet.confidence_modifier if direction == "bullish" else -wallet.confidence_modifier
+                wallet_applied = (
+                    wallet.confidence_modifier
+                    if direction == "bullish" else -wallet.confidence_modifier
                 )
-            modifier_parts.append(etf.confidence_modifier)
+            etf_applied = etf.confidence_modifier
+        wallet_applied = self._apply_wallet_crosscheck(
+            wallet, exchange_transfer, wallet_applied,
+        )
+        modifier_parts = [funding_applied, wallet_applied, etf_applied]
         modifier_total = max(-self._cfg.modifier_cap, min(self._cfg.modifier_cap, sum(modifier_parts)))
         confidence = max(0.0, min(100.0, abs(core_score) + modifier_total))
         footprint_raw = data.get("footprint")
@@ -333,7 +402,9 @@ class TrendService:
             direction=direction, core_score=core_score, confidence=round(confidence, 2),
             consecutive_core_confirmations=count,
             confirmation_target=self._cfg.confirmation_bars, timeframes=timeframes,
-            active_flows=active_flows, wallet_flow=wallet, funding=funding, etf_flow=etf,
+            active_flows=active_flows, wallet_flow=wallet,
+            exchange_transfer_flow=exchange_transfer,
+            funding=funding, etf_flow=etf,
             footprint=FootprintStatus(
                 enabled=self._cfg.footprint_enabled,
                 available=footprint_effective,
@@ -353,6 +424,14 @@ class TrendService:
                 ),
             ),
             modifier_total=round(modifier_total, 2),
+            modifier_breakdown=ModifierBreakdown(
+                funding_applied=round(funding_applied, 2),
+                wallet_market_bias=round(wallet.confidence_modifier, 2),
+                wallet_applied=round(wallet_applied, 2),
+                etf_applied=round(etf_applied, 2),
+                total=round(modifier_total, 2),
+                wallet_cross_source_status=exchange_transfer.cross_source_status,
+            ),
             data_quality=DataQuality(
                 valid=core_valid, points=sum(len(v) for v in bars.values()),
                 reason="" if core_valid else "至少一个核心周期未通过质量门",
@@ -362,26 +441,29 @@ class TrendService:
                 as_of_ts=closed_5m_ts + 300, fetched_at_ts=now,
                 status="fresh" if core_valid else "missing",
             ),
-            source_diagnostics=self._cg.request_diagnostics(),
+            source_diagnostics=self.source_diagnostics(),
         )
 
-        if self._ai_reviewer and state not in ("data_invalid", "range"):
-            verdict, review_reason = await self._ai_reviewer.review(snapshot)
-            snapshot.ai_review = verdict
-            snapshot.ai_review_reason = review_reason
-            if verdict == "downgrade":
-                snapshot.confidence = max(0.0, snapshot.confidence - 10.0)
-                downgrade = {
-                    "bullish_confirmed": "bullish_candidate",
-                    "bearish_confirmed": "bearish_candidate",
-                    "reversal_confirmed": "reversal_watch",
-                    "bullish_candidate": "bullish_watch",
-                    "bearish_candidate": "bearish_watch",
-                }
-                snapshot.state = downgrade.get(snapshot.state, snapshot.state)
-            elif verdict == "veto":
-                snapshot.confidence = 0.0
-                snapshot.state = f"{snapshot.direction}_watch"
+        if self._ai_reviewer:
+            if state not in ("data_invalid", "range"):
+                verdict, review_reason = await self._ai_reviewer.review(snapshot)
+                snapshot.ai_review = verdict
+                snapshot.ai_review_reason = review_reason
+                if verdict == "downgrade":
+                    snapshot.confidence = max(0.0, snapshot.confidence - 10.0)
+                    downgrade = {
+                        "bullish_confirmed": "bullish_candidate",
+                        "bearish_confirmed": "bearish_candidate",
+                        "reversal_confirmed": "reversal_watch",
+                        "bullish_candidate": "bullish_watch",
+                        "bearish_candidate": "bearish_watch",
+                    }
+                    snapshot.state = downgrade.get(snapshot.state, snapshot.state)
+                elif verdict == "veto":
+                    snapshot.confidence = 0.0
+                    snapshot.state = f"{snapshot.direction}_watch"
+            else:
+                snapshot.ai_review_reason = self._ai_reviewer.suspension_message()
 
         # 只有AI后的最终状态才允许提交确认方向，避免veto后内部仍记为confirmed。
         self._machine = self._finalize_machine(
@@ -394,7 +476,9 @@ class TrendService:
             if self._latest and self._latest.algorithm_version == self._cfg.algorithm_version
             else None
         )
-        events = build_events(snapshot, previous, self._store, self._cfg)
+        events = build_events(
+            snapshot, previous, self._store, self._cfg, self._looknode_cfg,
+        )
         event_emails = []
         for event in events:
             subject = html_body = None
@@ -427,6 +511,8 @@ class TrendService:
             "wallet_chart": self._cg.fetch_exchange_balance_chart("BTC"),
             "etf": self._cg.fetch_btc_etf_flow_history(),
         }
+        if self._looknode is not None:
+            jobs["looknode_flow"] = self._looknode.fetch_exchange_flows()
         if self._cfg.footprint_enabled:
             fetch_footprint = getattr(
                 self._cg, "fetch_trend_futures_footprint_history",
@@ -469,6 +555,32 @@ class TrendService:
                     for row in rows
                 ],
             )
+        looknode_raw = refreshed.get("looknode_flow")
+        if isinstance(looknode_raw, dict):
+            try:
+                history_days = int(getattr(self._looknode_cfg, "history_days", 730))
+                inflow = {
+                    int(float(row["t"]) // 1000): float(row["v"])
+                    for row in looknode_raw.get("inflow", [])[-history_days:]
+                    if isinstance(row, dict) and math.isfinite(float(row.get("v", -1)))
+                    and float(row.get("v", -1)) >= 0
+                }
+                outflow = {
+                    int(float(row["t"]) // 1000): float(row["v"])
+                    for row in looknode_raw.get("outflow", [])[-history_days:]
+                    if isinstance(row, dict) and math.isfinite(float(row.get("v", -1)))
+                    and float(row.get("v", -1)) >= 0
+                }
+                if inflow and set(inflow) == set(outflow):
+                    timestamps = sorted(inflow)[-history_days:]
+                    self._store.upsert_exchange_transfer_flows(
+                        [(ts, inflow[ts], outflow[ts], inflow[ts] - outflow[ts])
+                         for ts in timestamps],
+                        int(looknode_raw.get("fetched_at") or fetched_at),
+                    )
+            except (KeyError, TypeError, ValueError, OverflowError):
+                logger.warning("Looknode flow persistence skipped due to invalid rows", exc_info=True)
+        self._aux_bootstrapped = True
         logger.info("trend auxiliary data refreshed | sources=%s", sorted(refreshed))
 
     @staticmethod
@@ -478,6 +590,59 @@ class TrendService:
             return parsed if math.isfinite(parsed) else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _set_pending(quality: DataQuality, reason: str) -> None:
+        quality.valid = False
+        quality.status = "pending"
+        quality.reason = reason
+
+    def _apply_wallet_crosscheck(
+        self, wallet, exchange_transfer: ExchangeTransferFlowSnapshot,
+        wallet_applied: float,
+    ) -> float:
+        """Looknode may only veto a material conflicting wallet modifier."""
+        exchange_transfer.cross_source_status = "unavailable"
+        if not wallet.quality.valid or not exchange_transfer.quality.valid:
+            return wallet_applied
+        transfer_7d = next(
+            (window for window in exchange_transfer.windows if window.window == "7d"), None,
+        )
+        current_wallet = wallet.change_7d_btc
+        if transfer_7d is None or current_wallet is None or current_wallet == 0:
+            exchange_transfer.cross_source_status = "neutral"
+            return wallet_applied
+
+        historical_wallet: list[float] = []
+        points = [point for point in wallet.chart if point.net_change_btc is not None]
+        # Keep the current seven days completely outside their own baseline.
+        for end in range(7, len(points) - 7 + 1):
+            historical_wallet.append(abs(sum(
+                float(point.net_change_btc) for point in points[end - 7:end]
+            )))
+        historical_wallet = historical_wallet[-365:]
+        wallet_pct = (
+            100.0 * sum(value <= abs(current_wallet) for value in historical_wallet)
+            / len(historical_wallet)
+            if historical_wallet else None
+        )
+        exchange_transfer.coinglass_7d_abs_percentile = wallet_pct
+        threshold = float(getattr(self._looknode_cfg, "crosscheck_abs_percentile", 75.0))
+        min_ratio = float(getattr(self._looknode_cfg, "crosscheck_min_net_ratio", 0.03))
+        transfer_pct = transfer_7d.abs_net_percentile_365d
+        material = bool(
+            wallet_pct is not None and wallet_pct >= threshold
+            and transfer_pct is not None and transfer_pct >= threshold
+            and abs(transfer_7d.net_ratio) >= min_ratio
+        )
+        if not material:
+            exchange_transfer.cross_source_status = "neutral"
+            return wallet_applied
+        if current_wallet * transfer_7d.netflow_btc > 0:
+            exchange_transfer.cross_source_status = "confirmed"
+            return wallet_applied
+        exchange_transfer.cross_source_status = "conflict"
+        return 0.0
 
     def _fresh_aux(self, key: str, now: int) -> Optional[dict[str, Any]]:
         envelope = self._aux_data.get(key)

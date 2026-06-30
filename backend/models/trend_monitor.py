@@ -97,6 +97,50 @@ class WalletFlowSnapshot(BaseModel):
     caveat: str = "余额增加代表潜在卖压，不等于已经卖出。链上余额源为日级更新。"
 
 
+class ExchangeTransferPoint(BaseModel):
+    ts: int
+    inflow_btc: float = 0
+    outflow_btc: float = 0
+    netflow_btc: float = 0
+
+
+class ExchangeTransferWindow(BaseModel):
+    window: Literal["1d", "3d", "7d", "30d"]
+    inflow_btc: float = 0
+    outflow_btc: float = 0
+    netflow_btc: float = 0
+    net_ratio: float = 0
+    inflow_percentile_365d: Optional[float] = None
+    outflow_percentile_365d: Optional[float] = None
+    abs_net_percentile_365d: Optional[float] = None
+    same_sign_days: int = 0
+
+
+class ExchangeTransferFlowSnapshot(BaseModel):
+    source: Literal["looknode"] = "looknode"
+    source_granularity: Literal["1d"] = "1d"
+    scope: str = "Binance、OKX、Bitfinex、Deribit、Bybit、Huobi、KuCoin"
+    covered_exchanges: list[str] = Field(default_factory=lambda: [
+        "Binance", "OKX", "Bitfinex", "Deribit", "Bybit", "Huobi", "KuCoin",
+    ])
+    latest_date_ts: Optional[int] = None
+    windows: list[ExchangeTransferWindow] = Field(default_factory=list)
+    chart: list[ExchangeTransferPoint] = Field(default_factory=list)
+    activity_regime: Literal[
+        "unknown", "normal", "high_inflow", "high_outflow", "high_turnover",
+    ] = "unknown"
+    cross_source_status: Literal[
+        "unavailable", "neutral", "confirmed", "conflict",
+    ] = "unavailable"
+    coinglass_7d_abs_percentile: Optional[float] = None
+    score_weight: int = 0
+    quality: DataQuality = Field(default_factory=DataQuality)
+    caveat: str = (
+        "仅覆盖七家主要交易所。充值不等于卖出、提现不等于买入，"
+        "可能包含交易所内部钱包迁移。"
+    )
+
+
 class FundingSnapshot(BaseModel):
     binance_rate: Optional[float] = None
     okx_rate: Optional[float] = None
@@ -134,6 +178,17 @@ class FootprintStatus(BaseModel):
     note: str = "首版仅展示数据健康，趋势评分权重为0。"
 
 
+class ModifierBreakdown(BaseModel):
+    funding_applied: float = 0
+    wallet_market_bias: float = 0
+    wallet_applied: float = 0
+    etf_applied: float = 0
+    total: float = 0
+    wallet_cross_source_status: Literal[
+        "unavailable", "neutral", "confirmed", "conflict",
+    ] = "unavailable"
+
+
 class TrendEvent(BaseModel):
     id: Optional[int] = None
     ts: int
@@ -161,10 +216,14 @@ class TrendSnapshot(BaseModel):
     timeframes: dict[str, TimeframeTrend] = Field(default_factory=dict)
     active_flows: dict[str, ActiveFlowSnapshot] = Field(default_factory=dict)
     wallet_flow: WalletFlowSnapshot = Field(default_factory=WalletFlowSnapshot)
+    exchange_transfer_flow: ExchangeTransferFlowSnapshot = Field(
+        default_factory=ExchangeTransferFlowSnapshot,
+    )
     funding: FundingSnapshot = Field(default_factory=FundingSnapshot)
     etf_flow: EtfFlowSnapshot = Field(default_factory=EtfFlowSnapshot)
     footprint: FootprintStatus = Field(default_factory=FootprintStatus)
     modifier_total: float = 0
+    modifier_breakdown: ModifierBreakdown = Field(default_factory=ModifierBreakdown)
     ai_review: Literal["not_run", "accept", "downgrade", "veto"] = "not_run"
     ai_review_reason: str = ""
     data_quality: DataQuality = Field(default_factory=DataQuality)

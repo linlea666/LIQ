@@ -109,6 +109,22 @@ class NansenSourceConfig:
 
 
 @dataclass(frozen=True)
+class LooknodeSourceConfig:
+    """Looknode seven-exchange BTC transfer-flow source."""
+
+    enabled: bool = True
+    base_url: str = "https://www.looknode.com"
+    timeout_sec: int = 15
+    cache_ttl_sec: int = 21600
+    stale_after_sec: int = 216000
+    history_days: int = 730
+    alert_daily_percentile: float = 99.0
+    alert_multiday_percentile: float = 98.0
+    crosscheck_abs_percentile: float = 75.0
+    crosscheck_min_net_ratio: float = 0.03
+
+
+@dataclass(frozen=True)
 class ProcessorsConfig:
     cvd: dict[str, Any]
     percentile: dict[str, Any]
@@ -284,7 +300,7 @@ class TrendMonitorConfig:
     enabled: bool = True
     evaluation_interval_sec: int = 300
     data_dir: str = "data/trend"
-    algorithm_version: str = "btc-native-v2"
+    algorithm_version: str = "btc-native-v3"
     email_enabled: bool = True
     footprint_enabled: bool = True
     ai_review_enabled: bool = True
@@ -325,6 +341,7 @@ class Settings:
     trend_monitor: TrendMonitorConfig = field(default_factory=TrendMonitorConfig)
     coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
     nansen: NansenSourceConfig = field(default_factory=NansenSourceConfig)
+    looknode: LooknodeSourceConfig = field(default_factory=LooknodeSourceConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -431,6 +448,28 @@ def _build_settings(raw: dict) -> Settings:
                 "chains", ["ethereum", "base", "solana"],
             )
         ],
+    )
+
+    looknode_raw = src.get("looknode", {}) or {}
+    looknode = LooknodeSourceConfig(
+        enabled=bool(looknode_raw.get("enabled", True)),
+        base_url=str(looknode_raw.get("base_url", "https://www.looknode.com")).rstrip("/"),
+        timeout_sec=max(3, int(looknode_raw.get("timeout_sec", 15))),
+        cache_ttl_sec=max(3600, int(looknode_raw.get("cache_ttl_sec", 21600))),
+        stale_after_sec=max(86400, int(looknode_raw.get("stale_after_sec", 216000))),
+        history_days=max(400, int(looknode_raw.get("history_days", 730))),
+        alert_daily_percentile=max(
+            90.0, min(100.0, float(looknode_raw.get("alert_daily_percentile", 99.0))),
+        ),
+        alert_multiday_percentile=max(
+            90.0, min(100.0, float(looknode_raw.get("alert_multiday_percentile", 98.0))),
+        ),
+        crosscheck_abs_percentile=max(
+            50.0, min(100.0, float(looknode_raw.get("crosscheck_abs_percentile", 75.0))),
+        ),
+        crosscheck_min_net_ratio=max(
+            0.0, min(1.0, float(looknode_raw.get("crosscheck_min_net_ratio", 0.03))),
+        ),
     )
 
     processors = ProcessorsConfig(**raw["processors"])
@@ -599,7 +638,7 @@ def _build_settings(raw: dict) -> Settings:
         ),
         data_dir=str(trend_raw.get("data_dir", "data/trend") or "data/trend"),
         algorithm_version=str(
-            trend_raw.get("algorithm_version", "btc-native-v2") or "btc-native-v2"
+            trend_raw.get("algorithm_version", "btc-native-v3") or "btc-native-v3"
         ),
         email_enabled=bool(trend_raw.get("email_enabled", True)),
         footprint_enabled=bool(trend_raw.get("footprint_enabled", True)),
@@ -626,6 +665,7 @@ def _build_settings(raw: dict) -> Settings:
         bbx=bbx,
         coinbase=coinbase,
         nansen=nansen,
+        looknode=looknode,
         processors=processors,
         ai=ai,
         push=push,

@@ -18,7 +18,8 @@ body:has(.news-brief-page),
 body:has(.roll-page),
 body:has(.scalp-page),
 body:has(.smc-page),
-body:has(.brain-page) {
+body:has(.brain-page),
+body:has(.trend-page) {
   overflow: auto;
 }
 

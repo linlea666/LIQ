@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from models.trend_monitor import (
-    ActiveFlowSnapshot, DataQuality, EtfFlowSnapshot, FlowWindow,
-    FundingSnapshot, TimeframeTrend, WalletChartPoint, WalletContribution,
-    WalletFlowSnapshot,
+    ActiveFlowSnapshot, DataQuality, EtfFlowSnapshot, ExchangeTransferFlowSnapshot,
+    ExchangeTransferPoint, ExchangeTransferWindow, FlowWindow, FundingSnapshot,
+    TimeframeTrend, WalletChartPoint, WalletContribution, WalletFlowSnapshot,
 )
 
 
@@ -377,8 +377,168 @@ def parse_active_flow(
         market=market, semantics=semantics, windows=windows, cvd_consistent=consistent,
         quality=DataQuality(
             valid=valid, points=len(windows), reason="" if valid else "无有效主动成交净流",
+            age_sec=max(0, int(time.time()) - fetched_at) if fetched_at else None,
             as_of_ts=fetched_at, fetched_at_ts=fetched_at,
             status="fresh" if valid else "missing",
+        ),
+    )
+
+
+def parse_exchange_transfer_flow(
+    raw: Any,
+    now_sec: Optional[int] = None,
+    *,
+    stale_after_sec: int = 60 * 3600,
+    history_days: int = 730,
+) -> ExchangeTransferFlowSnapshot:
+    """Parse Looknode seven-exchange daily BTC inflow/outflow.
+
+    The source is independent from the CoinGlass wallet balance series.  It has
+    zero standalone score weight and is used later only as a material 7d
+    cross-source quality check.
+    """
+    now_sec = now_sec or int(time.time())
+    if not isinstance(raw, dict):
+        return ExchangeTransferFlowSnapshot(
+            quality=DataQuality(
+                valid=False, status="missing", reason="Looknode交易所流入流出尚未加载",
+            ),
+        )
+
+    def parse_side(value: Any) -> tuple[dict[int, float], bool]:
+        result: dict[int, float] = {}
+        valid_rows = True
+        if not isinstance(value, list):
+            return result, False
+        # Upstream contains a 2010-era -0.0001 floating cleanup artifact.  Only
+        # retained production history participates in validation and scoring.
+        for row in value[-max(400, history_days):]:
+            if not isinstance(row, dict):
+                valid_rows = False
+                continue
+            ts_value = _num(row.get("t"))
+            flow_value = _num(row.get("v"))
+            if ts_value is None or flow_value is None or flow_value < 0:
+                valid_rows = False
+                continue
+            ts = int(ts_value)
+            ts = ts // 1000 if ts > 10_000_000_000 else ts
+            if ts <= 0:
+                valid_rows = False
+                continue
+            result[ts] = flow_value
+        return result, valid_rows
+
+    inflow, inflow_rows_valid = parse_side(raw.get("inflow"))
+    outflow, outflow_rows_valid = parse_side(raw.get("outflow"))
+    timestamps_match = bool(inflow and outflow and set(inflow) == set(outflow))
+    timestamps = sorted(set(inflow) & set(outflow))
+    points = [
+        ExchangeTransferPoint(
+            ts=ts,
+            inflow_btc=inflow[ts],
+            outflow_btc=outflow[ts],
+            netflow_btc=inflow[ts] - outflow[ts],
+        )
+        for ts in timestamps
+    ][-max(400, history_days):]
+    recent = points[-30:]
+    recent_daily = len(recent) >= 30 and all(
+        recent[idx].ts - recent[idx - 1].ts == 86400 for idx in range(1, len(recent))
+    )
+    latest_ts = points[-1].ts if points else None
+    age = max(0, now_sec - latest_ts) if latest_ts is not None else None
+    valid = bool(
+        inflow_rows_valid and outflow_rows_valid and timestamps_match and recent_daily
+        and age is not None and age <= stale_after_sec
+    )
+
+    windows: list[ExchangeTransferWindow] = []
+    for days, name in ((1, "1d"), (3, "3d"), (7, "7d"), (30, "30d")):
+        if len(points) < days:
+            continue
+        current = points[-days:]
+        inflow_sum = sum(point.inflow_btc for point in current)
+        outflow_sum = sum(point.outflow_btc for point in current)
+        net_sum = inflow_sum - outflow_sum
+        history_in: list[float] = []
+        history_out: list[float] = []
+        history_abs_net: list[float] = []
+        # Exclude the current window from its own baseline.
+        # Historical observations must end before the current window starts.
+        # Excluding only the latest point would still leak current days into
+        # the 3d/7d/30d baseline and suppress genuine extremes.
+        for end in range(days, len(points) - days + 1):
+            sample = points[end - days:end]
+            sample_in = sum(point.inflow_btc for point in sample)
+            sample_out = sum(point.outflow_btc for point in sample)
+            history_in.append(sample_in)
+            history_out.append(sample_out)
+            history_abs_net.append(abs(sample_in - sample_out))
+        history_in = history_in[-365:]
+        history_out = history_out[-365:]
+        history_abs_net = history_abs_net[-365:]
+        sign = 1 if net_sum > 0 else -1 if net_sum < 0 else 0
+        same_sign_days = sum(
+            point.netflow_btc * sign > 0 for point in current
+        ) if sign else 0
+        windows.append(ExchangeTransferWindow(
+            window=name,
+            inflow_btc=round(inflow_sum, 8),
+            outflow_btc=round(outflow_sum, 8),
+            netflow_btc=round(net_sum, 8),
+            net_ratio=net_sum / (inflow_sum + outflow_sum) if inflow_sum + outflow_sum else 0,
+            inflow_percentile_365d=_percentile(history_in, inflow_sum),
+            outflow_percentile_365d=_percentile(history_out, outflow_sum),
+            abs_net_percentile_365d=_percentile(history_abs_net, abs(net_sum)),
+            same_sign_days=same_sign_days,
+        ))
+
+    activity_regime = "unknown"
+    one_day = next((window for window in windows if window.window == "1d"), None)
+    if valid and one_day:
+        in_extreme = (one_day.inflow_percentile_365d or 0) >= 99
+        out_extreme = (one_day.outflow_percentile_365d or 0) >= 99
+        if in_extreme and out_extreme and abs(one_day.net_ratio) < 0.10:
+            activity_regime = "high_turnover"
+        elif in_extreme and one_day.netflow_btc > 0:
+            activity_regime = "high_inflow"
+        elif out_extreme and one_day.netflow_btc < 0:
+            activity_regime = "high_outflow"
+        else:
+            activity_regime = "normal"
+
+    if not points:
+        reason = "Looknode交易所流入流出为空"
+        status = "missing"
+    elif not timestamps_match:
+        reason = "Looknode流入与流出日期不完全对齐"
+        status = "stale"
+    elif not recent_daily:
+        reason = "Looknode最近30日数据不是连续日级序列"
+        status = "stale"
+    elif age is not None and age > stale_after_sec:
+        reason = "Looknode日级数据超过60小时未更新"
+        status = "stale"
+    elif not inflow_rows_valid or not outflow_rows_valid:
+        reason = "Looknode存在非法时间戳或负数/非有限值"
+        status = "stale"
+    else:
+        reason = ""
+        status = "fresh"
+    return ExchangeTransferFlowSnapshot(
+        latest_date_ts=latest_ts,
+        windows=windows,
+        chart=points[-120:],
+        activity_regime=activity_regime,
+        quality=DataQuality(
+            valid=valid,
+            age_sec=age,
+            points=len(points),
+            reason=reason,
+            as_of_ts=latest_ts,
+            fetched_at_ts=int(raw.get("fetched_at") or now_sec),
+            status=status,
         ),
     )
 
@@ -527,7 +687,16 @@ def parse_wallet_flow(
     modifier = 0.0
     reason = "钱包流不满足质量门，不修正趋势"
     if valid and consistent:
-        anchor = change_3d if change_3d is not None else change_1d or 0.0
+        majority_sign = 1 if pos > neg else -1
+        daily_rates = [
+            value / days for value, days in (
+                (change_1d, 1), (change_3d, 3), (change_7d, 7),
+            )
+            if value is not None and value * majority_sign > 0
+        ]
+        # Preserve the original 3d calibration while ensuring a dissenting 3d
+        # window can never reverse the majority direction.
+        anchor = statistics.median(daily_rates) * 3 if daily_rates else 0.0
         modifier = _clamp(-math.tanh(anchor / max(1.0, modifier_scale_btc)) * 5.0, -5, 5)
         if dominant > 0.70:
             modifier *= 0.5

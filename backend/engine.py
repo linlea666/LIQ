@@ -297,6 +297,8 @@ class Engine:
         )
         from sources.nansen import create_nansen_source
         self._nansen = create_nansen_source()
+        from sources.looknode import create_looknode_source
+        self._looknode = create_looknode_source(self._settings.looknode)
         self._nansen_market_breadth: Optional[dict] = None
         # BTC 原生趋势模块：复用底层客户端和缓存，但不消费 Engine 里的派生结论。
         from processors.trend_service import TrendService
@@ -305,7 +307,8 @@ class Engine:
             await push_to_coin("BTC", event, payload)
 
         self.trend_service = TrendService(
-            coinglass=self._cg, binance=self._bn, settings=self._settings,
+            coinglass=self._cg, binance=self._bn, looknode=self._looknode,
+            settings=self._settings,
             push_callback=_push_trend,
         )
         # PR-3 · self._analyzer 已下线（旧 Trader）。Strategic 通过 _get_strategic_arbiter 懒加载。
@@ -992,6 +995,8 @@ class Engine:
         await self._cb.close()
         if self._nansen is not None:
             await self._nansen.close()
+        if self._looknode is not None:
+            await self._looknode.close()
         logger.info("Engine stopped")
 
     # ── 活跃币种管理 ──

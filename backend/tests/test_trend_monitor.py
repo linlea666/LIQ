@@ -8,16 +8,21 @@ from types import SimpleNamespace
 import pytest
 
 from models.trend_monitor import (
-    ActiveFlowSnapshot, DataQuality, FlowWindow, TimeframeTrend, TrendEvent,
-    TrendMachineContext, TrendSnapshot, WalletChartPoint,
+    ActiveFlowSnapshot, DataQuality, ExchangeTransferFlowSnapshot,
+    ExchangeTransferPoint, ExchangeTransferWindow, FlowWindow, TimeframeTrend,
+    TrendEvent, TrendMachineContext, TrendSnapshot, WalletChartPoint,
+    WalletFlowSnapshot,
 )
+from ai.trend_reviewer import TrendAIReviewer
 from notifications.trend_alert import build_events
 from processors.trend_monitor import (
     build_funding_snapshot, calculate_timeframe, parse_closed_klines,
-    parse_cvd_deltas, parse_etf_flow, parse_wallet_flow, _oi_component,
+    parse_cvd_deltas, parse_etf_flow, parse_exchange_transfer_flow,
+    parse_wallet_flow, _oi_component,
 )
 from processors.trend_service import TrendService
 from sources.coinglass import CoinglassSource, PriorityRateLimiter
+from sources.looknode import LooknodeExchangeFlowSource
 from storage.trend_store import TrendStore
 
 
@@ -146,6 +151,129 @@ def test_wallet_chart_accepts_documented_data_map_shape():
     assert set(result.exchange_charts) == {"Binance", "Coinbase"}
 
 
+def test_wallet_modifier_uses_majority_direction_not_dissenting_3d_window():
+    now = int(time.time())
+    deltas = [2000, 2000, 2000, 1000, -1000, -1000, -1000]
+    balances = [100_000.0]
+    for delta in deltas:
+        balances.append(balances[-1] + delta)
+    times = [now - (7 - idx) * 86400 for idx in range(8)]
+    result = parse_wallet_flow(
+        [{"exchange_name": "Binance", "balance": balances[-1],
+          "change_1d": 1000, "change_7d": sum(deltas), "change_30d": 5000}],
+        {"time_list": [ts * 1000 for ts in times], "price_list": [60_000] * 8,
+         "data_map": {"Binance": balances}},
+        now,
+    )
+    assert result.change_3d_btc == -3000
+    assert result.change_7d_btc == 4000
+    assert result.direction_consistent is True
+    assert result.confidence_modifier < 0  # majority inflow is bearish market bias
+
+
+def _looknode_raw(days: int = 400, *, latest_age_hours: int = 30):
+    now = int(time.time())
+    latest = (now - latest_age_hours * 3600) // 86400 * 86400
+    times = [latest - (days - 1 - idx) * 86400 for idx in range(days)]
+    return {
+        "inflow": [{"t": ts * 1000, "v": 1000 + idx} for idx, ts in enumerate(times)],
+        "outflow": [{"t": ts * 1000, "v": 900 + idx / 2} for idx, ts in enumerate(times)],
+        "fetched_at": now,
+    }
+
+
+def test_looknode_daily_flow_contract_and_windows():
+    result = parse_exchange_transfer_flow(_looknode_raw(), int(time.time()))
+    assert result.quality.valid is True
+    assert result.quality.points == 400
+    assert [window.window for window in result.windows] == ["1d", "3d", "7d", "30d"]
+    assert len(result.chart) == 120
+    assert result.windows[0].netflow_btc > 0
+    assert result.score_weight == 0
+
+
+def test_looknode_multiday_percentile_excludes_entire_current_window():
+    raw = _looknode_raw()
+    for row in raw["inflow"]:
+        row["v"] = 1000.0
+    for row in raw["outflow"]:
+        row["v"] = 1000.0
+    # The current 7d sum is zero, but six current days are individually large.
+    # If the baseline overlaps the current window, its percentile falls below
+    # P100 even though every fully historical seven-day sum is zero.
+    for row, delta in zip(raw["inflow"][-7:], [100, -100, 100, -100, 100, -100, 0]):
+        row["v"] += delta
+    result = parse_exchange_transfer_flow(raw, int(time.time()))
+    seven_day = next(window for window in result.windows if window.window == "7d")
+    assert seven_day.netflow_btc == 0
+    assert seven_day.abs_net_percentile_365d == 100.0
+
+
+def test_looknode_misaligned_dates_fail_quality_gate():
+    raw = _looknode_raw()
+    raw["outflow"] = raw["outflow"][:-1]
+    result = parse_exchange_transfer_flow(raw, int(time.time()))
+    assert result.quality.valid is False
+    assert "日期不完全对齐" in result.quality.reason
+
+
+def test_looknode_ignores_ancient_rounding_artifact_but_rejects_recent_negative():
+    raw = _looknode_raw(800)
+    raw["outflow"][0]["v"] = -0.0001
+    assert parse_exchange_transfer_flow(raw, int(time.time())).quality.valid is True
+    raw["outflow"][-1]["v"] = -0.0001
+    result = parse_exchange_transfer_flow(raw, int(time.time()))
+    assert result.quality.valid is False
+    assert "日期不完全对齐" in result.quality.reason or "非法" in result.quality.reason
+
+
+def test_looknode_material_conflict_only_zeroes_wallet_modifier(tmp_path):
+    settings = SimpleNamespace(
+        trend_monitor=SimpleNamespace(
+            enabled=True, evaluation_interval_sec=300, data_dir=str(tmp_path),
+            algorithm_version="test", email_enabled=False, footprint_enabled=False,
+        ),
+        looknode=SimpleNamespace(
+            crosscheck_abs_percentile=75, crosscheck_min_net_ratio=0.03,
+        ),
+        notifications=SimpleNamespace(email=SimpleNamespace(enabled=False)),
+    )
+    service = TrendService(coinglass=object(), binance=object(), settings=settings)
+    chart = [
+        WalletChartPoint(ts=idx * 86400, balance_btc=100_000 + idx,
+                         net_change_btc=1.0)
+        for idx in range(380)
+    ]
+    for idx in range(373, 380):
+        chart[idx].net_change_btc = 100.0
+    wallet = WalletFlowSnapshot(
+        change_7d_btc=700, chart=chart,
+        confidence_modifier=-3,
+        quality=DataQuality(valid=True, status="fresh", points=380),
+    )
+    transfer = ExchangeTransferFlowSnapshot(
+        windows=[ExchangeTransferWindow(
+            window="7d", inflow_btc=900, outflow_btc=1100, netflow_btc=-200,
+            net_ratio=-0.1, abs_net_percentile_365d=90,
+        )],
+        quality=DataQuality(valid=True, status="fresh", points=400),
+    )
+    assert service._apply_wallet_crosscheck(wallet, transfer, 3.0) == 0
+    assert transfer.cross_source_status == "conflict"
+
+    aligned = transfer.model_copy(deep=True)
+    aligned.windows[0].netflow_btc = 200
+    aligned.windows[0].net_ratio = 0.1
+    assert service._apply_wallet_crosscheck(wallet, aligned, 3.0) == 3.0
+    assert aligned.cross_source_status == "confirmed"
+
+    stale = transfer.model_copy(deep=True)
+    stale.quality = DataQuality(valid=False, status="stale", points=400)
+    assert service._apply_wallet_crosscheck(wallet, stale, 3.0) == 3.0
+    assert stale.cross_source_status == "unavailable"
+    service.store.close()
+
+
 def _tf(tf: str, score: float, spot: bool = True) -> TimeframeTrend:
     return TimeframeTrend(
         timeframe=tf, score=score,
@@ -182,9 +310,22 @@ def test_store_outbox_dedup_and_snapshot_tables(tmp_path):
     snapshot.wallet_flow.chart = [
         WalletChartPoint(ts=100, balance_btc=123.0, net_change_btc=1.0)
     ]
+    snapshot.exchange_transfer_flow.chart = [
+        ExchangeTransferPoint(ts=100, inflow_btc=10, outflow_btc=8, netflow_btc=2)
+    ]
     store.save_snapshot(snapshot)
     assert store.latest_snapshot().wallet_flow.chart[0].balance_btc == 123.0
+    assert store.latest_snapshot().exchange_transfer_flow.chart[0].netflow_btc == 2
     assert store.history(1)[0]["wallet_flow"]["chart"] == []
+    assert store.history(1)[0]["exchange_transfer_flow"]["chart"] == []
+    store.upsert_exchange_transfer_flows(
+        [(100, 10.0, 8.0, 2.0), (200, 9.0, 11.0, -2.0)], fetched_at_ts=300,
+    )
+    persisted = store.load_exchange_transfer_flows()
+    assert persisted is not None
+    assert persisted["inflow"] == [{"t": 100000, "v": 10.0}, {"t": 200000, "v": 9.0}]
+    assert persisted["outflow"][-1] == {"t": 200000, "v": 11.0}
+    assert persisted["fetched_at"] == 300
     store.close()
 
 
@@ -216,6 +357,26 @@ async def test_coinglass_singleflight_merges_same_full_cache_key(monkeypatch, tm
         source._request("/api/test", {"symbol": "BTC"}),
     )
     assert one == two == {"ok": True}
+    assert calls == 1
+    await source.close()
+
+
+@pytest.mark.asyncio
+async def test_looknode_six_hour_cache_avoids_duplicate_pair_fetch(monkeypatch):
+    source = LooknodeExchangeFlowSource(SimpleNamespace(
+        timeout_sec=1, base_url="https://example.invalid", cache_ttl_sec=21600,
+    ))
+    calls = 0
+
+    async def fake_pair():
+        nonlocal calls
+        calls += 1
+        return _looknode_raw()
+
+    monkeypatch.setattr(source, "_fetch_pair_once", fake_pair)
+    first = await source.fetch_exchange_flows()
+    second = await source.fetch_exchange_flows()
+    assert first == second
     assert calls == 1
     await source.close()
 
@@ -297,6 +458,126 @@ def test_active_flow_dedup_uses_window_end_and_resonance_requires_same_window():
         None, _AlwaysExtremeStore(),
     )
     assert not any(event.event_type == "cross_market_flow_resonance" for event in mixed)
+
+
+def test_hourly_flow_percentile_uses_closed_window_boundary(tmp_path):
+    store = TrendStore(str(tmp_path))
+    end_ts = 2_000_000 - (2_000_000 % 3600)
+    store.record_flows("spot", "1h", [
+        (end_ts - (720 - idx) * 3600, float(idx + 1), 1000.0)
+        for idx in range(720)
+    ])
+    assert store.flow_abs_percentile(
+        "spot", "1h", 500.0, 30, min_samples=720, as_of_ts=end_ts,
+    ) is not None
+    store.close()
+
+
+def test_pending_auxiliary_source_does_not_emit_false_recovery(tmp_path):
+    store = TrendStore(str(tmp_path))
+    previous = TrendSnapshot(
+        ts=1000, closed_5m_ts=900, algorithm_version="test", state="range",
+        direction="range", core_score=0, confidence=0,
+    )
+    current = previous.model_copy(deep=True)
+    current.ts = 1300
+    current.closed_5m_ts = 1200
+    previous.active_flows["spot"] = ActiveFlowSnapshot(
+        market="spot", semantics="",
+        quality=DataQuality(valid=False, status="pending", reason="启动加载"),
+    )
+    current.active_flows["spot"] = ActiveFlowSnapshot(
+        market="spot", semantics="",
+        quality=DataQuality(valid=True, status="fresh", points=5),
+    )
+    assert not any(
+        event.event_type == "data_source_recovered"
+        for event in build_events(current, previous, store)
+    )
+    store.close()
+
+
+def test_source_recovery_requires_persisted_invalid_transition(tmp_path):
+    store = TrendStore(str(tmp_path))
+    valid = TrendSnapshot(
+        ts=1000, closed_5m_ts=900, algorithm_version="test", state="range",
+        direction="range", core_score=0, confidence=0,
+    )
+    invalid = valid.model_copy(deep=True)
+    invalid.ts, invalid.closed_5m_ts = 1300, 1200
+    valid.active_flows["spot"] = ActiveFlowSnapshot(
+        market="spot", semantics="", quality=DataQuality(valid=True, status="fresh"),
+    )
+    invalid.active_flows["spot"] = ActiveFlowSnapshot(
+        market="spot", semantics="",
+        quality=DataQuality(valid=False, status="stale", reason="超时"),
+    )
+    invalid_events = build_events(invalid, valid, store)
+    source_invalid = next(
+        event for event in invalid_events if event.event_type == "data_source_invalid"
+    )
+    assert store.add_event(source_invalid) is True
+    recovered = valid.model_copy(deep=True)
+    recovered.ts, recovered.closed_5m_ts = 1600, 1500
+    recovery_events = build_events(recovered, invalid, store)
+    assert any(event.event_type == "data_source_recovered" for event in recovery_events)
+    store.close()
+
+
+def test_looknode_high_turnover_alert_is_neutral_and_deduplicated(tmp_path):
+    store = TrendStore(str(tmp_path))
+    snapshot = TrendSnapshot(
+        ts=2000, closed_5m_ts=1800, algorithm_version="test", state="range",
+        direction="range", core_score=0, confidence=0,
+    )
+    snapshot.exchange_transfer_flow = ExchangeTransferFlowSnapshot(
+        latest_date_ts=86400,
+        windows=[ExchangeTransferWindow(
+            window="1d", inflow_btc=30_000, outflow_btc=29_500,
+            netflow_btc=500, net_ratio=0.0084,
+            inflow_percentile_365d=99.5, outflow_percentile_365d=99.4,
+        )],
+        chart=[ExchangeTransferPoint(
+            ts=86400, inflow_btc=30_000, outflow_btc=29_500, netflow_btc=500,
+        )],
+        quality=DataQuality(valid=True, status="fresh", points=365),
+    )
+    events = build_events(snapshot, None, store)
+    turnover = [event for event in events if event.event_type == "looknode_exchange_high_turnover"]
+    assert len(turnover) == 1
+    assert "不作方向解读" in turnover[0].message
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_trend_ai_402_opens_six_hour_circuit_breaker():
+    reviewer = TrendAIReviewer(SimpleNamespace(
+        model="test", timeout_sec=1, api_key="key", api_base="https://example.invalid",
+    ))
+    calls = 0
+
+    class PaymentRequired(Exception):
+        status_code = 402
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise PaymentRequired("no balance")
+
+    reviewer._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions()),
+    )
+    snapshot = TrendSnapshot(
+        ts=1, closed_5m_ts=0, algorithm_version="test",
+        state="bearish_watch", direction="bearish", core_score=-30, confidence=30,
+    )
+    first = await reviewer.review(snapshot)
+    second = await reviewer.review(snapshot)
+    assert first[0] == second[0] == "not_run"
+    assert calls == 1
+    assert "不影响原生算法" in second[1]
+    assert "HTTP 402" in reviewer.suspension_message()
 
 
 def test_machine_context_survives_weakening_restart(tmp_path):

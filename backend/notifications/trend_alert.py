@@ -24,7 +24,7 @@ def _event(
 
 
 def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
-                 store: TrendStore, config=None) -> list[TrendEvent]:
+                 store: TrendStore, config=None, looknode_config=None) -> list[TrendEvent]:
     events: list[TrendEvent] = []
     state_changed = previous is None or snapshot.state != previous.state
     recovered = bool(previous and previous.state == "data_invalid" and snapshot.state != "data_invalid")
@@ -69,6 +69,7 @@ def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
             percentile = store.flow_abs_percentile(
                 market, window.window, window.net_usd, lookback,
                 min_samples=720 if window.window == "1h" else 180,
+                as_of_ts=window_end_ts,
             )
             window.historical_percentile = percentile
             threshold = (
@@ -177,6 +178,70 @@ def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
             f"{bucket}d:{word}:{streak_start_ts}",
         ))
 
+    transfer = snapshot.exchange_transfer_flow
+    if transfer.quality.valid and transfer.quality.points >= 180 and transfer.latest_date_ts:
+        daily_threshold = float(getattr(looknode_config, "alert_daily_percentile", 99.0))
+        multiday_threshold = float(
+            getattr(looknode_config, "alert_multiday_percentile", 98.0)
+        )
+        one_day = next((item for item in transfer.windows if item.window == "1d"), None)
+        if one_day:
+            inflow_extreme = (one_day.inflow_percentile_365d or 0) >= daily_threshold
+            outflow_extreme = (one_day.outflow_percentile_365d or 0) >= daily_threshold
+            if inflow_extreme and outflow_extreme and abs(one_day.net_ratio) < 0.10:
+                events.append(_event(
+                    snapshot, "looknode_exchange_high_turnover",
+                    "七家交易所BTC双向高周转",
+                    f"日级流入 {one_day.inflow_btc:,.2f} BTC、流出 "
+                    f"{one_day.outflow_btc:,.2f} BTC 同时达到历史极端，但净流比例仅 "
+                    f"{one_day.net_ratio * 100:.2f}%。可能是内部钱包迁移，不作方向解读。",
+                    f"1d:turnover:{transfer.latest_date_ts}",
+                ))
+            elif inflow_extreme and one_day.netflow_btc > 0:
+                events.append(_event(
+                    snapshot, "looknode_exchange_inflow_extreme",
+                    "七家交易所BTC大额流入",
+                    f"日级流入 {one_day.inflow_btc:,.2f} BTC，达到365日"
+                    f"{one_day.inflow_percentile_365d:.1f}分位。充值增加潜在卖压，不等于已经卖出。",
+                    f"1d:in:{transfer.latest_date_ts}", "critical",
+                ))
+            elif outflow_extreme and one_day.netflow_btc < 0:
+                events.append(_event(
+                    snapshot, "looknode_exchange_outflow_extreme",
+                    "七家交易所BTC大额流出",
+                    f"日级流出 {one_day.outflow_btc:,.2f} BTC，达到365日"
+                    f"{one_day.outflow_percentile_365d:.1f}分位。提现减少潜在卖压，不等于已经买入。",
+                    f"1d:out:{transfer.latest_date_ts}", "critical",
+                ))
+        for window in transfer.windows:
+            if window.window not in ("3d", "7d"):
+                continue
+            required = 2 if window.window == "3d" else 5
+            if ((window.abs_net_percentile_365d or 0) < multiday_threshold
+                    or window.same_sign_days < required):
+                continue
+            word = "净流入" if window.netflow_btc > 0 else "净流出"
+            events.append(_event(
+                snapshot, f"looknode_exchange_net_{window.window}_extreme",
+                f"七家交易所BTC持续{word}",
+                f"{window.window}累计 {window.netflow_btc:+,.2f} BTC，绝对净流达到365日"
+                f"{window.abs_net_percentile_365d:.1f}分位，{window.same_sign_days}/"
+                f"{window.window[:-1]}天同向。链上转账不等于实际买卖。",
+                f"{window.window}:{'in' if window.netflow_btc > 0 else 'out'}:"
+                f"{transfer.latest_date_ts}",
+            ))
+        seven_day = next((item for item in transfer.windows if item.window == "7d"), None)
+        if (transfer.cross_source_status == "conflict" and seven_day
+                and (seven_day.abs_net_percentile_365d or 0) >= 95
+                and (transfer.coinglass_7d_abs_percentile or 0) >= 95):
+            events.append(_event(
+                snapshot, "wallet_cross_source_conflict",
+                "交易所钱包数据源强冲突",
+                "Looknode七家交易所净流与CoinGlass钱包余额7日方向相反，"
+                "且双方均达到历史高分位；本轮钱包可信度修正已归零。",
+                f"7d:conflict:{transfer.latest_date_ts}", "warning",
+            ))
+
     # 辅助源质量变化单独通知；Footprint首版零权重，不进入邮件。
     if previous is not None:
         current_sources = {
@@ -185,6 +250,7 @@ def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
             "wallet": snapshot.wallet_flow.quality,
             "funding": snapshot.funding.quality,
             "etf": snapshot.etf_flow.quality,
+            "looknode_exchange_flow": snapshot.exchange_transfer_flow.quality,
         }
         previous_sources = {
             "spot_netflow": previous.active_flows.get("spot").quality if previous.active_flows.get("spot") else None,
@@ -192,12 +258,17 @@ def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
             "wallet": previous.wallet_flow.quality,
             "funding": previous.funding.quality,
             "etf": previous.etf_flow.quality,
+            "looknode_exchange_flow": previous.exchange_transfer_flow.quality,
         }
         for source, quality in current_sources.items():
             old = previous_sources.get(source)
             if quality is None or old is None or quality.valid == old.valid:
                 continue
+            if quality.status == "pending" or old.status == "pending":
+                continue
             recovered_source = quality.valid
+            if recovered_source and not store.has_unrecovered_source_failure(source):
+                continue
             events.append(_event(
                 snapshot,
                 "data_source_recovered" if recovered_source else "data_source_invalid",
@@ -217,7 +288,7 @@ def render_email(event: TrendEvent, snapshot: TrendSnapshot) -> tuple[str, str]:
       <div style="background:{color};padding:14px 20px;color:white;font-weight:700">{html.escape(event.title)}</div>
       <div style="padding:20px;line-height:1.7">
         <p>{html.escape(event.message)}</p>
-        <p>状态：{html.escape(snapshot.state)} · 核心方向分：{snapshot.core_score:.1f} · 置信度：{snapshot.confidence:.1f}</p>
+        <p>状态：{html.escape(snapshot.state)} · 核心方向分：{snapshot.core_score:.1f} · 信号强度：{snapshot.confidence:.1f}/100（不是胜率）</p>
         <p style="color:#94a3b8;font-size:12px">仅用于趋势与资金状态监控，不构成交易、开仓、止盈止损或仓位建议。</p>
       </div>
     </div></body></html>"""
