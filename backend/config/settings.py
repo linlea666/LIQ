@@ -320,6 +320,12 @@ class TrendMonitorConfig:
     active_flow_1h_percentile: float = 99.0
     active_flow_24h_percentile: float = 97.5
     active_flow_1h_min_ratio: float = 0.10
+    behavior_futures_net_ratio_min: float = 0.005
+    behavior_spot_net_ratio_confirm: float = 0.003
+    behavior_price_atr_min: float = 0.15
+    behavior_oi_change_1h_min: float = 0.001
+    behavior_oi_change_4h_min: float = 0.0025
+    behavior_subbar_share_min: float = 7 / 12
 
 
 @dataclass(frozen=True)
@@ -656,6 +662,24 @@ def _build_settings(raw: dict) -> Settings:
         active_flow_1h_percentile=max(90.0, min(100.0, float(trend_raw.get("active_flow_1h_percentile", 99.0)))),
         active_flow_24h_percentile=max(90.0, min(100.0, float(trend_raw.get("active_flow_24h_percentile", 97.5)))),
         active_flow_1h_min_ratio=max(0.0, min(1.0, float(trend_raw.get("active_flow_1h_min_ratio", 0.10)))),
+        behavior_futures_net_ratio_min=max(
+            1e-6, min(1.0, float(trend_raw.get("behavior_futures_net_ratio_min", 0.005))),
+        ),
+        behavior_spot_net_ratio_confirm=max(
+            1e-6, min(1.0, float(trend_raw.get("behavior_spot_net_ratio_confirm", 0.003))),
+        ),
+        behavior_price_atr_min=max(
+            0.01, float(trend_raw.get("behavior_price_atr_min", 0.15)),
+        ),
+        behavior_oi_change_1h_min=max(
+            1e-6, float(trend_raw.get("behavior_oi_change_1h_min", 0.001)),
+        ),
+        behavior_oi_change_4h_min=max(
+            1e-6, float(trend_raw.get("behavior_oi_change_4h_min", 0.0025)),
+        ),
+        behavior_subbar_share_min=max(
+            0.5, min(1.0, float(trend_raw.get("behavior_subbar_share_min", 7 / 12))),
+        ),
     )
 
     return Settings(

@@ -17,8 +17,8 @@ from ai.trend_reviewer import TrendAIReviewer
 from notifications.trend_alert import build_events
 from processors.trend_monitor import (
     build_funding_snapshot, calculate_timeframe, parse_closed_klines,
-    parse_cvd_deltas, parse_etf_flow, parse_exchange_transfer_flow,
-    parse_wallet_flow, _oi_component,
+    interpret_flow_behavior, parse_cvd_deltas, parse_etf_flow,
+    parse_exchange_transfer_flow, parse_wallet_flow, _oi_component,
 )
 from processors.trend_service import TrendService
 from sources.coinglass import CoinglassSource, PriorityRateLimiter
@@ -280,6 +280,164 @@ def _tf(tf: str, score: float, spot: bool = True) -> TimeframeTrend:
         direction="bullish" if score > 0 else "bearish",
         spot_confirms=spot, quality=DataQuality(valid=True, points=50),
     )
+
+
+def _behavior_case(
+    *, price_end: float = 102.0, oi_change: float = 0.01,
+    spot_ratio: float = -0.02, futures_ratio: float = 0.02,
+    persistent: bool = True,
+):
+    bars = []
+    for idx in range(30):
+        close = 100.0 if idx < 29 else price_end
+        bars.append({
+            "ts": idx * 3600 * 1000, "open": 100.0,
+            "high": max(101.0, close + 1), "low": min(99.0, close - 1),
+            "close": close, "volume": 100.0,
+            "close_ts": (idx + 1) * 3600 * 1000 - 1,
+        })
+
+    def rows(ratio: float, count: int, one_off: bool = False):
+        deltas = [ratio * 100.0] * count
+        if one_off:
+            deltas = [-1.0] * (count - 1) + [count - 1 + ratio * 100.0 * count]
+        return [
+            {"ts": idx * 300, "buy": (100 + delta) / 2,
+             "sell": (100 - delta) / 2, "delta": delta}
+            for idx, delta in enumerate(deltas)
+        ]
+
+    spot = rows(spot_ratio, 12)
+    futures = rows(futures_ratio, 12, one_off=not persistent)
+    oi = [
+        {"ts": 0, "close": 1000.0 * 100.0},
+        {"ts": 3600, "close": 1000.0 * (1 + oi_change) * price_end},
+    ]
+    one_hour = (bars, spot, futures, oi)
+    four_hour = (bars, rows(spot_ratio, 4), rows(futures_ratio, 4), oi)
+    timeframes = {"1h": _tf("1h", -30), "4h": _tf("4h", -50)}
+    config = SimpleNamespace(
+        behavior_futures_net_ratio_min=0.005,
+        behavior_spot_net_ratio_confirm=0.003,
+        behavior_price_atr_min=0.15,
+        behavior_oi_change_1h_min=0.001,
+        behavior_oi_change_4h_min=0.0025,
+        behavior_subbar_share_min=7 / 12,
+    )
+    return timeframes, {"1h": one_hour, "4h": four_hour}, config
+
+
+def test_flow_behavior_new_longs_without_spot_is_unconfirmed_and_zero_weight():
+    timeframes, inputs, config = _behavior_case()
+    original_scores = {key: value.score for key, value in timeframes.items()}
+    result = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+    assert result.code == "leveraged_rebound_unconfirmed"
+    assert result.score_weight == 0
+    assert result.quality.valid is True
+    assert any("现货" in item for item in result.risks)
+    assert {key: value.score for key, value in timeframes.items()} == original_scores
+
+
+def test_flow_behavior_adds_opposite_24h_and_funding_as_risk_only():
+    timeframes, inputs, config = _behavior_case()
+    active = {
+        "futures": ActiveFlowSnapshot(
+            market="futures", semantics="test",
+            windows=[FlowWindow(
+                window="24h", buy_usd=40, sell_usd=60,
+                net_usd=-20, net_ratio=-0.20,
+            )],
+            quality=DataQuality(valid=True, status="fresh", points=1),
+        ),
+    }
+    funding = build_funding_snapshot(None, None, None, None, False)
+    funding.crowding = "long_crowded"
+    result = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        active_flows=active, funding=funding,
+    )
+    assert result.code == "leveraged_rebound_unconfirmed"
+    assert any("24h" in item for item in result.risks)
+    assert any("多头拥挤" in item for item in result.risks)
+    assert result.score_weight == 0
+
+
+def test_flow_behavior_distinguishes_short_covering_and_spot_confirmed_rebound():
+    timeframes, inputs, config = _behavior_case(oi_change=-0.01)
+    covering = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+    assert covering.code == "short_covering"
+
+    timeframes, inputs, config = _behavior_case(spot_ratio=0.02)
+    confirmed = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+    assert confirmed.code == "spot_confirmed_rebound"
+    assert any("状态机" in item for item in confirmed.missing_confirmations)
+
+
+def test_flow_behavior_never_upgrades_existing_reversal_state():
+    timeframes, inputs, config = _behavior_case(spot_ratio=0.02)
+    watched = interpret_flow_behavior(
+        "reversal_watch", "bullish", timeframes, inputs, config,
+    )
+    confirmed = interpret_flow_behavior(
+        "reversal_confirmed", "bullish", timeframes, inputs, config,
+    )
+    assert watched.code == "reversal_watch"
+    assert confirmed.code == "reversal_confirmed"
+
+
+def test_flow_behavior_flags_absorption_and_one_off_spike_without_calling_it_fact():
+    timeframes, inputs, config = _behavior_case(price_end=100.0)
+    absorbed = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+    assert absorbed.code == "buy_absorption_risk"
+    assert "风险" in absorbed.headline
+
+    timeframes, inputs, config = _behavior_case(persistent=False)
+    spike = interpret_flow_behavior(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+    )
+    assert spike.code == "one_off_spike"
+    assert spike.evidence_grade == "weak"
+
+
+def test_flow_behavior_zero_subbars_do_not_count_as_persistent_selling():
+    timeframes, inputs, config = _behavior_case(
+        price_end=98.0, futures_ratio=-0.02,
+    )
+    futures_rows = inputs["1h"][2]
+    for row in futures_rows:
+        row.update({"buy": 50.0, "sell": 50.0, "delta": 0.0})
+    futures_rows[-1].update({"buy": 20.0, "sell": 80.0, "delta": -60.0})
+    result = interpret_flow_behavior(
+        "bullish_confirmed", "bullish", timeframes, inputs, config,
+    )
+    assert result.code == "one_off_spike"
+    assert result.metrics["1h"].futures_negative_share == pytest.approx(1 / 12, abs=1e-6)
+
+
+def test_flow_behavior_missing_core_data_is_invalid_and_old_snapshot_defaults():
+    timeframes, inputs, config = _behavior_case()
+    timeframes["4h"].quality.valid = False
+    result = interpret_flow_behavior(
+        "bearish_watch", "bearish", timeframes, inputs, config,
+    )
+    assert result.code == "data_invalid"
+    assert result.quality.valid is False
+
+    old_payload = TrendSnapshot(
+        ts=1000, closed_5m_ts=900, algorithm_version="v3", state="range",
+        direction="range", core_score=0, confidence=0,
+    ).model_dump(exclude={"flow_behavior"})
+    restored = TrendSnapshot.model_validate(old_payload)
+    assert restored.flow_behavior.code == "data_invalid"
+    assert restored.flow_behavior.score_weight == 0
 
 
 def test_confirmation_counts_only_distinct_closed_5m_bars(tmp_path):

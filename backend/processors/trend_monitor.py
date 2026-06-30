@@ -14,8 +14,9 @@ from typing import Any, Optional
 
 from models.trend_monitor import (
     ActiveFlowSnapshot, DataQuality, EtfFlowSnapshot, ExchangeTransferFlowSnapshot,
-    ExchangeTransferPoint, ExchangeTransferWindow, FlowWindow, FundingSnapshot,
-    TimeframeTrend, WalletChartPoint, WalletContribution, WalletFlowSnapshot,
+    ExchangeTransferPoint, ExchangeTransferWindow, FlowBehaviorMetrics,
+    FlowBehaviorSnapshot, FlowWindow, FundingSnapshot, TimeframeTrend,
+    WalletChartPoint, WalletContribution, WalletFlowSnapshot,
 )
 
 
@@ -352,6 +353,253 @@ def calculate_core_direction(
         else "bearish" if score <= -direction_threshold else "range"
     )
     return round(_clamp(score), 2), direction
+
+
+def _flow_behavior_metrics(
+    timeframe: str,
+    inputs: tuple[list[dict], list[dict], list[dict], list[dict]],
+) -> Optional[FlowBehaviorMetrics]:
+    bars, spot_rows, futures_rows, oi_rows = inputs
+    if len(bars) < 15 or not spot_rows or not futures_rows or len(oi_rows) < 2:
+        return None
+    start_price = float(bars[-2]["close"])
+    end_price = float(bars[-1]["close"])
+    if start_price <= 0 or end_price <= 0:
+        return None
+    recent = bars[-15:]
+    true_ranges = [
+        max(
+            float(recent[idx]["high"]) - float(recent[idx]["low"]),
+            abs(float(recent[idx]["high"]) - float(recent[idx - 1]["close"])),
+            abs(float(recent[idx]["low"]) - float(recent[idx - 1]["close"])),
+        )
+        for idx in range(1, len(recent))
+    ]
+    atr = _wilder_latest(true_ranges, min(14, len(true_ranges))) or end_price * 0.001
+
+    def flow_stats(rows: list[dict]) -> tuple[float, float, float]:
+        total = sum(float(row["buy"]) + float(row["sell"]) for row in rows)
+        delta = sum(float(row["delta"]) for row in rows)
+        positive_share = sum(float(row["delta"]) > 0 for row in rows) / len(rows)
+        negative_share = sum(float(row["delta"]) < 0 for row in rows) / len(rows)
+        return (delta / total if total else 0.0), positive_share, negative_share
+
+    spot_ratio, spot_positive, spot_negative = flow_stats(spot_rows)
+    futures_ratio, futures_positive, futures_negative = flow_stats(futures_rows)
+    oi_start_coin = float(oi_rows[0]["close"]) / start_price
+    oi_end_coin = float(oi_rows[-1]["close"]) / end_price
+    oi_change = oi_end_coin / oi_start_coin - 1.0 if oi_start_coin > 0 else 0.0
+    price_change = end_price / start_price - 1.0
+    return FlowBehaviorMetrics(
+        timeframe=timeframe,
+        price_change_pct=round(price_change, 8),
+        price_change_atr=round((end_price - start_price) / atr, 6),
+        spot_net_ratio=round(spot_ratio, 8),
+        futures_net_ratio=round(futures_ratio, 8),
+        oi_change_pct=round(oi_change, 8),
+        spot_positive_share=round(spot_positive, 6),
+        spot_negative_share=round(spot_negative, 6),
+        futures_positive_share=round(futures_positive, 6),
+        futures_negative_share=round(futures_negative, 6),
+    )
+
+
+def interpret_flow_behavior(
+    state: str,
+    direction: str,
+    timeframes: dict[str, TimeframeTrend],
+    timeframe_inputs: dict[
+        str, tuple[list[dict], list[dict], list[dict], list[dict]]
+    ],
+    config: Any,
+    active_flows: Optional[dict[str, ActiveFlowSnapshot]] = None,
+    funding: Optional[FundingSnapshot] = None,
+) -> FlowBehaviorSnapshot:
+    """Explain closed-window futures flow without changing any trend score.
+
+    Trades alone cannot distinguish opening from closing.  Price response,
+    de-priced OI and spot order flow are therefore interpreted together.  The
+    result is diagnostic-only and deliberately has no score output.
+    """
+    required = ("1h", "4h")
+    if state == "data_invalid" or any(
+        key not in timeframes or not timeframes[key].quality.valid
+        or key not in timeframe_inputs
+        for key in required
+    ):
+        return FlowBehaviorSnapshot(
+            quality=DataQuality(
+                valid=False, status="missing",
+                reason="最近闭合1h或4h核心数据未通过质量门",
+            ),
+        )
+    metrics = {
+        key: _flow_behavior_metrics(key, timeframe_inputs[key]) for key in required
+    }
+    if any(value is None for value in metrics.values()):
+        return FlowBehaviorSnapshot(
+            quality=DataQuality(
+                valid=False, status="missing",
+                reason="价格、现货/合约主动成交或OI覆盖不足",
+            ),
+        )
+    one = metrics["1h"]
+    four = metrics["4h"]
+    assert one is not None and four is not None
+
+    futures_min = float(getattr(config, "behavior_futures_net_ratio_min", 0.005))
+    spot_min = float(getattr(config, "behavior_spot_net_ratio_confirm", 0.003))
+    price_min = float(getattr(config, "behavior_price_atr_min", 0.15))
+    oi_1h_min = float(getattr(config, "behavior_oi_change_1h_min", 0.001))
+    oi_4h_min = float(getattr(config, "behavior_oi_change_4h_min", 0.0025))
+    share_min = float(getattr(config, "behavior_subbar_share_min", 7 / 12))
+
+    pulse = 1 if one.futures_net_ratio >= futures_min else -1 if one.futures_net_ratio <= -futures_min else 0
+    pulse_share = one.futures_positive_share if pulse > 0 else one.futures_negative_share
+    persistent = pulse != 0 and pulse_share >= share_min
+    price_side = 1 if one.price_change_atr >= price_min else -1 if one.price_change_atr <= -price_min else 0
+    oi_side = 1 if one.oi_change_pct >= oi_1h_min else -1 if one.oi_change_pct <= -oi_1h_min else 0
+    spot_side = (
+        1 if one.spot_net_ratio >= spot_min and one.spot_positive_share >= share_min
+        else -1 if one.spot_net_ratio <= -spot_min and one.spot_negative_share >= share_min
+        else 0
+    )
+    context_price = 1 if four.price_change_atr >= price_min else -1 if four.price_change_atr <= -price_min else 0
+    context_oi = 1 if four.oi_change_pct >= oi_4h_min else -1 if four.oi_change_pct <= -oi_4h_min else 0
+    context_futures = (
+        1 if four.futures_net_ratio >= futures_min else
+        -1 if four.futures_net_ratio <= -futures_min else 0
+    )
+
+    evidence = [
+        f"最近闭合1h合约主动净流比例 {one.futures_net_ratio * 100:+.2f}%",
+        f"合约同向5m子周期占比 {pulse_share * 100:.0f}%" if pulse else "合约主动流未达到有效脉冲门槛",
+        f"1h价格反应 {one.price_change_atr:+.2f} ATR，去价格化OI {one.oi_change_pct * 100:+.2f}%",
+    ]
+    risks: list[str] = []
+    missing: list[str] = []
+    if pulse and spot_side != pulse:
+        risks.append("现货主动流没有同向确认，杠杆资金可能独自推动价格")
+        missing.append("等待现货主动成交与合约同向")
+    if pulse and (context_price == -pulse or context_futures == -pulse):
+        risks.append("4h价格或合约主动流仍与当前脉冲相反，属于逆主趋势尝试")
+        missing.append("等待4h价格与主动成交完成同向确认")
+    if context_oi == -pulse and context_price == pulse:
+        risks.append("4h上涨/下跌伴随OI下降，更像仓位回补而非新趋势扩张")
+    futures_flow = (active_flows or {}).get("futures")
+    futures_24h = next(
+        (window for window in futures_flow.windows if window.window == "24h"), None,
+    ) if futures_flow and futures_flow.quality.valid else None
+    if futures_24h and pulse * futures_24h.net_ratio <= -futures_min:
+        risks.append(
+            f"24h合约滚动净流仍为 {futures_24h.net_ratio * 100:+.2f}%，"
+            "当前1h脉冲尚未改变日内背景"
+        )
+    if funding is not None:
+        if pulse > 0 and funding.crowding == "long_crowded":
+            risks.append("Funding/Basis显示多头拥挤，追多脉冲的回撤风险更高")
+        elif pulse < 0 and funding.crowding == "short_crowded":
+            risks.append("Funding/Basis显示空头拥挤，追空脉冲的反弹风险更高")
+
+    code = "mixed"
+    headline = "资金行为信号混合，暂不能归类"
+    detail = "价格、主动成交和OI尚未形成可重复的联合结构。"
+    grade = "weak"
+    if pulse == 0:
+        code = "no_signal"
+        headline = "当前没有达到门槛的合约主动资金脉冲"
+        detail = "合约净流规模不足，不能据此判断反弹、下跌或趋势变化。"
+        missing = ["等待合约主动流达到有效比例并形成子周期持续性"]
+    elif not persistent:
+        code = "one_off_spike"
+        headline = "更像单次合约脉冲，持续性不足"
+        detail = "净流主要集中在少数5m子周期，暂不能当作稳定资金方向。"
+        risks.append("单点拉升或砸盘后容易快速回吐")
+        missing.append("至少7/12个闭合5m子周期保持同向")
+    elif state == "reversal_confirmed" and direction == ("bullish" if pulse > 0 else "bearish"):
+        code = "reversal_confirmed"
+        headline = "资金行为与已确认反转方向一致"
+        detail = "解释器只复述现有状态机结论，不独立确认反转。"
+        grade = "strong"
+    elif state == "reversal_watch" and direction == ("bullish" if pulse > 0 else "bearish"):
+        code = "reversal_watch"
+        headline = "资金行为支持反转观察，但尚未确认"
+        detail = "仍需满足现有4h主趋势、1h确认、现货确认及连续闭合周期要求。"
+        grade = "medium"
+        missing.append("等待现有趋势状态机完成反转确认")
+    elif pulse > 0:
+        if price_side <= 0 and oi_side > 0 and spot_side <= 0:
+            code = "buy_absorption_risk"
+            headline = "合约买盘未有效推高价格，诱多/吸收风险较高"
+            detail = "主动买入与OI同时增加，但价格反应不足，可能有被动卖盘承接。"
+            grade = "medium"
+            risks.append("不能断言已经诱多，需观察下一闭合周期是否回落")
+        elif price_side > 0 and oi_side < 0:
+            code = "short_covering"
+            headline = "这波上涨更像空头回补，不是新增多头确认"
+            detail = "价格上涨、合约主动买入但OI下降，可能包含主动平空或空头清算。"
+            grade = "medium"
+            missing.append("等待OI重新增加并获得现货买盘确认")
+        elif price_side > 0 and oi_side >= 0 and spot_side > 0:
+            code = "spot_confirmed_rebound"
+            headline = "反弹获得现货确认，但仍不等于趋势反转"
+            detail = "价格、合约主动买盘与现货需求共同改善，反弹质量高于纯杠杆拉升。"
+            grade = "strong" if context_price > 0 else "medium"
+            if context_price <= 0:
+                missing.append("等待4h主趋势转强并通过状态机确认")
+            elif state not in ("bullish_confirmed", "reversal_confirmed") or direction != "bullish":
+                missing.append("等待现有趋势状态机确认多头趋势或反转")
+        elif price_side > 0 and oi_side > 0:
+            code = "leveraged_rebound_unconfirmed"
+            headline = "新增杠杆多头正在尝试反弹，现货尚未确认"
+            detail = "价格上涨、OI增加且合约主动净买，但目前不能排除短线拉升或多头陷阱。"
+            grade = "medium"
+        else:
+            missing.append("等待价格对合约买盘产生明确正向反应")
+    else:
+        if price_side >= 0 and oi_side > 0 and spot_side >= 0:
+            code = "sell_absorption_risk"
+            headline = "合约卖盘未有效压低价格，诱空/吸收风险较高"
+            detail = "主动卖出与OI同时增加，但价格反应不足，可能有被动买盘承接。"
+            grade = "medium"
+            risks.append("不能断言已经诱空，需观察下一闭合周期是否反弹")
+        elif price_side < 0 and oi_side < 0:
+            code = "long_closing"
+            headline = "这波下跌更像多头止损/平仓"
+            detail = "价格下跌、合约主动卖出且OI下降，可能包含多头主动止损或清算。"
+            grade = "medium"
+            missing.append("等待OI重新增加并获得现货卖盘确认")
+        elif price_side < 0 and oi_side >= 0 and spot_side < 0:
+            code = "spot_confirmed_selloff"
+            headline = "下跌获得现货确认，但仍需4h趋势确认"
+            detail = "价格、合约主动卖盘与现货卖压共同增强。"
+            grade = "strong" if context_price < 0 else "medium"
+            if state not in ("bearish_confirmed", "reversal_confirmed") or direction != "bearish":
+                missing.append("等待现有趋势状态机确认空头趋势或反转")
+        elif price_side < 0 and oi_side > 0:
+            code = "leveraged_selloff_unconfirmed"
+            headline = "新增杠杆空头正在推动下跌，现货尚未确认"
+            detail = "价格下跌、OI增加且合约主动净卖，但目前不能排除短线砸盘或空头陷阱。"
+            grade = "medium"
+        else:
+            missing.append("等待价格对合约卖盘产生明确负向反应")
+
+    quality_age = max(timeframes[key].quality.age_sec or 0 for key in required)
+    return FlowBehaviorSnapshot(
+        code=code,
+        headline=headline,
+        detail=detail,
+        evidence_grade=grade,
+        evidence=evidence,
+        risks=list(dict.fromkeys(risks)),
+        missing_confirmations=list(dict.fromkeys(missing)),
+        metrics={"1h": one, "4h": four},
+        score_weight=0,
+        quality=DataQuality(
+            valid=True, status="fresh", age_sec=quality_age,
+            points=sum(timeframes[key].quality.points for key in required),
+        ),
+    )
 
 
 def parse_active_flow(

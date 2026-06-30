@@ -17,8 +17,9 @@ from notifications.email_alert import send_html_email
 from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
     build_funding_snapshot, calculate_core_direction, calculate_timeframe,
-    parse_active_flow, parse_closed_klines, parse_cvd_deltas, parse_etf_flow,
-    parse_exchange_transfer_flow, parse_oi, parse_wallet_flow,
+    interpret_flow_behavior, parse_active_flow, parse_closed_klines,
+    parse_cvd_deltas, parse_etf_flow, parse_exchange_transfer_flow, parse_oi,
+    parse_wallet_flow,
 )
 from sources.funding_official import fetch_official_pair
 from storage.trend_store import TrendStore
@@ -464,6 +465,12 @@ class TrendService:
                     snapshot.state = f"{snapshot.direction}_watch"
             else:
                 snapshot.ai_review_reason = self._ai_reviewer.suspension_message()
+
+        # 解释器必须读取AI复核后的最终展示状态，避免状态被降级后仍显示“反转已确认”。
+        snapshot.flow_behavior = interpret_flow_behavior(
+            snapshot.state, snapshot.direction, timeframes, tf_inputs, self._cfg,
+            active_flows=active_flows, funding=funding,
+        )
 
         # 只有AI后的最终状态才允许提交确认方向，避免veto后内部仍记为confirmed。
         self._machine = self._finalize_machine(

@@ -141,6 +141,13 @@ trend_monitor:
   active_flow_1h_percentile: 99
   active_flow_24h_percentile: 97.5
   active_flow_1h_min_ratio: 0.10
+  # 零权重资金行为解释器：只生成小白解读，不改变趋势评分或状态机。
+  behavior_futures_net_ratio_min: 0.005
+  behavior_spot_net_ratio_confirm: 0.003
+  behavior_price_atr_min: 0.15
+  behavior_oi_change_1h_min: 0.001
+  behavior_oi_change_4h_min: 0.0025
+  behavior_subbar_share_min: 0.5833333333
 
 processors:
   cvd:

@@ -62,6 +62,44 @@ class ActiveFlowSnapshot(BaseModel):
     quality: DataQuality = Field(default_factory=DataQuality)
 
 
+class FlowBehaviorMetrics(BaseModel):
+    timeframe: Literal["1h", "4h"]
+    price_change_pct: float = 0
+    price_change_atr: float = 0
+    spot_net_ratio: float = 0
+    futures_net_ratio: float = 0
+    oi_change_pct: float = 0
+    spot_positive_share: float = Field(default=0, ge=0, le=1)
+    spot_negative_share: float = Field(default=0, ge=0, le=1)
+    futures_positive_share: float = Field(default=0, ge=0, le=1)
+    futures_negative_share: float = Field(default=0, ge=0, le=1)
+
+
+class FlowBehaviorSnapshot(BaseModel):
+    code: Literal[
+        "data_invalid", "no_signal", "one_off_spike", "short_covering",
+        "leveraged_rebound_unconfirmed", "spot_confirmed_rebound",
+        "buy_absorption_risk", "long_closing",
+        "leveraged_selloff_unconfirmed", "spot_confirmed_selloff",
+        "sell_absorption_risk", "reversal_watch", "reversal_confirmed", "mixed",
+    ] = "data_invalid"
+    headline: str = "资金行为解释尚未就绪"
+    detail: str = "等待最近闭合1小时与4小时原生数据。"
+    evidence_grade: Literal["weak", "medium", "strong"] = "weak"
+    primary_window: Literal["1h"] = "1h"
+    context_window: Literal["4h"] = "4h"
+    evidence: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    missing_confirmations: list[str] = Field(default_factory=list)
+    metrics: dict[str, FlowBehaviorMetrics] = Field(default_factory=dict)
+    score_weight: Literal[0] = 0
+    quality: DataQuality = Field(default_factory=DataQuality)
+    note: str = (
+        "解释器依据最近闭合1h/4h原生数据，只解释资金行为，不改变趋势方向、"
+        "信号强度或状态机；诱多/诱空只能表述为风险。"
+    )
+
+
 class WalletContribution(BaseModel):
     exchange: str
     balance_btc: float = 0
@@ -215,6 +253,7 @@ class TrendSnapshot(BaseModel):
     confirmation_target: int = 3
     timeframes: dict[str, TimeframeTrend] = Field(default_factory=dict)
     active_flows: dict[str, ActiveFlowSnapshot] = Field(default_factory=dict)
+    flow_behavior: FlowBehaviorSnapshot = Field(default_factory=FlowBehaviorSnapshot)
     wallet_flow: WalletFlowSnapshot = Field(default_factory=WalletFlowSnapshot)
     exchange_transfer_flow: ExchangeTransferFlowSnapshot = Field(
         default_factory=ExchangeTransferFlowSnapshot,
