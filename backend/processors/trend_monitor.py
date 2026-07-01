@@ -15,8 +15,9 @@ from typing import Any, Optional
 from models.trend_monitor import (
     ActiveFlowSnapshot, DataQuality, EtfFlowSnapshot, ExchangeTransferFlowSnapshot,
     ExchangeTransferPoint, ExchangeTransferWindow, FlowBehaviorMetrics,
-    FlowBehaviorSnapshot, FlowWindow, FundingSnapshot, TimeframeTrend,
-    WalletChartPoint, WalletContribution, WalletFlowSnapshot,
+    FlowBehaviorSnapshot, FlowExhaustionMetrics, FlowExhaustionWatchSnapshot,
+    FlowWindow, FundingSnapshot, TimeframeTrend, WalletChartPoint,
+    WalletContribution, WalletFlowSnapshot,
 )
 
 
@@ -597,6 +598,293 @@ def interpret_flow_behavior(
         risks=list(dict.fromkeys(risks)),
         missing_confirmations=list(dict.fromkeys(missing)),
         metrics={"1h": one, "4h": four},
+        score_weight=0,
+        quality=DataQuality(
+            valid=True, status="fresh", age_sec=quality_age,
+            points=sum(timeframes[key].quality.points for key in required),
+        ),
+    )
+
+
+def _net_ratio(rows: list[dict]) -> Optional[float]:
+    if not rows:
+        return None
+    total = sum(float(row["buy"]) + float(row["sell"]) for row in rows)
+    if total <= 0:
+        return None
+    return sum(float(row["delta"]) for row in rows) / total
+
+
+def _hourly_flow_ratios(
+    bars: list[dict], flow_rows: list[dict], *, max_windows: int = 3,
+) -> list[float]:
+    """Return net/total ratios for the latest closed 1h bars.
+
+    This is diagnostic-only.  It intentionally uses the same raw 5m CVD rows as
+    the trend engine and does not reuse old CVD trend strings.
+    """
+    ratios: list[float] = []
+    for bar in bars[-max_windows:]:
+        start = int(bar["ts"] // 1000)
+        end = int((bar["close_ts"] + 1) // 1000)
+        rows = sorted([
+            row for row in flow_rows
+            if start <= int(row["ts"]) and int(row["ts"]) + 300 <= end
+        ], key=lambda row: int(row["ts"]))
+        expected_points = (end - start) // 300
+        if (
+            len(rows) != expected_points
+            or int(rows[0]["ts"]) != start
+            or int(rows[-1]["ts"]) + 300 != end
+            or any(
+                int(rows[idx]["ts"]) - int(rows[idx - 1]["ts"]) != 300
+                for idx in range(1, len(rows))
+            )
+        ):
+            return []
+        ratio = _net_ratio(rows)
+        if ratio is None:
+            return []
+        ratios.append(ratio)
+    return ratios
+
+
+def _ratio_slope(values: list[float]) -> Optional[float]:
+    if len(values) < 3:
+        return None
+    return (values[-1] - values[0]) / (len(values) - 1)
+
+
+def interpret_flow_exhaustion_watch(
+    state: str,
+    direction: str,
+    timeframes: dict[str, TimeframeTrend],
+    timeframe_inputs: dict[
+        str, tuple[list[dict], list[dict], list[dict], list[dict]]
+    ],
+    config: Any,
+    *,
+    full_1h_inputs: Optional[tuple[list[dict], list[dict], list[dict], list[dict]]] = None,
+    funding: Optional[FundingSnapshot] = None,
+) -> FlowExhaustionWatchSnapshot:
+    """Classify whether active flow is extending or exhausting.
+
+    The result is strictly read-only: it never changes score, direction, state
+    machine transitions, events or emails.  It exists to explain the difference
+    between "many traders are selling" and "selling pressure is still
+    accelerating or starting to fade".
+    """
+    required = ("1h", "4h")
+    if state == "data_invalid" or any(
+        key not in timeframes or not timeframes[key].quality.valid
+        or key not in timeframe_inputs
+        for key in required
+    ):
+        return FlowExhaustionWatchSnapshot(
+            quality=DataQuality(
+                valid=False, status="missing",
+                reason="最近闭合1h或4h核心数据未通过质量门",
+            ),
+        )
+
+    one = _flow_behavior_metrics("1h", timeframe_inputs["1h"])
+    four = _flow_behavior_metrics("4h", timeframe_inputs["4h"])
+    if one is None or four is None:
+        return FlowExhaustionWatchSnapshot(
+            quality=DataQuality(
+                valid=False, status="missing",
+                reason="价格、现货/合约主动成交或OI覆盖不足",
+            ),
+        )
+
+    spot_history: list[float] = []
+    futures_history: list[float] = []
+    if full_1h_inputs is not None:
+        hourly_bars, all_spot, all_futures, _all_oi = full_1h_inputs
+        spot_history = _hourly_flow_ratios(hourly_bars, all_spot, max_windows=3)
+        futures_history = _hourly_flow_ratios(hourly_bars, all_futures, max_windows=3)
+
+    spot_prev = spot_history[-2] if len(spot_history) >= 2 else None
+    futures_prev = futures_history[-2] if len(futures_history) >= 2 else None
+    spot_delta = one.spot_net_ratio - spot_prev if spot_prev is not None else None
+    futures_delta = (
+        one.futures_net_ratio - futures_prev
+        if futures_prev is not None else None
+    )
+    spot_slope = _ratio_slope(spot_history)
+    futures_slope = _ratio_slope(futures_history)
+
+    futures_min = float(getattr(config, "behavior_futures_net_ratio_min", 0.005))
+    spot_min = float(getattr(config, "behavior_spot_net_ratio_confirm", 0.003))
+    price_min = float(getattr(config, "behavior_price_atr_min", 0.15))
+    oi_min = float(getattr(config, "behavior_oi_change_1h_min", 0.001))
+    oi_4h_min = float(getattr(config, "behavior_oi_change_4h_min", 0.0025))
+
+    metrics = FlowExhaustionMetrics(
+        futures_net_ratio_1h=one.futures_net_ratio,
+        futures_net_ratio_prev_1h=futures_prev,
+        futures_net_ratio_delta=futures_delta,
+        futures_net_ratio_slope_3h=futures_slope,
+        spot_net_ratio_1h=one.spot_net_ratio,
+        spot_net_ratio_prev_1h=spot_prev,
+        spot_net_ratio_delta=spot_delta,
+        spot_net_ratio_slope_3h=spot_slope,
+        oi_change_1h=one.oi_change_pct,
+        oi_change_4h=four.oi_change_pct,
+        price_change_atr_1h=one.price_change_atr,
+        funding_crowding=funding.crowding if funding is not None else "unknown",
+        funding_percentile_30d=funding.percentile_30d if funding is not None else None,
+    )
+
+    futures_buy = one.futures_net_ratio >= futures_min
+    futures_sell = one.futures_net_ratio <= -futures_min
+    spot_buy = one.spot_net_ratio >= spot_min
+    spot_sell = one.spot_net_ratio <= -spot_min
+    price_up = one.price_change_atr >= price_min
+    price_down = one.price_change_atr <= -price_min
+    price_not_down = one.price_change_atr > -price_min
+    price_not_up = one.price_change_atr < price_min
+    oi_up = one.oi_change_pct >= oi_min
+    oi_down = one.oi_change_pct <= -oi_min
+    oi_not_up = one.oi_change_pct <= oi_min
+    oi_not_down = one.oi_change_pct >= -oi_min
+    futures_selling_eases = (
+        futures_delta is not None and futures_delta >= futures_min
+    ) or (futures_slope is not None and futures_slope >= futures_min / 2)
+    spot_selling_eases = (
+        not spot_sell
+        or (spot_delta is not None and spot_delta >= spot_min)
+        or (spot_slope is not None and spot_slope >= spot_min / 2)
+    )
+    futures_buying_eases = (
+        futures_delta is not None and futures_delta <= -futures_min
+    ) or (futures_slope is not None and futures_slope <= -futures_min / 2)
+    spot_buying_eases = (
+        not spot_buy
+        or (spot_delta is not None and spot_delta <= -spot_min)
+        or (spot_slope is not None and spot_slope <= -spot_min / 2)
+    )
+
+    evidence = [
+        f"1h合约净流比例 {one.futures_net_ratio * 100:+.2f}%",
+        (
+            f"较上一闭合1h变化 {futures_delta * 100:+.2f}个百分点"
+            if futures_delta is not None else "上一闭合1h样本不足，暂不能判断衰竭速度"
+        ),
+        f"1h价格反应 {one.price_change_atr:+.2f} ATR，去价格化OI {one.oi_change_pct * 100:+.2f}%",
+    ]
+    risks: list[str] = []
+    missing: list[str] = []
+    code = "mixed"
+    headline = "资金行为有变化，但还不能归类"
+    detail = "价格、主动成交、OI和现货确认没有形成清晰的延续或衰竭结构。"
+    grade = "weak"
+
+    if not futures_buy and not futures_sell:
+        code = "no_signal"
+        headline = "合约主动资金没有形成有效方向脉冲"
+        detail = "当前合约净买/净卖比例没有达到诊断门槛，不能判断延续、衰竭或陷阱。"
+        missing.append("等待合约主动成交净流达到有效比例")
+    elif (
+        price_down and futures_sell and spot_sell and one.oi_change_pct >= -oi_min
+        and direction == "bearish"
+    ):
+        code = "bearish_continuation"
+        headline = "当前仍是空头延续，不能因为卖得多就判断反弹"
+        detail = "价格继续下跌，现货和合约同时净卖，OI没有明显释放，说明新增空头或真实卖压仍在。"
+        grade = "strong" if four.oi_change_pct >= -oi_4h_min else "medium"
+        if futures_selling_eases:
+            risks.append("虽然方向仍偏空，但合约净卖已有收敛迹象，需观察下一小时是否继续减弱")
+        missing.append("需要合约净卖继续收敛、OI释放、现货卖压转弱后才进入衰竭观察")
+    elif futures_sell and price_not_down and futures_selling_eases and oi_not_up and spot_selling_eases:
+        code = "sell_pressure_exhaustion_watch"
+        headline = "卖压开始衰竭观察，但不是反弹确认"
+        detail = "合约仍在净卖，但净卖强度较上一小时收敛，价格没有继续有效下跌，OI也未继续扩张。"
+        grade = "medium"
+        risks.append("只说明追空力量可能降速，不代表买盘已经接管")
+        if not spot_buy:
+            missing.append("等待现货主动成交由净卖转为净买")
+        if not price_up:
+            missing.append("等待价格出现明确正向反应")
+        if direction != "bullish":
+            missing.append("等待趋势状态机进入反转观察或多头确认")
+    elif price_up and futures_buy and oi_down:
+        code = "short_covering_bounce"
+        headline = "更像空头回补，不是新多趋势"
+        detail = "价格上涨、合约主动净买但OI下降，说明上涨可能主要来自空头平仓或清算回补。"
+        grade = "medium"
+        risks.append("空头回补结束后，如果现货不接力，价格容易重新走弱")
+        if not spot_buy:
+            missing.append("等待现货主动净买确认真实需求")
+        missing.append("等待OI重新健康增加或4h主趋势转强")
+    elif (
+        price_up and futures_buy and spot_buy and oi_not_down
+        and direction == "bullish"
+        and state in ("bullish_confirmed", "reversal_confirmed")
+    ):
+        code = "bullish_continuation"
+        headline = "多头延续证据较一致"
+        detail = "价格上涨，现货和合约主动买盘同向，OI没有明显释放。"
+        grade = "strong"
+        if funding is not None and funding.crowding == "long_crowded":
+            risks.append("Funding/Basis显示多头拥挤，继续追多的回撤风险更高")
+    elif price_up and futures_buy and spot_buy and oi_not_down:
+        code = "spot_confirmed_rebound"
+        headline = "现货确认反弹，等待趋势状态机确认"
+        detail = "价格上涨、合约主动净买、现货主动净买，且OI没有明显释放，反弹质量高于纯杠杆回补。"
+        grade = "strong" if direction == "bullish" else "medium"
+        if direction != "bullish" or state not in ("bullish_confirmed", "reversal_confirmed"):
+            missing.append("等待4h主趋势和连续闭合周期完成确认")
+    elif futures_buy and price_not_up and oi_up and not spot_buy:
+        code = "bull_trap_risk"
+        headline = "合约买盘推不动价格，存在诱多/吸收风险"
+        detail = "合约主动净买且OI增加，但价格反应不足、现货没有确认，可能被被动卖盘吸收。"
+        grade = "medium"
+        risks.append("不能把合约净买直接理解为真实看多")
+        missing.append("等待价格和现货主动成交同向确认")
+    elif futures_sell and price_not_down and not spot_sell:
+        code = "sell_absorption_risk"
+        headline = "合约卖盘压不动价格，存在诱空/吸收风险"
+        detail = "合约主动净卖但价格没有继续有效下跌，现货卖压也不强，可能有被动买盘承接。"
+        grade = "medium"
+        risks.append("不能把合约净卖直接理解为趋势继续下跌")
+        missing.append("等待价格反弹和现货净买确认，否则只能算风险观察")
+    elif futures_buy and price_not_up and futures_buying_eases and oi_not_down and spot_buying_eases:
+        code = "buy_pressure_exhaustion_watch"
+        headline = "买盘开始衰竭观察，但不是下跌确认"
+        detail = "合约仍在净买，但净买强度开始收敛，价格没有继续有效上涨。"
+        grade = "medium"
+        risks.append("只说明追多力量可能降速，不代表空头已经接管")
+    elif price_down and futures_sell and oi_down:
+        code = "long_closing_selloff"
+        headline = "这波下跌更像多头止损/平仓"
+        detail = "价格下跌、合约主动净卖且OI下降，常见于多头止损或清算释放，不是空头平仓。"
+        grade = "medium"
+        missing.append("若要确认空头趋势延续，需要看到OI重新增加且现货继续净卖")
+    elif price_down and futures_sell and spot_sell and one.oi_change_pct >= -oi_min:
+        code = "spot_confirmed_selloff"
+        headline = "现货确认卖压，偏空延续质量较高"
+        detail = "价格下跌、合约主动净卖、现货主动净卖，且OI没有明显释放。"
+        grade = "strong"
+
+    if funding is not None:
+        if code in {"bearish_continuation", "long_closing_selloff"} and funding.crowding == "short_crowded":
+            risks.append("Funding/Basis显示空头拥挤，继续追空的挤压风险更高")
+        elif code in {"bullish_continuation", "spot_confirmed_rebound"} and funding.crowding == "long_crowded":
+            risks.append("Funding/Basis显示多头拥挤，继续追多的回撤风险更高")
+        elif code == "sell_pressure_exhaustion_watch" and funding.crowding == "short_crowded":
+            evidence.append("Funding/Basis偏空拥挤，为空头回补提供潜在燃料")
+
+    quality_age = max(timeframes[key].quality.age_sec or 0 for key in required)
+    return FlowExhaustionWatchSnapshot(
+        code=code,
+        headline=headline,
+        detail=detail,
+        evidence_grade=grade,
+        evidence=list(dict.fromkeys(evidence)),
+        risks=list(dict.fromkeys(risks)),
+        missing_confirmations=list(dict.fromkeys(missing)),
+        metrics=metrics,
         score_weight=0,
         quality=DataQuality(
             valid=True, status="fresh", age_sec=quality_age,

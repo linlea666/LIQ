@@ -100,6 +100,45 @@ class FlowBehaviorSnapshot(BaseModel):
     )
 
 
+class FlowExhaustionMetrics(BaseModel):
+    futures_net_ratio_1h: float = 0
+    futures_net_ratio_prev_1h: Optional[float] = None
+    futures_net_ratio_delta: Optional[float] = None
+    futures_net_ratio_slope_3h: Optional[float] = None
+    spot_net_ratio_1h: float = 0
+    spot_net_ratio_prev_1h: Optional[float] = None
+    spot_net_ratio_delta: Optional[float] = None
+    spot_net_ratio_slope_3h: Optional[float] = None
+    oi_change_1h: float = 0
+    oi_change_4h: float = 0
+    price_change_atr_1h: float = 0
+    funding_crowding: str = "unknown"
+    funding_percentile_30d: Optional[float] = None
+
+
+class FlowExhaustionWatchSnapshot(BaseModel):
+    code: Literal[
+        "data_invalid", "no_signal", "bearish_continuation",
+        "sell_pressure_exhaustion_watch", "short_covering_bounce",
+        "spot_confirmed_rebound", "bull_trap_risk", "sell_absorption_risk",
+        "bullish_continuation", "buy_pressure_exhaustion_watch",
+        "long_closing_selloff", "spot_confirmed_selloff", "mixed",
+    ] = "data_invalid"
+    headline: str = "资金衰竭诊断尚未就绪"
+    detail: str = "等待最近闭合1小时资金、价格和OI数据。"
+    evidence_grade: Literal["weak", "medium", "strong"] = "weak"
+    evidence: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    missing_confirmations: list[str] = Field(default_factory=list)
+    metrics: FlowExhaustionMetrics = Field(default_factory=FlowExhaustionMetrics)
+    score_weight: Literal[0] = 0
+    quality: DataQuality = Field(default_factory=DataQuality)
+    note: str = (
+        "卖压/买压衰竭诊断只解释资金行为变化，不参与趋势方向、信号强度、"
+        "确认状态或邮件触发；衰竭只能表述为观察，不能表述为反弹/反转确认。"
+    )
+
+
 class WalletContribution(BaseModel):
     exchange: str
     balance_btc: float = 0
@@ -254,6 +293,9 @@ class TrendSnapshot(BaseModel):
     timeframes: dict[str, TimeframeTrend] = Field(default_factory=dict)
     active_flows: dict[str, ActiveFlowSnapshot] = Field(default_factory=dict)
     flow_behavior: FlowBehaviorSnapshot = Field(default_factory=FlowBehaviorSnapshot)
+    flow_exhaustion_watch: FlowExhaustionWatchSnapshot = Field(
+        default_factory=FlowExhaustionWatchSnapshot,
+    )
     wallet_flow: WalletFlowSnapshot = Field(default_factory=WalletFlowSnapshot)
     exchange_transfer_flow: ExchangeTransferFlowSnapshot = Field(
         default_factory=ExchangeTransferFlowSnapshot,

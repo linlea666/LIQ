@@ -283,12 +283,36 @@ def build_events(snapshot: TrendSnapshot, previous: Optional[TrendSnapshot],
 def render_email(event: TrendEvent, snapshot: TrendSnapshot) -> tuple[str, str]:
     subject = f"[LIQ BTC监控] {event.title}"
     color = "#ef4444" if event.severity == "critical" else "#f59e0b"
+    exhaustion = snapshot.flow_exhaustion_watch
+    exhaustion_html = ""
+    if exhaustion.quality.valid:
+        evidence = "".join(
+            f"<li>{html.escape(item)}</li>" for item in exhaustion.evidence[:3]
+        ) or "<li>暂无额外证据</li>"
+        risks = "".join(
+            f"<li>{html.escape(item)}</li>" for item in exhaustion.risks[:3]
+        ) or "<li>暂无额外风险证据</li>"
+        missing = "".join(
+            f"<li>{html.escape(item)}</li>"
+            for item in exhaustion.missing_confirmations[:3]
+        ) or "<li>当前分类无需额外解释条件</li>"
+        exhaustion_html = f"""
+        <div style="margin-top:18px;padding:14px;border:1px solid #334155;border-radius:8px;background:#0f172a">
+          <div style="font-weight:700">资金衰竭诊断（零权重）</div>
+          <div style="margin-top:6px">{html.escape(exhaustion.headline)}</div>
+          <div style="color:#94a3b8;font-size:12px">{html.escape(exhaustion.detail)}</div>
+          <div style="margin-top:10px;font-size:12px"><b>证据</b><ul>{evidence}</ul></div>
+          <div style="font-size:12px"><b>风险</b><ul>{risks}</ul></div>
+          <div style="font-size:12px"><b>仍缺确认</b><ul>{missing}</ul></div>
+          <div style="color:#64748b;font-size:11px">只解释资金行为，不单独触发邮件，不改变趋势方向或确认状态。</div>
+        </div>"""
     body = f"""<!doctype html><html><body style="font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px">
     <div style="max-width:680px;margin:auto;background:#111827;border:1px solid #334155;border-radius:12px;overflow:hidden">
       <div style="background:{color};padding:14px 20px;color:white;font-weight:700">{html.escape(event.title)}</div>
       <div style="padding:20px;line-height:1.7">
         <p>{html.escape(event.message)}</p>
         <p>状态：{html.escape(snapshot.state)} · 核心方向分：{snapshot.core_score:.1f} · 信号强度：{snapshot.confidence:.1f}/100（不是胜率）</p>
+        {exhaustion_html}
         <p style="color:#94a3b8;font-size:12px">仅用于趋势与资金状态监控，不构成交易、开仓、止盈止损或仓位建议。</p>
       </div>
     </div></body></html>"""

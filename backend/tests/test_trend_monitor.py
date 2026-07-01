@@ -14,11 +14,12 @@ from models.trend_monitor import (
     WalletFlowSnapshot,
 )
 from ai.trend_reviewer import TrendAIReviewer
-from notifications.trend_alert import build_events
+from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
     build_funding_snapshot, calculate_timeframe, parse_closed_klines,
-    interpret_flow_behavior, parse_cvd_deltas, parse_etf_flow,
-    parse_exchange_transfer_flow, parse_wallet_flow, _oi_component,
+    interpret_flow_behavior, interpret_flow_exhaustion_watch, parse_cvd_deltas,
+    parse_etf_flow, parse_exchange_transfer_flow, parse_wallet_flow,
+    _oi_component,
 )
 from processors.trend_service import TrendService
 from sources.coinglass import CoinglassSource, PriorityRateLimiter
@@ -468,6 +469,183 @@ def test_flow_behavior_missing_core_data_is_invalid_and_old_snapshot_defaults():
     restored = TrendSnapshot.model_validate(old_payload)
     assert restored.flow_behavior.code == "data_invalid"
     assert restored.flow_behavior.score_weight == 0
+
+
+def _exhaustion_case(
+    *, price_end: float, oi_change: float, spot_history: list[float],
+    futures_history: list[float], four_oi_change: float | None = None,
+):
+    """Build three aligned closed hours without relying on rolling NetFlow."""
+    assert len(spot_history) == len(futures_history) == 3
+    timeframes, inputs, config = _behavior_case(
+        price_end=price_end,
+        oi_change=oi_change,
+        spot_ratio=spot_history[-1],
+        futures_ratio=futures_history[-1],
+    )
+    bars = inputs["1h"][0]
+
+    def hourly_rows(ratios: list[float]):
+        result = []
+        for hour_offset, ratio in enumerate(ratios, start=27):
+            for subbar in range(12):
+                delta = ratio * 100.0
+                result.append({
+                    "ts": hour_offset * 3600 + subbar * 300,
+                    "buy": (100.0 + delta) / 2,
+                    "sell": (100.0 - delta) / 2,
+                    "delta": delta,
+                })
+        return result
+
+    spot_rows = hourly_rows(spot_history)
+    futures_rows = hourly_rows(futures_history)
+    current_spot = spot_rows[-12:]
+    current_futures = futures_rows[-12:]
+    current_oi = inputs["1h"][3]
+    inputs["1h"] = (bars, current_spot, current_futures, current_oi)
+
+    if four_oi_change is None:
+        four_oi_change = oi_change
+    four_oi = [
+        {"ts": 0, "close": 1000.0 * 100.0},
+        {"ts": 14_400, "close": 1000.0 * (1 + four_oi_change) * price_end},
+    ]
+    inputs["4h"] = (bars, current_spot, current_futures, four_oi)
+    full = (bars, spot_rows, futures_rows, current_oi)
+    return timeframes, inputs, config, full
+
+
+def test_flow_exhaustion_identifies_bearish_continuation_without_changing_scores():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=98.0, oi_change=0.01,
+        spot_history=[-0.01, -0.015, -0.02],
+        futures_history=[-0.01, -0.015, -0.02],
+    )
+    original_scores = {key: item.score for key, item in timeframes.items()}
+    result = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert result.code == "bearish_continuation"
+    assert result.score_weight == 0
+    assert {key: item.score for key, item in timeframes.items()} == original_scores
+
+
+def test_flow_exhaustion_requires_deceleration_for_sell_pressure_watch():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=100.0, oi_change=-0.002,
+        spot_history=[-0.02, -0.01, -0.001],
+        futures_history=[-0.04, -0.025, -0.01],
+    )
+    result = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert result.code == "sell_pressure_exhaustion_watch"
+    assert result.metrics.futures_net_ratio_prev_1h == pytest.approx(-0.025)
+    assert result.metrics.futures_net_ratio_delta == pytest.approx(0.015)
+    assert "不是反弹确认" in result.headline
+
+
+def test_flow_exhaustion_distinguishes_short_covering_and_spot_confirmed_rebound():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=102.0, oi_change=-0.01,
+        spot_history=[-0.01, -0.01, -0.01],
+        futures_history=[-0.01, 0.01, 0.02],
+    )
+    covering = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert covering.code == "short_covering_bounce"
+    assert "不是新多趋势" in covering.headline
+
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=102.0, oi_change=0.005,
+        spot_history=[-0.01, 0.005, 0.02],
+        futures_history=[-0.01, 0.01, 0.02],
+    )
+    confirmed = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert confirmed.code == "spot_confirmed_rebound"
+    assert any("4h" in item for item in confirmed.missing_confirmations)
+
+
+def test_flow_exhaustion_flags_bull_trap_and_sell_absorption_risks():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=100.0, oi_change=0.01,
+        spot_history=[-0.01, -0.01, -0.01],
+        futures_history=[0.01, 0.015, 0.02],
+    )
+    trap = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert trap.code == "bull_trap_risk"
+
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=100.0, oi_change=0.01,
+        spot_history=[0.0, 0.0, 0.0],
+        futures_history=[-0.02, -0.02, -0.02],
+    )
+    absorption = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full,
+    )
+    assert absorption.code == "sell_absorption_risk"
+
+
+def test_flow_exhaustion_funding_is_risk_only_and_old_snapshot_defaults():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=98.0, oi_change=0.01,
+        spot_history=[-0.01, -0.015, -0.02],
+        futures_history=[-0.01, -0.015, -0.02],
+    )
+    funding = build_funding_snapshot(None, None, None, None, False)
+    funding.crowding = "short_crowded"
+    result = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full, funding=funding,
+    )
+    assert result.code == "bearish_continuation"
+    assert any("空头拥挤" in item for item in result.risks)
+    assert result.score_weight == 0
+
+    old_payload = TrendSnapshot(
+        ts=1000, closed_5m_ts=900, algorithm_version="v3", state="range",
+        direction="range", core_score=0, confidence=0,
+    ).model_dump(exclude={"flow_exhaustion_watch"})
+    restored = TrendSnapshot.model_validate(old_payload)
+    assert restored.flow_exhaustion_watch.code == "data_invalid"
+    assert restored.flow_exhaustion_watch.score_weight == 0
+
+
+def test_existing_alert_email_includes_zero_weight_exhaustion_explanation():
+    snapshot = TrendSnapshot(
+        ts=1000, closed_5m_ts=900, algorithm_version="v3",
+        state="bearish_confirmed", direction="bearish", core_score=-50,
+        confidence=55,
+    )
+    snapshot.flow_exhaustion_watch.code = "sell_pressure_exhaustion_watch"
+    snapshot.flow_exhaustion_watch.headline = "卖压开始衰竭观察，但不是反弹确认"
+    snapshot.flow_exhaustion_watch.detail = "合约净卖收敛 <仅作诊断>"
+    snapshot.flow_exhaustion_watch.evidence = ["合约净卖较上一小时收敛"]
+    snapshot.flow_exhaustion_watch.risks = ["不代表买盘已经接管"]
+    snapshot.flow_exhaustion_watch.missing_confirmations = ["等待现货净买"]
+    snapshot.flow_exhaustion_watch.quality = DataQuality(valid=True, status="fresh")
+    event = TrendEvent(
+        ts=1000, event_type="trend_bearish_confirmed", severity="critical",
+        direction="bearish", title="空头趋势确认", message="核心条件通过",
+        dedup_key="test",
+    )
+    _, body = render_email(event, snapshot)
+    assert "资金衰竭诊断（零权重）" in body
+    assert "卖压开始衰竭观察，但不是反弹确认" in body
+    assert "&lt;仅作诊断&gt;" in body
+    assert "不单独触发邮件" in body
 
 
 def test_confirmation_counts_only_distinct_closed_5m_bars(tmp_path):
