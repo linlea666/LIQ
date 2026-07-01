@@ -13,11 +13,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from models.trend_monitor import (
-    ActiveFlowSnapshot, DataQuality, EtfFlowSnapshot, ExchangeTransferFlowSnapshot,
+    ActiveFlowSnapshot, ClosedFlowHistory, ClosedFlowLeg, ClosedFlowPoint,
+    DataQuality, EtfFlowSnapshot, ExchangeTransferFlowSnapshot,
     ExchangeTransferPoint, ExchangeTransferWindow, FlowBehaviorMetrics,
     FlowBehaviorSnapshot, FlowExhaustionMetrics, FlowExhaustionWatchSnapshot,
-    FlowWindow, FundingSnapshot, TimeframeTrend, WalletChartPoint,
-    WalletContribution, WalletFlowSnapshot,
+    FlowWindow, FlowWindowContext, FundingSnapshot, TimeframeTrend,
+    WalletChartPoint, WalletContribution, WalletFlowSnapshot,
 )
 
 
@@ -155,6 +156,107 @@ def parse_oi(raw: Any, interval_sec: int, now_sec: Optional[int] = None) -> list
         if ts > 0 and close > 0 and ts + interval_sec <= now_sec:
             out[ts] = {"ts": ts, "close": close}
     return [out[ts] for ts in sorted(out)]
+
+
+def build_closed_flow_histories(
+    bars_1h: list[dict], spot_1h: list[dict], futures_1h: list[dict],
+    oi_1h: list[dict], now_sec: Optional[int] = None,
+) -> dict[str, ClosedFlowHistory]:
+    """Aggregate native hourly inputs into complete, non-overlapping windows."""
+    now_sec = now_sec or int(time.time())
+    bars_by_start = {int(row["ts"] // 1000): row for row in bars_1h}
+    spot_by_start = {int(row["ts"]): row for row in spot_1h}
+    futures_by_start = {int(row["ts"]): row for row in futures_1h}
+    oi_by_boundary = {
+        int(row["ts"]) + 3600: float(row["close"])
+        for row in oi_1h if float(row.get("close", 0)) > 0
+    }
+    definitions = {"1h": (3600, 168), "4h": (14_400, 42), "24h": (86_400, 7)}
+    result: dict[str, ClosedFlowHistory] = {}
+
+    for name, (duration, limit) in definitions.items():
+        latest_end = now_sec // duration * duration
+        raw_points: list[dict] = []
+        # Scan extra windows so isolated missing hours do not unnecessarily
+        # shorten otherwise valid history.
+        for offset in range(limit * 2, 0, -1):
+            start = latest_end - offset * duration
+            end = start + duration
+            hours = list(range(start, end, 3600))
+            bars = [bars_by_start.get(ts) for ts in hours]
+            spots = [spot_by_start.get(ts) for ts in hours]
+            futures = [futures_by_start.get(ts) for ts in hours]
+            if (
+                any(row is None for row in bars)
+                or any(row is None for row in spots)
+                or any(row is None for row in futures)
+                or start not in oi_by_boundary or end not in oi_by_boundary
+            ):
+                continue
+            complete_bars = [row for row in bars if row is not None]
+            complete_spots = [row for row in spots if row is not None]
+            complete_futures = [row for row in futures if row is not None]
+
+            def leg(rows: list[dict]) -> ClosedFlowLeg:
+                buy = sum(float(row["buy"]) for row in rows)
+                sell = sum(float(row["sell"]) for row in rows)
+                total = buy + sell
+                return ClosedFlowLeg(
+                    buy_usd=buy, sell_usd=sell, net_usd=buy - sell,
+                    net_ratio=(buy - sell) / total if total > 0 else 0.0,
+                )
+
+            open_price = float(complete_bars[0]["open"])
+            close_price = float(complete_bars[-1]["close"])
+            oi_start_coin = oi_by_boundary[start] / open_price if open_price > 0 else 0
+            oi_end_coin = oi_by_boundary[end] / close_price if close_price > 0 else 0
+            raw_points.append({
+                "start": start, "end": end,
+                "open": open_price, "close": close_price,
+                "high": max(float(row["high"]) for row in complete_bars),
+                "low": min(float(row["low"]) for row in complete_bars),
+                "spot": leg(complete_spots), "futures": leg(complete_futures),
+                "oi_change": (
+                    oi_end_coin / oi_start_coin - 1.0 if oi_start_coin > 0 else 0.0
+                ),
+            })
+
+        contiguous_points: list[dict] = []
+        for point in raw_points:
+            if contiguous_points and int(point["start"]) != int(contiguous_points[-1]["end"]):
+                contiguous_points = []
+            contiguous_points.append(point)
+        raw_points = contiguous_points[-limit:]
+        items: list[ClosedFlowPoint] = []
+        true_ranges: list[float] = []
+        for idx, point in enumerate(raw_points):
+            previous_close = (
+                float(raw_points[idx - 1]["close"]) if idx else float(point["open"])
+            )
+            true_ranges.append(max(
+                float(point["high"]) - float(point["low"]),
+                abs(float(point["high"]) - previous_close),
+                abs(float(point["low"]) - previous_close),
+            ))
+            atr = _wilder_latest(true_ranges, min(14, len(true_ranges)))
+            if not atr or atr <= 0:
+                atr = float(point["close"]) * 0.001
+            items.append(ClosedFlowPoint(
+                window=name, start_ts=int(point["start"]), end_ts=int(point["end"]),
+                spot=point["spot"], futures=point["futures"],
+                price_change_pct=(float(point["close"]) / float(point["open"]) - 1.0),
+                price_change_atr=(float(point["close"]) - float(point["open"])) / atr,
+                oi_change_pct=float(point["oi_change"]),
+            ))
+        quality = DataQuality(
+            valid=bool(items), points=len(items),
+            age_sec=max(0, now_sec - items[-1].end_ts) if items else None,
+            as_of_ts=items[-1].end_ts if items else None, fetched_at_ts=now_sec,
+            status="fresh" if items else "missing",
+            reason="" if items else "完整闭合价格、CVD或OI历史覆盖不足",
+        )
+        result[name] = ClosedFlowHistory(window=name, items=items, quality=quality)
+    return result
 
 
 def _price_volume_score(bars: list[dict]) -> tuple[float, list[str]]:
@@ -641,10 +743,12 @@ def _hourly_flow_ratios(
                 for idx in range(1, len(rows))
             )
         ):
-            return []
+            ratios = []
+            continue
         ratio = _net_ratio(rows)
         if ratio is None:
-            return []
+            ratios = []
+            continue
         ratios.append(ratio)
     return ratios
 
@@ -653,6 +757,61 @@ def _ratio_slope(values: list[float]) -> Optional[float]:
     if len(values) < 3:
         return None
     return (values[-1] - values[0]) / (len(values) - 1)
+
+
+def _consecutive_direction(values: list[float]) -> int:
+    if not values or values[-1] == 0:
+        return 0
+    sign = 1 if values[-1] > 0 else -1
+    count = 0
+    for value in reversed(values):
+        if value * sign <= 0:
+            break
+        count += 1
+    return sign * count
+
+
+def summarize_closed_flow_history(history: ClosedFlowHistory) -> Optional[FlowWindowContext]:
+    if not history.quality.valid or not history.items:
+        return None
+    current = history.items[-1]
+    previous = history.items[-2] if len(history.items) >= 2 else None
+    prior = history.items[-4:-1]
+    recent = history.items[-3:]
+
+    def values(market: str) -> list[float]:
+        return [getattr(item, market).net_ratio for item in history.items]
+
+    spot_values = values("spot")
+    futures_values = values("futures")
+    spot_prior = [item.spot.net_ratio for item in prior]
+    futures_prior = [item.futures.net_ratio for item in prior]
+    spot_median = statistics.median(spot_prior) if spot_prior else None
+    futures_median = statistics.median(futures_prior) if futures_prior else None
+    spot_slope = _ratio_slope([item.spot.net_ratio for item in recent])
+    futures_slope = _ratio_slope([item.futures.net_ratio for item in recent])
+    return FlowWindowContext(
+        window=history.window,
+        current_spot_net_ratio=current.spot.net_ratio,
+        previous_spot_net_ratio=previous.spot.net_ratio if previous else None,
+        previous_3_spot_median=spot_median,
+        spot_delta_vs_previous_3=(
+            current.spot.net_ratio - spot_median if spot_median is not None else None
+        ),
+        spot_slope_3=spot_slope,
+        spot_consecutive_direction=_consecutive_direction(spot_values),
+        current_futures_net_ratio=current.futures.net_ratio,
+        previous_futures_net_ratio=previous.futures.net_ratio if previous else None,
+        previous_3_futures_median=futures_median,
+        futures_delta_vs_previous_3=(
+            current.futures.net_ratio - futures_median
+            if futures_median is not None else None
+        ),
+        futures_slope_3=futures_slope,
+        futures_consecutive_direction=_consecutive_direction(futures_values),
+        price_change_atr=current.price_change_atr,
+        oi_change_pct=current.oi_change_pct,
+    )
 
 
 def interpret_flow_exhaustion_watch(
@@ -665,6 +824,7 @@ def interpret_flow_exhaustion_watch(
     config: Any,
     *,
     full_1h_inputs: Optional[tuple[list[dict], list[dict], list[dict], list[dict]]] = None,
+    closed_histories: Optional[dict[str, ClosedFlowHistory]] = None,
     funding: Optional[FundingSnapshot] = None,
 ) -> FlowExhaustionWatchSnapshot:
     """Classify whether active flow is extending or exhausting.
@@ -701,8 +861,8 @@ def interpret_flow_exhaustion_watch(
     futures_history: list[float] = []
     if full_1h_inputs is not None:
         hourly_bars, all_spot, all_futures, _all_oi = full_1h_inputs
-        spot_history = _hourly_flow_ratios(hourly_bars, all_spot, max_windows=3)
-        futures_history = _hourly_flow_ratios(hourly_bars, all_futures, max_windows=3)
+        spot_history = _hourly_flow_ratios(hourly_bars, all_spot, max_windows=4)
+        futures_history = _hourly_flow_ratios(hourly_bars, all_futures, max_windows=4)
 
     spot_prev = spot_history[-2] if len(spot_history) >= 2 else None
     futures_prev = futures_history[-2] if len(futures_history) >= 2 else None
@@ -711,8 +871,13 @@ def interpret_flow_exhaustion_watch(
         one.futures_net_ratio - futures_prev
         if futures_prev is not None else None
     )
-    spot_slope = _ratio_slope(spot_history)
-    futures_slope = _ratio_slope(futures_history)
+    spot_slope = _ratio_slope(spot_history[-3:])
+    futures_slope = _ratio_slope(futures_history[-3:])
+    window_context = {
+        name: context
+        for name, history in (closed_histories or {}).items()
+        if (context := summarize_closed_flow_history(history)) is not None
+    }
 
     futures_min = float(getattr(config, "behavior_futures_net_ratio_min", 0.005))
     spot_min = float(getattr(config, "behavior_spot_net_ratio_confirm", 0.003))
@@ -748,12 +913,34 @@ def interpret_flow_exhaustion_watch(
     oi_down = one.oi_change_pct <= -oi_min
     oi_not_up = one.oi_change_pct <= oi_min
     oi_not_down = one.oi_change_pct >= -oi_min
+    four_context = window_context.get("4h")
+    day_context = window_context.get("24h")
+    fresh_futures_prior = futures_history[-4:-1]
+    fresh_spot_prior = spot_history[-4:-1]
+    futures_prior_median = (
+        statistics.median(fresh_futures_prior) if fresh_futures_prior else None
+    )
+    spot_prior_median = statistics.median(fresh_spot_prior) if fresh_spot_prior else None
+    futures_delta_median = (
+        one.futures_net_ratio - futures_prior_median
+        if futures_prior_median is not None else None
+    )
+    spot_delta_median = (
+        one.spot_net_ratio - spot_prior_median if spot_prior_median is not None else None
+    )
     futures_selling_eases = (
-        futures_delta is not None and futures_delta >= futures_min
+        futures_delta_median is not None and futures_delta_median >= futures_min
+    ) or (
+        futures_delta_median is None and futures_delta is not None
+        and futures_delta >= futures_min
     ) or (futures_slope is not None and futures_slope >= futures_min / 2)
     spot_selling_eases = (
         not spot_sell
-        or (spot_delta is not None and spot_delta >= spot_min)
+        or (spot_delta_median is not None and spot_delta_median >= -spot_min)
+        or (
+            spot_delta_median is None and spot_delta is not None
+            and spot_delta >= spot_min
+        )
         or (spot_slope is not None and spot_slope >= spot_min / 2)
     )
     futures_buying_eases = (
@@ -763,6 +950,26 @@ def interpret_flow_exhaustion_watch(
         not spot_buy
         or (spot_delta is not None and spot_delta <= -spot_min)
         or (spot_slope is not None and spot_slope <= -spot_min / 2)
+    )
+    four_hour_sell_accelerating = bool(
+        four_context
+        and (four_context.current_futures_net_ratio or 0) <= -futures_min
+        and (four_context.futures_delta_vs_previous_3 or 0) <= -futures_min
+    )
+    four_hour_sell_easing = bool(
+        four_context
+        and (four_context.current_futures_net_ratio or 0) <= -futures_min
+        and four_context.futures_delta_vs_previous_3 is not None
+        and four_context.futures_delta_vs_previous_3 >= futures_min
+    )
+    four_hour_rebound_confirms = bool(
+        four_context
+        and (four_context.current_futures_net_ratio or 0) >= futures_min
+        and (four_context.current_spot_net_ratio or 0) >= spot_min
+        and four_context.futures_delta_vs_previous_3 is not None
+        and four_context.futures_delta_vs_previous_3 >= 0
+        and four_context.spot_delta_vs_previous_3 is not None
+        and four_context.spot_delta_vs_previous_3 >= 0
     )
 
     evidence = [
@@ -796,11 +1003,25 @@ def interpret_flow_exhaustion_watch(
         if futures_selling_eases:
             risks.append("虽然方向仍偏空，但合约净卖已有收敛迹象，需观察下一小时是否继续减弱")
         missing.append("需要合约净卖继续收敛、OI释放、现货卖压转弱后才进入衰竭观察")
+    elif (
+        futures_sell and price_not_down and futures_selling_eases and oi_not_up
+        and spot_selling_eases and four_hour_sell_accelerating
+    ):
+        code = "mixed"
+        headline = "短线卖压缓和，但4小时卖压仍在增强"
+        detail = "最近完整1小时的合约净卖开始收敛，但完整4小时背景仍偏空，暂不能称为卖压衰竭。"
+        grade = "weak"
+        risks.append("短线止跌可能只是局部缓和，4小时卖压仍可能重新压低价格")
+        missing.extend(["等待4小时合约卖压同步收敛", "等待现货主动买盘持续确认"])
     elif futures_sell and price_not_down and futures_selling_eases and oi_not_up and spot_selling_eases:
         code = "sell_pressure_exhaustion_watch"
         headline = "卖压开始衰竭观察，但不是反弹确认"
         detail = "合约仍在净卖，但净卖强度较上一小时收敛，价格没有继续有效下跌，OI也未继续扩张。"
-        grade = "medium"
+        grade = "medium" if four_hour_sell_easing else "weak"
+        if four_hour_sell_easing:
+            evidence.append("完整4小时合约净卖也较前3窗口中位数收敛，衰竭观察获得中周期确认")
+        elif four_context:
+            risks.append("1小时卖压虽缓和，但4小时尚未同步收敛")
         risks.append("只说明追空力量可能降速，不代表买盘已经接管")
         if not spot_buy:
             missing.append("等待现货主动成交由净卖转为净买")
@@ -830,9 +1051,16 @@ def interpret_flow_exhaustion_watch(
             risks.append("Funding/Basis显示多头拥挤，继续追多的回撤风险更高")
     elif price_up and futures_buy and spot_buy and oi_not_down:
         code = "spot_confirmed_rebound"
-        headline = "现货确认反弹，等待趋势状态机确认"
-        detail = "价格上涨、合约主动净买、现货主动净买，且OI没有明显释放，反弹质量高于纯杠杆回补。"
-        grade = "strong" if direction == "bullish" else "medium"
+        headline = (
+            "1小时与4小时资金同步改善，反弹质量提高"
+            if four_hour_rebound_confirms else "现货确认反弹，等待趋势状态机确认"
+        )
+        detail = (
+            "价格上涨，现货和合约主动净买，完整4小时资金也同步改善；这仍是质量判断，不替代趋势状态机。"
+            if four_hour_rebound_confirms else
+            "价格上涨、合约主动净买、现货主动净买，且OI没有明显释放，反弹质量高于纯杠杆回补。"
+        )
+        grade = "strong" if four_hour_rebound_confirms or direction == "bullish" else "medium"
         if direction != "bullish" or state not in ("bullish_confirmed", "reversal_confirmed"):
             missing.append("等待4h主趋势和连续闭合周期完成确认")
     elif futures_buy and price_not_up and oi_up and not spot_buy:
@@ -867,6 +1095,26 @@ def interpret_flow_exhaustion_watch(
         detail = "价格下跌、合约主动净卖、现货主动净卖，且OI没有明显释放。"
         grade = "strong"
 
+    if code == "mixed" and not risks:
+        if price_up and spot_sell:
+            evidence.append("价格上涨，但现货主动卖压仍偏强，价格与真实需求发生冲突")
+            risks.append("若现货持续净卖，当前反弹可能缺少真实买盘接力")
+        elif price_down and spot_buy:
+            evidence.append("价格下跌，但现货主动买盘偏强，价格与现货需求发生冲突")
+            risks.append("买盘可能仍在被更强卖压吸收，暂不能判断止跌")
+        else:
+            risks.append("价格、主动成交与OI尚未形成一致结构，单一指标容易误判")
+        missing.extend(["等待现货与价格形成同向反应", "等待OI和4小时资金流给出一致确认"])
+
+    if futures_buy and four_context and (
+        four_context.current_futures_net_ratio or 0
+    ) <= -futures_min:
+        risks.append("1小时买盘回升，但完整4小时合约资金仍偏卖，中周期压力尚未扭转")
+    if futures_buy and day_context and (
+        day_context.current_futures_net_ratio or 0
+    ) <= -futures_min:
+        risks.append("完整24小时合约资金仍偏卖，短线反弹尚未改变日内背景")
+
     if funding is not None:
         if code in {"bearish_continuation", "long_closing_selloff"} and funding.crowding == "short_crowded":
             risks.append("Funding/Basis显示空头拥挤，继续追空的挤压风险更高")
@@ -885,6 +1133,7 @@ def interpret_flow_exhaustion_watch(
         risks=list(dict.fromkeys(risks)),
         missing_confirmations=list(dict.fromkeys(missing)),
         metrics=metrics,
+        window_context=window_context,
         score_weight=0,
         quality=DataQuality(
             valid=True, status="fresh", age_sec=quality_age,

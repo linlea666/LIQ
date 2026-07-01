@@ -10,15 +10,15 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from models.trend_monitor import (
-    DataQuality, ExchangeTransferFlowSnapshot, FootprintStatus, ModifierBreakdown,
-    TrendMachineContext, TrendSnapshot,
+    ClosedFlowHistory, DataQuality, ExchangeTransferFlowSnapshot, FootprintStatus,
+    ModifierBreakdown, TrendMachineContext, TrendSnapshot,
 )
 from notifications.email_alert import send_html_email
 from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
-    build_funding_snapshot, calculate_core_direction, calculate_timeframe,
-    interpret_flow_behavior, interpret_flow_exhaustion_watch, parse_active_flow,
-    parse_closed_klines, parse_cvd_deltas, parse_etf_flow,
+    build_closed_flow_histories, build_funding_snapshot, calculate_core_direction,
+    calculate_timeframe, interpret_flow_behavior, interpret_flow_exhaustion_watch,
+    parse_active_flow, parse_closed_klines, parse_cvd_deltas, parse_etf_flow,
     parse_exchange_transfer_flow, parse_oi, parse_wallet_flow,
 )
 from sources.funding_official import fetch_official_pair
@@ -61,6 +61,7 @@ class TrendService:
         self._aux_task: Optional[asyncio.Task] = None
         self._aux_data: dict[str, dict[str, Any]] = {}
         self._aux_bootstrapped = False
+        self._flow_histories: dict[str, ClosedFlowHistory] = {}
         self._latest = self._store.latest_snapshot()
         persisted = self._store.load_machine_context()
         if persisted and persisted.algorithm_version != self._cfg.algorithm_version:
@@ -82,6 +83,20 @@ class TrendService:
 
     def latest(self) -> Optional[TrendSnapshot]:
         return self._latest
+
+    def flow_history(self, window: str, limit: int) -> ClosedFlowHistory:
+        history = self._flow_histories.get(window)
+        if history is None:
+            return ClosedFlowHistory(
+                window=window,
+                quality=DataQuality(
+                    valid=False, status="pending", reason="等待首轮闭合资金流历史构建",
+                ),
+            )
+        result = history.model_copy(deep=True)
+        result.items = result.items[-limit:]
+        result.quality.points = len(result.items)
+        return result
 
     def source_diagnostics(self) -> dict[str, Any]:
         diagnostics = self._cg.request_diagnostics()
@@ -208,6 +223,23 @@ class TrendService:
         fut1h = parse_cvd_deltas(data.get("fut1h"), 3600, now)
         oi5 = parse_oi(data.get("oi5"), 300, now)
         oi1h = parse_oi(data.get("oi1h"), 3600, now)
+        built_histories = build_closed_flow_histories(
+            bars["1h"], spot1h, fut1h, oi1h, now,
+        )
+        for name, history in built_histories.items():
+            if history.quality.valid:
+                self._flow_histories[name] = history
+            elif name in self._flow_histories:
+                fallback = self._flow_histories[name].model_copy(deep=True)
+                fallback.quality.valid = False
+                fallback.quality.status = "stale"
+                fallback.quality.reason = history.quality.reason
+                fallback.quality.age_sec = max(
+                    0, now - (fallback.quality.as_of_ts or now),
+                )
+                self._flow_histories[name] = fallback
+            else:
+                self._flow_histories[name] = history
         # 1h 告警基线直接由同源逐根 buy/sell 回填；仅存历史分位，不重复进入方向评分。
         for market, rows in (("spot", spot1h), ("futures", fut1h)):
             self._store.record_flows(
@@ -474,6 +506,7 @@ class TrendService:
         snapshot.flow_exhaustion_watch = interpret_flow_exhaustion_watch(
             snapshot.state, snapshot.direction, timeframes, tf_inputs, self._cfg,
             full_1h_inputs=(bars["1h"], spot5, fut5, oi5),
+            closed_histories=self._flow_histories,
             funding=funding,
         )
 

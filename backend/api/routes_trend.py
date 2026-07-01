@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/api/trend", tags=["btc-trend-monitor"])
@@ -36,6 +38,24 @@ async def get_trend(coin: str):
 async def get_trend_history(coin: str, limit: int = Query(200, ge=1, le=2000)):
     service = _require_btc(coin)
     return {"coin": "BTC", "items": service.store.history(limit)}
+
+
+@router.get("/{coin}/flow-history")
+async def get_closed_flow_history(
+    coin: str,
+    window: Literal["1h", "4h", "24h"] = Query("1h"),
+    limit: Optional[int] = Query(None, ge=1, le=168),
+):
+    service = _require_btc(coin)
+    defaults = {"1h": 24, "4h": 18, "24h": 7}
+    maximums = {"1h": 168, "4h": 42, "24h": 7}
+    selected_limit = defaults[window] if limit is None else limit
+    if selected_limit > maximums[window]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{window} flow history limit must be <= {maximums[window]}",
+        )
+    return service.flow_history(window, selected_limit).model_dump(mode="json")
 
 
 @router.get("/{coin}/events")

@@ -6,20 +6,22 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from models.trend_monitor import (
-    ActiveFlowSnapshot, DataQuality, ExchangeTransferFlowSnapshot,
-    ExchangeTransferPoint, ExchangeTransferWindow, FlowWindow, TimeframeTrend,
-    TrendEvent, TrendMachineContext, TrendSnapshot, WalletChartPoint,
-    WalletFlowSnapshot,
+    ActiveFlowSnapshot, ClosedFlowHistory, ClosedFlowLeg, ClosedFlowPoint,
+    DataQuality, ExchangeTransferFlowSnapshot, ExchangeTransferPoint,
+    ExchangeTransferWindow, FlowWindow, TimeframeTrend, TrendEvent,
+    TrendMachineContext, TrendSnapshot, WalletChartPoint, WalletFlowSnapshot,
 )
 from ai.trend_reviewer import TrendAIReviewer
+from api import routes_trend
 from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
-    build_funding_snapshot, calculate_timeframe, parse_closed_klines,
-    interpret_flow_behavior, interpret_flow_exhaustion_watch, parse_cvd_deltas,
-    parse_etf_flow, parse_exchange_transfer_flow, parse_wallet_flow,
-    _oi_component,
+    build_closed_flow_histories, build_funding_snapshot, calculate_timeframe,
+    parse_closed_klines, interpret_flow_behavior, interpret_flow_exhaustion_watch,
+    parse_cvd_deltas, parse_etf_flow, parse_exchange_transfer_flow,
+    parse_wallet_flow, _oi_component,
 )
 from processors.trend_service import TrendService
 from sources.coinglass import CoinglassSource, PriorityRateLimiter
@@ -47,6 +49,88 @@ def test_cvd_is_rebuilt_from_buy_minus_sell_not_upstream_cumulative():
     rows = parse_cvd_deltas(raw, 300, now)
     assert [x["delta"] for x in rows] == [6, -4]
     assert [x["cvd_local"] for x in rows] == [6, 2]
+
+
+def _closed_history_inputs(hours: int = 200):
+    bars = []
+    spot = []
+    futures = []
+    for idx in range(hours):
+        bars.append({
+            "ts": idx * 3600 * 1000, "open": 100.0, "high": 101.0,
+            "low": 99.0, "close": 100.0, "volume": 100.0,
+            "close_ts": (idx + 1) * 3600 * 1000 - 1,
+        })
+        spot.append({"ts": idx * 3600, "buy": 60.0, "sell": 40.0, "delta": 20.0})
+        futures.append({"ts": idx * 3600, "buy": 40.0, "sell": 60.0, "delta": -20.0})
+    oi = [
+        {"ts": (idx - 1) * 3600, "close": 100_000.0 + idx * 10}
+        for idx in range(hours + 1)
+    ]
+    return bars, spot, futures, oi, hours * 3600
+
+
+def test_closed_flow_history_aggregates_complete_non_overlapping_windows():
+    bars, spot, futures, oi, now = _closed_history_inputs()
+    histories = build_closed_flow_histories(bars, spot, futures, oi, now)
+    assert len(histories["1h"].items) == 168
+    assert len(histories["4h"].items) == 42
+    assert len(histories["24h"].items) == 7
+    one = histories["1h"].items[-1]
+    four = histories["4h"].items[-1]
+    day = histories["24h"].items[-1]
+    assert one.end_ts == now
+    assert one.spot.buy_usd == 60
+    assert one.spot.sell_usd == 40
+    assert one.spot.net_ratio == pytest.approx(0.20)
+    assert four.spot.buy_usd == 4 * one.spot.buy_usd
+    assert four.futures.sell_usd == 4 * one.futures.sell_usd
+    assert day.spot.buy_usd == 24 * one.spot.buy_usd
+    assert day.futures.net_usd == 24 * one.futures.net_usd
+
+
+def test_closed_flow_history_rejects_partial_or_missing_subperiods():
+    bars, spot, futures, oi, now = _closed_history_inputs()
+    missing_ts = now - 3600
+    spot = [row for row in spot if row["ts"] != missing_ts]
+    histories = build_closed_flow_histories(bars, spot, futures, oi, now + 1800)
+    assert histories["1h"].items[-1].end_ts < now
+    assert histories["4h"].items[-1].end_ts <= now - 4 * 3600
+    assert all(item.end_ts <= now for item in histories["24h"].items)
+
+    bars, spot, futures, oi, now = _closed_history_inputs()
+    gap_ts = now - 10 * 3600
+    spot = [row for row in spot if row["ts"] != gap_ts]
+    one_hour = build_closed_flow_histories(bars, spot, futures, oi, now)["1h"]
+    assert one_hour.items[0].start_ts == gap_ts + 3600
+    assert len(one_hour.items) == 9
+
+
+def test_closed_flow_history_api_applies_window_defaults_and_limits():
+    class FakeService:
+        enabled = True
+
+        def __init__(self):
+            self.requested = None
+
+        def flow_history(self, window, limit):
+            self.requested = (window, limit)
+            return ClosedFlowHistory(
+                window=window,
+                quality=DataQuality(valid=True, status="fresh", points=0),
+            )
+
+    service = FakeService()
+    routes_trend.set_service(service)
+    try:
+        result = asyncio.run(routes_trend.get_closed_flow_history("BTC", "4h", None))
+        assert service.requested == ("4h", 18)
+        assert result["window"] == "4h"
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(routes_trend.get_closed_flow_history("BTC", "24h", 8))
+        assert exc.value.status_code == 422
+    finally:
+        routes_trend.set_service(None)
 
 
 def test_taker_history_contract_fields_feed_alert_baseline():
@@ -621,6 +705,72 @@ def test_flow_exhaustion_funding_is_risk_only_and_old_snapshot_defaults():
     restored = TrendSnapshot.model_validate(old_payload)
     assert restored.flow_exhaustion_watch.code == "data_invalid"
     assert restored.flow_exhaustion_watch.score_weight == 0
+
+
+def _context_history(window: str, futures_ratios: list[float], spot_ratio: float = -0.01):
+    seconds = {"1h": 3600, "4h": 14_400, "24h": 86_400}[window]
+    items = []
+    for idx, ratio in enumerate(futures_ratios):
+        total = 100.0
+        items.append(ClosedFlowPoint(
+            window=window, start_ts=idx * seconds, end_ts=(idx + 1) * seconds,
+            spot=ClosedFlowLeg(
+                buy_usd=(1 + spot_ratio) * total / 2,
+                sell_usd=(1 - spot_ratio) * total / 2,
+                net_usd=spot_ratio * total, net_ratio=spot_ratio,
+            ),
+            futures=ClosedFlowLeg(
+                buy_usd=(1 + ratio) * total / 2,
+                sell_usd=(1 - ratio) * total / 2,
+                net_usd=ratio * total, net_ratio=ratio,
+            ),
+            price_change_atr=0, oi_change_pct=0,
+        ))
+    return ClosedFlowHistory(
+        window=window, items=items,
+        quality=DataQuality(valid=True, status="fresh", points=len(items)),
+    )
+
+
+def test_flow_exhaustion_uses_4h_history_as_confirmation_not_new_vote():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=100.0, oi_change=-0.002,
+        spot_history=[-0.02, -0.01, -0.001],
+        futures_history=[-0.04, -0.025, -0.01],
+    )
+    histories = {
+        "4h": _context_history("4h", [-0.01, -0.012, -0.015, -0.04]),
+        "24h": _context_history("24h", [-0.02, -0.025, -0.03]),
+    }
+    original_scores = {key: value.score for key, value in timeframes.items()}
+    result = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full, closed_histories=histories,
+    )
+    assert result.code == "mixed"
+    assert "4小时" in result.headline
+    assert result.window_context["24h"].current_futures_net_ratio == -0.03
+    assert result.score_weight == 0
+    assert {key: value.score for key, value in timeframes.items()} == original_scores
+
+
+def test_flow_exhaustion_calls_multiperiod_rebound_quality_not_trend_confirmation():
+    timeframes, inputs, config, full = _exhaustion_case(
+        price_end=102.0, oi_change=0.005,
+        spot_history=[-0.01, 0.005, 0.02],
+        futures_history=[-0.01, 0.01, 0.02],
+    )
+    histories = {
+        "4h": _context_history("4h", [-0.01, 0.0, 0.01, 0.02], spot_ratio=0.02),
+    }
+    result = interpret_flow_exhaustion_watch(
+        "bearish_confirmed", "bearish", timeframes, inputs, config,
+        full_1h_inputs=full, closed_histories=histories,
+    )
+    assert result.code == "spot_confirmed_rebound"
+    assert "反弹质量提高" in result.headline
+    assert any("状态机" in item or "4h" in item for item in result.missing_confirmations)
+    assert result.score_weight == 0
 
 
 def test_existing_alert_email_includes_zero_weight_exhaustion_explanation():

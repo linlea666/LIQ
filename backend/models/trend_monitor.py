@@ -116,6 +116,52 @@ class FlowExhaustionMetrics(BaseModel):
     funding_percentile_30d: Optional[float] = None
 
 
+class ClosedFlowLeg(BaseModel):
+    buy_usd: float = 0
+    sell_usd: float = 0
+    net_usd: float = 0
+    net_ratio: float = 0
+
+
+class ClosedFlowPoint(BaseModel):
+    window: Literal["1h", "4h", "24h"]
+    start_ts: int
+    end_ts: int
+    spot: ClosedFlowLeg = Field(default_factory=ClosedFlowLeg)
+    futures: ClosedFlowLeg = Field(default_factory=ClosedFlowLeg)
+    price_change_pct: float = 0
+    price_change_atr: float = 0
+    oi_change_pct: float = 0
+
+
+class ClosedFlowHistory(BaseModel):
+    coin: Literal["BTC"] = "BTC"
+    window: Literal["1h", "4h", "24h"]
+    semantics: str = (
+        "不重叠完整闭合窗口；主动买卖为taker成交，不是链上充值提现。"
+    )
+    items: list[ClosedFlowPoint] = Field(default_factory=list)
+    quality: DataQuality = Field(default_factory=DataQuality)
+
+
+class FlowWindowContext(BaseModel):
+    window: Literal["1h", "4h", "24h"]
+    current_spot_net_ratio: Optional[float] = None
+    previous_spot_net_ratio: Optional[float] = None
+    previous_3_spot_median: Optional[float] = None
+    spot_delta_vs_previous_3: Optional[float] = None
+    spot_slope_3: Optional[float] = None
+    spot_consecutive_direction: int = 0
+    current_futures_net_ratio: Optional[float] = None
+    previous_futures_net_ratio: Optional[float] = None
+    previous_3_futures_median: Optional[float] = None
+    futures_delta_vs_previous_3: Optional[float] = None
+    futures_slope_3: Optional[float] = None
+    futures_consecutive_direction: int = 0
+    price_change_atr: Optional[float] = None
+    oi_change_pct: Optional[float] = None
+
+
 class FlowExhaustionWatchSnapshot(BaseModel):
     code: Literal[
         "data_invalid", "no_signal", "bearish_continuation",
@@ -131,6 +177,7 @@ class FlowExhaustionWatchSnapshot(BaseModel):
     risks: list[str] = Field(default_factory=list)
     missing_confirmations: list[str] = Field(default_factory=list)
     metrics: FlowExhaustionMetrics = Field(default_factory=FlowExhaustionMetrics)
+    window_context: dict[str, FlowWindowContext] = Field(default_factory=dict)
     score_weight: Literal[0] = 0
     quality: DataQuality = Field(default_factory=DataQuality)
     note: str = (
