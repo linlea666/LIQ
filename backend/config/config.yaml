@@ -63,7 +63,7 @@ sources:
       etf: 1800
       onchain: 3600
       macro_index: 600
-      whale: 600
+      whale: 900              # Hyperliquid/chain 端点强制缓存 900s，避免无效唤醒
       news: 1800
 
   bbx:

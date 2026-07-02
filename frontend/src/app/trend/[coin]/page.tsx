@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/constants";
 import { useTrendWebSocket } from "@/hooks/useTrendWebSocket";
+import { HyperliquidWhaleDistribution } from "@/components/Trend/HyperliquidWhaleDistribution";
 
 type Quality = { valid: boolean; age_sec?: number | null; points: number; reason: string; status?: "fresh" | "stale" | "pending" | "missing" };
 type Timeframe = { timeframe: string; score: number; direction: string; price_volume_score: number; orderflow_score: number; oi_participation_score: number; spot_confirms: boolean; oi_interpretation: string; quality: Quality };
@@ -146,6 +147,8 @@ export default function TrendPage() {
           <section className="rounded-xl border border-slate-800 bg-slate-900/35 p-4"><SectionTitle title="最近滚动资金流" note="回答最近正在发生什么；滚动窗口彼此重叠，只展示和告警，不作为多张独立选票" /><div className="mt-4 grid gap-5 xl:grid-cols-2"><FlowPanel title="现货主动资金流" flow={data.active_flows.spot} /><FlowPanel title="合约主动资金流" flow={data.active_flows.futures} /></div></section>
 
           <ClosedFlowHistoryPanel history={flowHistory} selected={historyWindow} onSelect={setHistoryWindow} error={historyError} />
+
+          <HyperliquidWhaleDistribution />
 
           <section className="rounded-xl border border-slate-800 bg-slate-900/55 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3"><SectionTitle title="CoinGlass 交易所BTC钱包余额" note="覆盖面较广的余额存量变化；正数代表交易所潜在可售BTC增加" /><select value={exchange} onChange={(event) => setExchange(event.target.value)} className="rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs"><option>全部</option>{data.wallet_flow.contributions.map((item) => <option key={item.exchange}>{item.exchange}</option>)}</select></div>

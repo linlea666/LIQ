@@ -13,6 +13,10 @@ from models.trend_monitor import (
     ClosedFlowHistory, DataQuality, ExchangeTransferFlowSnapshot, FootprintStatus,
     ModifierBreakdown, TrendMachineContext, TrendSnapshot,
 )
+from models.hyperliquid_whale import (
+    HyperliquidWhaleDistributions,
+    pending_hyperliquid_whale_distributions,
+)
 from notifications.email_alert import send_html_email
 from notifications.trend_alert import build_events, render_email
 from processors.trend_monitor import (
@@ -20,6 +24,10 @@ from processors.trend_monitor import (
     calculate_timeframe, interpret_flow_behavior, interpret_flow_exhaustion_watch,
     parse_active_flow, parse_closed_klines, parse_cvd_deltas, parse_etf_flow,
     parse_exchange_transfer_flow, parse_oi, parse_wallet_flow,
+)
+from processors.hyperliquid_whale_stats import (
+    build_hyperliquid_whale_distributions,
+    refreshed_distribution_quality,
 )
 from sources.funding_official import fetch_official_pair
 from storage.trend_store import TrendStore
@@ -62,6 +70,7 @@ class TrendService:
         self._aux_data: dict[str, dict[str, Any]] = {}
         self._aux_bootstrapped = False
         self._flow_histories: dict[str, ClosedFlowHistory] = {}
+        self._whale_distributions = pending_hyperliquid_whale_distributions()
         self._latest = self._store.latest_snapshot()
         persisted = self._store.load_machine_context()
         if persisted and persisted.algorithm_version != self._cfg.algorithm_version:
@@ -97,6 +106,10 @@ class TrendService:
         result.items = result.items[-limit:]
         result.quality.points = len(result.items)
         return result
+
+    def hyperliquid_whale_distributions(self) -> HyperliquidWhaleDistributions:
+        """只返回内存聚合结果；API 读取不会触发上游请求。"""
+        return refreshed_distribution_quality(self._whale_distributions)
 
     def source_diagnostics(self) -> dict[str, Any]:
         diagnostics = self._cg.request_diagnostics()
@@ -555,6 +568,8 @@ class TrendService:
             "wallet_list": self._cg.fetch_exchange_balance_list("BTC"),
             "wallet_chart": self._cg.fetch_exchange_balance_chart("BTC"),
             "etf": self._cg.fetch_btc_etf_flow_history(),
+            # 与 Engine 巨鲸轮询完全相同的请求参数，复用缓存与 single-flight。
+            "hl_whale_positions": self._cg.fetch_hyperliquid_whale_position(),
         }
         if self._looknode is not None:
             jobs["looknode_flow"] = self._looknode.fetch_exchange_flows()
@@ -587,6 +602,12 @@ class TrendService:
         for key, value in refreshed.items():
             if key in self._AUX_MAX_AGE:
                 self._aux_data[key] = {"value": value, "fetched_at": fetched_at}
+        whale_positions = refreshed.get("hl_whale_positions")
+        if isinstance(whale_positions, list):
+            self._whale_distributions = build_hyperliquid_whale_distributions(
+                whale_positions,
+                fetched_at_ts=fetched_at,
+            )
         if not self._cfg.footprint_enabled:
             self._aux_data.pop("footprint", None)
         for market, key in (("spot", "spot_baseline_1d"), ("futures", "fut_baseline_1d")):

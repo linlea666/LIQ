@@ -25,6 +25,12 @@ def _require_btc(coin: str, *, allow_disabled: bool = False):
     return _service
 
 
+@router.get("/hyperliquid-whale-distributions")
+async def get_hyperliquid_whale_distributions():
+    service = _require_btc("BTC")
+    return service.hyperliquid_whale_distributions().model_dump(mode="json")
+
+
 @router.get("/{coin}")
 async def get_trend(coin: str):
     service = _require_btc(coin)
