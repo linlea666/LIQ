@@ -199,7 +199,7 @@ export function HyperliquidWhaleDistribution() {
           )}
 
           <div className="mt-4 rounded-lg border border-blue-900/50 bg-blue-950/20 px-3 py-2 text-xs leading-5 text-blue-200">
-            <span className="font-medium">读图规则：</span>图上方是价格上涨方向，图下方是价格下跌方向。绿色只表示多头仓位，不等于支撑；红色只表示空头仓位，不等于阻力。
+            <span className="font-medium">读图规则：</span>图上方是价格上涨方向，图下方是价格下跌方向。仓位方向由上游仓位数量正负决定，不由开仓价在现价上方或下方决定；绿色只表示多头仓位，不等于支撑，红色只表示空头仓位，不等于阻力。
           </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -240,6 +240,8 @@ export function HyperliquidWhaleDistribution() {
 
 function BeginnerSummary({ asset, insights }: { asset: AssetDistribution; insights: WhaleInsights }) {
   const nearMax = Math.max(1, insights.upperShortNear5Usd, insights.lowerLongNear5Usd);
+  const longEntryState = entryPriceState(insights.longEntry, asset.mark_price);
+  const shortEntryState = entryPriceState(insights.shortEntry, asset.mark_price);
   const balanceText = nearRiskSentence(
     insights.upperShortNear5Usd,
     insights.lowerLongNear5Usd,
@@ -257,18 +259,20 @@ function BeginnerSummary({ asset, insights }: { asset: AssetDistribution; insigh
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <InsightCard
-          label="多头金额最厚开仓区"
+          label={`多头金额最厚开仓区${longEntryState ? `（${longEntryState.label}）` : ""}`}
           insight={insights.longEntry}
           markPrice={asset.mark_price}
           tone="emerald"
           empty="暂无有效多头开仓价"
+          help={longEntryState?.sentence}
         />
         <InsightCard
-          label="空头金额最厚开仓区"
+          label={`空头金额最厚开仓区${shortEntryState ? `（${shortEntryState.label}）` : ""}`}
           insight={insights.shortEntry}
           markPrice={asset.mark_price}
           tone="rose"
           empty="暂无有效空头开仓价"
+          help={shortEntryState?.sentence}
         />
         <InsightCard
           label="上涨重点看：金额最厚空头爆仓区"
@@ -548,6 +552,27 @@ function distanceText(price: number, markPrice?: number | null) {
   if (!markPrice || markPrice <= 0) return "—";
   const distance = (price / markPrice - 1) * 100;
   return `${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%`;
+}
+
+function entryPriceState(insight: SideBucketInsight | null, markPrice?: number | null) {
+  if (!insight || !markPrice || markPrice <= 0) return null;
+  const entryPrice = insight.bucket.price_mid;
+  const priceMoveFromEntryPct = (markPrice / entryPrice - 1) * 100;
+  const nearCost = Math.abs(priceMoveFromEntryPct) < 0.1;
+  if (nearCost) {
+    return {
+      label: "接近成本",
+      sentence: "该价格带开仓成本与当前标记价接近；仅按价格比较，未计资金费。",
+    };
+  }
+  const profitable = insight.side === "long" ? markPrice > entryPrice : markPrice < entryPrice;
+  const directionText = insight.side === "long"
+    ? (profitable ? "现价高于多头成本" : "现价低于多头成本")
+    : (profitable ? "现价低于空头成本" : "现价高于空头成本");
+  return {
+    label: profitable ? "价格浮盈" : "价格浮亏",
+    sentence: `${directionText}约 ${Math.abs(priceMoveFromEntryPct).toFixed(2)}%，该价格带仓位处于价格${profitable ? "浮盈" : "浮亏"}区；仅按价格比较，未计资金费。`,
+  };
 }
 
 function nearRiskSentence(upperShortUsd: number, lowerLongUsd: number) {
