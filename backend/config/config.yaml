@@ -282,7 +282,11 @@ ai:
   timeout_sec: 120
   max_retries: 2
   cooldown_sec: 30
-  max_history: 500
+  # 注意：旧 Trader AI 历史已在 PR-3 下线，此值当前实际仅用于 CoinState.kl_history
+  # 的 deque maxlen（engine.py:350）。快照节律 snapshot_interval_sec=7200(2h)，
+  # 故 120 条/币 ≈ 10 天，足够覆盖 v1v2-stats 回测最大窗口(72h)的 ~3.3 倍。
+  # 从 500 降到 120 可将 kl_history 常驻内存从 ~670MB 降到 ~161MB（省 ~510MB）。
+  max_history: 120
   auto_interval_sec: 7200
   providers:
     openai:
