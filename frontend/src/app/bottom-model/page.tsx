@@ -174,6 +174,15 @@ export default function BottomModelPage() {
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
 
+  const fetchHealth = useCallback(async (): Promise<Record<string, unknown> | null> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/bottom-model/health`);
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const [snapRes, histRes] = await Promise.all([
@@ -181,7 +190,20 @@ export default function BottomModelPage() {
         fetch(`${API_BASE}/api/bottom-model/history?limit=400`),
       ]);
       if (!snapRes.ok) {
-        setError(snapRes.status === 503 ? "模型尚未就绪（等待首轮每日采集，或后端未启动）" : `加载失败：${snapRes.status}`);
+        if (snapRes.status === 503) {
+          // 区分"采集进行中 / 服务未启动 / 等待调度"——首轮冷采集受
+          // Coinglass 限流约束，可达十余分钟，期间快照接口持续 503
+          const health = await fetchHealth();
+          if (health?.run_in_progress) {
+            setError("首轮采集进行中（受数据源限流约束，约需 5-15 分钟），完成后本页自动刷新");
+          } else if (health && health.running === false) {
+            setError("底部模型服务未启动（后端仍在暖机，或该模块被禁用）");
+          } else {
+            setError("模型尚未就绪（等待首轮每日采集；可点「手动运行」立即采集）");
+          }
+        } else {
+          setError(`加载失败：${snapRes.status}`);
+        }
         return;
       }
       setSnapshot(await snapRes.json());
@@ -190,7 +212,7 @@ export default function BottomModelPage() {
     } catch {
       setError("无法连接后端");
     }
-  }, []);
+  }, [fetchHealth]);
 
   useEffect(() => {
     load();
@@ -202,12 +224,18 @@ export default function BottomModelPage() {
     setRunning(true);
     try {
       await fetch(`${API_BASE}/api/bottom-model/run`, { method: "POST" });
-      // 采集含限流 spacing，最长数分钟；延迟刷新拿新快照
-      setTimeout(() => { load(); setRunning(false); }, 20_000);
-    } catch {
+      // 轮询后端运行状态直到本轮结束（首轮冷采集可达十余分钟），再取快照
+      const deadline = Date.now() + 20 * 60_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        const health = await fetchHealth();
+        if (health && !health.run_in_progress) break;
+      }
+      await load();
+    } finally {
       setRunning(false);
     }
-  }, [load]);
+  }, [fetchHealth, load]);
 
   const dq = snapshot?.data_quality;
   const dqIssues = useMemo(() => {
