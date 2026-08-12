@@ -205,25 +205,25 @@ class TestPartitioning:
 
     def test_cross_day_partitioning(self, tmp_path):
         archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
-        # 第 1 天
-        ts_d1 = int(datetime(2026, 4, 28, 12, tzinfo=_TZ_CN).timestamp())
-        archiver.append(_make_snapshot(ts_sec=ts_d1))
-        # 第 2 天
-        ts_d2 = int(datetime(2026, 4, 29, 12, tzinfo=_TZ_CN).timestamp())
-        archiver.append(_make_snapshot(ts_sec=ts_d2))
-        assert (tmp_path / "BTC" / "20260428.jsonl").exists()
-        assert (tmp_path / "BTC" / "20260429.jsonl").exists()
+        # 日期必须相对当天取，写死日期会随时间推移落到 keep_days 之外被保留策略清掉。
+        day1 = datetime.now(_TZ_CN).replace(hour=12) - timedelta(days=2)
+        day2 = day1 + timedelta(days=1)
+        archiver.append(_make_snapshot(ts_sec=int(day1.timestamp())))
+        archiver.append(_make_snapshot(ts_sec=int(day2.timestamp())))
+        assert (tmp_path / "BTC" / f"{day1.strftime('%Y%m%d')}.jsonl").exists()
+        assert (tmp_path / "BTC" / f"{day2.strftime('%Y%m%d')}.jsonl").exists()
 
     def test_list_days(self, tmp_path):
         archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
-        ts1 = int(datetime(2026, 4, 28, tzinfo=_TZ_CN).timestamp())
-        ts2 = int(datetime(2026, 4, 29, tzinfo=_TZ_CN).timestamp())
-        archiver.append(_make_snapshot(coin="BTC", ts_sec=ts1))
-        archiver.append(_make_snapshot(coin="BTC", ts_sec=ts2))
-        archiver.append(_make_snapshot(coin="ETH", ts_sec=ts2))
-        assert archiver.list_days(coin="BTC") == ["20260428", "20260429"]
-        assert archiver.list_days(coin="ETH") == ["20260429"]
-        assert archiver.list_days() == ["20260428", "20260429"]
+        day1 = datetime.now(_TZ_CN).replace(hour=12) - timedelta(days=2)
+        day2 = day1 + timedelta(days=1)
+        key1, key2 = day1.strftime("%Y%m%d"), day2.strftime("%Y%m%d")
+        archiver.append(_make_snapshot(coin="BTC", ts_sec=int(day1.timestamp())))
+        archiver.append(_make_snapshot(coin="BTC", ts_sec=int(day2.timestamp())))
+        archiver.append(_make_snapshot(coin="ETH", ts_sec=int(day2.timestamp())))
+        assert archiver.list_days(coin="BTC") == [key1, key2]
+        assert archiver.list_days(coin="ETH") == [key2]
+        assert archiver.list_days() == [key1, key2]
 
 
 # ─────────────────────────────────────────────────────────────────

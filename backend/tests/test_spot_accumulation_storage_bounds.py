@@ -223,6 +223,18 @@ def test_legacy_monthly_facts_are_not_loaded_unless_requested(tmp_path):
     assert len(store.load_facts_snapshots(include_legacy=True)) == 2
 
 
+def test_daily_rollup_is_not_mistaken_for_a_legacy_monthly_archive(tmp_path):
+    """facts_daily.jsonl 同在根目录且匹配 facts_*.jsonl，不得混入旧归档口径。"""
+    store = SpotAccumulationStore(str(tmp_path))
+    now = int(time.time())
+    store.append_compact_facts_snapshot({"archive_schema_version": 4, "timestamp": now}, now)
+    store.append_daily_facts_rollup({"day": "20260810", "sample_count": 2})
+
+    assert store.storage_stats()["legacy_monthly_facts"] == {"files": 0, "bytes": 0}
+    assert store.storage_stats()["daily_facts"]["files"] == 1
+    assert len(store.load_facts_snapshots(include_legacy=True)) == 1
+
+
 def test_daily_rollup_is_written_once_per_day_and_bounded(tmp_path):
     store = SpotAccumulationStore(str(tmp_path))
     day = "20260810"

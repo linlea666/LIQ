@@ -639,13 +639,24 @@ class SpotAccumulationStore:
                 records.append(payload)
         return records
 
+    def _legacy_monthly_fact_paths(self) -> list[Path]:
+        """按月切分的旧事实归档 facts_YYYY-MM.jsonl。
+
+        必须排除 facts_daily.jsonl：它同在根目录且同样匹配 facts_*.jsonl，但存的是
+        日汇总而非事实快照，混入会污染前向报告输入并让旧归档统计永远清不到 0。
+        """
+        return sorted(
+            path for path in self.root.glob("facts_*.jsonl")
+            if path != self.daily_facts_path
+        )
+
     def load_facts_snapshots(self, *, include_legacy: bool = False) -> list[dict]:
         """Read compact archives by default; legacy multi-GB files require explicit opt-in."""
         records: list[dict] = []
         with self._exclusive_lock(self.facts_lock_path):
             paths = sorted(self.compact_facts_dir.glob("*.jsonl"))
             if include_legacy:
-                paths.extend(sorted(self.root.glob("facts_*.jsonl")))
+                paths.extend(self._legacy_monthly_fact_paths())
             for path in paths:
                 records.extend(self._read_jsonl_records(path))
         return records
@@ -724,6 +735,16 @@ class SpotAccumulationStore:
                 total += path.stat().st_size
         return {"files": files, "bytes": total}
 
+    @staticmethod
+    def _path_list_stats(paths: list[Path]) -> dict[str, int]:
+        total = 0
+        for path in paths:
+            try:
+                total += path.stat().st_size
+            except OSError:
+                continue
+        return {"files": len(paths), "bytes": total}
+
     def storage_stats(self) -> dict:
         checkpoint = self._load_checkpoint_unlocked()
         return {
@@ -734,10 +755,7 @@ class SpotAccumulationStore:
             "compact_facts": self._tree_stats(self.compact_facts_dir),
             "raw_facts": self._tree_stats(self.raw_facts_dir),
             "daily_facts": self._tree_stats(self.daily_facts_path),
-            "legacy_monthly_facts": {
-                "files": len(list(self.root.glob("facts_*.jsonl"))),
-                "bytes": sum(path.stat().st_size for path in self.root.glob("facts_*.jsonl")),
-            },
+            "legacy_monthly_facts": self._path_list_stats(self._legacy_monthly_fact_paths()),
             "retention": {
                 "compact_days": _COMPACT_FACT_RETENTION_DAYS,
                 "daily_days": _DAILY_FACT_RETENTION_DAYS,
