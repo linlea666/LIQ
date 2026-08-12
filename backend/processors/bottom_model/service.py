@@ -139,9 +139,13 @@ class BottomModelService:
         latest = self._store.latest_snapshot()
         if latest is None or latest.get("day", "") < expected_day:
             return True
-        # 当日快照已出：仍有失败 spec 且距上次尝试 ≥2h → 轻量自愈重试
+        # 当日快照已出：仍有失败 spec 且距上次尝试 ≥2h → 轻量自愈重试。
+        # 只看注册表内的 spec——已停采指标的失败旧行会永久留在账本，
+        # 不过滤会导致自愈循环每 2h 无谓触发且永远无法"修复"
+        active_keys = {spec.key for spec in self._collector.registry}
         failed = [
-            item for item in self._store.fetch_log().values() if not item["last_ok"]
+            item for key, item in self._store.fetch_log().items()
+            if key in active_keys and not item["last_ok"]
         ]
         if failed:
             newest_attempt = max(item["last_attempt_ts"] for item in failed)

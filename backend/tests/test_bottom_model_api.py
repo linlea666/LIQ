@@ -72,16 +72,28 @@ def test_should_retry_failed_fetch_after_cooldown(tmp_path):
     svc = _service(tmp_path)
     object.__setattr__(svc._cfg, "daily_run_hour_utc", 0)
     build_snapshot(svc.store, as_of_day="2099-12-31")
-    svc.store.record_fetch("some_metric", ok=False, error="http_429")
+    # 必须用注册表内的 spec key——账本中已停采 spec 的失败旧行不触发自愈
+    active_key = svc._collector.registry[0].key
+    svc.store.record_fetch(active_key, ok=False, error="http_429")
     # 刚失败：2h 冷却内不重试
     assert svc._should_run_now() is False
     # 手动把账本时间戳回拨 3h → 触发自愈重试
     with svc.store._lock, svc.store._conn:
         svc.store._conn.execute(
-            "UPDATE fetch_log SET last_attempt_ts=? WHERE metric='some_metric'",
-            (int(time.time()) - 3 * 3600,),
+            "UPDATE fetch_log SET last_attempt_ts=? WHERE metric=?",
+            (int(time.time()) - 3 * 3600, active_key),
         )
     assert svc._should_run_now() is True
+    # 注册表外的孤儿失败行：不应触发自愈
+    with svc.store._lock, svc.store._conn:
+        svc.store._conn.execute("DELETE FROM fetch_log WHERE metric=?", (active_key,))
+    svc.store.record_fetch("orphan_metric", ok=False, error="http_429")
+    with svc.store._lock, svc.store._conn:
+        svc.store._conn.execute(
+            "UPDATE fetch_log SET last_attempt_ts=? WHERE metric='orphan_metric'",
+            (int(time.time()) - 3 * 3600,),
+        )
+    assert svc._should_run_now() is False
 
 
 def test_trigger_run_guard(tmp_path):

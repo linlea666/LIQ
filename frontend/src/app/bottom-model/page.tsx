@@ -63,6 +63,94 @@ const QUADRANT_TONE: Record<string, string> = {
   unknown: "border-slate-700 bg-slate-900 text-slate-500",
 };
 
+// ── 小白结论横幅：把象限/评分翻译成人话，并展示四阶段进度 ──
+
+const STAGES = [
+  { key: "bear_market", label: "熊市进行" },
+  { key: "panic_flush", label: "恐慌出清" },
+  { key: "basing", label: "筑底改善" },
+  { key: "confirmed_recovery", label: "确认恢复" },
+] as const;
+
+const VERDICT: Record<string, { headline: string; advice: string }> = {
+  bear_market: {
+    headline: "还没到底部区域",
+    advice: "熊市仍在进行，市场压力未达历史底部的极端程度——底部特征不足，现在不是抄底时机。",
+  },
+  panic_flush: {
+    headline: "正在恐慌出清（左侧酝酿期）",
+    advice: "市场已极度恐慌、抛售出清中。历史大底大多在这个阶段酝酿，但目前还没有好转信号——左侧勿急，等待确认。",
+  },
+  basing: {
+    headline: "可能正在筑底（阶段性底部概率上升）",
+    advice: "底部特征已经明显，并且开始出现改善迹象——市场可能正在筑底，但尚未完全确认，仍需更多确认信号共振。",
+  },
+  confirmed_recovery: {
+    headline: "底部确认信号共振",
+    advice: "压力极端 + 多项改善信号同时确认——大概率已度过最坏时刻。",
+  },
+  unknown: {
+    headline: "数据不足，暂无法判断",
+    advice: "有效因子权重不足，等待数据补齐后自动恢复判断。",
+  },
+};
+
+function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
+  const qkey = snapshot.quadrant.key;
+  const verdict = VERDICT[qkey] ?? VERDICT.unknown;
+  const stageIdx = STAGES.findIndex((s) => s.key === qkey);
+  const stress = snapshot.stress?.score ?? null;
+  const conf = snapshot.confirmation.score;
+  const exhaustion = snapshot.seller_exhaustion?.score ?? null;
+  const pendingChecks = snapshot.confirmation.checks.filter(
+    (c) => c.ok && (c.score ?? 0) < 100,
+  );
+  const triggers = snapshot.fake_bottom_filter.triggers;
+  const tone = QUADRANT_TONE[qkey] ?? QUADRANT_TONE.unknown;
+  return (
+    <div className={`rounded-lg border p-4 ${tone}`}>
+      <div className="text-[11px] opacity-70">当前判断（每日更新 · 仅供参考，非交易指令）</div>
+      <div className="mt-1 text-2xl font-semibold">{verdict.headline}</div>
+      <div className="mt-1 text-[12px] leading-relaxed opacity-90">{verdict.advice}</div>
+
+      {/* 四阶段进度：回答"现在到什么程度了" */}
+      <div className="mt-4 flex items-start gap-1.5">
+        {STAGES.map((stage, i) => (
+          <div key={stage.key} className="flex-1">
+            <div className={`h-1.5 rounded-full ${
+              stageIdx >= 0 && i <= stageIdx ? "bg-current opacity-90" : "bg-slate-700/50"}`} />
+            <div className={`mt-1.5 text-center text-[10px] ${
+              i === stageIdx ? "font-semibold opacity-100" : "opacity-45"}`}>
+              {stage.label}{i === stageIdx ? " ◀ 现在" : ""}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-2 text-[11px] leading-relaxed md:grid-cols-2">
+        <div className="opacity-75">
+          <span className="opacity-70">读数解释：</span>
+          市场压力 <b>{fmt(stress)}</b>（市场有多惨，≥55 进入极端区）·
+          改善确认 <b>{fmt(conf)}</b>（有没有开始好转，≥65 算确认）·
+          卖方衰竭 <b>{fmt(exhaustion)}</b>（抛压是否枯竭，越高越接近卖完）
+        </div>
+        <div className="space-y-1">
+          {qkey !== "confirmed_recovery" && pendingChecks.length > 0 && (
+            <div className="opacity-85">
+              距离「底部确认」还差：{pendingChecks.map((c) => c.label).join("、")}
+            </div>
+          )}
+          {triggers.length > 0 && (
+            <div className="text-rose-300/90">
+              ⚠ 假底风险：{triggers.map((t) => t.label).join("、")}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ScoreDial({ label, score, sub }: { label: string; score: number | null; sub?: string }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-3">
@@ -244,7 +332,8 @@ export default function BottomModelPage() {
   }, [dq]);
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-5 text-slate-200">
+    // bottom-model-page：globals.css 白名单标记，恢复 body 滚动（主页大屏默认 overflow hidden）
+    <div className="bottom-model-page min-h-screen bg-slate-950 px-4 py-5 text-slate-200">
       <div className="mx-auto max-w-6xl space-y-5">
         {/* 头部 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -273,6 +362,9 @@ export default function BottomModelPage() {
 
         {snapshot && (
           <>
+            {/* 小白结论横幅 */}
+            <VerdictBanner snapshot={snapshot} />
+
             {/* 结论行 */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <ScoreDial label="Bottom Stress（市场压力）" score={snapshot.stress?.score ?? null}

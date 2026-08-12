@@ -134,7 +134,9 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
     """逐指标新鲜度/窗口标注——证据包防外部 AI 误读的关键。"""
     cadence_by_metric: dict[str, str] = {}
     tolerance_override: dict[str, int] = {}
+    active_spec_keys: set[str] = set()
     for spec in build_registry():
+        active_spec_keys.add(spec.key)
         for metric in spec.metrics:
             cadence_by_metric[metric] = spec.cadence
             if spec.staleness_days is not None:
@@ -160,9 +162,11 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
         }
         if behind > tolerance:
             stale.append({"metric": metric, "last_day": last_day, "behind_days": behind})
+    # 只报告注册表内 spec 的失败——已停采指标的失败旧行不应永久误报
     failed_fetches = {
         key: item["last_error"]
-        for key, item in store.fetch_log().items() if not item["last_ok"]
+        for key, item in store.fetch_log().items()
+        if key in active_spec_keys and not item["last_ok"]
     }
     return {
         "ok": not missing and not stale,
