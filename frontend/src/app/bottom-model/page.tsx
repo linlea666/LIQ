@@ -5,25 +5,41 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/constants";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
+// evidence_quality / correlation_audit / reliability 均为 bottom-v3 新增，
+// 全部声明为可选并在渲染处回退，保证 v2 历史快照仍可正常渲染。
 type SubSignal = {
   key: string; label: string; weight: number; ok: boolean;
   score: number | null; value: number | null; percentile: number | null; note: string;
+  evidence_quality?: number | null; eq_note?: string;
 };
 type Factor = {
   key: string; label: string; weight: number; score: number | null;
-  coverage: number; sub_signals: SubSignal[];
+  coverage: number; sub_signals: SubSignal[]; evidence_quality?: number | null;
 };
-type Check = { key: string; label: string; ok: boolean; score: number | null; note: string };
+type Check = {
+  key: string; label: string; ok: boolean; score: number | null; note: string;
+  evidence_quality?: number | null;
+};
 type Trigger = { key: string; label: string; penalty: number; note: string };
 type Analog = {
   day: string; label: string; similarity: number | null;
   common_factors: string[]; past_stress?: number | null; note: string;
+  reliability?: "high" | "medium" | "low";
+};
+type CorrelationPair = { a: string; b: string; rho: number; n: number };
+type CorrelationAudit = {
+  window_days: number;
+  groups: { key: string; label: string; note: string; pairs: CorrelationPair[]; max_abs_rho: number; strong_pairs: number }[];
+  cross_layer_overlaps: { topic: string; usage: string; note: string }[];
+  structural_redundancies?: { topic: string; basis: string; conclusion: string }[];
 };
 type Snapshot = {
   day: string; ts: number; algorithm_version: string;
   price_context: { price: number | null; ma_200w: number | null; sth_realized_price: number | null; lth_realized_price: number | null };
-  stress: { score: number; active_weight: number; abstained: string[] } | null;
-  confirmation: { score: number | null; score_before_penalty: number | null; checks: Check[] };
+  stress: { score: number; active_weight: number; abstained: string[]; evidence_quality?: number | null } | null;
+  confirmation: { score: number | null; score_before_penalty: number | null; checks: Check[]; evidence_quality?: number | null };
+  evidence_quality?: { stress: number | null; confirmation: number | null; overall: number | null };
+  correlation_audit?: CorrelationAudit;
   fake_bottom_filter: { triggers: Trigger[]; total_penalty: number };
   quadrant: { key: string; label: string; note: string };
   seller_exhaustion: { score: number; components: Record<string, number> } | null;
@@ -56,6 +72,15 @@ const scoreTone = (score: number | null) =>
     : score >= 70 ? "text-emerald-400"
     : score >= 45 ? "text-amber-300"
     : "text-rose-400";
+// 卖方衰竭子项中文名：该仪表已升到首屏，英文 key 对非专业读者不可读
+const EXHAUSTION_LABEL: Record<string, string> = {
+  loss_decay: "亏损衰减", loss_profit_ratio: "亏损/利润比",
+  sopr_recovery: "SOPR 回升", liq_decay: "清算衰减", sth_stable: "STH 供应稳定",
+};
+const RELIABILITY_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低" };
+const RELIABILITY_TONE: Record<string, string> = {
+  high: "text-emerald-400/80", medium: "text-amber-400/80", low: "text-slate-500",
+};
 const QUADRANT_TONE: Record<string, string> = {
   bear_market: "border-slate-600 bg-slate-800/60 text-slate-300",
   panic_flush: "border-rose-700/60 bg-rose-900/30 text-rose-300",
@@ -73,46 +98,65 @@ const STAGES = [
   { key: "confirmed_recovery", label: "确认恢复" },
 ] as const;
 
-const VERDICT: Record<string, { headline: string; advice: string }> = {
-  bear_market: {
-    headline: "还没到底部区域",
-    advice: "熊市仍在进行，市场压力未达历史底部的极端程度——底部特征不足，现在不是抄底时机。",
-  },
-  panic_flush: {
-    headline: "正在恐慌出清（左侧酝酿期）",
-    advice: "市场已极度恐慌、抛售出清中。历史大底大多在这个阶段酝酿，但目前还没有好转信号——左侧勿急，等待确认。",
-  },
-  basing: {
-    headline: "可能正在筑底（阶段性底部概率上升）",
-    advice: "底部特征已经明显，并且开始出现改善迹象——市场可能正在筑底，但尚未完全确认，仍需更多确认信号共振。",
-  },
-  confirmed_recovery: {
-    headline: "底部确认信号共振",
-    advice: "压力极端 + 多项改善信号同时确认——大概率已度过最坏时刻。",
-  },
-  unknown: {
-    headline: "数据不足，暂无法判断",
-    advice: "有效因子权重不足，等待数据补齐后自动恢复判断。",
-  },
+// 结论措辞刻意写成"陈述已发生的事实 + 尚未发生的事实"，不预测概率：
+// 历史大底样本仅 4 个，模型无法支撑"概率上升"这类断言。
+const VERDICT: Record<string, string> = {
+  bear_market: "还没到底部区域",
+  panic_flush: "正在恐慌出清（左侧酝酿期）",
+  basing: "压力已到极端，改善尚未确认",
+  confirmed_recovery: "压力极端 + 改善信号共振",
+  unknown: "数据不足，暂无法判断",
 };
+
+/** 三段式陈述：压力 / 卖方衰竭 / 需求，各自只说当前观测到的事实 */
+function verdictStatements(snapshot: Snapshot): string[] {
+  const stress = snapshot.stress?.score ?? null;
+  const exhaustion = snapshot.seller_exhaustion?.score ?? null;
+  const demand = snapshot.factors.find((f) => f.key === "demand")?.score ?? null;
+  const stage = snapshot.confirmation.checks.find((c) => c.key === "structure_stage");
+  const lines: string[] = [];
+  lines.push(
+    stress == null ? "市场压力：数据不足"
+      : stress >= 70 ? `市场压力 ${stress.toFixed(0)}：已达历史极端区（多项估值/投降指标处于历史低分位）`
+      : stress >= 55 ? `市场压力 ${stress.toFixed(0)}：已进入极端区，但未及历次大底的最深处`
+      : `市场压力 ${stress.toFixed(0)}：尚未进入历史极端区`,
+  );
+  lines.push(
+    exhaustion == null ? "卖方衰竭：数据不足"
+      : exhaustion >= 70 ? `卖方衰竭 ${exhaustion.toFixed(0)}：抛压已显著枯竭`
+      : exhaustion >= 45 ? `卖方衰竭 ${exhaustion.toFixed(0)}：抛压在减弱，但尚未确认枯竭`
+      : `卖方衰竭 ${exhaustion.toFixed(0)}：抛压仍未衰竭`,
+  );
+  lines.push(
+    demand == null ? "流动性/需求：数据不足"
+      : demand >= 60 ? `流动性/需求 ${demand.toFixed(0)}：新增买盘已在接管`
+      : demand >= 40 ? `流动性/需求 ${demand.toFixed(0)}：弹药在积累，但买盘尚未接管`
+      : `流动性/需求 ${demand.toFixed(0)}：新需求尚未接管`,
+  );
+  if (stage?.note) lines.push(`价格结构：${stage.note}`);
+  return lines;
+}
 
 function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
   const qkey = snapshot.quadrant.key;
-  const verdict = VERDICT[qkey] ?? VERDICT.unknown;
+  const headline = VERDICT[qkey] ?? VERDICT.unknown;
   const stageIdx = STAGES.findIndex((s) => s.key === qkey);
-  const stress = snapshot.stress?.score ?? null;
-  const conf = snapshot.confirmation.score;
-  const exhaustion = snapshot.seller_exhaustion?.score ?? null;
   const pendingChecks = snapshot.confirmation.checks.filter(
     (c) => c.ok && (c.score ?? 0) < 100,
   );
   const triggers = snapshot.fake_bottom_filter.triggers;
   const tone = QUADRANT_TONE[qkey] ?? QUADRANT_TONE.unknown;
+  const overallEq = snapshot.evidence_quality?.overall ?? null;
   return (
     <div className={`rounded-lg border p-4 ${tone}`}>
       <div className="text-[11px] opacity-70">当前判断（每日更新 · 仅供参考，非交易指令）</div>
-      <div className="mt-1 text-2xl font-semibold">{verdict.headline}</div>
-      <div className="mt-1 text-[12px] leading-relaxed opacity-90">{verdict.advice}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <span className="text-2xl font-semibold">{headline}</span>
+        <EqBadge eq={overallEq} label="整体证据质量" />
+      </div>
+      <ul className="mt-2 space-y-0.5 text-[12px] leading-relaxed opacity-90">
+        {verdictStatements(snapshot).map((line) => <li key={line}>· {line}</li>)}
+      </ul>
 
       {/* 四阶段进度：回答"现在到什么程度了" */}
       <div className="mt-4 flex items-start gap-1.5">
@@ -131,9 +175,8 @@ function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
       <div className="mt-3 grid gap-2 text-[11px] leading-relaxed md:grid-cols-2">
         <div className="opacity-75">
           <span className="opacity-70">读数解释：</span>
-          市场压力 <b>{fmt(stress)}</b>（市场有多惨，≥55 进入极端区）·
-          改善确认 <b>{fmt(conf)}</b>（有没有开始好转，≥65 算确认）·
-          卖方衰竭 <b>{fmt(exhaustion)}</b>（抛压是否枯竭，越高越接近卖完）
+          市场压力（市场有多惨，≥55 进入极端区）· 改善确认（有没有开始好转，≥65 算确认）·
+          卖方衰竭（抛压是否枯竭）· 证据质量 EQ（这些分数有多可信，越低越该打折）
         </div>
         <div className="space-y-1">
           {qkey !== "confirmed_recovery" && pendingChecks.length > 0 && (
@@ -152,13 +195,90 @@ function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function ScoreDial({ label, score, sub }: { label: string; score: number | null; sub?: string }) {
+const EQ_HINT = "证据质量 EQ：由历史跨度、可用分位窗口、数据新鲜度、代理关系四项"
+  + "推导（两个 BTC 周期 = 满分跨度），已作为子信号聚合的权重乘子。EQ 越低，"
+  + "同样的分数越不该被当真。";
+
+/** 证据质量徽标；v2 快照无该字段时不渲染 */
+function EqBadge({ eq, label = "EQ" }: { eq?: number | null; label?: string }) {
+  if (eq == null) return null;
+  const tone = eq >= 70 ? "border-slate-600 text-slate-400"
+    : eq >= 50 ? "border-amber-800/70 text-amber-400/90"
+    : "border-rose-900/70 text-rose-400/80";
+  return (
+    <span className={`rounded border px-1.5 py-px text-[9px] ${tone}`} title={EQ_HINT}>
+      {label} {eq.toFixed(0)}
+    </span>
+  );
+}
+
+function ScoreDial({ label, score, sub, eq }: {
+  label: string; score: number | null; sub?: string; eq?: number | null;
+}) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[11px] text-slate-500">{label}</div>
+        <EqBadge eq={eq} />
+      </div>
       <div className={`mt-1 text-3xl font-semibold ${scoreTone(score)}`}>{fmt(score)}</div>
       {sub && <div className="mt-1 text-[10px] text-slate-500">{sub}</div>}
     </div>
+  );
+}
+
+/** 相关性与重复计分声明（折叠）；v2 快照无 correlation_audit 时不渲染 */
+function CorrelationPanel({ audit }: { audit: CorrelationAudit }) {
+  const strongTotal = audit.groups.reduce((sum, g) => sum + g.strong_pairs, 0);
+  return (
+    <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <summary className="cursor-pointer text-[12px] font-medium text-slate-300 hover:text-white">
+        相关性与重复计分声明
+        <span className="ml-2 text-[10px] font-normal text-slate-500">
+          {strongTotal} 对子信号高度相关（|ρ| ≥ 0.70），它们不是彼此独立的证据
+        </span>
+      </summary>
+      <div className="mt-3 space-y-3 text-[11px]">
+        <div className="text-[10px] text-slate-500">
+          在最近 {audit.window_days} 天的重叠交易日上实测。把高相关的两个指标分别计入
+          「支持底部的证据」等于把一份证据数了两遍——这是模型自身也无法避免的结构性
+          局限，因此在此显式声明。
+        </div>
+        {audit.groups.map((group) => (
+          <div key={group.key} className="rounded border border-slate-800/80 bg-slate-950/40 p-2.5">
+            <div className="text-slate-300">
+              {group.label}
+              <span className="ml-2 text-[10px] text-slate-500">最大 |ρ| {group.max_abs_rho.toFixed(2)}</span>
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-500">{group.note}</div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {group.pairs.map((pair) => (
+                <span key={`${pair.a}-${pair.b}`}
+                  className={`rounded border px-1.5 py-px text-[10px] ${
+                    Math.abs(pair.rho) >= 0.7
+                      ? "border-rose-900/70 bg-rose-950/30 text-rose-300/90"
+                      : "border-slate-800 text-slate-500"}`}>
+                  {pair.a} ↔ {pair.b} {pair.rho >= 0 ? "+" : ""}{pair.rho.toFixed(2)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+        {(audit.structural_redundancies ?? []).map((item) => (
+          <div key={item.topic} className="text-slate-400">
+            <span className="text-slate-300">{item.topic}</span>：{item.basis} → {item.conclusion}
+          </div>
+        ))}
+        <div className="space-y-1">
+          <div className="text-slate-300">跨层重复使用清单</div>
+          {audit.cross_layer_overlaps.map((item) => (
+            <div key={item.topic} className="text-[10px] text-slate-500">
+              · <span className="text-slate-400">{item.topic}</span>：{item.usage}。{item.note}
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -403,6 +523,7 @@ export default function BottomModelPage() {
     }
   }, [fetchHealth, load]);
 
+  const demandFactor = snapshot?.factors.find((f) => f.key === "demand");
   const dq = snapshot?.data_quality;
   const dqIssues = useMemo(() => {
     if (!dq) return 0;
@@ -443,24 +564,34 @@ export default function BottomModelPage() {
             {/* 小白结论横幅 */}
             <VerdictBanner snapshot={snapshot} />
 
-            {/* 结论行 */}
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              <ScoreDial label="Bottom Stress（市场压力）" score={snapshot.stress?.score ?? null}
+            {/* 四仪表盘：压力极端不等于底部——把"卖方是否卖完""需求是否接管"
+                与压力并列，分歧本身比单一综合分更有信息量 */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <ScoreDial label="市场压力（有多惨）" score={snapshot.stress?.score ?? null}
+                eq={snapshot.stress?.evidence_quality ?? null}
                 sub={`Δ7d ${fmtSigned(snapshot.delta.stress_7d)} · Δ30d ${fmtSigned(snapshot.delta.stress_30d)}`} />
-              <ScoreDial label="Confirmation（改善确认）" score={snapshot.confirmation.score}
+              <ScoreDial label="卖方衰竭（卖完了吗）" score={snapshot.seller_exhaustion?.score ?? null}
+                sub={snapshot.seller_exhaustion
+                  ? Object.entries(snapshot.seller_exhaustion.components)
+                    .map(([k, v]) => `${EXHAUSTION_LABEL[k] ?? k} ${v.toFixed(0)}`).join(" · ")
+                  : "数据不足"} />
+              <ScoreDial label="流动性/需求（谁在买）" score={demandFactor?.score ?? null}
+                eq={demandFactor?.evidence_quality ?? null}
+                sub={demandFactor ? `覆盖 ${(demandFactor.coverage * 100).toFixed(0)}% · 稳定币弹药≠已进场买盘` : "数据不足"} />
+              <ScoreDial label="改善确认（开始好转吗）" score={snapshot.confirmation.score}
+                eq={snapshot.confirmation.evidence_quality ?? null}
                 sub={`假底惩罚前 ${fmt(snapshot.confirmation.score_before_penalty)} · Δ7d ${fmtSigned(snapshot.delta.confirmation_7d)}`} />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
               <div className={`rounded-lg border px-4 py-3 ${QUADRANT_TONE[snapshot.quadrant.key] ?? QUADRANT_TONE.unknown}`}>
                 <div className="text-[11px] opacity-70">四象限状态</div>
                 <div className="mt-1 text-xl font-semibold">{snapshot.quadrant.label}</div>
                 <div className="mt-1 text-[10px] opacity-70">{snapshot.quadrant.note}</div>
               </div>
-              <ScoreDial label="卖方衰竭指数" score={snapshot.seller_exhaustion?.score ?? null}
-                sub={snapshot.seller_exhaustion
-                  ? Object.entries(snapshot.seller_exhaustion.components).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(" · ")
-                  : "数据不足"} />
               <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-3 text-[11px]">
                 <div className="text-slate-500">价格上下文</div>
-                <div className="mt-1 space-y-0.5 text-slate-300">
+                <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-slate-300">
                   <div>现价 <span className="text-slate-100">{fmtValue(snapshot.price_context.price)}</span></div>
                   <div>200W 均线 {fmtValue(snapshot.price_context.ma_200w)}</div>
                   <div>STH 成本 {fmtValue(snapshot.price_context.sth_realized_price)}</div>
@@ -484,29 +615,47 @@ export default function BottomModelPage() {
             {/* 六因子明细 */}
             <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
               <div className="mb-1 text-[12px] font-medium text-slate-300">六因子明细</div>
-              <div className="mb-3 text-[10px] text-slate-500">评分 0-100，越高越符合历史底部特征；分位为 3y/5y/全历史混合（窗口不足自动退化）</div>
+              <div className="mb-3 text-[10px] text-slate-500">
+                评分 0-100，越高越符合历史底部特征；分位为 3y/5y/全历史混合（窗口不足自动退化）。
+                EQ 为证据质量，已作为子信号聚合权重——EQ 低于 50 的行会淡化并标注原因。
+              </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 {snapshot.factors.map((factor) => (
                   <div key={factor.key} className="rounded-md border border-slate-800/80 bg-slate-950/50 p-3">
-                    <div className="mb-2 flex items-center justify-between">
+                    <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="text-[12px] font-medium text-slate-200">
                         {factor.label}
                         <span className="ml-2 text-[10px] text-slate-500">权重 {(factor.weight * 100).toFixed(0)}% · 覆盖 {(factor.coverage * 100).toFixed(0)}%</span>
                       </div>
-                      <div className={`text-lg font-semibold ${scoreTone(factor.score)}`}>
-                        {factor.score == null ? "弃权" : factor.score.toFixed(1)}
+                      <div className="flex items-center gap-2">
+                        <EqBadge eq={factor.evidence_quality ?? null} />
+                        <div className={`text-lg font-semibold ${scoreTone(factor.score)}`}>
+                          {factor.score == null ? "弃权" : factor.score.toFixed(1)}
+                        </div>
                       </div>
                     </div>
                     <table className="w-full text-[11px]">
                       <tbody>
-                        {factor.sub_signals.map((sub) => (
-                          <tr key={sub.key} className="border-t border-slate-800/60">
-                            <td className="py-1 pr-2 text-slate-400" title={sub.note}>{sub.label}</td>
-                            <td className="py-1 pr-2 text-right text-slate-300">{fmtValue(sub.value)}</td>
-                            <td className="py-1 pr-2 text-right text-slate-500">{sub.percentile == null ? "—" : `${sub.percentile.toFixed(0)}分位`}</td>
-                            <td className={`py-1 text-right font-medium ${scoreTone(sub.score)}`}>{sub.score == null ? "—" : sub.score.toFixed(0)}</td>
-                          </tr>
-                        ))}
+                        {factor.sub_signals.map((sub) => {
+                          const weak = sub.evidence_quality != null && sub.evidence_quality < 50;
+                          return (
+                            <tr key={sub.key} className={`border-t border-slate-800/60 ${weak ? "opacity-60" : ""}`}>
+                              <td className="py-1 pr-2 text-slate-400" title={sub.note}>
+                                {sub.label}
+                                {weak && (
+                                  <span className="ml-1 rounded border border-rose-900/60 px-1 text-[9px] text-rose-400/80"
+                                    title={`${sub.eq_note || ""}｜${EQ_HINT}`}>窗口不足一个周期</span>
+                                )}
+                              </td>
+                              <td className="py-1 pr-2 text-right text-slate-300">{fmtValue(sub.value)}</td>
+                              <td className="py-1 pr-2 text-right text-slate-500">{sub.percentile == null ? "—" : `${sub.percentile.toFixed(0)}分位`}</td>
+                              <td className="py-1 pr-2 text-right text-slate-500" title={sub.eq_note || EQ_HINT}>
+                                {sub.evidence_quality == null ? "—" : `EQ ${sub.evidence_quality.toFixed(0)}`}
+                              </td>
+                              <td className={`py-1 text-right font-medium ${scoreTone(sub.score)}`}>{sub.score == null ? "—" : sub.score.toFixed(0)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -517,14 +666,20 @@ export default function BottomModelPage() {
             {/* 确认信号 + 假底过滤器 */}
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-                <div className="mb-2 text-[12px] font-medium text-slate-300">确认信号（快变量）</div>
+                <div className="mb-2 text-[12px] font-medium text-slate-300">
+                  确认信号（快变量）
+                  <span className="ml-2 text-[10px] font-normal text-slate-500">按 EQ 加权汇总，短窗口指标自动降权</span>
+                </div>
                 <div className="space-y-1.5">
                   {snapshot.confirmation.checks.map((check) => (
-                    <div key={check.key} className="flex items-center justify-between text-[11px]">
+                    <div key={check.key} className="flex items-start justify-between gap-2 text-[11px]">
                       <span className="text-slate-400">{check.label}
                         {check.note && <span className="ml-1 text-[10px] text-slate-600">{check.note}</span>}
                       </span>
-                      <span className={`font-medium ${scoreTone(check.score)}`}>{check.score == null ? "—" : check.score.toFixed(0)}</span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <EqBadge eq={check.evidence_quality ?? null} />
+                        <span className={`font-medium ${scoreTone(check.score)}`}>{check.score == null ? "—" : check.score.toFixed(0)}</span>
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -552,7 +707,14 @@ export default function BottomModelPage() {
             {/* 反证清单 */}
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
-                <div className="mb-2 text-[12px] font-medium text-emerald-300">支持底部的证据（{snapshot.counter_evidence.supporting.length}）</div>
+                <div className="mb-2 text-[12px] font-medium text-emerald-300">
+                  支持底部的证据（{snapshot.counter_evidence.supporting.length}）
+                  {/* 条数看着多，是因为同一份证据被多个指标重复表达（如估值簇），
+                      不加这句提示会让读者把条数当成证据强度 */}
+                  <span className="ml-2 text-[10px] font-normal text-slate-500">
+                    条数 ≠ 独立证据数，见下方相关性声明
+                  </span>
+                </div>
                 <ul className="space-y-1 text-[11px] text-slate-400">
                   {snapshot.counter_evidence.supporting.map((item, i) => <li key={i}>· {item}</li>)}
                 </ul>
@@ -569,12 +731,16 @@ export default function BottomModelPage() {
 
             {/* 历史类比 */}
             <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-              <div className="mb-2 text-[12px] font-medium text-slate-300">历史底部类比</div>
+              <div className="mb-2 text-[12px] font-medium text-slate-300">
+                历史底部类比
+                <span className="ml-2 text-[10px] font-normal text-slate-500">共同因子仅 3-6 个，低可信度的类比只能当线索</span>
+              </div>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-left text-[10px] text-slate-500">
                     <th className="pb-1">历史底部</th><th className="pb-1 text-right">相似度</th>
                     <th className="pb-1 text-right">当年 Stress</th><th className="pb-1 text-right">共同因子</th>
+                    <th className="pb-1 text-right">可信度</th>
                     <th className="pb-1 pl-3">备注</th>
                   </tr>
                 </thead>
@@ -582,15 +748,21 @@ export default function BottomModelPage() {
                   {snapshot.analogs.map((analog) => (
                     <tr key={analog.day} className="border-t border-slate-800/60">
                       <td className="py-1.5 text-slate-300">{analog.day} {analog.label}</td>
-                      <td className={`py-1.5 text-right font-medium ${scoreTone(analog.similarity)}`}>{fmt(analog.similarity)}</td>
+                      <td className={`py-1.5 text-right font-medium ${scoreTone(analog.similarity)}`}>{fmt(analog.similarity, 0)}</td>
                       <td className="py-1.5 text-right text-slate-400">{fmt(analog.past_stress ?? null)}</td>
                       <td className="py-1.5 text-right text-slate-500">{analog.common_factors.length}/6</td>
+                      <td className={`py-1.5 text-right ${RELIABILITY_TONE[analog.reliability ?? ""] ?? "text-slate-500"}`}>
+                        {RELIABILITY_LABEL[analog.reliability ?? ""] ?? "—"}
+                      </td>
                       <td className="py-1.5 pl-3 text-[10px] text-slate-500">{analog.note}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {/* 相关性与重复计分声明（v3 起） */}
+            {snapshot.correlation_audit && <CorrelationPanel audit={snapshot.correlation_audit} />}
 
             {/* AI 证据包透明化 */}
             <EvidencePackPanel snapshot={snapshot} />
@@ -615,6 +787,9 @@ export default function BottomModelPage() {
 
             <div className="pb-4 text-center text-[10px] text-slate-600">
               历史大底样本仅 4 个，任何评分都不是交易指令 · 每日 UTC 01:00 自动更新 · 单一信号只加分不否决
+              <br />
+              历史曲线跨 bottom-v2 / v3 两个算法版本：v3 起子信号按证据质量加权、
+              周线结构改为分阶段并只计入确认层，两版分数不完全可比
             </div>
           </>
         )}

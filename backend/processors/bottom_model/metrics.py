@@ -90,6 +90,41 @@ def parse_ts_rows(raw: Any, outputs: dict[str, str]) -> dict[str, Rows]:
     return {name: sorted(days.items()) for name, days in result.items()}
 
 
+# 读取期坏点过滤：指标 → 相邻两点绝对跳变上限。
+# 只为存在**已观测到的**上游残缺数据的指标设置，阈值取历史真实最大跳变的 2 倍
+# 以上，确保只可能命中物理上不可能的值。
+#
+# global_m2_yoy：2026-07-06 上游给出 global_m2_supply = 100.1 万亿（前一周
+# 123.3 万亿），一周蒸发 19%，导致同比读数 -12.54%（全历史最低）。685 次周环比
+# 中最大真实跳变仅 2.47 个百分点，该点跳变 19.86 个百分点。这类残缺点会把
+# 宏观因子推向"极度紧缩=底部有利"的错误方向，必须在进入评分前剔除。
+_MAX_ABS_STEP: dict[str, float] = {"global_m2_yoy": 5.0}
+
+
+def sanitize_series(metric: str, rows: Rows) -> Rows:
+    """剔除上游残缺造成的孤立坏点（连续 3 点以上视为真实水平位移，予以保留）。"""
+    max_step = _MAX_ABS_STEP.get(metric)
+    if max_step is None or len(rows) < 3:
+        return rows
+    kept: Rows = [rows[0]]
+    pending: Rows = []
+    for day, value in rows[1:]:
+        if abs(value - kept[-1][1]) > max_step:
+            pending.append((day, value))
+            if len(pending) >= 3:      # 连续偏离 = 上游口径真的变了，接受
+                kept.extend(pending)
+                pending = []
+            continue
+        pending = []                   # 回到正常区间 → 确认前面是孤立坏点
+        kept.append((day, value))
+    if pending:
+        logger.warning(
+            "bottom_model.sanitize metric=%s dropped=%s (跳变超过 %.1f，判定为上游残缺)",
+            metric, [day for day, _ in pending], max_step,
+        )
+    return kept
+
+
 def parse_stablecoin_mcap(raw: Any) -> dict[str, Rows]:
     """稳定币市值 dict 格式：{data_list:[{USDT:..},..], time_list:[..]}。
 

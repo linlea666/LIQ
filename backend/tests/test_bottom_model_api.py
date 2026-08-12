@@ -117,10 +117,17 @@ def test_evidence_pack_sections(tmp_path):
     pack = build_evidence_pack(snap, store)
     for section in ["§0 分析指令", "§1 模型结论摘要", "§2 六因子明细",
                     "§3 确认信号与假底过滤器", "§4 反证清单", "§5 历史类比",
-                    "§6 关键指标原始序列", "§7 数据窗口与局限声明"]:
+                    "§6 关键指标原始序列", "§7 数据窗口与局限声明",
+                    "§8 相关性与重复计分声明", "§9 滚动上下文"]:
         assert section in pack, f"缺少分节：{section}"
     assert "Bottom Stress" in pack
-    assert "不要跨窗口直接比较分位数" in pack
+    # 审计员指令的核心禁止项必须在场
+    assert "禁止跨窗口比较分位数" in pack
+    assert "禁止重算或\"修正\"模型分数" in pack
+    assert "整体证据质量 EQ" in pack
+    # §2 表头带证据质量列；§5 类比带可信度列
+    assert "| 子信号 | 当前值 | 混合分位 | 得分 | 证据质量 | 备注 |" in pack
+    assert "| 历史底部 | 相似度 | 共同因子 | 可信度 | 备注 |" in pack
     # §6 序列确实带数值
     assert "BTC 价格 (USD)" in pack
     store.close()

@@ -46,8 +46,32 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert isinstance(snap["analogs"], list)
     # 数据质量：注册表中未喂入的指标进 missing
     assert "puell_multiple" in snap["data_quality"]["missing"]
+    # v3：顶层证据质量汇总 + 因子级 EQ
+    eq = snap["evidence_quality"]
+    assert 0 < eq["overall"] <= 100 and eq["stress"] is not None
+    assert all(
+        f["evidence_quality"] is None or 0 < f["evidence_quality"] <= 100
+        for f in snap["factors"]
+    )
+    # v3：相关性审计随快照落库，供前端与证据包直接消费
+    audit = snap["correlation_audit"]
+    assert audit["groups"] and audit["cross_layer_overlaps"]
     # 快照已落库
     assert store.latest_snapshot()["day"] == snap["day"]
+    store.close()
+
+
+def test_analog_reliability_and_integer_similarity(tmp_path):
+    """类比相似度取整并带可信度标签——共同因子只有 3-6 个，小数位是假精度。"""
+    store = BottomModelStore(str(tmp_path / "bm"))
+    for metric, rows in _bottomish_data(n=2200).items():
+        store.upsert_series(metric, rows)
+    snap = build_snapshot(store)
+    scored = [a for a in snap["analogs"] if a["similarity"] is not None]
+    assert scored
+    for analog in scored:
+        assert analog["similarity"] == int(analog["similarity"])
+        assert analog["reliability"] in {"high", "medium", "low"}
     store.close()
 
 

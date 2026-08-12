@@ -5,9 +5,13 @@ import os
 import sys
 from datetime import date, timedelta
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from processors.bottom_model.correlation import compute_correlation_audit, pearson
 from processors.bottom_model.factors import (
+    PROXY_CME_VOL,
     blended_percentile,
     build_counter_evidence,
     classify_quadrant,
@@ -17,9 +21,15 @@ from processors.bottom_model.factors import (
     compute_seller_exhaustion,
     compute_stress,
     drawdown_series,
+    evidence_quality,
+    median_gap_days,
+    oi_flush_ratio,
     percentile_rank,
     ratio_series,
+    weekly_higher_high,
     weekly_higher_low,
+    weekly_structure_stage,
+    window_coverage,
 )
 
 END = date(2026, 8, 11)
@@ -71,6 +81,201 @@ def test_drawdown_and_ratio_series():
     assert [round(v, 2) for _, v in dd] == [0.0, 0.2, 0.0, 0.5]
     num, den = mk([10, 20]), mk([2, 4])
     assert [v for _, v in ratio_series(num, den)] == [5.0, 5.0]
+
+
+# ── 证据质量 EQ ──
+
+def test_evidence_quality_span_multiplier():
+    # 跨度 8 年（两个 BTC 周期）= 满分；2 年跨度触及 0.30 下限
+    eight_years = mk(range(3000))
+    eq, note = evidence_quality(eight_years, as_of=END.strftime("%Y-%m-%d"))
+    assert eq == 100.0 and "→1.00" in note
+    two_years = mk(range(2 * 365))
+    eq2, _ = evidence_quality(two_years, as_of=END.strftime("%Y-%m-%d"))
+    assert eq2 == 30.0
+    # 四年史（BGeometrics 量级）落在中段，明显低于 2009 起的链上指标
+    four_years = mk(range(4 * 365))
+    eq4, _ = evidence_quality(four_years, as_of=END.strftime("%Y-%m-%d"))
+    assert 45.0 <= eq4 <= 55.0
+    assert evidence_quality([])[0] is None
+
+
+def test_evidence_quality_freshness_and_proxy():
+    rows = mk(range(3000))
+    # 日级序列滞后 2 天以内不罚；滞后到 6 倍间隔触及 0.50 下限
+    assert evidence_quality(rows, as_of="2026-08-13")[0] == 100.0
+    assert evidence_quality(rows, as_of="2026-08-17")[0] == 50.0
+    # 周级序列 gap=7，滞后 10 天仍在 2×gap 内 → 不罚
+    weekly = mk(range(500), step_days=7)
+    assert evidence_quality(weekly, as_of="2026-08-21")[0] == 100.0
+    # as_of 缺省 = 不做新鲜度折扣（历史类比传入各自截断日）
+    assert evidence_quality(rows)[0] == 100.0
+    eq_proxy, note = evidence_quality(rows, as_of="2026-08-11", proxy=PROXY_CME_VOL)
+    assert eq_proxy == 80.0 and "代理 0.80" in note
+
+
+def test_window_coverage_and_median_gap():
+    # 样本充足 → 三窗口全达标；样本不足以估计分布 → 0（分位本身也会返回 None）
+    assert window_coverage(mk(range(1200))) == 1.0
+    assert window_coverage(mk(range(50))) == 0.0
+    assert blended_percentile(mk(range(50))) is None
+    assert window_coverage([]) == 0.0
+    # 周级最小样本按比例放宽
+    assert window_coverage(mk(range(60), step_days=7), cadence="weekly") == 1.0
+    assert median_gap_days(mk(range(20))) == 1.0
+    assert median_gap_days(mk(range(20), step_days=7)) == 7.0
+
+
+def test_factor_weights_by_evidence_quality():
+    """短窗口子信号应被自动降权：同样的分数，历史越短影响越小。"""
+    n = 1200
+    base = {
+        "nupl": mk([0.7 - 0.65 * i / n for i in range(n)]),        # 16 年不可得，
+        "reserve_risk": mk([0.02 - 0.019 * i / n for i in range(n)]),
+    }
+    factors = {f["key"]: f for f in compute_factors(base, END.strftime("%Y-%m-%d"))}
+    valuation = factors["valuation"]
+    eqs = {s["key"]: s["evidence_quality"] for s in valuation["sub_signals"] if s["ok"]}
+    # 两个子信号跨度相同（合成数据 1200 天）→ EQ 相同且低于满分
+    assert all(eq is not None and eq < 60 for eq in eqs.values())
+    assert valuation["evidence_quality"] == pytest.approx(
+        sum(eqs.values()) / len(eqs), abs=0.1,
+    )
+
+
+# ── 周线结构分阶段 ──
+
+def test_weekly_higher_high():
+    # 最低周后：前半段高点 45，后半段突破 → True
+    lows = mk([50, 45, 40, 30, 33, 36, 39, 42], step_days=7)
+    highs = mk([55, 50, 45, 35, 40, 42, 48, 52], step_days=7)
+    assert weekly_higher_high(lows, highs) is True
+    # 反弹高点持续走低 → False
+    highs2 = mk([55, 50, 45, 35, 44, 43, 38, 37], step_days=7)
+    assert weekly_higher_high(lows, highs2) is False
+    assert weekly_higher_high(mk([1, 2, 3], step_days=7), mk([1, 2, 3], step_days=7)) is None
+
+
+def test_weekly_structure_stage_grades():
+    highs = mk([55, 50, 45, 35, 40, 42, 48, 52], step_days=7)
+    rising = mk([50, 45, 40, 30, 33, 36, 39, 42], step_days=7)
+    falling = mk([50, 45, 40, 38, 35, 33, 31, 30], step_days=7)
+
+    # 阶段 0：仍在创新低
+    stage = weekly_structure_stage({"btc_low_1w": falling, "btc_high_1w": highs})
+    assert stage["stage"] == 0 and stage["score"] == 10.0
+
+    # 阶段 2：已形成 HL，但价格仍低于 STH 成本线与 200W 均线
+    below = {"btc_low_1w": rising, "btc_high_1w": highs,
+             "btc_price_onchain": mk([90.0]), "sth_realized_price": mk([120.0]),
+             "ma_200w": mk([130.0])}
+    assert weekly_structure_stage(below)["stage"] == 2
+
+    # 阶段 3：HL + 收复成本线，但无更高高点
+    flat_highs = mk([55, 50, 45, 35, 44, 43, 38, 37], step_days=7)
+    reclaimed = {**below, "btc_high_1w": flat_highs, "btc_price_onchain": mk([150.0])}
+    stage3 = weekly_structure_stage(reclaimed)
+    assert stage3["stage"] == 3 and stage3["score"] == 75.0
+
+    # 阶段 4：HL + HH + 站上成本线
+    stage4 = weekly_structure_stage({**reclaimed, "btc_high_1w": highs})
+    assert stage4["stage"] == 4 and stage4["score"] == 100.0
+    assert weekly_structure_stage({}) is None
+
+
+def test_weekly_hl_not_double_counted_in_structure_factor():
+    """周线结构只应出现在确认层，Stress 的结构因子不得再计一次。"""
+    data = _bottomish_data()
+    factors = {f["key"]: f for f in compute_factors(data)}
+    sub_keys = {s["key"] for s in factors["structure"]["sub_signals"]}
+    assert "weekly_hl" not in sub_keys
+    check_keys = {c["key"] for c in compute_confirmation(data)["checks"]}
+    assert "structure_stage" in check_keys and "weekly_hl" not in check_keys
+
+
+# ── 资金费 × OI 制度矩阵 ──
+
+def _funding_oi(funding_tail, oi_tail):
+    """构造 120 天资金费 + 60 天 OI 序列，尾部按传入形态覆盖。"""
+    funding = [0.01] * (120 - len(funding_tail)) + list(funding_tail)
+    oi = [3e10] * (60 - len(oi_tail)) + list(oi_tail)
+    return {"funding_oiw": mk(funding), "oi_agg_usd": mk(oi)}
+
+
+def _regime(data):
+    checks = {c["key"]: c for c in compute_confirmation(data)["checks"]}
+    return checks["funding_oi_regime"]
+
+
+def test_funding_oi_regime_branches():
+    recovering = [-0.02] * 60 + [0.0] * 30    # 90d 有负极端，14d 均回到 0
+    extreme = [-0.02] * 90                    # 仍处负极端
+
+    # 1. 资金费回升 + OI 未回堆 = 健康正常化
+    healthy = _regime(_funding_oi(recovering, [3e10] * 31 + [2.4e10] * 29))
+    assert healthy["score"] == 100.0
+
+    # 2. 资金费回升但 OI 30d 增幅 > 15% = 杠杆重新堆积（本轮新增的关键修正）
+    rebuild = _regime(_funding_oi(recovering, [2e10] * 31 + [2.6e10] * 29))
+    assert rebuild["score"] == 25.0 and "杠杆重新堆积" in rebuild["note"]
+
+    # 3. 资金费仍为负 + OI 下降 = 恐慌出清进行中（压力事件，非确认）
+    flushing = _regime(_funding_oi(extreme, [3e10] * 31 + [2.4e10] * 29))
+    assert flushing["score"] == 40.0
+
+    # 4. 资金费仍为负 + OI 上升 = 空头累积
+    shorts = _regime(_funding_oi(extreme, [2e10] * 31 + [2.6e10] * 29))
+    assert shorts["score"] == 35.0
+
+    # 5. 两者均平稳
+    calm = _regime(_funding_oi([0.001] * 90, [3e10] * 60))
+    assert calm["score"] == 70.0
+
+    # OI 缺失时退化为资金费单边判定，并在备注中说明
+    no_oi = _regime({"funding_oiw": mk([0.01] * 30 + [-0.02] * 60 + [0.0] * 30)})
+    assert no_oi["score"] == 70.0 and "OI 数据不足" in no_oi["note"]
+
+
+def test_funding_shallow_dip_is_not_normalization_and_note_uses_percent_unit():
+    """funding_oiw 单位是百分比/8h：贴近零的负值不算负极端，备注不得放大 100 倍。
+
+    真实数据里 90d 低点仅 -0.0008%（历史 10% 分位上方），旧口径会把它当成
+    "从负极端回升"并给出 100 分的健康正常化确认。
+    """
+    shallow = _regime(_funding_oi([-0.0008] * 30 + [0.005] * 60, [3e10] * 60))
+    assert shallow["score"] == 70.0
+    assert "-0.0008%" in shallow["note"] and "0.0050%/8h" in shallow["note"]
+
+    deep = _regime(_funding_oi([-0.006] * 30 + [0.005] * 60,
+                               [3e10] * 31 + [2.4e10] * 29))
+    assert deep["score"] == 100.0
+
+
+def test_oi_flush_ratio_shared_helper():
+    rows = mk([3e10] * 100 + [2.1e10] * 20)
+    assert oi_flush_ratio(rows) == pytest.approx(0.30, abs=1e-6)
+    assert oi_flush_ratio(mk([1e10] * 10)) is None    # 样本不足
+
+
+# ── 相关性审计 ──
+
+def test_correlation_audit_flags_valuation_cluster():
+    data = _bottomish_data()
+    audit = compute_correlation_audit(data)
+    groups = {g["key"]: g for g in audit["groups"]}
+    # 合成数据中估值簇均为同向线性趋势 → 必然高度相关
+    assert groups["valuation"]["max_abs_rho"] >= 0.9
+    assert groups["valuation"]["strong_pairs"] >= 1
+    # 结构性冗余只做声明，不给相关系数（避免同义反复的假精度）
+    assert audit["structural_redundancies"]
+    assert all("rho" not in item for item in audit["structural_redundancies"])
+    assert len(audit["cross_layer_overlaps"]) >= 3
+
+
+def test_pearson_requires_overlap():
+    assert pearson(mk(range(100)), mk(range(100)))[0] == pytest.approx(1.0)
+    assert pearson(mk([5.0] * 100), mk(range(100))) is None   # 方差为 0
+    assert pearson(mk(range(10)), mk(range(10))) is None      # 重叠不足
 
 
 def test_weekly_higher_low():

@@ -25,12 +25,13 @@ from processors.bottom_model.factors import (
     compute_seller_exhaustion,
     compute_stress,
 )
-from processors.bottom_model.metrics import build_registry
+from processors.bottom_model.correlation import compute_correlation_audit
+from processors.bottom_model.metrics import build_registry, sanitize_series
 from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM_VERSION = "bottom-v2"
+ALGORITHM_VERSION = "bottom-v3"
 
 # 历史周期底部参考日（公认的周期低点附近，用于因子向量类比）
 HISTORICAL_BOTTOMS: tuple[tuple[str, str], ...] = (
@@ -50,7 +51,7 @@ def load_all_series(store: BottomModelStore) -> dict[str, Rows]:
     data: dict[str, Rows] = {}
     for spec in build_registry():
         for metric in spec.metrics:
-            data[metric] = store.series(metric)
+            data[metric] = sanitize_series(metric, store.series(metric))
     return data
 
 
@@ -62,11 +63,16 @@ def truncate_asof(data: dict[str, Rows], day: str) -> dict[str, Rows]:
     }
 
 
-def compute_core(data: dict[str, Rows]) -> dict[str, Any]:
-    """纯计算核心：因子 → Stress / Confirmation（含假底惩罚）→ 象限。"""
-    factors = compute_factors(data)
+def compute_core(data: dict[str, Rows],
+                 as_of: Optional[str] = None) -> dict[str, Any]:
+    """纯计算核心：因子 → Stress / Confirmation（含假底惩罚）→ 象限。
+
+    as_of 传给因子/确认层仅用于证据质量的新鲜度乘子；历史类比传入各自的
+    截断日，保证当年评估只惩罚"当年就已滞后"的数据。
+    """
+    factors = compute_factors(data, as_of)
     stress = compute_stress(factors)
-    confirmation_raw = compute_confirmation(data)
+    confirmation_raw = compute_confirmation(data, as_of)
     fake_filter = compute_fake_bottom_filter(data)
     conf_score = confirmation_raw["score"]
     adjusted = (
@@ -80,6 +86,7 @@ def compute_core(data: dict[str, Rows]) -> dict[str, Any]:
         "confirmation": {
             "score": adjusted,
             "score_before_penalty": conf_score,
+            "evidence_quality": confirmation_raw.get("evidence_quality"),
             "checks": confirmation_raw["checks"],
         },
         "fake_bottom_filter": fake_filter,
@@ -101,7 +108,7 @@ def compute_analogs(data: dict[str, Rows], current_core: dict[str, Any]) -> list
     analogs: list[dict[str, Any]] = []
     for day, label in HISTORICAL_BOTTOMS:
         try:
-            past_core = compute_core(truncate_asof(data, day))
+            past_core = compute_core(truncate_asof(data, day), day)
         except Exception:
             logger.warning("BottomModel analog compute failed | day=%s", day, exc_info=True)
             continue
@@ -115,16 +122,23 @@ def compute_analogs(data: dict[str, Rows], current_core: dict[str, Any]) -> list
             })
             continue
         mean_diff = sum(abs(current_vec[k] - past_vec[k]) for k in common) / len(common)
+        past_eq = (past_core["stress"] or {}).get("evidence_quality")
+        # 相似度取整：共同因子仅 3-5 个时，小数位是虚假精度
+        reliability = "low" if len(common) <= 3 else "high" if (
+            len(common) >= 5 and (past_eq or 0) >= 60
+        ) else "medium"
         analogs.append({
             "day": day,
             "label": label,
-            "similarity": round(100.0 - mean_diff, 1),
+            "similarity": round(100.0 - mean_diff),
             "common_factors": common,
+            "reliability": reliability,
             "past_scores": {k: past_vec[k] for k in common},
             "past_stress": past_core["stress"]["score"] if past_core["stress"] else None,
+            "past_evidence_quality": past_eq,
             "note": f"基于 {len(common)}/6 个共同有效因子" + (
                 "（早期数据缺失较多，置信度有限）" if len(common) <= 3 else ""
-            ),
+            ) + (f"，当年证据质量 {past_eq:.0f}" if past_eq is not None else ""),
         })
     return analogs
 
@@ -230,15 +244,24 @@ def build_snapshot(store: BottomModelStore,
     else:
         data = truncate_asof(data, as_of_day)
 
-    core = compute_core(data)
+    core = compute_core(data, as_of_day)
     stress_score = core["stress"]["score"] if core["stress"] else None
     conf_score = core["confirmation"]["score"]
+    stress_eq = (core["stress"] or {}).get("evidence_quality")
+    conf_eq = core["confirmation"].get("evidence_quality")
+    overall_eq = [eq for eq in (stress_eq, conf_eq) if eq is not None]
     snapshot = {
         "day": as_of_day,
         "ts": int(time.time()),
         "algorithm_version": ALGORITHM_VERSION,
         "price_context": _price_context(data),
         **core,
+        "evidence_quality": {
+            "stress": stress_eq,
+            "confirmation": conf_eq,
+            "overall": round(sum(overall_eq) / len(overall_eq), 1) if overall_eq else None,
+        },
+        "correlation_audit": compute_correlation_audit(data),
         "analogs": compute_analogs(data, core),
         "delta": compute_delta(store, stress_score, conf_score),
         "data_quality": compute_data_quality(store, data, as_of_day),
