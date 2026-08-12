@@ -11,12 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from models.spot_accumulation import SpotAccumulationRuntimeState, SpotOpportunityJournalEvent
+from models.spot_accumulation import (
+    EvidenceScore,
+    SpotAccumulationRuntimeState,
+    SpotOpportunity,
+    SpotOpportunityJournalEvent,
+)
 from processors.spot_accumulation_service import SpotAccumulationService
 from storage.spot_accumulation_store import (
     SpotAccumulationStore,
     SpotStorageCorruption,
     _MAX_ACTIVE_JOURNAL_EVENTS,
+    _TAIL_READ_CHUNK_BYTES,
 )
 
 
@@ -28,6 +34,31 @@ def _event(sequence: int, cycle_ath: float = 100_000.0) -> SpotOpportunityJourna
         created_at=1_700_000_000 + sequence,
         runtime=SpotAccumulationRuntimeState(cycle_ath=cycle_ath, updated_at=sequence),
     )
+
+
+def _bulky_event(sequence: int, cycle_ath: float = 100_000.0) -> SpotOpportunityJournalEvent:
+    """构造与线上同量级的记录：runtime 内嵌 200 条历史机会，单条远超尾部读取块。
+
+    线上 _prune_terminal 保留最近 200 条终态机会，单条日志约 160KB。
+    """
+    event = _event(sequence, cycle_ath)
+    for index in range(200):
+        event.runtime.opportunities[f"op-{sequence}-{index}"] = SpotOpportunity(
+            opportunity_id=f"op-{sequence}-{index}",
+            stage="insurance",
+            bucket="core",
+            allocation_usdt=1_000,
+            status="invalidated",
+            price_zone_low=49_000,
+            price_zone_high=51_000,
+            trigger_price=50_000,
+            scores=EvidenceScore(valuation=80, capital_flow=70, acceptance=67.53),
+            reasons=["估值层通过：回撤达到保险仓阈值", "资金层通过：ETF 连续净流入"],
+            blocked_by=["现货承接不足，等待吸筹确认"],
+            created_at=1_700_000_000,
+            updated_at=1_700_000_000 + index,
+        )
+    return event
 
 
 def _write_journal(path: Path, events: list[SpotOpportunityJournalEvent]) -> None:
@@ -51,6 +82,60 @@ def test_unbounded_legacy_journal_is_migrated_without_full_parse(tmp_path):
     assert store.journal_checkpoint_path.exists()
     # 旧数据整体保留为只读审计源，不得被删除
     assert len(store.legacy_journal_path.read_text(encoding="utf-8").splitlines()) == 500
+
+
+def test_tail_read_returns_whole_line_when_record_exceeds_read_chunk(tmp_path):
+    """线上单条日志 160KB+：只读一个尾部块会返回半截 JSON，必须继续向前扩窗。"""
+    store = SpotAccumulationStore(str(tmp_path))
+    events = [_bulky_event(seq) for seq in (1, 2)]
+    _write_journal(store.journal_path, events)
+    serialized = json.dumps(events[-1].model_dump(mode="json"), ensure_ascii=False)
+    assert len(serialized.encode("utf-8")) > _TAIL_READ_CHUNK_BYTES
+
+    offset, line = SpotAccumulationStore._read_last_jsonl_line(store.journal_path)
+
+    assert json.loads(line)["sequence"] == 2
+    with open(store.journal_path, "rb") as f:
+        f.seek(offset)
+        assert f.read(1) == b"{"
+
+
+def test_tail_read_skips_trailing_blank_lines_and_handles_single_record(tmp_path):
+    store = SpotAccumulationStore(str(tmp_path))
+    _write_journal(store.journal_path, [_bulky_event(7)])
+    with open(store.journal_path, "a", encoding="utf-8") as f:
+        f.write("\n\n")
+
+    offset, line = SpotAccumulationStore._read_last_jsonl_line(store.journal_path)
+
+    assert json.loads(line)["sequence"] == 7
+    assert offset == 0
+
+
+def test_tail_read_rejects_pathologically_long_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "storage.spot_accumulation_store._MAX_JSONL_LINE_BYTES", 256 * 1024,
+    )
+    store = SpotAccumulationStore(str(tmp_path))
+    store.journal_path.write_text("x" * (512 * 1024), encoding="utf-8")
+
+    with pytest.raises(SpotStorageCorruption, match="超过"):
+        SpotAccumulationStore._read_last_jsonl_line(store.journal_path)
+
+
+def test_production_sized_journal_migrates_instead_of_failing_closed(tmp_path):
+    """线上回归：380MB / 2511 条、单条 160KB 的日志必须能迁移，而不是判定为损坏。"""
+    store = SpotAccumulationStore(str(tmp_path))
+    _write_journal(store.journal_path, [_bulky_event(seq, 100_000.0 + seq) for seq in range(1, 21)])
+
+    service = SpotAccumulationService(str(tmp_path), lambda: None)
+
+    assert service.recovery_errors == []
+    assert service.recovery_required is False
+    assert service.runtime.cycle_ath == 100_020.0
+    assert store.journal_checkpoint_path.exists()
+    assert store.legacy_journal_path.exists()
+    assert store.storage_stats()["journal_checkpoint_sequence"] == 20
 
 
 def test_legacy_migration_is_idempotent_and_keeps_sequence_monotonic(tmp_path):

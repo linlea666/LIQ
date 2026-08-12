@@ -32,6 +32,9 @@ _COMPACT_FACT_RETENTION_DAYS = 90
 _DAILY_FACT_RETENTION_DAYS = 400
 _RAW_FACT_RETENTION_SECONDS = 48 * 3600
 _DAY_SECONDS = 86_400
+_TAIL_READ_CHUNK_BYTES = 64 * 1024
+# 单条机会日志内嵌完整 runtime，线上约 160KB；超过该上限视为异常，避免读尾部时吃穿内存。
+_MAX_JSONL_LINE_BYTES = 8 * 1024 * 1024
 
 
 @dataclass
@@ -344,21 +347,44 @@ class SpotAccumulationStore:
 
     @staticmethod
     def _read_last_jsonl_line(path: Path) -> tuple[int, str] | None:
-        """Read only the final non-empty JSONL line without materializing history."""
-        if not path.exists() or path.stat().st_size == 0:
+        """读取文件最后一条完整 JSONL 记录，不加载历史全文。
+
+        返回 (该行起始字节偏移, 行内容)。
+
+        关键约束：只有当候选行之前在窗口内出现过换行符（或窗口已回退到文件头）时，
+        才能确认这一行没有被读取窗口截断。单条机会日志内嵌完整 runtime，线上可达
+        160+ KB，远超单次读取块；若只看一个块就返回末尾片段，会得到半截 JSON 并被
+        误判为“记录损坏”，进而让整个现货模块 fail-closed 停摆。
+        """
+        if not path.exists():
+            return None
+        size = path.stat().st_size
+        if size == 0:
             return None
         with open(path, "rb") as f:
-            pos = f.seek(0, os.SEEK_END)
-            chunks: list[bytes] = []
+            pos = size
+            window = b""
             while pos > 0:
-                size = min(64 * 1024, pos)
-                pos -= size
+                step = min(_TAIL_READ_CHUNK_BYTES, pos)
+                pos -= step
                 f.seek(pos)
-                chunks.insert(0, f.read(size))
-                lines = b"".join(chunks).splitlines()
-                for line in reversed(lines):
-                    if line.strip():
-                        return pos, line.decode("utf-8")
+                window = f.read(step) + window
+                lines = window.split(b"\n")
+                offsets: list[int] = []
+                cursor = pos
+                for item in lines:
+                    offsets.append(cursor)
+                    cursor += len(item) + 1
+                # 窗口未到文件头时，lines[0] 可能被截断，不能作为完整行使用。
+                lowest = 0 if pos == 0 else 1
+                for index in range(len(lines) - 1, lowest - 1, -1):
+                    if lines[index].strip():
+                        return offsets[index], lines[index].decode("utf-8")
+                if len(window) > _MAX_JSONL_LINE_BYTES:
+                    raise SpotStorageCorruption(
+                        f"{path.name} 末尾单行超过 "
+                        f"{_MAX_JSONL_LINE_BYTES // (1024 * 1024)}MiB，拒绝载入"
+                    )
         return None
 
     @staticmethod
