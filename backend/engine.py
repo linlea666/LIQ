@@ -314,6 +314,12 @@ class Engine:
             settings=self._settings,
             push_callback=_push_trend,
         )
+        # BTC 底部概率模型：日级慢数据独立子系统，复用 Coinglass 客户端；
+        # 只消费原始序列（不引用其他模块的加工评分），纯 REST 无 WS 推送。
+        from processors.bottom_model.service import BottomModelService
+        self.bottom_model_service = BottomModelService(
+            coinglass=self._cg, settings=self._settings,
+        )
         # PR-3 · self._analyzer 已下线（旧 Trader）。Strategic 通过 _get_strategic_arbiter 懒加载。
         # MAA arbiter（懒创建：只在需要时导入，不影响旧链路）
         self._maa_arbiter = None  # type: ignore[assignment]
@@ -693,6 +699,11 @@ class Engine:
         except Exception:
             logger.warning("Trend service startup failed", exc_info=True)
 
+        try:
+            await self.bottom_model_service.start()
+        except Exception:
+            logger.warning("Bottom model service startup failed", exc_info=True)
+
         tasks: list[asyncio.Task] = []
         btc_coin = self._settings.get_coin("BTC")
         if self._nansen is not None:
@@ -991,6 +1002,10 @@ class Engine:
     async def stop(self):
         self._running = False
         await self.trend_service.stop()
+        try:
+            await self.bottom_model_service.stop()
+        except Exception:
+            logger.warning("Bottom model service stop failed", exc_info=True)
         for ccy, tasks in self._active_tasks.items():
             for t in tasks:
                 t.cancel()

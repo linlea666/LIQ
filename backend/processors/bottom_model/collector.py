@@ -51,7 +51,9 @@ class BottomModelCollector:
         }
         self._cg_spacing = max(0.0, float(coinglass_spacing_sec))
         self._registry = registry if registry is not None else build_registry()
-        self._run_lock = asyncio.Lock()
+        # 懒创建：Python 3.9 的 asyncio.Lock() 构造期即要求事件循环，
+        # 而本类在同步上下文（Engine.__init__/脚本）中实例化
+        self._run_lock: Optional[asyncio.Lock] = None
 
     @property
     def registry(self) -> list[FetchSpec]:
@@ -64,6 +66,8 @@ class BottomModelCollector:
         now: Optional[datetime] = None,
     ) -> dict[str, Any]:
         """执行一轮采集。返回逐 spec 结果摘要（供脚本/健康接口展示）。"""
+        if self._run_lock is None:
+            self._run_lock = asyncio.Lock()
         async with self._run_lock:
             return await self._run_once_locked(force, only_sources, now)
 
