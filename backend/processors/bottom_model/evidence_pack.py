@@ -21,7 +21,10 @@ _SERIES_SPEC: tuple[tuple[str, str, int, str], ...] = (
     ("mvrv_zscore", "MVRV Z-Score", 30, "{:.3f}"),
     ("nupl", "NUPL", 30, "{:.4f}"),
     ("sopr", "aSOPR", 30, "{:.4f}"),
+    ("sth_sopr", "STH-SOPR", 30, "{:.4f}"),
+    ("puell_multiple", "Puell Multiple", 30, "{:.3f}"),
     ("realized_loss", "已实现亏损 (USD)", 30, "{:.3e}"),
+    ("realized_profit", "已实现利润 (USD)", 30, "{:.3e}"),
     ("oi_agg_usd", "聚合 OI (USD)", 30, "{:.3e}"),
     ("cme_oi_usd", "CME OI (USD)", 30, "{:.3e}"),
     ("funding_oiw", "OI 加权资金费", 30, "{:.5f}"),
@@ -29,6 +32,7 @@ _SERIES_SPEC: tuple[tuple[str, str, int, str], ...] = (
     ("etf_flow_usd", "ETF 日净流 (USD)", 30, "{:.3e}"),
     ("stablecoin_total_mcap", "稳定币总市值 (USD)", 30, "{:.4e}"),
     ("fear_greed", "恐惧贪婪指数", 30, "{:.0f}"),
+    ("cme_close_1w", "CME 周收盘 (USD)", 12, "{:.0f}"),
     ("cme_vol_1w", "CME 周成交量 (张)", 12, "{:.0f}"),
 )
 

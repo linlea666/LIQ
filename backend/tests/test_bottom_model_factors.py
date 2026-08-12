@@ -19,7 +19,6 @@ from processors.bottom_model.factors import (
     drawdown_series,
     percentile_rank,
     ratio_series,
-    robust_z,
     weekly_higher_low,
 )
 
@@ -37,13 +36,10 @@ def mk(values, end=END, step_days=1):
 
 # ── 原语 ──
 
-def test_percentile_and_robust_z():
+def test_percentile_rank():
     values = [float(v) for v in range(1, 101)]
     assert percentile_rank(values, 100.0) == 100.0
     assert percentile_rank(values, 0.5) == 0.0
-    z = robust_z(values, 50.5)
-    assert abs(z) < 0.03  # 中位数附近 ≈ 0
-    assert robust_z([1.0] * 20, 5.0) is None  # MAD=0
 
 
 def test_blended_percentile_window_degradation():
@@ -53,6 +49,20 @@ def test_blended_percentile_window_degradation():
     assert bp is not None and bp["pct"] == 100.0
     # 全部窗口样本 < 90 → None
     assert blended_percentile(mk(range(50))) is None
+
+
+def test_blended_percentile_weekly_cadence():
+    # 周级序列：窗口天数按 7 天/行换算——300 周（≈5.7 年）序列中，
+    # 3y 窗口应只取最近 156 行而非 1095 行
+    rows = mk(range(300), step_days=7)
+    bp = blended_percentile(rows, cadence="weekly")
+    assert bp is not None
+    by_days = {w["days"]: w["n"] for w in bp["windows"]}
+    assert by_days[1095] == 1095 // 7   # 3y 窗口 = 156 周
+    assert by_days[1825] == 1825 // 7   # 5y 窗口 = 260 周
+    assert by_days[None] == 300         # 全历史
+    # 周级最小样本按比例放宽：30 周（约 200 天）不应整体 None
+    assert blended_percentile(mk(range(30), step_days=7), cadence="weekly") is not None
 
 
 def test_drawdown_and_ratio_series():

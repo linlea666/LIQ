@@ -30,7 +30,7 @@ from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM_VERSION = "bottom-v1"
+ALGORITHM_VERSION = "bottom-v2"
 
 # 历史周期底部参考日（公认的周期低点附近，用于因子向量类比）
 HISTORICAL_BOTTOMS: tuple[tuple[str, str], ...] = (
@@ -40,8 +40,9 @@ HISTORICAL_BOTTOMS: tuple[tuple[str, str], ...] = (
     ("2022-11-21", "FTX 崩盘底"),
 )
 
-# 数据新鲜度容忍（天）：超过视为 stale 写入 data_quality
-_STALENESS_TOLERANCE = {"daily": 3, "weekly": 10}
+# 数据新鲜度容忍（天）：超过视为 stale 写入 data_quality。
+# weekly=14：周线在"上周完整周一"与当前日期间最大自然间隔 13 天，10 会误报
+_STALENESS_TOLERANCE = {"daily": 3, "weekly": 14}
 
 
 def load_all_series(store: BottomModelStore) -> dict[str, Rows]:
@@ -132,9 +133,12 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
                          as_of_day: str) -> dict[str, Any]:
     """逐指标新鲜度/窗口标注——证据包防外部 AI 误读的关键。"""
     cadence_by_metric: dict[str, str] = {}
+    tolerance_override: dict[str, int] = {}
     for spec in build_registry():
         for metric in spec.metrics:
             cadence_by_metric[metric] = spec.cadence
+            if spec.staleness_days is not None:
+                tolerance_override[metric] = spec.staleness_days
     as_of = datetime.strptime(as_of_day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     missing: list[str] = []
     stale: list[dict[str, Any]] = []
@@ -146,7 +150,10 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
         first_day, last_day = rows[0][0], rows[-1][0]
         behind = (as_of - datetime.strptime(last_day, "%Y-%m-%d")
                   .replace(tzinfo=timezone.utc)).days
-        tolerance = _STALENESS_TOLERANCE.get(cadence_by_metric.get(metric, "daily"), 3)
+        tolerance = tolerance_override.get(
+            metric,
+            _STALENESS_TOLERANCE.get(cadence_by_metric.get(metric, "daily"), 3),
+        )
         metrics_meta[metric] = {
             "first_day": first_day, "last_day": last_day,
             "days": len(rows), "behind_days": behind,

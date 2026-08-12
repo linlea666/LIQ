@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import logging
-from statistics import median
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -89,28 +88,24 @@ def percentile_rank(values: list[float], value: float) -> Optional[float]:
     return 100.0 * sum(1 for v in values if v <= value) / len(values)
 
 
-def robust_z(values: list[float], value: float) -> Optional[float]:
-    """Robust Z = (v - median) / (1.4826 × MAD)；MAD=0 时返回 None。"""
-    if len(values) < 10:
-        return None
-    med = median(values)
-    mad = median(abs(v - med) for v in values)
-    if mad < 1e-12:
-        return None
-    return (value - med) / (1.4826 * mad)
+def blended_percentile(rows: Rows, value: Optional[float] = None,
+                       cadence: str = "daily") -> Optional[dict[str, Any]]:
+    """三窗口混合百分位。返回 {pct, windows:[{days,n,pct}]}；数据不足返回 None。
 
-
-def blended_percentile(rows: Rows, value: Optional[float] = None) -> Optional[dict[str, Any]]:
-    """三窗口混合百分位。返回 {pct, windows:[{days,n,pct}]}；数据不足返回 None。"""
+    cadence="weekly" 时窗口天数与最小样本数按 7 天/行换算——序列按行存储，
+    直接用天数切片会把周级窗口放大 7 倍。
+    """
     if not rows:
         return None
     if value is None:
         value = rows[-1][1]
+    scale = 7 if cadence == "weekly" else 1
+    min_samples = max(10, _MIN_WINDOW_SAMPLES // scale)
     parts: list[tuple[float, float, dict[str, Any]]] = []
     for days, weight in PERCENTILE_WINDOWS:
-        window_rows = rows if days is None else rows[-days:]
+        window_rows = rows if days is None else rows[-max(1, days // scale):]
         vals = values_of(window_rows)
-        if len(vals) < _MIN_WINDOW_SAMPLES:
+        if len(vals) < min_samples:
             continue
         pct = percentile_rank(vals, value)
         parts.append((weight, pct, {
@@ -165,9 +160,10 @@ def _sub(key: str, label: str, score: Optional[float], weight: float,
 
 
 def _pct_sub(key: str, label: str, rows: Rows, weight: float,
-             invert: bool = True, note: str = "") -> dict[str, Any]:
+             invert: bool = True, note: str = "",
+             cadence: str = "daily") -> dict[str, Any]:
     """按混合百分位打分的通用子信号；invert=True 表示低分位 = 高分（底部方向）。"""
-    bp = blended_percentile(rows)
+    bp = blended_percentile(rows, cadence=cadence)
     if bp is None:
         return _sub(key, label, None, weight, note=note or "数据不足")
     score = 100.0 - bp["pct"] if invert else bp["pct"]
@@ -203,6 +199,8 @@ def _factor_valuation(d: dict[str, Rows]) -> dict[str, Any]:
         _pct_sub("nupl", "NUPL", d.get("nupl", []), 1.0, note="2009 起全历史"),
         _pct_sub("reserve_risk", "Reserve Risk", d.get("reserve_risk", []), 1.0,
                  note="2010 起全历史"),
+        _pct_sub("puell", "Puell Multiple", d.get("puell_multiple", []), 1.0,
+                 note="2010 起全历史；低分位 = 矿工收入极度压缩"),
     ]
     # STH-MVRV：优先 BGeometrics；缺失则用 价格/STH Realized Price 派生
     sth_mvrv = d.get("sth_mvrv", [])
@@ -255,6 +253,8 @@ def _factor_capitulation(d: dict[str, Rows]) -> dict[str, Any]:
         ))
     else:
         subs.append(_sub("sopr_structure", "aSOPR 跌破1→收复", None, 1.0, note="数据不足"))
+    subs.append(_pct_sub("sth_sopr", "STH-SOPR", d.get("sth_sopr", []), 0.5,
+                         note="低分位 = 短期持有者深度割肉（2010 起全历史）"))
     subs.append(_pct_sub("lth_sopr", "LTH-SOPR", d.get("lth_sopr", []), 0.5,
                          note="低分位 = 长期持有者亏损兑现"))
     # LTH 已实现亏损极值
@@ -477,7 +477,7 @@ def _factor_macro(d: dict[str, Rows]) -> dict[str, Any]:
     # 全球 M2 同比：回升趋势 + 低位分位（宽松空间）
     m2 = d.get("global_m2_yoy", [])
     if len(m2) >= 30:
-        bp = blended_percentile(m2)
+        bp = blended_percentile(m2, cadence="weekly")
         rising = len(m2) >= 4 and m2[-1][1] > m2[-4][1]
         level_score = 100.0 - bp["pct"] if bp else 50.0
         score = 0.5 * level_score + 0.5 * (100.0 if rising else 0.0)
@@ -661,7 +661,7 @@ def compute_fake_bottom_filter(d: dict[str, Rows]) -> dict[str, Any]:
 # ══════════════════════ 卖方衰竭指数 ══════════════════════
 
 def compute_seller_exhaustion(d: dict[str, Rows]) -> Optional[dict[str, Any]]:
-    """卖方衰竭 0-100：亏损衰减 / SOPR 回升 / 清算衰减 / STH 供应稳定，等权。"""
+    """卖方衰竭 0-100：亏损衰减 / 亏损利润比 / SOPR 回升 / 清算衰减 / STH 供应稳定，等权。"""
     parts: list[tuple[str, float]] = []
 
     loss_abs: Rows = [(day, abs(v)) for day, v in d.get("realized_loss", [])]
@@ -670,6 +670,15 @@ def compute_seller_exhaustion(d: dict[str, Rows]) -> Optional[dict[str, Any]]:
         avg_14 = sma_tail(loss_abs, 14)
         if peak > 1e-9 and avg_14 is not None:
             parts.append(("loss_decay", clamp(100.0 * (1.0 - min(1.0, avg_14 / peak)))))
+
+    # 亏损/利润兑现比：恐慌期 >1（亏损主导），衰竭修复期趋近 0
+    profit_rows = d.get("realized_profit", [])
+    if len(loss_abs) >= 30 and len(profit_rows) >= 30:
+        avg_loss_14 = sma_tail(loss_abs, 14)
+        avg_profit_14 = sma_tail(profit_rows, 14)
+        if avg_loss_14 is not None and avg_profit_14 is not None and avg_profit_14 > 1e-9:
+            ratio = avg_loss_14 / avg_profit_14
+            parts.append(("loss_profit_ratio", clamp(100.0 * (1.0 - min(1.0, ratio)))))
 
     sopr = d.get("sopr", [])
     if len(sopr) >= 30:

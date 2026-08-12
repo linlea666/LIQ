@@ -35,7 +35,8 @@ def test_build_snapshot_end_to_end(tmp_path):
     store = _seeded_store(tmp_path)
     snap = build_snapshot(store)
     assert snap["day"] == END.strftime("%Y-%m-%d")
-    assert snap["algorithm_version"] == "bottom-v1"
+    from processors.bottom_model.snapshot import ALGORITHM_VERSION
+    assert snap["algorithm_version"] == ALGORITHM_VERSION
     assert snap["stress"]["score"] > 55
     assert snap["confirmation"]["score"] is not None
     assert snap["quadrant"]["key"] in {"panic_flush", "basing", "confirmed_recovery"}

@@ -201,6 +201,9 @@ class FetchSpec:
     fetch: Callable[[Any], Awaitable[Any]]      # (source_obj) -> raw
     parse: Callable[[Any], dict[str, Rows]]     # raw -> {metric: rows}
     note: str = ""
+    # 新鲜度容忍覆盖（天）：None = 按 cadence 默认；用于上游固有滞后的
+    # 指标（如 global_m2_yoy 滞后约 1 个月），避免 data_quality 恒报 stale
+    staleness_days: Optional[int] = None
 
 
 def _cg(method: str, /, **kwargs) -> Callable[[Any], Awaitable[Any]]:
@@ -300,12 +303,8 @@ def build_registry() -> list[FetchSpec]:
             fetch=_cg("fetch_sth_supply"),
             parse=lambda raw: parse_ts_rows(raw, {"sth_supply": "auto"}),
         ),
-        FetchSpec(
-            key="lth_supply", source="coinglass", cadence="daily",
-            metrics=("lth_supply",),
-            fetch=_cg("fetch_lth_supply"),
-            parse=lambda raw: parse_ts_rows(raw, {"lth_supply": "auto"}),
-        ),
+        # lth_supply 已停采：与 sth_supply 信息镜像冗余（总供应恒增背景下
+        # 两者近似互补），投降因子的筹码转移视角由 sth_supply_drop 覆盖
         FetchSpec(
             key="reserve_risk", source="coinglass", cadence="daily",
             metrics=("reserve_risk",),
@@ -389,6 +388,7 @@ def build_registry() -> list[FetchSpec]:
                 raw, {"global_m2_yoy": "global_m2_yoy_growth"},
             ),
             note="全球 M2 同比增速（2013 起周级，上游滞后约 1 个月）",
+            staleness_days=45,
         ),
         # ── BGeometrics · Coinglass 缺失的估值/投降指标 ──
         FetchSpec(
@@ -423,12 +423,8 @@ def build_registry() -> list[FetchSpec]:
             fetch=_bg("realized_loss_lth"), parse=_bg_parse("lth_realized_loss"),
             note="LTH 投降强度（端点命名带下划线，与其余端点不同）",
         ),
-        FetchSpec(
-            key="realized_price_bg", source="bgeometrics", cadence="daily",
-            metrics=("realized_price_bg",),
-            fetch=_bg("realized-price"), parse=_bg_parse("realized_price_bg"),
-            note="全市场 Realized Price（与 Coinglass STH/LTH-RP 互补）",
-        ),
+        # realized_price_bg 已停采：与 Coinglass 的 STH/LTH Realized Price
+        # 信息冗余，且释放 BGeometrics 15 次/天配额（留给失败自愈重试）
         # ── Yahoo · CME 恐慌周量 ──
         FetchSpec(
             key="cme_weekly", source="yahoo_cme", cadence="weekly",
