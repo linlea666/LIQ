@@ -139,6 +139,37 @@ def parse_fear_greed(raw: Any) -> dict[str, Rows]:
     return {"fear_greed": sorted(days.items())}
 
 
+def parse_exchange_balance(raw: Any) -> dict[str, Rows]:
+    """交易所余额 dict 格式：{time_list, price_list, data_map:{exchange:[...]}}。
+
+    汇总为全交易所 BTC 总余额；某交易所当日为 None 则跳过该所（口径会随
+    交易所覆盖变化漂移，因子层只用 30d 变化率，不用绝对值）。
+    """
+    if not isinstance(raw, dict):
+        return {"exchange_balance_btc": []}
+    time_list = raw.get("time_list") or []
+    data_map = raw.get("data_map") or {}
+    if not isinstance(data_map, dict):
+        return {"exchange_balance_btc": []}
+    days: dict[str, float] = {}
+    for i, ts in enumerate(time_list):
+        day = _day_from_ms(ts)
+        if day is None:
+            continue
+        total = 0.0
+        seen = False
+        for series in data_map.values():
+            if not isinstance(series, list) or i >= len(series):
+                continue
+            value = _to_float(series[i])
+            if value is not None:
+                total += value
+                seen = True
+        if seen and total > 0:
+            days[day] = total
+    return {"exchange_balance_btc": sorted(days.items())}
+
+
 def parse_yahoo_weekly(rows: Any) -> dict[str, Rows]:
     """YahooCMESource.fetch_weekly_history 输出 → 周级序列（day = 周一日期）。"""
     close: Rows = []
@@ -342,6 +373,22 @@ def build_registry() -> list[FetchSpec]:
             metrics=("fear_greed",),
             fetch=_cg("fetch_fear_greed"),
             parse=parse_fear_greed,
+        ),
+        FetchSpec(
+            key="exchange_balance", source="coinglass", cadence="daily",
+            metrics=("exchange_balance_btc",),
+            fetch=_cg("fetch_exchange_balance_chart", symbol="BTC"),
+            parse=parse_exchange_balance,
+            note="全交易所 BTC 余额合计（2024-08 起 ~2 年）",
+        ),
+        FetchSpec(
+            key="global_m2_yoy", source="coinglass", cadence="weekly",
+            metrics=("global_m2_yoy",),
+            fetch=_cg("fetch_btc_vs_global_m2"),
+            parse=lambda raw: parse_ts_rows(
+                raw, {"global_m2_yoy": "global_m2_yoy_growth"},
+            ),
+            note="全球 M2 同比增速（2013 起周级，上游滞后约 1 个月）",
         ),
         # ── BGeometrics · Coinglass 缺失的估值/投降指标 ──
         FetchSpec(

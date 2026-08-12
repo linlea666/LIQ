@@ -13,6 +13,7 @@ from processors.bottom_model.collector import BottomModelCollector, target_day_f
 from processors.bottom_model.metrics import (
     FetchSpec,
     build_registry,
+    parse_exchange_balance,
     parse_fear_greed,
     parse_stablecoin_mcap,
     parse_ts_rows,
@@ -54,6 +55,22 @@ def test_parse_stablecoin_mcap_usd_units():
     assert parse_stablecoin_mcap(
         {"data_list": [{"USDT": 1.0}], "time_list": [D0]}
     )["stablecoin_total_mcap"] == []
+
+
+def test_parse_exchange_balance_sums_and_skips_none():
+    raw = {
+        "time_list": [D0, D0 + DAY_MS],
+        "price_list": [60000, 61000],
+        "data_map": {
+            "Binance": [500000.0, 499000.0],
+            "CoinEx": [None, 1000.0],
+        },
+    }
+    out = parse_exchange_balance(raw)
+    assert out["exchange_balance_btc"] == [
+        ("2025-08-11", 500000.0), ("2025-08-12", 500000.0),
+    ]
+    assert parse_exchange_balance(None)["exchange_balance_btc"] == []
 
 
 def test_parse_fear_greed_both_shapes():
