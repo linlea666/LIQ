@@ -32,6 +32,8 @@ backend/data/roll/
 backend/data/spot_accumulation/
 # BTC原生趋势模块SQLite、WAL与运行状态
 backend/data/trend/
+# BTC底部概率模型SQLite与WAL（运行时生成）
+backend/data/bottom_model/
 # W1-T2 · 流动性墙引擎历史落盘（90 天保留，运行时生成）
 backend/data/liquidity_wall_history/
 # W4-T1 · 流动性墙后验报告输出（CLI 生成）

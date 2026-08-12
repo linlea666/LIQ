@@ -125,6 +125,55 @@ class LooknodeSourceConfig:
 
 
 @dataclass(frozen=True)
+class BGeometricsSourceConfig:
+    """BGeometrics（bitcoin-data.com）链上指标源。
+
+    免费档硬限：8 次/小时、15 次/天（按 IP/token 计），近 4 年日级历史。
+    专供 Bottom Model 模块补充 Coinglass 缺失的 MVRV-Z / Realized Loss 等指标；
+    key 可选（无 key 也可用免费档），仅从 ``api_key_env`` 环境变量读取。
+    """
+
+    enabled: bool = True
+    base_url: str = "https://bitcoin-data.com"
+    api_key_env: str = "BGEOMETRICS_API_KEY"
+    timeout_sec: int = 20
+    hourly_limit: int = 8
+    daily_limit: int = 15
+
+
+@dataclass(frozen=True)
+class YahooCMESourceConfig:
+    """Yahoo Finance CME 比特币期货（BTC=F）周线量价源。
+
+    非官方公开接口，无需 key；仅供 Bottom Model 的 CME 恐慌周量子信号。
+    失败时该子信号缺省（fail-open），不影响其他因子。
+    """
+
+    enabled: bool = True
+    base_url: str = "https://query1.finance.yahoo.com"
+    timeout_sec: int = 20
+    symbol: str = "BTC=F"
+
+
+@dataclass(frozen=True)
+class BottomModelConfig:
+    """BTC 熊市底部概率模型模块配置。
+
+    - daily_run_hour_utc：每日自动采集+评分小时（UTC）。默认 1（北京 09:00），
+      此时 Coinglass 链上指标（T-1 日更）与 BGeometrics 均已更新完整。
+    - coinglass_spacing_sec：模块内相邻 Coinglass 请求的最小间隔，
+      避免每日一轮采集瞬时挤占常规轮询的限流配额。
+    - snapshot_retention_days：每日评分快照保留天数（有界存储纪律）。
+    """
+
+    enabled: bool = True
+    data_dir: str = "data/bottom_model"
+    daily_run_hour_utc: int = 1
+    coinglass_spacing_sec: float = 10.0
+    snapshot_retention_days: int = 800
+
+
+@dataclass(frozen=True)
 class ProcessorsConfig:
     cvd: dict[str, Any]
     percentile: dict[str, Any]
@@ -348,6 +397,9 @@ class Settings:
     coinbase: CoinbaseSourceConfig = field(default_factory=CoinbaseSourceConfig)
     nansen: NansenSourceConfig = field(default_factory=NansenSourceConfig)
     looknode: LooknodeSourceConfig = field(default_factory=LooknodeSourceConfig)
+    bgeometrics: BGeometricsSourceConfig = field(default_factory=BGeometricsSourceConfig)
+    yahoo_cme: YahooCMESourceConfig = field(default_factory=YahooCMESourceConfig)
+    bottom_model: BottomModelConfig = field(default_factory=BottomModelConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -476,6 +528,24 @@ def _build_settings(raw: dict) -> Settings:
         crosscheck_min_net_ratio=max(
             0.0, min(1.0, float(looknode_raw.get("crosscheck_min_net_ratio", 0.03))),
         ),
+    )
+
+    bg_raw = src.get("bgeometrics", {}) or {}
+    bgeometrics = BGeometricsSourceConfig(
+        enabled=bool(bg_raw.get("enabled", True)),
+        base_url=str(bg_raw.get("base_url", "https://bitcoin-data.com")).rstrip("/"),
+        api_key_env=str(bg_raw.get("api_key_env", "BGEOMETRICS_API_KEY")),
+        timeout_sec=max(5, int(bg_raw.get("timeout_sec", 20))),
+        hourly_limit=max(1, int(bg_raw.get("hourly_limit", 8))),
+        daily_limit=max(1, int(bg_raw.get("daily_limit", 15))),
+    )
+
+    yc_raw = src.get("yahoo_cme", {}) or {}
+    yahoo_cme = YahooCMESourceConfig(
+        enabled=bool(yc_raw.get("enabled", True)),
+        base_url=str(yc_raw.get("base_url", "https://query1.finance.yahoo.com")).rstrip("/"),
+        timeout_sec=max(5, int(yc_raw.get("timeout_sec", 20))),
+        symbol=str(yc_raw.get("symbol", "BTC=F")),
     )
 
     processors = ProcessorsConfig(**raw["processors"])
@@ -682,6 +752,15 @@ def _build_settings(raw: dict) -> Settings:
         ),
     )
 
+    bottom_raw = raw.get("bottom_model", {}) or {}
+    bottom_model_cfg = BottomModelConfig(
+        enabled=bool(bottom_raw.get("enabled", True)),
+        data_dir=str(bottom_raw.get("data_dir", "data/bottom_model") or "data/bottom_model"),
+        daily_run_hour_utc=max(0, min(23, int(bottom_raw.get("daily_run_hour_utc", 1)))),
+        coinglass_spacing_sec=max(1.0, float(bottom_raw.get("coinglass_spacing_sec", 10.0))),
+        snapshot_retention_days=max(90, int(bottom_raw.get("snapshot_retention_days", 800))),
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -690,6 +769,9 @@ def _build_settings(raw: dict) -> Settings:
         coinbase=coinbase,
         nansen=nansen,
         looknode=looknode,
+        bgeometrics=bgeometrics,
+        yahoo_cme=yahoo_cme,
+        bottom_model=bottom_model_cfg,
         processors=processors,
         ai=ai,
         push=push,

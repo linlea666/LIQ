@@ -103,6 +103,23 @@ sources:
       flow_intelligence: 3600
       exchange_flows: 14400
       market_breadth: 14400
+  # BGeometrics（bitcoin-data.com）链上指标源 · 仅供 Bottom Model 模块。
+  # 免费档硬限 8 次/小时、15 次/天，近 4 年日级历史；key 可选（BGEOMETRICS_API_KEY）。
+  # 采集器按日期戳去重：同一指标同一天只成功拉取一次，重启不重复消耗配额。
+  bgeometrics:
+    enabled: true
+    base_url: "https://bitcoin-data.com"
+    api_key_env: "BGEOMETRICS_API_KEY"
+    timeout_sec: 20
+    hourly_limit: 8
+    daily_limit: 15
+  # Yahoo Finance CME 比特币期货（BTC=F）周线量价 · 仅供 Bottom Model 的
+  # CME 恐慌周量子信号。非官方接口，失败 fail-open 不影响其他因子。
+  yahoo_cme:
+    enabled: true
+    base_url: "https://query1.finance.yahoo.com"
+    timeout_sec: 20
+    symbol: "BTC=F"
   # Looknode 七家主要交易所 BTC 日级流入/流出；独立于 CoinGlass 配额。
   looknode:
     enabled: true
@@ -378,6 +395,18 @@ market_action:
                               # （想更省可改 7200=2h；最小 60s 由 settings 强制）
   max_history: 200            # per-coin 历史保留条数（~8.3d @ 1h）
   include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
+
+# ── BTC 熊市底部概率模型（Bottom Model · 仅 BTC，日级更新） ──
+# 数据骨架：Coinglass（P 系列日级慢数据）+ BGeometrics + Yahoo CME。
+# 每日 UTC 01:00（北京 09:00）自动采集+评分，此时上游 T-1 数据已齐。
+# coinglass_spacing_sec：模块内相邻 Coinglass 请求最小间隔，防止
+# 每日一轮采集（约 25 个请求）瞬时挤占常规轮询的 10/min 限流配额。
+bottom_model:
+  enabled: true
+  data_dir: "data/bottom_model"
+  daily_run_hour_utc: 1
+  coinglass_spacing_sec: 10.0
+  snapshot_retention_days: 800
 
 # ── 短线预测合约信号引擎（独立模块，仅消费 state，不写回） ──
 # 周期：30s 一个 tick；策略覆盖 10/30/60min 预测周期。
