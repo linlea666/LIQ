@@ -221,6 +221,12 @@ function ToolsMenu() {
         icon: "₿",
         desc: "2万U动态预算 · 手工成交账本",
       },
+      {
+        href: "/bottom-model",
+        label: "底部概率模型",
+        icon: "🏔️",
+        desc: "六因子双层评分 · 证据包一键复制",
+      },
     ],
     [coin, urgentCount, activeCount],
   );
