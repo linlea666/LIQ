@@ -5,3 +5,15 @@ __pycache__/
 venv/
 *.log
 .git/
+
+# 运行时数据与日志由 compose bind volume 提供，绝不能进入构建上下文：
+# data/ 在生产已达 11GB，打进上下文会让构建阶段吃满内存与磁盘。
+data/
+logs/
+
+# 本地缓存与测试产物
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage

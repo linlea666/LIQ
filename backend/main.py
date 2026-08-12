@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, Callable
@@ -33,8 +34,33 @@ from api.routes_trend import router as trend_router, set_service as set_trend_se
 from api.ws import sio, set_engine as set_ws_engine
 from config.settings import get_settings
 from engine import Engine
+from monitoring.log_buffer import (
+    LOG_DATEFMT,
+    LOG_FORMAT,
+    install_memory_handler,
+    log_buffer,  # noqa: F401  兼容旧的 `from main import log_buffer` 调用方
+)
 
-from collections import deque
+
+def _guard_duplicate_module_import() -> None:
+    """入口模块只允许加载一次。
+
+    以 `python main.py` 运行时模块名是 `__main__`；若同一文件再以 `main` 被导入
+    （例如 uvicorn 使用 "main:socket_app" 字符串目标，或业务代码 `from main import ...`），
+    Engine 与全部历史数据会被初始化两次，直接把常驻内存翻倍。此处快速失败而非静默重复。
+    """
+    twin_name = "main" if __name__ == "__main__" else "__main__"
+    twin = sys.modules.get(twin_name)
+    twin_file = getattr(twin, "__file__", None) if twin is not None else None
+    if twin_file and os.path.realpath(twin_file) == os.path.realpath(__file__):
+        raise RuntimeError(
+            "main 模块被重复导入（当前名=%s，已存在=%s）；"
+            "请向 uvicorn 传入已创建的 ASGI 应用对象，并避免从 main 导入共享状态。"
+            % (__name__, twin_name)
+        )
+
+
+_guard_duplicate_module_import()
 
 
 class CORSASGIWrapper:
@@ -113,32 +139,6 @@ class CORSASGIWrapper:
 
         await self.app(scope, receive, send_with_cors)
 
-LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
-LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
-
-log_buffer: deque[dict] = deque(maxlen=500)
-
-
-class MemoryHandler(logging.Handler):
-    """将日志写入内存 deque，供 /api/logs 端点读取"""
-    def emit(self, record: logging.LogRecord):
-        msg = record.getMessage()
-        if record.exc_info and record.exc_info[1] is not None:
-            tb = self.format(record).split("\n", 1)
-            if len(tb) > 1:
-                msg = f"{msg}\n{tb[1]}"
-            else:
-                import traceback
-                msg = f"{msg}\n{''.join(traceback.format_exception(*record.exc_info))}"
-        log_buffer.append({
-            "ts": record.created,
-            "time": self.format(record),
-            "level": record.levelname,
-            "name": record.name,
-            "msg": msg,
-        })
-
-
 logging.basicConfig(
     level=logging.INFO,
     format=LOG_FORMAT,
@@ -146,9 +146,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-mem_handler = MemoryHandler()
-mem_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
-logging.getLogger().addHandler(mem_handler)
+mem_handler = install_memory_handler()
 
 logger = logging.getLogger("liq")
 
@@ -341,10 +339,11 @@ socket_app = CORSASGIWrapper(_socket_app, settings.server.cors_origins)
 
 
 if __name__ == "__main__":
+    # 必须传应用对象而非 "main:socket_app" 字符串：字符串目标会让 uvicorn 二次导入
+    # 本文件，Engine 与历史数据被初始化两次。
     uvicorn.run(
-        "main:socket_app",
+        socket_app,
         host=settings.server.host,
         port=settings.server.port,
-        reload=False,
         log_level="info",
     )

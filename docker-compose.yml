@@ -6,7 +6,8 @@ services:
         APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
         APP_BUILD_TIME: ${APP_BUILD_TIME:-unknown}
     container_name: liq-backend
-    restart: always
+    # 整机仅 3.5GB：内存触顶时有限重试并保留现场，不允许无限重启拖垮宿主机。
+    restart: on-failure:5
     ports:
       - "8800:8000"
     env_file:
@@ -17,11 +18,16 @@ services:
       # /app/logs        → te_shadow / te_eval / 诊断日志
       - ./backend/data:/app/data
       - ./backend/logs:/app/logs
+    mem_limit: 2g
+    # 与 mem_limit 相同即禁止该容器使用 swap：宁可快速失败，也不要 swap thrashing 拖死整机。
+    memswap_limit: 2g
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      # /api/ready 只在核心行情暖机完成后返回 200；暖机期不得被判定为可用。
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=5)"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
+      start_period: 300s
 
   frontend:
     build:
@@ -33,5 +39,7 @@ services:
     restart: always
     ports:
       - "8801:3000"
+    mem_limit: 384m
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy

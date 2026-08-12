@@ -56,6 +56,9 @@ from sources.coinbase_native import CoinbaseNativeSource
 
 logger = logging.getLogger(__name__)
 
+# 核心行情暖机的最长等待时间；超时后派生子系统降级启动，不再无限等待。
+_CORE_WARMUP_TIMEOUT_SEC = 600
+
 
 def _pick_max_pain_for_coin(
     pain_data: Optional[LiqMaxPainData], ccy: str,
@@ -321,6 +324,10 @@ class Engine:
         self._percentile = PercentileTracker()
         self._states: dict[str, CoinState] = {}
         self._running = False
+        self._core_ready = False
+        self._startup_degraded = False
+        self._startup_phase = "initializing"
+        self._started_at = 0.0
         self._ai_running: set[str] = set()
         self._maa_running: set[str] = set()
         self._strategic_running: set[str] = set()
@@ -534,16 +541,41 @@ class Engine:
     def get_kl_history(self, ccy: str) -> list[KeyLevelSnapshotV2]:
         return list(self._states.get(ccy, CoinState(ccy)).kl_history)
 
+    @property
+    def core_ready(self) -> bool:
+        """默认币核心行情是否已完成暖机。"""
+        return self._core_ready
+
+    @property
+    def is_ready(self) -> bool:
+        """可对外提供服务：核心暖机完成，或暖机超时后降级放行。"""
+        return self._core_ready or self._startup_degraded
+
+    def get_startup_status(self) -> dict:
+        """启动阶段诊断：供 /api/ready 与 /api/health 判定与排查。"""
+        return {
+            "phase": self._startup_phase,
+            "core_ready": self._core_ready,
+            "ready": self.is_ready,
+            "degraded": self._startup_degraded,
+            "default_coin": self._default_coin,
+            "core_warmup_timeout_sec": _CORE_WARMUP_TIMEOUT_SEC,
+            "started_at": int(self._started_at),
+            "uptime_sec": int(time.time() - self._started_at) if self._started_at else 0,
+        }
+
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
         self._running = True
+        self._core_ready = False
+        self._startup_degraded = False
+        self._startup_phase = "core_warmup"
+        self._started_at = time.time()
         self._roll_loop_ref = asyncio.get_running_loop()
         logger.info(
             "Engine starting (Coinglass) | coins=%s default=%s",
             self._settings.supported_coins, self._default_coin,
         )
-        await self.trend_service.start()
-
         # ── 滚仓模块启动：从磁盘加载 positions + plans + events + settings ──
         try:
             self.roll_service.bootstrap()
@@ -623,30 +655,6 @@ class Engine:
             )),
         ])
 
-        # SMC · Nansen 只做低频确认层：不影响 Coinglass 限流，不阻塞 SMC 主判断。
-        if self._nansen is not None:
-            nsn_cfg = self._settings.nansen.poll_intervals
-            for idx, ccy in enumerate(("BTC", "ETH")):
-                if ccy not in self._settings.supported_coins:
-                    continue
-                coin = self._settings.get_coin(ccy)
-                tasks.append(asyncio.create_task(self._poll_loop(
-                    f"nansen_perp_{ccy}", self._poll_nansen_perp, coin,
-                    nsn_cfg.get("perp_screener", 900), 42 + idx * 3,
-                )))
-                tasks.append(asyncio.create_task(self._poll_loop(
-                    f"nansen_flow_{ccy}", self._poll_nansen_flow_intelligence, coin,
-                    nsn_cfg.get("flow_intelligence", 3600), 48 + idx * 3,
-                )))
-                tasks.append(asyncio.create_task(self._poll_loop(
-                    f"nansen_exchange_flows_{ccy}", self._poll_nansen_exchange_flows, coin,
-                    nsn_cfg.get("exchange_flows", 14400), 54 + idx * 3,
-                )))
-            tasks.append(asyncio.create_task(self._poll_loop(
-                "nansen_breadth", self._poll_nansen_market_breadth, btc_coin,
-                nsn_cfg.get("market_breadth", 14400), 61,
-            )))
-
         for idx, ccy in enumerate(self._settings.supported_coins):
             coin = self._settings.get_coin(ccy)
             stagger = 1.0 + idx * 1.5
@@ -654,55 +662,87 @@ class Engine:
             if ccy == self._default_coin:
                 tasks.extend(self._create_full_poll_tasks(coin, stagger))
 
-        # PR-3 · _auto_ai_loop 已下线（旧 Trader）。Strategic AI 走独立调度。
+        # 派生计算、AI 与扩展来源必须等核心行情就绪，避免启动阶段叠加峰值。
+        tasks.append(asyncio.create_task(self._optional_startup_loop()))
 
-        # ── Market Action Analyzer (MAA) 周期循环 ──
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _optional_startup_loop(self) -> None:
+        """Wait for the BTC core data contract before enabling expensive subsystems."""
+        deadline = time.time() + _CORE_WARMUP_TIMEOUT_SEC
+        while self._running and not self._is_coin_data_ready(self._default_coin):
+            if time.time() >= deadline:
+                # 核心行情长时间不就绪时不能永久挂起派生子系统（趋势/滚仓评估/新闻等），
+                # 否则一次上游故障会让整个二级功能栈静默停摆。
+                self._startup_degraded = True
+                logger.warning(
+                    "Core market data not ready after %ds; starting optional subsystems anyway | coin=%s",
+                    _CORE_WARMUP_TIMEOUT_SEC, self._default_coin,
+                )
+                break
+            await asyncio.sleep(2)
+        if not self._running:
+            return
+        if not self._startup_degraded:
+            self._core_ready = True
+            logger.info("Core market data ready | coin=%s", self._default_coin)
+        self._startup_phase = "optional_starting"
+
+        try:
+            await self.trend_service.start()
+        except Exception:
+            logger.warning("Trend service startup failed", exc_info=True)
+
+        tasks: list[asyncio.Task] = []
+        btc_coin = self._settings.get_coin("BTC")
+        if self._nansen is not None:
+            nsn_cfg = self._settings.nansen.poll_intervals
+            for idx, ccy in enumerate(("BTC", "ETH")):
+                if ccy not in self._settings.supported_coins:
+                    continue
+                coin = self._settings.get_coin(ccy)
+                tasks.extend([
+                    asyncio.create_task(self._poll_loop(
+                        f"nansen_perp_{ccy}", self._poll_nansen_perp, coin,
+                        nsn_cfg.get("perp_screener", 900), idx * 3,
+                    )),
+                    asyncio.create_task(self._poll_loop(
+                        f"nansen_flow_{ccy}", self._poll_nansen_flow_intelligence, coin,
+                        nsn_cfg.get("flow_intelligence", 3600), 3 + idx * 3,
+                    )),
+                    asyncio.create_task(self._poll_loop(
+                        f"nansen_exchange_flows_{ccy}", self._poll_nansen_exchange_flows, coin,
+                        nsn_cfg.get("exchange_flows", 14400), 6 + idx * 3,
+                    )),
+                ])
+            tasks.append(asyncio.create_task(self._poll_loop(
+                "nansen_breadth", self._poll_nansen_market_breadth, btc_coin,
+                nsn_cfg.get("market_breadth", 14400), 9,
+            )))
+
         maa_cfg = self._settings.market_action
         if maa_cfg.enabled:
-            tasks.append(asyncio.create_task(
-                self._auto_market_action_loop(maa_cfg.auto_interval_sec)
-            ))
-            # Phase 5-A：启动 shadow logger（懒启动也可，但显式启动便于落盘验证）
             try:
                 from monitoring.maa_shadow import get_maa_shadow_logger
                 get_maa_shadow_logger().start()
             except Exception:
                 logger.warning("[MAA-Shadow] start failed", exc_info=True)
-            # Phase 5-A：价格 heartbeat 循环（5 分钟一轮，每币去重）
+            tasks.extend([
+                asyncio.create_task(self._auto_market_action_loop(maa_cfg.auto_interval_sec)),
+                asyncio.create_task(self._auto_maa_heartbeat_loop(interval_sec=300)),
+                asyncio.create_task(self._auto_maa_eval_loop(interval_sec=1800)),
+                asyncio.create_task(self._auto_maa_history_loop(interval_sec=300)),
+            ])
+        if self._settings.strategic.enabled:
             tasks.append(asyncio.create_task(
-                self._auto_maa_heartbeat_loop(interval_sec=300)
+                self._auto_strategic_loop(self._settings.strategic.auto_interval_sec)
             ))
-            # Phase 5-B：事后评估循环（30 分钟一轮，按 coin 滚动计算）
-            tasks.append(asyncio.create_task(
-                self._auto_maa_eval_loop(interval_sec=1800)
-            ))
-            # P0 增强：funding 8h 历史 + OI 30d hourly 历史（5min / 币一次）
-            tasks.append(asyncio.create_task(
-                self._auto_maa_history_loop(interval_sec=300)
-            ))
-
-        # ── PR-2 · Strategic AI 决策官周期循环（与 MAA 并行，独立配额） ──
-        strat_cfg = self._settings.strategic
-        if strat_cfg.enabled:
-            tasks.append(asyncio.create_task(
-                self._auto_strategic_loop(strat_cfg.auto_interval_sec)
-            ))
-
         kl_snap_sec = self._settings.processors.key_level_tracker.get("snapshot_interval_sec", 0)
         if kl_snap_sec > 0:
             tasks.append(asyncio.create_task(self._auto_kl_snapshot_loop(kl_snap_sec)))
-
-        # PR-3 · _digest_email_loop 已下线（依赖旧 Trader 回测）
-
-        # ── D13 · News Intelligence Agent 编排（P1.2b） ──
-        try:
-            tasks.append(asyncio.create_task(self._news_agent_loop()))
-        except Exception:
-            logger.debug("[D13] news_agent_loop schedule failed", exc_info=True)
-
-        # ── 滚仓评估循环（每 _roll_eval_interval_sec 秒一轮） ──
+        tasks.append(asyncio.create_task(self._news_agent_loop()))
         tasks.append(asyncio.create_task(self._roll_eval_loop()))
-
+        self._startup_phase = "running"
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _news_agent_loop(self):

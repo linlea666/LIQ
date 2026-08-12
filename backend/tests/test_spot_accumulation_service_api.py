@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import time
 from types import SimpleNamespace
 
@@ -501,22 +502,38 @@ def test_email_notification_marker_is_persisted_and_only_emitted_once(tmp_path):
     assert restarted.pending_email_notifications() == []
 
 
-def test_monthly_archive_contains_replayable_full_fact_snapshot(tmp_path):
+def test_compact_archive_stays_replayable_and_raw_archive_keeps_full_context(tmp_path):
     service = _service(tmp_path)
     snapshot = service.evaluate()
     assert snapshot is not None
+
     records = service.store.load_facts_snapshots()
     assert records
     record = records[-1]
-    assert record["archive_schema_version"] == 3
+    assert record["archive_schema_version"] == 4
     assert record["record_type"] == "spot_accumulation_full_fact_snapshot"
     assert record["policy_version"] == service.config.policy_version
     assert record["facts"]["metric_facts"]["spot_netflow_24h_usd"]["source_timestamp"] > 0
     assert "parse_status" in record["score_breakdown"]["etf_flow_5d_usd"]
-    assert record["config"]["core_thresholds"] == service.config.core_thresholds
     assert record["opportunities"]
     assert record["opportunity_changes"]
     assert "portfolio" in record and "blocking_reasons" in record
+    # 紧凑记录不再重复承载可由当前快照重建的大对象
+    assert "config" not in record
+    assert "conditional_ladder" not in record
+    assert "spot_support_map" not in record
+
+    day = time.strftime("%Y%m%d", time.gmtime(snapshot.timestamp))
+    raw_records = [
+        json.loads(line)
+        for line in (service.store.raw_facts_dir / f"{day}.jsonl")
+        .read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    raw = raw_records[-1]
+    assert raw["archive_schema_version"] == 3
+    assert raw["record_type"] == "spot_accumulation_raw_snapshot"
+    assert raw["config"]["core_thresholds"] == service.config.core_thresholds
+    assert "conditional_ladder" in raw and "spot_support_map" in raw
 
 
 def test_spot_evaluation_does_not_mutate_shared_old_module_state(tmp_path):

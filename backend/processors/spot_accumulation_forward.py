@@ -12,7 +12,8 @@ from typing import Any, Iterable, Optional
 DAY_SECONDS = 86_400
 FORWARD_DAYS = (7, 30, 90)
 TERMINAL_STATUSES = {"invalidated", "expired", "skipped", "filled"}
-SUPPORTED_ARCHIVE_VERSIONS = {2, 3}
+# 2/3：旧版月度全量事实快照（仅离线迁移与审计读取）；4：紧凑事实归档（在线写入）。
+SUPPORTED_ARCHIVE_VERSIONS = {2, 3, 4}
 M_METRICS = {
     "etf_flow_5d_usd", "exchange_balance_7d_pct", "spot_netflow_24h_usd",
     "stablecoin_change_7d_pct", "coinbase_premium",

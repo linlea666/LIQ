@@ -81,14 +81,27 @@ def test_forward_report_does_not_invent_missing_horizon_prices():
     assert report["horizons"]["7d"]["sample_count"] == 0
 
 
-def test_forward_report_accepts_mixed_v2_v3_and_reports_unknown_versions():
+def test_forward_report_accepts_mixed_v2_v3_v4_and_reports_unknown_versions():
     records = [
         _record(0, 100, "eligible", 2),
         _record(1, 101, "invalidated", 3),
-        _record(2, 102, "invalidated", 99),
+        _record(2, 102, "invalidated", 4),
+        _record(3, 103, "invalidated", 99),
     ]
     report = build_forward_report(records)
-    assert report["record_count"] == 2
+    assert report["record_count"] == 3
     assert report["legacy_record_count"] == 1
     assert report["opportunity_count"] == 1
     assert report["unsupported_archive_versions"] == [99]
+
+
+def test_forward_report_reads_compact_v4_records_end_to_end():
+    """紧凑归档是线上唯一在写的 schema；前向报告必须原生支持，不得整体拒绝。"""
+    records = [_record(day, 100 + day, "eligible" if day == 0 else "invalidated", 4)
+               for day in range(91)]
+    report = build_forward_report(records)
+    assert report["record_count"] == 91
+    assert report["unsupported_archive_versions"] == []
+    outcome = report["outcomes"][0]
+    assert outcome["return_90d_pct"] == 90.0
+    assert outcome["ma_coverage_ratio"] == 1.0

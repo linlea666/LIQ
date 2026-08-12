@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from config.settings import get_settings
 
@@ -784,6 +785,40 @@ async def news_brief_history(
     }
 
 
+def _runtime_diagnostics() -> dict:
+    """内存、后台任务与现货归档用量；容器内存治理的观测入口。"""
+    from utils.process_stats import process_memory_stats
+
+    diagnostics: dict = {"memory": process_memory_stats()}
+    try:
+        diagnostics["background_tasks"] = len(asyncio.all_tasks())
+    except RuntimeError:
+        diagnostics["background_tasks"] = None
+    if _engine is not None:
+        try:
+            diagnostics["spot_accumulation_storage"] = (
+                _engine.spot_accumulation_service.store.storage_stats()
+            )
+        except Exception as exc:  # noqa: BLE001
+            diagnostics["spot_accumulation_storage_error"] = str(exc)
+    return diagnostics
+
+
+@router.get("/ready")
+async def readiness_check(response: Response):
+    """就绪探针：核心行情完成暖机（或暖机超时降级）后才返回 200。
+
+    容器健康检查与前端启动依赖此端点，避免暖机期的高负载阶段被判定为可用。
+    """
+    if not _engine:
+        response.status_code = 503
+        return {"ready": False, "phase": "initializing"}
+    status = _engine.get_startup_status()
+    if not status["ready"]:
+        response.status_code = 503
+    return status
+
+
 @router.get("/health")
 async def health_check():
     """数据源健康状态"""
@@ -792,10 +827,12 @@ async def health_check():
         "built_at": os.getenv("APP_BUILD_TIME", "unknown"),
     }
     if not _engine:
-        return {"status": "starting", "build": build}
+        return {"status": "starting", "build": build, "runtime": _runtime_diagnostics()}
     return {
         "status": "running",
         "build": build,
+        "startup": _engine.get_startup_status(),
+        "runtime": _runtime_diagnostics(),
         "sources": _engine.get_source_health(),
         "smc_monitor": _engine.get_smc_monitor_status(),
         "strategic_available": _engine.strategic_available,
@@ -1087,7 +1124,7 @@ async def get_logs(
     keyword: Optional[str] = Query(None, description="Filter by keyword"),
 ):
     """获取后端运行日志（内存缓存，最近500条）"""
-    from main import log_buffer
+    from monitoring.log_buffer import log_buffer
 
     logs = list(log_buffer)
 

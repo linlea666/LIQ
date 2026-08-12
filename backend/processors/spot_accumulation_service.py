@@ -77,7 +77,12 @@ class SpotAccumulationService:
             self.store.save_config(self.config)
         if (state_cache_invalid or not self.store.state_path.exists()) and not self.recovery_errors:
             self.store.save_state(self.runtime)
-        if not self.recovery_errors and not self.store.journal_path.exists():
+        if (
+            not self.recovery_errors
+            and not self.store.journal_path.exists()
+            and not self.store.journal_checkpoint_path.exists()
+            and not self.store.legacy_journal_path.exists()
+        ):
             self.store.backup_legacy_files_once()
             self._journal_runtime("migration", "初始化机会事件日志")
         elif ledger_reconstructed_runtime and not self.recovery_errors:
@@ -86,7 +91,8 @@ class SpotAccumulationService:
         self.long_term = self.store.load_long_term_facts()
         self._state_getter = state_getter
         self._latest_snapshot: Optional[SpotAccumulationSnapshot] = None
-        self._last_snapshot_hash = ""
+        self._last_compact_archive_bucket = -1
+        self._last_rollup_check_day = ""
         self._last_archived_opportunity_states: dict[str, str] = {}
         self._ai_explanation: Optional[str] = None
         self.last_evaluation_error = ""
@@ -710,6 +716,7 @@ class SpotAccumulationService:
             "policy_version": int(self.config.policy_version),
             "view_degraded": bool(self._last_view_warnings),
             "view_warnings": list(self._last_view_warnings),
+            "storage": self.store.storage_stats(),
             "data_quality": (
                 self._latest_snapshot.facts.data_quality.model_dump(mode="json")
                 if self._latest_snapshot else None
@@ -1388,9 +1395,9 @@ class SpotAccumulationService:
             + list(snapshot.facts.data_quality.notes)
             + [reason for item in snapshot.opportunities for reason in item.blocked_by]
         ))
-        payload = {
+        raw_payload = {
             "archive_schema_version": 3,
-            "record_type": "spot_accumulation_full_fact_snapshot",
+            "record_type": "spot_accumulation_raw_snapshot",
             "capability": "live_full_stack_shadow",
             "timestamp": snapshot.timestamp,
             "coin": snapshot.coin,
@@ -1419,50 +1426,139 @@ class SpotAccumulationService:
             ],
             "view_warnings": list(snapshot.view_warnings),
         }
-        digest_source = {
-            "policy_version": payload["policy_version"],
-            "price": snapshot.facts.price,
-            "metric_breakdown": metric_breakdown,
-            "data_quality": snapshot.facts.data_quality.model_dump(mode="json"),
+        self.store.append_raw_facts_snapshot(raw_payload, snapshot.timestamp)
+
+        changed_ids = {str(item["opportunity_id"]) for item in changes}
+        compact_payload = {
+            "archive_schema_version": 4,
+            "record_type": "spot_accumulation_full_fact_snapshot",
+            "capability": "compact_forward_validation",
+            "timestamp": snapshot.timestamp,
+            "coin": snapshot.coin,
+            "policy_version": self.config.policy_version,
+            "facts": snapshot.facts.model_dump(mode="json"),
+            "score_breakdown": metric_breakdown,
             "opportunities": [
-                {
-                    "id": item.opportunity_id,
-                    "status": item.status,
-                    "reserved": item.reserved_usdt,
-                    "filled": item.filled_usdt,
-                    "blocked_by": item.blocked_by,
-                }
+                item.model_dump(mode="json")
                 for item in snapshot.opportunities
+                if item.opportunity_id in changed_ids
+                or item.status in {"observing", "eligible", "accepted"}
             ],
-            "conditional_ladder": [
-                {
-                    "stage": item.stage,
-                    "status": item.status,
-                    "price": item.reference_price_mid,
-                    "remaining": item.remaining_usdt,
-                    "actionable": item.is_actionable,
-                }
-                for item in snapshot.conditional_ladder
-            ],
-            "spot_support_map": [
-                {
-                    "id": item.support_id,
-                    "price": item.price_mid,
-                    "wall": item.spot_wall_usd,
-                    "absorption": item.absorption_usd,
-                    "fresh": item.is_fresh,
-                }
-                for item in snapshot.spot_support_map
-            ],
-            "view_warnings": list(snapshot.view_warnings),
+            "opportunity_changes": changes,
+            "blocking_reasons": blocking,
+            "portfolio": snapshot.portfolio.model_dump(mode="json"),
+            "budget_reserved_usdt": snapshot.budget_reserved_usdt,
+            "next_action": snapshot.next_action,
         }
-        digest = hashlib.sha1(
-            json.dumps(digest_source, sort_keys=True, default=str).encode()
-        ).hexdigest()
-        if digest != self._last_snapshot_hash:
-            self.store.append_facts_snapshot(payload, snapshot.timestamp)
-            self._last_snapshot_hash = digest
-            self._last_archived_opportunity_states = current_states
+        bucket = snapshot.timestamp // 300
+        if changes or bucket != self._last_compact_archive_bucket:
+            self.store.append_compact_facts_snapshot(compact_payload, snapshot.timestamp)
+            self._last_compact_archive_bucket = bucket
+        self._last_archived_opportunity_states = current_states
+        self._rollup_previous_day(snapshot.timestamp)
+
+    def _rollup_previous_day(self, timestamp: int) -> None:
+        """跨 UTC 日界时，把上一天的紧凑事实聚合成 400 天日汇总。
+
+        汇总由已落盘的紧凑归档重新计算，因此重启不会丢失当天数据，重复执行也幂等。
+        """
+        today = time.strftime("%Y%m%d", time.gmtime(timestamp))
+        if today == self._last_rollup_check_day:
+            return
+        self._last_rollup_check_day = today
+        previous = time.strftime("%Y%m%d", time.gmtime(timestamp - 86400))
+        try:
+            if previous in self.store.daily_rollup_days():
+                return
+            records = self.store.load_compact_facts_for_day(previous)
+            if not records:
+                return
+            self.store.append_daily_facts_rollup(self._build_daily_rollup(previous, records))
+        except (SpotStorageCorruption, OSError, ValueError):
+            logger.warning("spot daily rollup failed | day=%s", previous, exc_info=True)
+
+    @staticmethod
+    def _build_daily_rollup(day: str, records: list[dict]) -> dict:
+        """紧凑事实的单日汇总；只保留长周期复盘需要的标量，不保留可重建的大对象。"""
+        def _facts(record: dict) -> dict:
+            value = record.get("facts")
+            return value if isinstance(value, dict) else {}
+
+        prices = [
+            price for record in records
+            if (price := SpotAccumulationService._float(_facts(record).get("price"))) is not None
+            and price > 0
+        ]
+        drawdowns = [
+            value for record in records
+            if (value := SpotAccumulationService._float(_facts(record).get("drawdown_pct"))) is not None
+        ]
+        timestamps = [
+            int(record.get("timestamp") or 0) for record in records
+            if int(record.get("timestamp") or 0) > 0
+        ]
+        status_counts: dict[str, int] = {}
+        seen_status: set[tuple[str, str]] = set()
+        for record in records:
+            opportunities = record.get("opportunities")
+            for item in opportunities if isinstance(opportunities, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                key = (str(item.get("opportunity_id") or ""), str(item.get("status") or ""))
+                if not key[0] or key in seen_status:
+                    continue
+                seen_status.add(key)
+                status_counts[key[1]] = status_counts.get(key[1], 0) + 1
+        score_stats: dict[str, dict[str, Optional[float]]] = {}
+        for name in ("valuation", "capital_flow", "acceptance"):
+            values = [
+                value for record in records
+                if (value := SpotAccumulationService._float(
+                    (_facts(record).get("scores") or {}).get(name)
+                )) is not None
+            ]
+            score_stats[name] = {
+                "min": min(values) if values else None,
+                "max": max(values) if values else None,
+                "last": values[-1] if values else None,
+            }
+        last = records[-1] if records else {}
+        last_portfolio = last.get("portfolio") if isinstance(last.get("portfolio"), dict) else {}
+        change_count = sum(
+            len(record.get("opportunity_changes") or [])
+            for record in records
+            if isinstance(record.get("opportunity_changes"), list)
+        )
+        return {
+            "archive_schema_version": 1,
+            "record_type": "spot_accumulation_daily_rollup",
+            "day": day,
+            "coin": str(last.get("coin") or "BTC"),
+            "policy_version": last.get("policy_version"),
+            "sample_count": len(records),
+            "first_timestamp": min(timestamps) if timestamps else 0,
+            "last_timestamp": max(timestamps) if timestamps else 0,
+            "price": {
+                "first": prices[0] if prices else None,
+                "last": prices[-1] if prices else None,
+                "min": min(prices) if prices else None,
+                "max": max(prices) if prices else None,
+            },
+            "drawdown_pct": {
+                "max": max(drawdowns) if drawdowns else None,
+                "last": drawdowns[-1] if drawdowns else None,
+            },
+            "scores": score_stats,
+            "opportunity_status_counts": status_counts,
+            "opportunity_change_count": change_count,
+            "portfolio": {
+                key: last_portfolio.get(key)
+                for key in (
+                    "total_cash_usdt", "total_btc", "total_cost_basis_usdt",
+                    "average_cost_usdt", "realized_pnl_usdt",
+                )
+            },
+        }
 
     @staticmethod
     def _last_dict(value: Any) -> dict:

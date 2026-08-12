@@ -25,6 +25,15 @@ from models.spot_accumulation import (
 logger = logging.getLogger(__name__)
 
 
+_JOURNAL_CHECKPOINT_VERSION = 1
+_MAX_ACTIVE_JOURNAL_EVENTS = 128
+_JOURNAL_ARCHIVE_RETENTION_DAYS = 90
+_COMPACT_FACT_RETENTION_DAYS = 90
+_DAILY_FACT_RETENTION_DAYS = 400
+_RAW_FACT_RETENTION_SECONDS = 48 * 3600
+_DAY_SECONDS = 86_400
+
+
 @dataclass
 class SpotStageExecution:
     spent_usdt: float = 0.0
@@ -71,6 +80,12 @@ class SpotAccumulationStore:
         self.raw_path = self.root / "long_term_facts.json"
         self.ledger_path = self.root / "ledger.jsonl"
         self.journal_path = self.root / "opportunity_journal.jsonl"
+        self.journal_checkpoint_path = self.root / "runtime_checkpoint.json"
+        self.legacy_journal_path = self.root / "opportunity_journal.legacy.jsonl"
+        self.journal_archive_dir = self.root / "journal_archive"
+        self.compact_facts_dir = self.root / "facts_compact"
+        self.raw_facts_dir = self.root / "facts_raw"
+        self.daily_facts_path = self.root / "facts_daily.jsonl"
         self.ledger_lock_path = self.root / ".ledger.lock"
         self.journal_lock_path = self.root / ".journal.lock"
         self.config_lock_path = self.root / ".config.lock"
@@ -327,6 +342,32 @@ class SpotAccumulationStore:
             self.build_portfolio(config, events=events + [reversal])
             return self._append_event_unlocked(reversal), target
 
+    @staticmethod
+    def _read_last_jsonl_line(path: Path) -> tuple[int, str] | None:
+        """Read only the final non-empty JSONL line without materializing history."""
+        if not path.exists() or path.stat().st_size == 0:
+            return None
+        with open(path, "rb") as f:
+            pos = f.seek(0, os.SEEK_END)
+            chunks: list[bytes] = []
+            while pos > 0:
+                size = min(64 * 1024, pos)
+                pos -= size
+                f.seek(pos)
+                chunks.insert(0, f.read(size))
+                lines = b"".join(chunks).splitlines()
+                for line in reversed(lines):
+                    if line.strip():
+                        return pos, line.decode("utf-8")
+        return None
+
+    @staticmethod
+    def _parse_journal_event(line: str, line_ref: str) -> SpotOpportunityJournalEvent:
+        try:
+            return SpotOpportunityJournalEvent.model_validate_json(line)
+        except Exception as exc:  # noqa: BLE001
+            raise SpotStorageCorruption(f"{line_ref}损坏: {exc}") from exc
+
     def _load_journal_unlocked(self) -> list[SpotOpportunityJournalEvent]:
         if not self.journal_path.exists():
             return []
@@ -335,16 +376,139 @@ class SpotAccumulationStore:
             for line_no, line in enumerate(f, 1):
                 if not line.strip():
                     continue
-                try:
-                    result.append(SpotOpportunityJournalEvent.model_validate_json(line))
-                except Exception as exc:  # noqa: BLE001
+                # 超限时立即失败：绝不能把无界历史全部解析进内存后再报错。
+                if len(result) >= _MAX_ACTIVE_JOURNAL_EVENTS:
                     raise SpotStorageCorruption(
-                        f"opportunity_journal.jsonl 第{line_no}行损坏: {exc}"
-                    ) from exc
+                        "活动机会日志超过上限；请先运行存储迁移，不允许全量恢复"
+                    )
+                result.append(self._parse_journal_event(
+                    line, f"opportunity_journal.jsonl 第{line_no}行",
+                ))
         return result
+
+    @staticmethod
+    def _line_count_exceeds(path: Path, limit: int) -> bool:
+        """流式判断 JSONL 行数是否超限；不解析内容，内存占用与文件大小无关。"""
+        if not path.exists():
+            return False
+        count = 0
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    return False
+                count += chunk.count(b"\n")
+                if count > limit:
+                    return True
+
+    def _load_checkpoint_unlocked(self) -> tuple[int, SpotAccumulationRuntimeState] | None:
+        if not self.journal_checkpoint_path.exists():
+            return None
+        try:
+            raw = json.loads(self.journal_checkpoint_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("checkpoint must be an object")
+            if int(raw.get("schema_version", 0)) != _JOURNAL_CHECKPOINT_VERSION:
+                raise ValueError("unsupported checkpoint schema")
+            sequence = int(raw.get("sequence", 0))
+            if sequence < 0:
+                raise ValueError("negative checkpoint sequence")
+            runtime = SpotAccumulationRuntimeState.model_validate(raw.get("runtime") or {})
+            return sequence, runtime
+        except Exception as exc:  # noqa: BLE001
+            raise SpotStorageCorruption(f"runtime_checkpoint.json 损坏: {exc}") from exc
+
+    def _write_checkpoint_unlocked(self, event: SpotOpportunityJournalEvent) -> None:
+        _atomic_write_json(self.journal_checkpoint_path, {
+            "schema_version": _JOURNAL_CHECKPOINT_VERSION,
+            "sequence": event.sequence,
+            "event_id": event.event_id,
+            "event_type": event.event_type,
+            "created_at": event.created_at,
+            "runtime": event.runtime.model_dump(mode="json"),
+        })
+
+    def _migrate_legacy_journal_unlocked(self) -> bool:
+        """Archive a legacy unbounded journal and checkpoint its final durable state."""
+        if self._load_checkpoint_unlocked() is not None:
+            return False
+        source = self.journal_path if self.journal_path.exists() else self.legacy_journal_path
+        if not source.exists() or source.stat().st_size == 0:
+            return False
+        last = self._read_last_jsonl_line(source)
+        if last is None:
+            return False
+        _offset, line = last
+        event = self._parse_journal_event(line, f"{source.name} 最后一条记录")
+        if source == self.journal_path:
+            if self.legacy_journal_path.exists():
+                raise SpotStorageCorruption(
+                    "旧机会日志与待迁移日志同时存在，拒绝覆盖审计数据"
+                )
+            os.replace(self.journal_path, self.legacy_journal_path)
+        self._write_checkpoint_unlocked(event)
+        logger.info(
+            "spot journal migrated to checkpoint | sequence=%d legacy=%s",
+            event.sequence, self.legacy_journal_path.name,
+        )
+        return True
+
+    def _archive_active_journal_unlocked(self, event: SpotOpportunityJournalEvent) -> None:
+        """检查点落盘后把活动 journal 移入归档目录；同名归档不覆盖。"""
+        self._write_checkpoint_unlocked(event)
+        self.journal_archive_dir.mkdir(parents=True, exist_ok=True)
+        archive = self.journal_archive_dir / f"opportunity_journal_{event.sequence}.jsonl"
+        suffix = 1
+        while archive.exists():
+            archive = self.journal_archive_dir / (
+                f"opportunity_journal_{event.sequence}_{suffix}.jsonl"
+            )
+            suffix += 1
+        os.replace(self.journal_path, archive)
+        self._prune_journal_archive_unlocked()
+
+    def _prune_journal_archive_unlocked(self) -> None:
+        if not self.journal_archive_dir.exists():
+            return
+        cutoff = time.time() - _JOURNAL_ARCHIVE_RETENTION_DAYS * _DAY_SECONDS
+        for path in self.journal_archive_dir.glob("opportunity_journal_*.jsonl"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                logger.warning("journal archive prune failed | file=%s", path.name, exc_info=True)
+
+    def _rotate_oversized_journal_unlocked(self) -> bool:
+        """活动 journal 超限时自愈轮转：保留全部审计数据，避免恢复路径被永久阻断。
+
+        正常运行由 append_journal 触发轮转；此处覆盖轮转中断、或历史遗留的
+        “检查点已存在但活动 journal 仍然超限”的场景。
+        """
+        if not self._line_count_exceeds(self.journal_path, _MAX_ACTIVE_JOURNAL_EVENTS):
+            return False
+        last = self._read_last_jsonl_line(self.journal_path)
+        if last is None:
+            return False
+        _offset, line = last
+        event = self._parse_journal_event(line, "opportunity_journal.jsonl 最后一条记录")
+        self._archive_active_journal_unlocked(event)
+        logger.warning(
+            "spot active journal exceeded %d events; rotated to archive | sequence=%d",
+            _MAX_ACTIVE_JOURNAL_EVENTS, event.sequence,
+        )
+        return True
+
+    def _ensure_bounded_journal_unlocked(self) -> None:
+        self._migrate_legacy_journal_unlocked()
+        self._rotate_oversized_journal_unlocked()
+
+    def migrate_legacy_journal(self) -> bool:
+        with self._exclusive_lock(self.journal_lock_path):
+            return self._migrate_legacy_journal_unlocked()
 
     def load_journal(self) -> list[SpotOpportunityJournalEvent]:
         with self._exclusive_lock(self.journal_lock_path):
+            self._ensure_bounded_journal_unlocked()
             return self._load_journal_unlocked()
 
     def append_journal(
@@ -352,8 +516,14 @@ class SpotAccumulationStore:
         event: SpotOpportunityJournalEvent,
     ) -> SpotOpportunityJournalEvent:
         with self._exclusive_lock(self.journal_lock_path):
+            self._ensure_bounded_journal_unlocked()
+            checkpoint = self._load_checkpoint_unlocked()
             events = self._load_journal_unlocked()
-            event.sequence = max((item.sequence for item in events), default=0) + 1
+            base_sequence = checkpoint[0] if checkpoint else 0
+            event.sequence = max(
+                base_sequence,
+                max((item.sequence for item in events), default=0),
+            ) + 1
             payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False) + "\n"
             fd = os.open(self.journal_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
             try:
@@ -361,11 +531,19 @@ class SpotAccumulationStore:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            if len(events) + 1 >= _MAX_ACTIVE_JOURNAL_EVENTS:
+                self._archive_active_journal_unlocked(event)
             return event
 
     def latest_journal_runtime(self) -> Optional[SpotAccumulationRuntimeState]:
-        events = self.load_journal()
-        return events[-1].runtime.model_copy(deep=True) if events else None
+        with self._exclusive_lock(self.journal_lock_path):
+            self._ensure_bounded_journal_unlocked()
+            checkpoint = self._load_checkpoint_unlocked()
+            events = self._load_journal_unlocked()
+            latest = events[-1] if events else None
+            if latest and (checkpoint is None or latest.sequence > checkpoint[0]):
+                return latest.runtime.model_copy(deep=True)
+            return checkpoint[1].model_copy(deep=True) if checkpoint else None
 
     def backup_legacy_files_once(self) -> None:
         """首次事件日志迁移前保存用户原文件；不覆盖已有备份。"""
@@ -378,39 +556,169 @@ class SpotAccumulationStore:
                 if path.exists():
                     shutil.copy2(path, backup / path.name)
 
-    def append_facts_snapshot(self, payload: dict, timestamp: int) -> None:
-        month = time.strftime("%Y-%m", time.gmtime(timestamp))
-        path = self.root / f"facts_{month}.jsonl"
+    def _append_jsonl(self, path: Path, payload: dict) -> None:
         line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-        with self._exclusive_lock(self.facts_lock_path):
-            fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
-            try:
-                os.write(fd, line.encode("utf-8"))
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
-    def load_facts_snapshots(self) -> list[dict]:
-        """严格读取全部月度事实；损坏行不得被静默用于回放报告。"""
+    @staticmethod
+    def _day_key(timestamp: int) -> str:
+        return time.strftime("%Y%m%d", time.gmtime(timestamp))
+
+    def append_compact_facts_snapshot(self, payload: dict, timestamp: int) -> None:
+        with self._exclusive_lock(self.facts_lock_path):
+            self._append_jsonl(self.compact_facts_dir / f"{self._day_key(timestamp)}.jsonl", payload)
+            self._prune_facts_unlocked(timestamp)
+
+    def append_raw_facts_snapshot(self, payload: dict, timestamp: int) -> None:
+        with self._exclusive_lock(self.facts_lock_path):
+            self._append_jsonl(self.raw_facts_dir / f"{self._day_key(timestamp)}.jsonl", payload)
+            self._prune_facts_unlocked(timestamp)
+
+    def _prune_facts_unlocked(self, now_ts: int) -> None:
+        compact_cutoff = self._day_key(now_ts - _COMPACT_FACT_RETENTION_DAYS * 86400)
+        raw_cutoff = self._day_key(now_ts - _RAW_FACT_RETENTION_SECONDS)
+        for root, cutoff in ((self.compact_facts_dir, compact_cutoff), (self.raw_facts_dir, raw_cutoff)):
+            if not root.exists():
+                continue
+            for path in root.glob("*.jsonl"):
+                if path.stem.isdigit() and path.stem < cutoff:
+                    path.unlink()
+
+    @staticmethod
+    def _read_jsonl_records(path: Path) -> list[dict]:
+        """严格读取一个 JSONL 文件；损坏行不得被静默跳过。"""
+        if not path.exists():
+            return []
+        records: list[dict] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, 1):
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise SpotStorageCorruption(
+                        f"{path.name} 第{line_no}行损坏: {exc}"
+                    ) from exc
+                if not isinstance(payload, dict):
+                    raise SpotStorageCorruption(
+                        f"{path.name} 第{line_no}行必须是JSON对象"
+                    )
+                records.append(payload)
+        return records
+
+    def load_facts_snapshots(self, *, include_legacy: bool = False) -> list[dict]:
+        """Read compact archives by default; legacy multi-GB files require explicit opt-in."""
         records: list[dict] = []
         with self._exclusive_lock(self.facts_lock_path):
-            for path in sorted(self.root.glob("facts_*.jsonl")):
-                with open(path, "r", encoding="utf-8") as f:
-                    for line_no, line in enumerate(f, 1):
-                        if not line.strip():
-                            continue
-                        try:
-                            payload = json.loads(line)
-                        except json.JSONDecodeError as exc:
-                            raise SpotStorageCorruption(
-                                f"{path.name} 第{line_no}行损坏: {exc}"
-                            ) from exc
-                        if not isinstance(payload, dict):
-                            raise SpotStorageCorruption(
-                                f"{path.name} 第{line_no}行必须是JSON对象"
-                            )
-                        records.append(payload)
+            paths = sorted(self.compact_facts_dir.glob("*.jsonl"))
+            if include_legacy:
+                paths.extend(sorted(self.root.glob("facts_*.jsonl")))
+            for path in paths:
+                records.extend(self._read_jsonl_records(path))
         return records
+
+    def load_compact_facts_for_day(self, day_key: str) -> list[dict]:
+        """读取单日紧凑事实；用于生成日汇总，内存占用限定为一天的数据量。"""
+        with self._exclusive_lock(self.facts_lock_path):
+            return self._read_jsonl_records(self.compact_facts_dir / f"{day_key}.jsonl")
+
+    def load_daily_facts_rollups(self) -> list[dict]:
+        """读取 400 天日汇总；文件按保留策略裁剪，可安全全量加载。"""
+        with self._exclusive_lock(self.facts_lock_path):
+            return self._read_jsonl_records(self.daily_facts_path)
+
+    def daily_rollup_days(self) -> set[str]:
+        return {
+            str(record.get("day"))
+            for record in self.load_daily_facts_rollups()
+            if record.get("day")
+        }
+
+    def append_daily_facts_rollup(self, payload: dict) -> bool:
+        """追加一条日汇总；同日已存在则跳过，并按 400 天上限裁剪。"""
+        day = str(payload.get("day") or "")
+        if not day:
+            raise ValueError("daily rollup payload 必须包含 day")
+        with self._exclusive_lock(self.facts_lock_path):
+            existing = self._read_jsonl_records(self.daily_facts_path)
+            if any(str(record.get("day")) == day for record in existing):
+                return False
+            merged = existing + [payload]
+            # 保留窗口以最新一天为锚：补写历史日汇总不得把窗口整体往前拉。
+            anchor = max(str(record.get("day") or "") for record in merged)
+            kept = [
+                record for record in merged
+                if str(record.get("day") or "") >= self._retention_cutoff_day(anchor)
+            ]
+            kept.sort(key=lambda record: str(record.get("day") or ""))
+            if len(kept) == len(existing) + 1:
+                self._append_jsonl(self.daily_facts_path, payload)
+            else:
+                self._rewrite_jsonl(self.daily_facts_path, kept)
+            return True
+
+    @staticmethod
+    def _retention_cutoff_day(day: str) -> str:
+        try:
+            anchor = time.mktime(time.strptime(day, "%Y%m%d"))
+        except ValueError:
+            return ""
+        return time.strftime(
+            "%Y%m%d", time.localtime(anchor - _DAILY_FACT_RETENTION_DAYS * _DAY_SECONDS)
+        )
+
+    def _rewrite_jsonl(self, path: Path, records: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+
+    @staticmethod
+    def _tree_stats(root: Path) -> dict[str, int]:
+        if not root.exists():
+            return {"files": 0, "bytes": 0}
+        if root.is_file():
+            return {"files": 1, "bytes": root.stat().st_size}
+        files = 0
+        total = 0
+        for path in root.rglob("*"):
+            if path.is_file():
+                files += 1
+                total += path.stat().st_size
+        return {"files": files, "bytes": total}
+
+    def storage_stats(self) -> dict:
+        checkpoint = self._load_checkpoint_unlocked()
+        return {
+            "journal_checkpoint_sequence": checkpoint[0] if checkpoint else 0,
+            "active_journal": self._tree_stats(self.journal_path),
+            "legacy_journal": self._tree_stats(self.legacy_journal_path),
+            "journal_archive": self._tree_stats(self.journal_archive_dir),
+            "compact_facts": self._tree_stats(self.compact_facts_dir),
+            "raw_facts": self._tree_stats(self.raw_facts_dir),
+            "daily_facts": self._tree_stats(self.daily_facts_path),
+            "legacy_monthly_facts": {
+                "files": len(list(self.root.glob("facts_*.jsonl"))),
+                "bytes": sum(path.stat().st_size for path in self.root.glob("facts_*.jsonl")),
+            },
+            "retention": {
+                "compact_days": _COMPACT_FACT_RETENTION_DAYS,
+                "daily_days": _DAILY_FACT_RETENTION_DAYS,
+                "raw_hours": _RAW_FACT_RETENTION_SECONDS // 3600,
+                "journal_archive_days": _JOURNAL_ARCHIVE_RETENTION_DAYS,
+            },
+        }
 
     def build_portfolio(
         self,
