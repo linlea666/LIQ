@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/constants";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type SubSignal = {
   key: string; label: string; weight: number; ok: boolean;
@@ -230,6 +231,81 @@ function HistoryChart({ history }: { history: HistoryItem[] }) {
   );
 }
 
+/** 折叠区块右上角的复制小按钮；失败时提示手动全选（HTTP 环境剪贴板可能受限） */
+function CopyInlineButton({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
+  const onClick = useCallback(async (e: React.MouseEvent) => {
+    // summary 内嵌按钮：阻止触发 details 展开/收起
+    e.preventDefault();
+    e.stopPropagation();
+    const ok = await copyTextToClipboard(text);
+    setState(ok ? "ok" : "fail");
+    setTimeout(() => setState("idle"), 2500);
+  }, [text]);
+  return (
+    <button type="button" onClick={onClick} disabled={!text}
+      className={`rounded border px-2 py-0.5 text-[10px] transition ${
+        state === "ok" ? "border-emerald-600 bg-emerald-900/40 text-emerald-300"
+        : state === "fail" ? "border-rose-600 bg-rose-900/40 text-rose-300"
+        : "border-slate-700 bg-slate-900/60 text-slate-400 hover:border-slate-500 disabled:opacity-40"}`}>
+      {state === "ok" ? "✓ 已复制" : state === "fail" ? "复制失败·请展开后手动全选" : "📋 复制"}
+    </button>
+  );
+}
+
+/** AI 证据包透明化面板：内容直接可见 + 一键复制，剪贴板受限时可手动全选 */
+function EvidencePackPanel({ snapshot }: { snapshot: Snapshot }) {
+  const [pack, setPack] = useState("");
+  const [packErr, setPackErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack`);
+        if (!res.ok) throw new Error(String(res.status));
+        const text = await res.text();
+        if (!cancelled) { setPack(text); setPackErr(""); }
+      } catch {
+        if (!cancelled) setPackErr("证据包加载失败，可稍后刷新重试");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [snapshot.day]);
+
+  const rawJson = useMemo(() => JSON.stringify(snapshot, null, 2), [snapshot]);
+  const rows = [
+    { key: "pack", label: "证据包 · 数据+分析指令（Markdown，直接粘贴给 AI）", content: pack, err: packErr },
+    { key: "raw", label: "原始数据 JSON（当日快照全量字段）", content: rawJson, err: "" },
+  ];
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div className="mb-1 text-[12px] font-medium text-slate-300">AI 证据包</div>
+      <div className="mb-3 text-[10px] text-slate-500">
+        展开可查看全文；点复制后粘贴到任意 AI 对话即可分析。若复制失败（HTTP 环境剪贴板受限），展开后手动全选复制。
+      </div>
+      <div className="space-y-2 text-xs">
+        {rows.map((row) => (
+          <details key={row.key} className="rounded-lg border border-slate-800 bg-slate-950/40">
+            <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-slate-300 hover:text-white">
+              <span>{row.label}{row.content ? `（${row.content.length} 字符）` : row.err ? "" : "（加载中…）"}</span>
+              <CopyInlineButton text={row.content} />
+            </summary>
+            {row.err
+              ? <div className="border-t border-slate-800 p-3 text-[11px] text-rose-400">{row.err}</div>
+              : (
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-slate-800 p-3 text-[10px] text-slate-500">
+                  {row.content || "加载中…"}
+                </pre>
+              )}
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CopyEvidenceButton() {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const onCopy = useCallback(async () => {
@@ -237,7 +313,9 @@ function CopyEvidenceButton() {
     try {
       const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack`);
       if (!res.ok) throw new Error(String(res.status));
-      await navigator.clipboard.writeText(await res.text());
+      // HTTP + IP 直连部署下 navigator.clipboard 不可用，走降级复制
+      const ok = await copyTextToClipboard(await res.text());
+      if (!ok) throw new Error("copy_failed");
       setState("done");
       setTimeout(() => setState("idle"), 2500);
     } catch {
@@ -513,6 +591,9 @@ export default function BottomModelPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* AI 证据包透明化 */}
+            <EvidencePackPanel snapshot={snapshot} />
 
             {/* 数据质量 */}
             {dq && dqIssues > 0 && (
