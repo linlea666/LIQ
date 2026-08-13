@@ -1,0 +1,23 @@
+{
+  "kind": "read_only_production_sqlite_copy",
+  "source_host": "8.217.240.76",
+  "source_path": "/www/wwwroot/LIQ/backend/data/bottom_model/bottom_model.sqlite3",
+  "copied_at": "2026-08-13T21:42:11+08:00",
+  "copy_includes": ["sqlite3", "wal", "shm"],
+  "source_mutated": false,
+  "sqlite_sha256": "32449f74a1d530b901648de3f27ec88761d742d8bfbc3bcc7e77aac025e8dacf",
+  "wal_sha256": "f0f0c0c2248a177be44ba3e89aff4f3941e0a8dacc8091d481047a8ce386fa82",
+  "local_quick_check": "ok",
+  "series_rows": 102250,
+  "series_first_day": "2009-01-09",
+  "series_last_day": "2026-08-13",
+  "latest_snapshot_day": "2026-08-12",
+  "decision_as_of": "2026-08-12",
+  "point_in_time_status": "PIT_APPROX",
+  "verification_status": "READ_ONLY_COPY_QUICK_CHECK_OK",
+  "audit_id": "audit-817c37f17d9849f63212",
+  "dataset_id": "45dfeb3e8c61e9a02353b65519e1c799bb7e27625b900337df2a7f6f7e2cd7ba",
+  "model_id": "bottom-v5",
+  "data_policy_id": "pit-final-v2",
+  "audit_engine_version": "audit-v5"
+}

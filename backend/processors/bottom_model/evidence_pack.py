@@ -7,7 +7,7 @@
 - 每指标标注实际历史窗口（§7），防止跨窗口误比分位数
 - 显式声明指标间相关性与跨层重复（§8），防止把一份证据数成多份
 - 附原始序列（§6）与滚动上下文（§9），让 AI 能核验计算而非盲信
-- 历史频率层（§10）把模型读数对照实测前向结果，作为对规则引擎的独立检验；
+- 历史频率层（§10）只提供 PIT_APPROX 样本内历史条件描述，不冒充严格 OOS；
   新章节一律追加在末尾——现有单测按 § 编号断言，编号必须稳定
 """
 
@@ -56,7 +56,7 @@ _CONTEXT_SPEC: tuple[tuple[str, str, str, str, str], ...] = (
     ("puell_multiple", "Puell Multiple", "{:.2f}", "abs", "daily"),
     ("sopr", "aSOPR", "{:.4f}", "abs", "daily"),
     ("sth_sopr", "STH-SOPR", "{:.4f}", "abs", "daily"),
-    ("realized_loss", "已实现亏损（负值）", "{:.3e}", "abs", "daily"),
+    ("realized_loss", "已实现亏损绝对额", "{:.3e}", "abs", "daily"),
     ("sth_supply", "STH 供应", "{:.4e}", "rel", "daily"),
     ("oi_agg_usd", "聚合 OI", "{:.3e}", "rel", "daily"),
     ("cme_oi_usd", "CME OI", "{:.3e}", "rel", "daily"),
@@ -106,12 +106,12 @@ EQ 低于 50 的必须显式降权说明。
 - 卖方衰竭要看"亏损兑现衰减"而非"价格不跌"。
 
 **历史频率（§10）的用法**
-- 它是对模型的**独立检验**，不是模型的背书。若频率与模型分数方向矛盾，\
-必须显式指出矛盾，并判断哪一个更可信、理由是什么。
+- 它是 PIT_APPROX 样本内历史条件描述，不是严格 OOS 或模型背书。\
+若频率与模型分数方向矛盾，必须显式指出，但不得据此直接重估生产权重。
 - **任何结论必须绑定时间尺度**。同一状态在 13 周与 52 周的胜率可能相反，\
 只说"接近底部"而不说在哪个时间尺度上，等于没有结论。
-- 注意 Confirmation 分档表：若它在各档之间几乎没有区分度，说明确认层是\
-趋势跟随指标而非底部指标，你应据此下调对确认分的权重。
+- 注意 Confirmation 互斥分箱：缺少区分度只表示当前样本未显示增量信息，\
+不能据此证明其经济类型，也不能由外部 AI 自行调整权重。
 
 **允许弃权**
 若证据不足以支撑判断，你应当在第 8 项直接给出"证据不足"，并列出还缺什么\
@@ -119,7 +119,7 @@ EQ 低于 50 的必须显式降权说明。
 
 **输出结构**（简洁，能用一句说清就不要三句）
 1. 执行摘要（3-5 句，必须带时间尺度）
-2. 最强的 5 项支持证据（每项注明 EQ 与你的可信度）
+2. 最强的 5 项支持证据（每项注明 EQ 与证据局限）
 3. 最强的 5 项反对证据
 4. 市场状态诊断（一节写完，不要拆成四段）：卖方衰竭到哪一步 / 结构处于 §3 的\
 哪一阶段 / 需求是弹药还是真实买盘 / 当前由现货还是杠杆驱动
@@ -173,6 +173,8 @@ def _rolling_context_section(data: dict[str, list[list[Any]]]) -> list[str]:
     ]
     for metric, label, fmt, mode, cadence in _CONTEXT_SPEC:
         rows = sanitize_series(metric, data.get(metric) or [])
+        if metric == "realized_loss":
+            rows = [(day, abs(value)) for day, value in rows]
         if len(rows) < 2:
             continue
         days = [day for day, _ in rows]
@@ -205,12 +207,22 @@ def _rolling_context_section(data: dict[str, list[list[Any]]]) -> list[str]:
     return lines
 
 
-def _correlation_section(audit: dict[str, Any]) -> list[str]:
+def _correlation_section(audit: dict[str, Any],
+                         audit_match: Optional[dict[str, Any]] = None) -> list[str]:
     lines = [
         f"\n以下相关系数在最近 {audit.get('window_days', 1095)} 天的重叠交易日上实测。"
         "**|ρ| ≥ 0.70 的两个指标不构成独立证据**，把它们分别计入"
-        "\"支持底部的证据\"会重复计分。\n",
+        "\"支持底部的证据\"会重复计分。生产轻量层使用 Pearson；已实现亏损取绝对值、"
+        "价格/200W 使用比值、稳定币使用 30 日变化，其余使用对应水平序列。\n",
     ]
+    audit_match = audit_match or {}
+    if audit_match.get("status") == "MATCHED":
+        lines.append(
+            f"完整 Spearman、MI、VIF 与聚类见精确匹配审计 `{audit_match.get('audit_id')}`；"
+            "本证据包不重复执行科学计算。\n"
+        )
+    else:
+        lines.append("当前无精确匹配审计，Spearman、MI、VIF 标记为 UNSCORABLE。\n")
     for group in audit.get("groups") or []:
         lines.append(f"\n**{group['label']}** — {group['note']}\n")
         lines.append("| 指标 A | 指标 B | ρ | 重叠样本 |")
@@ -262,11 +274,14 @@ def _base_rate_windows(label: str, windows: list[dict[str, Any]]) -> list[str]:
     for w in windows:
         if w.get("reliable"):
             hit = f"{w['hit_rate']:.1f}%"
+            ci = w.get("hit_rate_ci95")
+            hit += f" [{ci[0]:.1f}, {ci[1]:.1f}]" if ci and len(ci) == 2 else " [CI —]"
             med = f"{w['median_return']:+.1f}%"
         else:
             hit = med = f"样本不足（不给频率）"
         rows.append(
             f"| {label} | {w['weeks']} 周 | {w['points']} | {w['independent']} | "
+            f"{w.get('segments', 0)} | "
             f"{hit} | {med} | {_fmt(w.get('worst_return'), '{:+.1f}')}% |"
         )
     return rows
@@ -281,10 +296,10 @@ def _base_rate_section(base_rate: dict[str, Any]) -> list[str]:
         f"{replay.get('first_day')} ~ {replay.get('last_day')} 的 "
         f"{replay.get('points')} 个周级时点，统计各条件下**前向终点收益**的分布。"
         f"胜率 = N 周后收盘涨幅 ≥ {threshold:.0f}% 的比例。\n",
-        "\n**这是对模型的独立检验，不是模型的背书。**"
-        "先看全样本基准，任何条件频率只有相对基准的超额才有意义。\n",
-        "| 条件 | 窗口 | 时点数 | 不重叠观测 | 胜率 | 中位收益 | 最差一次 |",
-        "|---|---|---|---|---|---|---|",
+        "\n**这是 PIT_APPROX 样本内历史条件描述，不是严格 OOS、"
+        "显著性证明或已校准概率。**先看全样本基准，差值只作描述。\n",
+        "| 条件 | 窗口 | raw时点 | 非重叠N | 事件段 | 胜率 [Wilson 95% CI] | 中位收益 | 最差一次 |",
+        "|---|---|---:|---:|---:|---|---|---|",
     ]
     baseline = base_rate.get("baseline") or {}
     if baseline:
@@ -319,14 +334,41 @@ def _base_rate_section(base_rate: dict[str, Any]) -> list[str]:
 
     _ladder_table(
         "Stress 分档单调性", base_rate.get("stress_ladder") or [],
-        "压力越高、前向胜率越高，说明压力维度本身是有效的——这是模型可信的"
-        "正面证据。最高档常因不重叠观测过少而弃权，那是样本问题，不是反例。",
+        "以下是兼容保留的累积门槛，同一时点会进入多个门槛，不能用于证明单调性。",
     )
     _ladder_table(
         "Confirmation 分档单调性", base_rate.get("confirmation_ladder") or [],
-        "若各档胜率几乎相同，说明确认层**不是**底部指标而是趋势跟随指标："
-        "牛市途中它长期维持高位。这是模型的已知弱点，请据此调整权重。",
+        "以下是兼容保留的累积门槛；缺少区分度只表示当前样本未显示增量信息，"
+        "不能证明指标类型，也不能据此直接调整权重。",
     )
+    disjoint = base_rate.get("disjoint_bins") or {}
+    monotonicity = base_rate.get("monotonicity") or {}
+    for key, title in (("stress", "Stress 互斥分箱"),
+                       ("confirmation", "Confirmation 互斥分箱")):
+        bins = disjoint.get(key) or []
+        if not bins:
+            continue
+        lines.append(f"\n**{title}（单调性只看点估计方向）**\n")
+        status = (monotonicity.get(key) or {}).get("by_weeks") or {}
+        lines.append("- " + "；".join(
+            f"{weeks}周={item.get('status')}（可用箱 {item.get('reliable_bins')}）"
+            for weeks, item in status.items()
+        ))
+        lines.append("| 分箱 | raw时点 | " + " | ".join(
+            f"{weeks}周胜率/非重叠N" for weeks in base_rate.get("forward_weeks", [])
+        ) + " |")
+        lines.append("|---|---:|" + "---|" * len(base_rate.get("forward_weeks", [])))
+        for item in bins:
+            cells = [
+                f"{window['hit_rate']:.1f}%/{window['independent']}"
+                if window.get("reliable") and window.get("hit_rate") is not None
+                else f"UNSCORABLE/{window.get('independent', 0)}"
+                for window in item.get("windows", [])
+            ]
+            lines.append(
+                f"| {item.get('label')} | {item.get('points')} | "
+                + " | ".join(cells) + " |"
+            )
     caveats = base_rate.get("caveats") or []
     if caveats:
         lines.append("\n**口径与局限**\n")
@@ -335,7 +377,10 @@ def _base_rate_section(base_rate: dict[str, Any]) -> list[str]:
 
 
 def build_evidence_pack(snapshot: dict[str, Any],
-                        store: Optional[BottomModelStore] = None) -> str:
+                        store: Optional[BottomModelStore] = None,
+                        detail: str = "full") -> str:
+    if detail not in {"full", "compact"}:
+        raise ValueError("detail must be full or compact")
     stress = snapshot.get("stress") or {}
     confirmation = snapshot.get("confirmation") or {}
     quadrant = snapshot.get("quadrant") or {}
@@ -344,11 +389,26 @@ def build_evidence_pack(snapshot: dict[str, Any],
     exhaustion = snapshot.get("seller_exhaustion")
     dq = snapshot.get("data_quality") or {}
     eq_summary = snapshot.get("evidence_quality") or {}
+    audit_match = snapshot.get("audit_match") or {}
+    prediction = snapshot.get("prediction") or {}
+    blockers = snapshot.get("blocking_reasons") or []
 
     lines: list[str] = [
         "# BTC 熊市底部证据与验证模型 · 日常证据包",
         f"\n数据日：{snapshot.get('day')} ｜ 算法：{snapshot.get('algorithm_version')} ｜ "
-        "生成方式：确定性规则引擎（无 AI 参与）",
+        f"生成方式：确定性规则引擎（无 AI 参与） ｜ detail={detail}",
+        f"模型：{snapshot.get('model_id', 'legacy')} ｜ schema：{snapshot.get('schema_version', 'legacy')}"
+        f" ｜ 数据策略：{snapshot.get('data_policy_id', 'legacy')}",
+        f"dataset_id：{snapshot.get('dataset_id', '—')} ｜ decision_as_of：{snapshot.get('as_of', '—')}",
+        f"数据状态：{snapshot.get('quality_status', 'LEGACY')}"
+        f" ｜ 阻断：{', '.join(blockers) if blockers else '无'}"
+        f" ｜ PIT：{(snapshot.get('data_quality') or {}).get('pit_status', '逐指标见 §7')}",
+        f"验证状态：{snapshot.get('validation_status', 'INSUFFICIENT_EVIDENCE')}"
+        f" ｜ prediction.kind={prediction.get('kind', 'score')}"
+        f" ｜ probability={prediction.get('probability')}",
+        f"审计匹配：{audit_match.get('status', 'NO_MATCHING_AUDIT')}"
+        f" ｜ audit_id={snapshot.get('audit_id') or 'null'}"
+        f" ｜ 冻结序列={snapshot.get('frozen_series_id') or snapshot.get('dataset_id') or 'legacy'}",
         "\n## §0 分析指令\n",
         _INSTRUCTIONS,
         "\n## §1 模型结论摘要（供校对，非最终答案）\n",
@@ -364,7 +424,7 @@ def build_evidence_pack(snapshot: dict[str, Any],
         "已作为子信号聚合的权重乘子；EQ 越低，同样的分数越不该被当真",
         f"- **四象限状态**：{quadrant.get('label', '—')} — {quadrant.get('note', '')}",
         f"- **卖方衰竭指数**：{_fmt((exhaustion or {}).get('score'), '{:.1f}')}"
-        + (f"（{exhaustion['components']}）" if exhaustion else ""),
+        "（派生观察指标，分项见下表，不等于卖压已经结束）",
         f"- **ΔStress**：7d {_fmt(delta.get('stress_7d'), '{:+.1f}')} / "
         f"30d {_fmt(delta.get('stress_30d'), '{:+.1f}')}；"
         f"**ΔConfirmation**：7d {_fmt(delta.get('confirmation_7d'), '{:+.1f}')} / "
@@ -374,13 +434,41 @@ def build_evidence_pack(snapshot: dict[str, Any],
         f"STH 成本 {_fmt(price_ctx.get('sth_realized_price'), '{:.0f}')}，"
         f"LTH 成本 {_fmt(price_ctx.get('lth_realized_price'), '{:.0f}')}",
         f"- **历史频率对照**：{_base_rate_pointer(snapshot.get('base_rate'))}",
+    ]
+    if exhaustion:
+        lines.extend([
+            "\n卖方衰竭分项：\n",
+            "| 组件 | 得分 | 角色 |",
+            "|---|---:|---|",
+        ])
+        lines.extend(
+            f"| {key} | {value:.1f} | display_only 派生状态 |"
+            for key, value in exhaustion.get("components", {}).items()
+        )
+    lines.extend([
         "\n## §2 六因子明细\n",
         "评分方向：0-100，**越高越符合历史底部特征**。分位为 3y/5y/全历史混合"
         "（窗口不足自动退化，见 §7）。证据质量 EQ = 跨度 × 可用窗口 × 新鲜度 × "
         "代理折扣，其中跨度以两个 BTC 周期（8 年）为满分锚点——因此 2023 年才"
         "开始的清算/资金费即便读数极端，EQ 也只有 30 出头。",
-    ]
+    ])
     lines.extend(_factor_section(snapshot.get("factors") or []))
+    dimensions = snapshot.get("demand_dimensions") or {}
+    if dimensions:
+        lines.append("\n### 需求语义拆分（后端统一口径）\n")
+        lines.append("| 维度 | 得分 | EQ | 覆盖 | 解释 |")
+        lines.append("|---|---:|---:|---:|---|")
+        for key in ("direct_spot_demand", "liquidity_ammunition"):
+            item = dimensions.get(key) or {}
+            explanation = (
+                "已发生的现货/ETF需求方向" if key == "direct_spot_demand"
+                else "潜在流动性与持币代理，不等于资金已经进场"
+            )
+            lines.append(
+                f"| {item.get('label', key)} | {_fmt(item.get('score'), '{:.1f}')} | "
+                f"{_fmt(item.get('evidence_quality'), '{:.0f}')} | "
+                f"{_fmt(item.get('coverage'), '{:.0%}')} | {explanation} |"
+            )
 
     lines.append("\n## §3 确认信号与假底过滤器\n")
     lines.append("确认信号（快变量，与压力层分离，按 EQ 加权汇总）：\n")
@@ -388,6 +476,8 @@ def build_evidence_pack(snapshot: dict[str, Any],
         check_eq = check.get("evidence_quality")
         lines.append(
             f"- {check['label']}：{_fmt(check['score'], '{:.0f}')}"
+            + (f"｜状态 {check.get('state')}" if check.get("state") else "")
+            + (f"｜{check.get('status')}" if check.get("status") == "UNSCORABLE" else "")
             + (f"｜EQ {check_eq:.0f}" if check_eq is not None else "")
             + (f"（{check['note']}）" if check.get("note") else "")
         )
@@ -396,22 +486,54 @@ def build_evidence_pack(snapshot: dict[str, Any],
         lines.append("\n假底过滤器触发（对 Confirmation 施加惩罚）：\n")
         for trigger in triggers:
             lines.append(f"- **{trigger['label']}**（-{trigger['penalty']}）：{trigger['note']}")
-    else:
-        lines.append("\n假底过滤器：无触发。")
+    evaluations = (snapshot.get("fake_bottom_filter") or {}).get("evaluations") or []
+    if not triggers:
+        unknown = sum(1 for item in evaluations if item.get("status") == "UNSCORABLE")
+        lines.append(
+            "\n假底过滤器：未触发。"
+            + (f"但有 {unknown} 项不可评分，不能解释为已排除假底风险。" if unknown else
+               "全部检查均可评分且未越过触发阈值；这仍不是安全证明。")
+        )
+    if evaluations:
+        lines.extend([
+            "\n| 检查 | 状态 | 覆盖 | 惩罚 | 输入 | 阈值 | 说明 |",
+            "|---|---|---:|---:|---|---|---|",
+        ])
+        lines.extend(
+            f"| {item.get('label')} | {item.get('status')} | {item.get('coverage', 0):.0%} | "
+            f"{item.get('penalty')} | "
+            f"{item.get('inputs') or {}} | {item.get('thresholds') or {}} | "
+            f"{item.get('note')} |" for item in evaluations
+        )
 
     ce = snapshot.get("counter_evidence") or {}
     lines.append("\n## §4 反证清单（对抗性检验）\n")
-    lines.append("**支持底部的证据**：\n")
-    lines.extend(f"- {item}" for item in ce.get("supporting") or ["（无）"])
-    lines.append("\n**反对底部的证据**：\n")
-    lines.extend(f"- {item}" for item in ce.get("opposing") or ["（无）"])
+    lines.append("证据按独立经济维度去重；维度内成员不重复计票。\n")
+    if ce.get("clusters"):
+        lines.append("| 独立维度 | 立场 | 主证据 | 可用/未知 |")
+        lines.append("|---|---|---|---:|")
+        for cluster in ce["clusters"]:
+            primary = cluster.get("primary") or {}
+            primary_text = primary.get("label") or "数据不足"
+            if primary.get("score") is not None:
+                primary_text += f" {primary['score']:.0f}"
+            lines.append(
+                f"| {cluster.get('label')} | {cluster.get('stance')} | {primary_text} | "
+                f"{cluster.get('available_n', 0)}/{cluster.get('unknown_n', 0)} |"
+            )
+    for key, label in (
+        ("supporting", "支持"), ("opposing", "反对"),
+        ("neutral", "中性/冲突"), ("unknown", "未知"),
+    ):
+        lines.append(f"\n**{label}维度**：\n")
+        lines.extend(f"- {item}" for item in ce.get(key) or ["（无）"])
 
     lines.append("\n## §5 历史类比\n")
     lines.append(
-        "相似度为整数（共同因子仅 3-6 个，小数位是假精度）。可信度由共同因子"
-        "数量与当年数据的证据质量共同决定，低可信度的类比只能当线索。\n"
+        "历史类比是 display_only 的回顾性因子距离，存在只挑选已知底部的选择偏差，"
+        "不参与评分或象限。数据可比性只描述共同因子覆盖，不代表预测可信度。\n"
     )
-    lines.append("| 历史底部 | 相似度 | 共同因子 | 可信度 | 备注 |")
+    lines.append("| 历史底部 | 相似度 | 共同因子 | 数据可比性 | 备注 |")
     lines.append("|---|---|---|---|---|")
     for analog in snapshot.get("analogs") or []:
         reliability = _RELIABILITY_LABELS.get(analog.get("reliability", ""), "—")
@@ -421,27 +543,46 @@ def build_evidence_pack(snapshot: dict[str, Any],
             f"{len(analog.get('common_factors') or [])}/6 | {reliability} | "
             f"{analog.get('note', '')} |"
         )
+    audit_summary = audit_match.get("summary") or {}
+    if audit_match.get("status") == "MATCHED":
+        lines.append(
+            "\n匹配审计的样本内错误案例日期（仅用于反例检索）："
+            f"False Positive={audit_summary.get('false_positive_dates') or '无'}；"
+            f"False Negative={audit_summary.get('false_negative_dates') or '无'}。"
+        )
 
     frozen = snapshot.get("frozen_series") or {}
-    if frozen or store is not None:
-        lines.append("\n## §6 关键指标原始序列（近段尾部，升序）\n")
-        for metric, label, days, fmt in _SERIES_SPEC:
-            source_rows = frozen.get(metric) if frozen else store.series(metric, limit=days)
-            rows = sanitize_series(metric, source_rows or [])[-days:]
+    lines.append("\n## §6 关键指标原始序列（快照冻结切片，升序）\n")
+    if frozen:
+        for metric, label, _legacy_days, fmt in _SERIES_SPEC:
+            source_rows = frozen.get(metric) or []
+            rows = sanitize_series(metric, source_rows)
+            if detail == "compact":
+                rows = rows[-7:]
             if not rows:
                 continue
-            body = ", ".join(fmt.format(v) for _, v in rows)
+            body = ", ".join(f"{day}={fmt.format(value)}" for day, value in rows)
             lines.append(f"- **{label}**（{rows[0][0]} → {rows[-1][0]}）：{body}")
+    else:
+        lines.append(
+            "UNSCORABLE：该 legacy 快照不含 frozen_series；为保证可复现，"
+            "证据包不会回读当前实时数据库。"
+        )
 
     lines.append("\n## §7 数据窗口与局限声明\n")
     metrics_meta = dq.get("metrics") or {}
     if metrics_meta:
-        lines.append("| 指标 | 起始日 | 最新日 | 样本天数 |")
-        lines.append("|---|---|---|---|")
+        lines.append("| 指标 | cadence/unit | role | 起始日 | 最新日/滞后 | 观测数 | PIT/available_at |")
+        lines.append("|---|---|---|---|---|---:|---|")
         for metric in sorted(metrics_meta):
             meta = metrics_meta[metric]
+            availability = meta.get("availability") or {}
             lines.append(
-                f"| {metric} | {meta['first_day']} | {meta['last_day']} | {meta['days']} |"
+                f"| {metric} | {meta.get('cadence', '—')}/{meta.get('unit', '—')} | "
+                f"{meta.get('role', '—')}{'/deprecated' if meta.get('deprecated') else ''} | "
+                f"{meta.get('first_day', '—')} | {meta.get('last_day', '—')} / {meta.get('behind_days', '—')}d | "
+                f"{meta.get('days', '—')} | {meta.get('pit_status', 'PIT_UNAVAILABLE')} / "
+                f"{availability.get('available_at', '—')} |"
             )
     if dq.get("missing"):
         lines.append(f"\n缺失指标：{', '.join(dq['missing'])}")
@@ -460,20 +601,19 @@ def build_evidence_pack(snapshot: dict[str, Any],
     audit = snapshot.get("correlation_audit")
     if audit:
         lines.append("\n## §8 相关性与重复计分声明\n")
-        lines.extend(_correlation_section(audit))
+        lines.extend(_correlation_section(audit, audit_match))
 
-    if frozen or store is not None:
-        lines.append("\n## §9 滚动上下文（变化速度与所处分位）\n")
+    lines.append("\n## §9 滚动上下文（变化速度与所处分位）\n")
+    if frozen:
         lines.append(
             "变化窗口按自然日定位；分位与区间只基于快照冻结切片，保证证据包可复现。\n"
         )
-        context_data = frozen or {
-            metric: store.series(metric, limit=120) for metric, *_ in _CONTEXT_SPEC
-        }
-        lines.extend(_rolling_context_section(context_data))
+        lines.extend(_rolling_context_section(frozen))
+    else:
+        lines.append("UNSCORABLE：legacy 快照无冻结序列，不回读实时数据库。")
 
     # 章节无条件出现：§0 的指令引用了 §10，缺席会让外部 AI 找一个不存在的编号
-    lines.append("\n## §10 历史频率层（模型读数的实测对照）\n")
+    lines.append("\n## §10 历史频率层（PIT_APPROX 样本内历史条件描述）\n")
     base_rate = snapshot.get("base_rate")
     if base_rate:
         lines.extend(_base_rate_section(base_rate))

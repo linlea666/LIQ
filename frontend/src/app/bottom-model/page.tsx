@@ -11,6 +11,7 @@ type SubSignal = {
   key: string; label: string; weight: number; ok: boolean;
   score: number | null; value: number | null; percentile: number | null; note: string;
   evidence_quality?: number | null; eq_note?: string;
+  direction?: "NET_SELLING" | "NEUTRAL" | "NET_BUYING" | null;
 };
 type Factor = {
   key: string; label: string; weight: number; score: number | null;
@@ -19,8 +20,28 @@ type Factor = {
 type Check = {
   key: string; label: string; ok: boolean; score: number | null; note: string;
   evidence_quality?: number | null;
+  state?: string | null; status?: "SCORABLE" | "UNSCORABLE" | string;
 };
 type Trigger = { key: string; label: string; penalty: number; note: string };
+type FilterEvaluation = Trigger & {
+  status: "TRIGGERED" | "CLEAR" | "UNSCORABLE";
+  coverage?: number;
+  inputs?: Record<string, unknown>; thresholds?: Record<string, unknown>;
+};
+type DemandDimension = {
+  key: string; label: string; score: number | null; evidence_quality: number | null;
+  coverage: number; status: string; components: SubSignal[];
+};
+type EvidenceMember = {
+  layer: string; key: string; label: string; score: number | null;
+  evidence_quality?: number | null; status: string; note: string; direction?: string | null;
+};
+type EvidenceCluster = {
+  key: string; label: string;
+  stance: "supporting" | "opposing" | "mixed" | "neutral" | "unknown";
+  primary: EvidenceMember | null; members: EvidenceMember[];
+  available_n: number; unknown_n: number;
+};
 type Analog = {
   day: string; label: string; similarity: number | null;
   common_factors: string[]; past_stress?: number | null; note: string;
@@ -52,12 +73,20 @@ type BaseRate = {
   conditions: BaseRateCondition[];
   stress_ladder: BaseRateLadderStep[];
   confirmation_ladder: BaseRateLadderStep[];
+  validation_kind?: string; statistical_claim?: string;
+  legacy_ladder_kind?: string;
+  disjoint_bins?: {
+    stress: { label: string; points: number; windows: BaseRateWindow[] }[];
+    confirmation: { label: string; points: number; windows: BaseRateWindow[] }[];
+  };
+  monotonicity?: Record<string, { claim: string; by_weeks: Record<string, { status: string; reliable_bins: number }> }>;
   caveats: string[];
 };
 type Snapshot = {
   day: string; ts: number; algorithm_version: string;
   schema_version?: string; model_id?: string; data_policy_id?: string; dataset_id?: string;
   as_of?: string; validation_status?: string; audit_id?: string | null;
+  audit_match?: { status: "MATCHED" | "NO_MATCHING_AUDIT"; audit_id: string | null; reason: string; summary?: Record<string, unknown> | null };
   prediction?: { kind: "score" | "calibrated_probability"; score: number | null; probability: number | null };
   quality_status?: "OK" | "DEGRADED" | "ABSTAINED" | "INVALID_DATA";
   blocking_reasons?: string[];
@@ -67,11 +96,15 @@ type Snapshot = {
   evidence_quality?: { stress: number | null; confirmation: number | null; overall: number | null };
   correlation_audit?: CorrelationAudit;
   base_rate?: BaseRate | null;
-  fake_bottom_filter: { triggers: Trigger[]; total_penalty: number };
+  fake_bottom_filter: { triggers: Trigger[]; total_penalty: number; evaluations?: FilterEvaluation[] };
   quadrant: { key: string; label: string; note: string };
   seller_exhaustion: { score: number; components: Record<string, number> } | null;
   factors: Factor[];
-  counter_evidence: { supporting: string[]; opposing: string[] };
+  demand_dimensions?: { direct_spot_demand: DemandDimension; liquidity_ammunition: DemandDimension };
+  counter_evidence: {
+    supporting: string[]; opposing: string[]; neutral?: string[]; unknown?: string[];
+    clusters?: EvidenceCluster[]; independent_counts?: Record<string, number>;
+  };
   analogs: Analog[];
   delta: { stress_7d: number | null; stress_30d: number | null; confirmation_7d: number | null; confirmation_30d: number | null };
   data_quality: { ok: boolean; missing: string[]; blocking_missing?: string[]; stale: { metric: string; last_day: string; behind_days: number }[]; blocking_stale?: { metric: string; last_day: string; behind_days: number }[]; failed_fetches: Record<string, string> };
@@ -120,46 +153,73 @@ const QUADRANT_TONE: Record<string, string> = {
 // ── 小白结论横幅：把象限/评分翻译成人话，并展示四阶段进度 ──
 
 const STAGES = [
-  { key: "bear_market", label: "熊市进行" },
-  { key: "panic_flush", label: "恐慌出清" },
-  { key: "basing", label: "筑底改善" },
-  { key: "confirmed_recovery", label: "确认恢复" },
+  { key: "bear_market", label: "压力不足" },
+  { key: "panic_flush", label: "高压力／确认不足" },
+  { key: "basing", label: "高压力／早期确认" },
+  { key: "confirmed_recovery", label: "高压力／多项确认" },
 ] as const;
 
 // 结论措辞刻意写成"陈述已发生的事实 + 尚未发生的事实"，不预测概率：
 // 历史大底样本仅 4 个，模型无法支撑"概率上升"这类断言。
 const VERDICT: Record<string, string> = {
-  bear_market: "还没到底部区域",
-  panic_flush: "正在恐慌出清（左侧酝酿期）",
-  basing: "压力已到极端，改善尚未确认",
-  confirmed_recovery: "压力极端 + 改善信号共振",
+  bear_market: "压力不足，未形成周期底部证据集",
+  panic_flush: "高压力，但确认不足",
+  basing: "高压力，出现部分早期确认",
+  confirmed_recovery: "高压力，出现多项确认",
   unknown: "数据不足，暂无法判断",
 };
+
+function legacyDemandDimension(snapshot: Snapshot, keys: string[]) {
+  const demand = snapshot.factors.find((factor) => factor.key === "demand");
+  const selected = (demand?.sub_signals ?? []).filter(
+    (sub) => keys.includes(sub.key) && sub.score != null,
+  );
+  const effectiveWeight = (sub: SubSignal) => (
+    sub.weight * ((sub.evidence_quality ?? 100) / 100)
+  );
+  const effective = selected.reduce((sum, sub) => sum + effectiveWeight(sub), 0);
+  const nominalActive = selected.reduce((sum, sub) => sum + sub.weight, 0);
+  return {
+    score: effective > 0
+      ? selected.reduce(
+        (sum, sub) => sum + (sub.score as number) * effectiveWeight(sub), 0,
+      ) / effective
+      : null,
+    eq: nominalActive > 0 ? 100 * effective / nominalActive : null,
+  };
+}
 
 /** 三段式陈述：压力 / 卖方衰竭 / 需求，各自只说当前观测到的事实 */
 function verdictStatements(snapshot: Snapshot): string[] {
   const stress = snapshot.stress?.score ?? null;
   const exhaustion = snapshot.seller_exhaustion?.score ?? null;
-  const demand = snapshot.factors.find((f) => f.key === "demand")?.score ?? null;
+  const demand = snapshot.demand_dimensions?.direct_spot_demand.score
+    ?? legacyDemandDimension(snapshot, ["coinbase_premium", "spot_net_taker", "etf_momentum"]).score;
+  const liquidity = snapshot.demand_dimensions?.liquidity_ammunition.score
+    ?? legacyDemandDimension(snapshot, ["stablecoin_growth", "exchange_outflow"]).score;
   const stage = snapshot.confirmation.checks.find((c) => c.key === "structure_stage");
   const lines: string[] = [];
   lines.push(
     stress == null ? "市场压力：数据不足"
-      : stress >= 70 ? `市场压力 ${stress.toFixed(0)}：已达历史极端区（多项估值/投降指标处于历史低分位）`
-      : stress >= 55 ? `市场压力 ${stress.toFixed(0)}：已进入极端区，但未及历次大底的最深处`
-      : `市场压力 ${stress.toFixed(0)}：尚未进入历史极端区`,
+      : stress >= 70 ? `市场压力 ${stress.toFixed(0)}：规则分数处于高压力区`
+      : stress >= 55 ? `市场压力 ${stress.toFixed(0)}：规则分数进入中高压力区`
+      : `市场压力 ${stress.toFixed(0)}：规则分数未进入高压力区`,
   );
   lines.push(
     exhaustion == null ? "卖方衰竭：数据不足"
-      : exhaustion >= 70 ? `卖方衰竭 ${exhaustion.toFixed(0)}：抛压已显著枯竭`
-      : exhaustion >= 45 ? `卖方衰竭 ${exhaustion.toFixed(0)}：抛压在减弱，但尚未确认枯竭`
-      : `卖方衰竭 ${exhaustion.toFixed(0)}：抛压仍未衰竭`,
+      : exhaustion >= 70 ? `卖方衰竭 ${exhaustion.toFixed(0)}：衰竭组件读数偏高，仍需价格与需求确认`
+      : exhaustion >= 45 ? `卖方衰竭 ${exhaustion.toFixed(0)}：部分组件改善，尚未确认枯竭`
+      : `卖方衰竭 ${exhaustion.toFixed(0)}：衰竭组件读数偏低`,
   );
   lines.push(
-    demand == null ? "流动性/需求：数据不足"
-      : demand >= 60 ? `流动性/需求 ${demand.toFixed(0)}：新增买盘已在接管`
-      : demand >= 40 ? `流动性/需求 ${demand.toFixed(0)}：弹药在积累，但买盘尚未接管`
-      : `流动性/需求 ${demand.toFixed(0)}：新需求尚未接管`,
+    demand == null ? "直接现货需求：数据不足"
+      : demand >= 70 ? `直接现货需求 ${demand.toFixed(0)}：多项流量方向为正`
+      : demand >= 50 ? `直接现货需求 ${demand.toFixed(0)}：正负证据有限或分化`
+      : `直接现货需求 ${demand.toFixed(0)}：净卖出或需求不足仍占主导`,
+  );
+  lines.push(
+    liquidity == null ? "流动性弹药：数据不足"
+      : `流动性弹药 ${liquidity.toFixed(0)}：仅表示潜在资金与持币代理，不代表已经进场`,
   );
   if (stage?.note) lines.push(`价格结构：${stage.note}`);
   return lines;
@@ -264,9 +324,6 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
     if (!w.reliable || !base?.reliable || w.hit_rate == null || base.hit_rate == null) return null;
     return w.hit_rate - base.hit_rate;
   };
-  // 优势尺度 = 第一个胜率超出基准 5 个百分点以上的窗口。5pp 是拍的门槛，
-  // 但用意是避免把 1-2pp 的噪声讲成"历史上会涨"
-  const edge = current.windows.find((w) => (excess(w) ?? 0) >= 5);
   const negative = current.windows.filter((w) => w.reliable && (w.median_return ?? 0) < 0);
   const worst = current.windows.reduce<BaseRateWindow | null>(
     (acc, w) => (w.worst_return != null && (acc?.worst_return == null || w.worst_return < acc.worst_return) ? w : acc),
@@ -282,7 +339,7 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
         </span>
       </div>
       <div className="mb-3 text-[10px] text-slate-500">
-        这是独立计算的历史条件分布，不是严格样本外检验或模型背书：分数由规则算出，频率由价格算出。
+        PIT_APPROX 样本内历史条件描述 · NO_STATISTICAL_CLAIM。不是严格 OOS、概率或模型背书。
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
@@ -294,15 +351,13 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
               <div className="text-[10px] text-slate-500">{w.weeks} 周后</div>
               {w.reliable && w.hit_rate != null ? (
                 <>
-                  <div className={`text-2xl font-semibold ${
-                    ex == null ? "text-slate-300" : ex >= 5 ? "text-emerald-400"
-                      : ex <= -5 ? "text-rose-400" : "text-slate-300"}`}>
+                  <div className="text-2xl font-semibold text-slate-300">
                     {w.hit_rate.toFixed(0)}%
                   </div>
                   <div className="text-[10px] text-slate-500">
                     全样本基准 {base?.hit_rate?.toFixed(0) ?? "—"}%
                     {ex != null && (
-                      <span className={ex >= 0 ? "text-emerald-500/80" : "text-rose-500/80"}>
+                      <span className="text-slate-400">
                         {" "}（{ex >= 0 ? "+" : ""}{ex.toFixed(0)}pp）
                       </span>
                     )}
@@ -328,7 +383,7 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
                 </>
               )}
               <div className="mt-1 text-[10px] text-slate-600">
-                {w.points} 个时点 / {w.independent} 个不重叠观测 · 最差一次{" "}
+                {w.points} 个时点 / {w.independent} 个非重叠观测 / {w.segments} 个事件段 · 最差一次{" "}
                 {w.worst_return == null ? "—" : `${w.worst_return.toFixed(0)}%`}
               </div>
             </div>
@@ -339,9 +394,7 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
       <div className="mt-3 space-y-1 rounded border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] text-slate-400">
         <div className="text-slate-300">{current.label}</div>
         <div>
-          {edge
-            ? `历史描述频率在 ${edge.weeks} 周尺度高于全样本基准（${edge.hit_rate?.toFixed(0)}%，高出 ${(excess(edge) ?? 0).toFixed(0)} 个百分点）；这不是已校准概率。`
-            : "历史上同类状态在三个窗口都没有明显跑赢全样本基准——模型说的「压力极端」并不自动等于「该买」。"}
+          各窗口只展示相对全样本的描述性差值；未进行配对显著性检验，正差值不称为优势，负差值也不直接证明失效。
         </div>
         {negative.length > 0 && (
           <div>
@@ -387,8 +440,8 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
             </tbody>
           </table>
           {([
-            ["压力分档：越高越有效说明压力维度可靠", br.stress_ladder],
-            ["确认分档：若各档几乎相同，说明确认层是趋势跟随而非底部指标", br.confirmation_ladder],
+            ["压力累积门槛（legacy，同一时点会重复进入多个门槛）", br.stress_ladder],
+            ["确认累积门槛（legacy，不用于证明单调性）", br.confirmation_ladder],
           ] as const).map(([title, ladder]) => (
             <div key={title}>
               <div className="mb-1 text-[10px] text-slate-500">{title}</div>
@@ -398,6 +451,26 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
                     ≥{step.threshold.toFixed(0)}：
                     {step.windows.map((w) => (w.reliable && w.hit_rate != null ? `${w.hit_rate.toFixed(0)}%` : "—")).join(" / ")}
                   </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          {br.disjoint_bins && (["stress", "confirmation"] as const).map((key) => (
+            <div key={key}>
+              <div className="mb-1 text-[10px] text-slate-500">
+                {key === "stress" ? "Stress" : "Confirmation"} 互斥分箱 · {br.monotonicity?.[key]?.claim ?? "NO_STATISTICAL_CLAIM"}
+              </div>
+              <div className="space-y-1 text-[10px] text-slate-500">
+                {br.disjoint_bins?.[key].map((bin) => (
+                  <div key={bin.label}>
+                    {bin.label}（raw {bin.points}）：{bin.windows.map((w) => (
+                      w.reliable && w.hit_rate != null ? `${w.weeks}周 ${w.hit_rate.toFixed(0)}%/N${w.independent}`
+                        : `${w.weeks}周 UNSCORABLE/N${w.independent}`
+                    )).join(" · ")}
+                  </div>
+                ))}
+                {Object.entries(br.monotonicity?.[key]?.by_weeks ?? {}).map(([weeks, item]) => (
+                  <div key={weeks}>{weeks}周单调性：{item.status}（可用箱 {item.reliable_bins}）</div>
                 ))}
               </div>
             </div>
@@ -466,6 +539,21 @@ function CorrelationPanel({ audit }: { audit: CorrelationAudit }) {
   );
 }
 
+function splitHistoryVersions(items: HistoryItem[]): HistoryItem[][] {
+  const segments: HistoryItem[][] = [];
+  for (const item of items) {
+    const version = `${item.model_id ?? item.algorithm_version ?? "legacy"}|${item.data_policy_id ?? "legacy"}`;
+    const lastSegment = segments.length ? segments[segments.length - 1] : undefined;
+    const previous = lastSegment?.[lastSegment.length - 1];
+    const previousVersion = previous
+      ? `${previous.model_id ?? previous.algorithm_version ?? "legacy"}|${previous.data_policy_id ?? "legacy"}`
+      : null;
+    if (!segments.length || version !== previousVersion) segments.push([]);
+    segments[segments.length - 1].push(item);
+  }
+  return segments;
+}
+
 function QuadrantChart({ history, current }: { history: HistoryItem[]; current: Snapshot }) {
   const W = 260, H = 220, PAD = 30;
   const x = (stress: number) => PAD + (stress / 100) * (W - 2 * PAD);
@@ -473,6 +561,7 @@ function QuadrantChart({ history, current }: { history: HistoryItem[]; current: 
   const trail = history
     .filter((h) => h.stress?.score != null && h.confirmation?.score != null)
     .slice(-90);
+  const trailSegments = splitHistoryVersions(trail);
   const cs = current.stress?.score ?? null;
   const cc = current.confirmation?.score ?? null;
   return (
@@ -483,16 +572,15 @@ function QuadrantChart({ history, current }: { history: HistoryItem[]; current: 
       <line x1={x(55)} y1={PAD} x2={x(55)} y2={H - PAD} className="stroke-slate-700" strokeDasharray="3 3" />
       <line x1={PAD} y1={y(35)} x2={W - PAD} y2={y(35)} className="stroke-slate-700" strokeDasharray="3 3" />
       <line x1={PAD} y1={y(65)} x2={W - PAD} y2={y(65)} className="stroke-slate-700" strokeDasharray="3 3" />
-      <text x={x(25)} y={y(15)} className="fill-slate-600 text-[8px]" textAnchor="middle">熊市进行</text>
-      <text x={x(78)} y={y(15)} className="fill-rose-500/70 text-[8px]" textAnchor="middle">恐慌出清</text>
-      <text x={x(78)} y={y(50)} className="fill-amber-500/70 text-[8px]" textAnchor="middle">筑底改善</text>
-      <text x={x(78)} y={y(83)} className="fill-emerald-500/70 text-[8px]" textAnchor="middle">确认恢复</text>
-      {trail.length >= 2 && (
-        <polyline
-          points={trail.map((h) => `${x(h.stress!.score)},${y(h.confirmation!.score!)}`).join(" ")}
-          className="fill-none stroke-sky-500/40" strokeWidth={1.2}
-        />
-      )}
+      <text x={x(25)} y={y(15)} className="fill-slate-600 text-[8px]" textAnchor="middle">压力不足</text>
+      <text x={x(78)} y={y(15)} className="fill-rose-500/70 text-[8px]" textAnchor="middle">高压/确认不足</text>
+      <text x={x(78)} y={y(50)} className="fill-amber-500/70 text-[8px]" textAnchor="middle">早期确认</text>
+      <text x={x(78)} y={y(83)} className="fill-emerald-500/70 text-[8px]" textAnchor="middle">多项确认</text>
+      {trailSegments.map((segment, index) => segment.length >= 2 && (
+        <polyline key={`${segment[0].day}-${index}`}
+          points={segment.map((h) => `${x(h.stress!.score)},${y(h.confirmation!.score!)}`).join(" ")}
+          className="fill-none stroke-sky-500/40" strokeWidth={1.2} />
+      ))}
       {cs != null && cc != null && (
         <circle cx={x(cs)} cy={y(cc)} r={5} className="fill-sky-400 stroke-slate-950" strokeWidth={1.5} />
       )}
@@ -511,10 +599,11 @@ function HistoryChart({ history }: { history: HistoryItem[] }) {
   }
   const x = (i: number) => PAD + (i / (items.length - 1)) * (W - 2 * PAD);
   const y = (v: number) => H - PAD - (v / 100) * (H - 2 * PAD);
-  const line = (pick: (h: HistoryItem) => number | null | undefined) =>
-    items.map((h, i) => {
+  const segments = splitHistoryVersions(items);
+  const line = (segment: HistoryItem[], pick: (h: HistoryItem) => number | null | undefined) =>
+    segment.map((h) => {
       const v = pick(h);
-      return v == null ? null : `${x(i)},${y(v)}`;
+      return v == null ? null : `${x(items.indexOf(h))},${y(v)}`;
     }).filter(Boolean).join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
@@ -523,8 +612,12 @@ function HistoryChart({ history }: { history: HistoryItem[] }) {
       {[25, 50, 75].map((g) => (
         <line key={g} x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} className="stroke-slate-800/70" strokeDasharray="2 4" />
       ))}
-      <polyline points={line((h) => h.stress?.score)} className="fill-none stroke-rose-400" strokeWidth={1.5} />
-      <polyline points={line((h) => h.confirmation?.score)} className="fill-none stroke-emerald-400" strokeWidth={1.5} />
+      {segments.map((segment, index) => (
+        <g key={`${segment[0].day}-${index}`}>
+          <polyline points={line(segment, (h) => h.stress?.score)} className="fill-none stroke-rose-400" strokeWidth={1.5} />
+          <polyline points={line(segment, (h) => h.confirmation?.score)} className="fill-none stroke-emerald-400" strokeWidth={1.5} />
+        </g>
+      ))}
       <text x={PAD} y={12} className="fill-rose-400 text-[9px]">— Stress</text>
       <text x={PAD + 60} y={12} className="fill-emerald-400 text-[9px]">— Confirmation</text>
       <text x={PAD} y={H - 6} className="fill-slate-600 text-[8px]">{items[0].day}</text>
@@ -566,7 +659,7 @@ function EvidencePackPanel({ snapshot }: { snapshot: Snapshot }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack`);
+        const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack?detail=compact`);
         if (!res.ok) throw new Error(String(res.status));
         const text = await res.text();
         if (!cancelled) { setPack(text); setPackErr(""); }
@@ -615,7 +708,7 @@ function CopyEvidenceButton() {
   const onCopy = useCallback(async () => {
     setState("loading");
     try {
-      const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack`);
+      const res = await fetch(`${API_BASE}/api/bottom-model/evidence-pack?detail=compact`);
       if (!res.ok) throw new Error(String(res.status));
       // HTTP + IP 直连部署下 navigator.clipboard 不可用，走降级复制
       const ok = await copyTextToClipboard(await res.text());
@@ -718,23 +811,25 @@ export default function BottomModelPage() {
     }
   }, [fetchHealth, load]);
 
-  const demandFactor = snapshot?.factors.find((f) => f.key === "demand");
-  const groupedDemand = (keys: string[]) => {
-    const values = (demandFactor?.sub_signals ?? [])
-      .filter((sub) => keys.includes(sub.key) && sub.score != null);
-    const totalWeight = values.reduce((sum, sub) => sum + sub.weight, 0);
-    const score = totalWeight > 0
-      ? values.reduce((sum, sub) => sum + (sub.score as number) * sub.weight, 0) / totalWeight
-      : null;
-    const eqValues = values.filter((sub) => sub.evidence_quality != null);
-    const eqWeight = eqValues.reduce((sum, sub) => sum + sub.weight, 0);
-    const eq = eqWeight > 0
-      ? eqValues.reduce((sum, sub) => sum + (sub.evidence_quality as number) * sub.weight, 0) / eqWeight
-      : null;
-    return { score, eq };
-  };
-  const directDemand = groupedDemand(["coinbase_premium", "spot_net_taker", "etf_momentum"]);
-  const liquidityAmmo = groupedDemand(["stablecoin_growth", "exchange_outflow"]);
+  // bottom-v5 直接消费后端与因子层同口径的 EQ 加权维度；本地聚合仅用于旧快照回退。
+  const legacyDirectDemand = snapshot
+    ? legacyDemandDimension(snapshot, ["coinbase_premium", "spot_net_taker", "etf_momentum"])
+    : { score: null, eq: null };
+  const legacyLiquidityAmmo = snapshot
+    ? legacyDemandDimension(snapshot, ["stablecoin_growth", "exchange_outflow"])
+    : { score: null, eq: null };
+  const directDemand = snapshot?.demand_dimensions?.direct_spot_demand
+    ? {
+        score: snapshot.demand_dimensions.direct_spot_demand.score,
+        eq: snapshot.demand_dimensions.direct_spot_demand.evidence_quality,
+      }
+    : legacyDirectDemand;
+  const liquidityAmmo = snapshot?.demand_dimensions?.liquidity_ammunition
+    ? {
+        score: snapshot.demand_dimensions.liquidity_ammunition.score,
+        eq: snapshot.demand_dimensions.liquidity_ammunition.evidence_quality,
+      }
+    : legacyLiquidityAmmo;
   const lastRun = runtimeHealth?.last_run_summary as Record<string, unknown> | null | undefined;
   const lastRunBlocked = lastRun?.snapshot_persisted === false;
   const dq = snapshot?.data_quality;
@@ -781,7 +876,9 @@ export default function BottomModelPage() {
             <div className="mt-1 text-[10px] text-slate-400">
               数据状态 {snapshot.quality_status ?? "LEGACY"}
               {(snapshot.blocking_reasons?.length ?? 0) > 0 && ` · 阻断：${snapshot.blocking_reasons?.join("、")}`}
-              {snapshot.audit_id && ` · 审计 ${snapshot.audit_id}`}
+              {` · 审计匹配 ${snapshot.audit_match?.status ?? (snapshot.audit_id ? "LEGACY" : "NO_MATCHING_AUDIT")}`}
+              {snapshot.audit_id && ` · ${snapshot.audit_id}`}
+              {snapshot.model_id && ` · ${snapshot.model_id}/${snapshot.data_policy_id}`}
             </div>
           </div>
         )}
@@ -914,11 +1011,14 @@ export default function BottomModelPage() {
                   {snapshot.confirmation.checks.map((check) => (
                     <div key={check.key} className="flex items-start justify-between gap-2 text-[11px]">
                       <span className="text-slate-400">{check.label}
+                        {check.state && <span className="ml-1 rounded border border-slate-700 px-1 text-[9px] text-slate-500">{check.state}</span>}
                         {check.note && <span className="ml-1 text-[10px] text-slate-600">{check.note}</span>}
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
                         <EqBadge eq={check.evidence_quality ?? null} />
-                        <span className={`font-medium ${scoreTone(check.score)}`}>{check.score == null ? "—" : check.score.toFixed(0)}</span>
+                        <span className={`font-medium ${scoreTone(check.score)}`}>
+                          {check.status === "UNSCORABLE" ? "UNSCORABLE" : check.score == null ? "—" : check.score.toFixed(0)}
+                        </span>
                       </span>
                     </div>
                   ))}
@@ -929,45 +1029,82 @@ export default function BottomModelPage() {
                   假底过滤器
                   <span className="ml-2 text-[10px] text-slate-500">触发项对 Confirmation 施加惩罚（不否决 Stress）</span>
                 </div>
-                {snapshot.fake_bottom_filter.triggers.length === 0 ? (
-                  <div className="text-[11px] text-emerald-400/80">✓ 无触发</div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {snapshot.fake_bottom_filter.triggers.map((trigger) => (
-                      <div key={trigger.key} className="rounded border border-rose-800/50 bg-rose-950/30 px-2 py-1.5 text-[11px]">
-                        <span className="font-medium text-rose-300">{trigger.label}（-{trigger.penalty}）</span>
-                        <span className="ml-1 text-rose-400/70">{trigger.note}</span>
+                <div className="space-y-1.5">
+                  {(snapshot.fake_bottom_filter.evaluations ?? snapshot.fake_bottom_filter.triggers.map((item) => ({
+                    ...item, status: "TRIGGERED" as const, coverage: 1, inputs: {}, thresholds: {},
+                  }))).map((item) => (
+                    <div key={item.key} className={`rounded border px-2 py-1.5 text-[11px] ${
+                      item.status === "TRIGGERED" ? "border-rose-800/50 bg-rose-950/30"
+                        : item.status === "UNSCORABLE" ? "border-amber-900/50 bg-amber-950/20"
+                        : "border-slate-800 bg-slate-950/30"
+                    }`}>
+                      <span className={item.status === "TRIGGERED" ? "font-medium text-rose-300" : "text-slate-400"}>
+                        {item.label} · {item.status} · 覆盖 {((item.coverage ?? 0) * 100).toFixed(0)}%
+                        {item.status === "TRIGGERED" ? `（-${item.penalty}）` : ""}
+                      </span>
+                      <span className="ml-1 text-slate-500">{item.note}</span>
+                      <div className="mt-0.5 text-[9px] text-slate-600">
+                        输入 {JSON.stringify(item.inputs ?? {})} · 阈值 {JSON.stringify(item.thresholds ?? {})}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                  {(snapshot.fake_bottom_filter.evaluations?.length ?? snapshot.fake_bottom_filter.triggers.length) === 0 && (
+                    <div className="text-[11px] text-amber-400/80">没有检查明细，不能确认过滤器覆盖</div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* 反证清单 */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
-                <div className="mb-2 text-[12px] font-medium text-emerald-300">
-                  支持底部的证据（{snapshot.counter_evidence.supporting.length}）
-                  {/* 条数看着多，是因为同一份证据被多个指标重复表达（如估值簇），
-                      不加这句提示会让读者把条数当成证据强度 */}
-                  <span className="ml-2 text-[10px] font-normal text-slate-500">
-                    条数 ≠ 独立证据数，见下方相关性声明
-                  </span>
+            {snapshot.counter_evidence.clusters ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+                <div className="mb-2 text-[12px] font-medium text-slate-300">
+                  去重后的八维对抗证据
+                  <span className="ml-2 text-[10px] font-normal text-slate-500">每个经济维度最多计一次，成员仅供展开核查</span>
                 </div>
-                <ul className="space-y-1 text-[11px] text-slate-400">
-                  {snapshot.counter_evidence.supporting.map((item, i) => <li key={i}>· {item}</li>)}
-                </ul>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {snapshot.counter_evidence.clusters.map((cluster) => (
+                    <details key={cluster.key} className="rounded border border-slate-800 bg-slate-950/40 p-2.5">
+                      <summary className="cursor-pointer text-[11px] text-slate-300">
+                        {cluster.label}
+                        <span className={`ml-2 ${
+                          cluster.stance === "supporting" ? "text-emerald-400"
+                            : cluster.stance === "opposing" ? "text-rose-400"
+                            : cluster.stance === "mixed" ? "text-amber-400" : "text-slate-500"
+                        }`}>{cluster.stance}</span>
+                        <span className="ml-2 text-[10px] text-slate-600">
+                          主证据 {cluster.primary?.label ?? "数据不足"}
+                          {cluster.primary?.score != null ? ` ${cluster.primary.score.toFixed(0)}` : ""}
+                        </span>
+                      </summary>
+                      <div className="mt-2 space-y-1 text-[10px] text-slate-500">
+                        {cluster.members.map((item, index) => (
+                          <div key={`${item.layer}-${item.key}-${index}`}>
+                            · {item.label}：{item.status === "UNSCORABLE" ? "UNSCORABLE" : item.score?.toFixed(0) ?? "—"}
+                            {item.direction ? ` · ${item.direction}` : ""}{item.note ? ` · ${item.note}` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
               </div>
-              <div className="rounded-lg border border-rose-900/50 bg-rose-950/20 p-4">
-                <div className="mb-2 text-[12px] font-medium text-rose-300">反对底部的证据（{snapshot.counter_evidence.opposing.length}）</div>
-                <ul className="space-y-1 text-[11px] text-slate-400">
-                  {snapshot.counter_evidence.opposing.length === 0
-                    ? <li className="text-slate-600">（无）</li>
-                    : snapshot.counter_evidence.opposing.map((item, i) => <li key={i}>· {item}</li>)}
-                </ul>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
+                  <div className="mb-2 text-[12px] font-medium text-emerald-300">支持证据（legacy）</div>
+                  <ul className="space-y-1 text-[11px] text-slate-400">
+                    {snapshot.counter_evidence.supporting.map((item, i) => <li key={i}>· {item}</li>)}
+                  </ul>
+                </div>
+                <div className="rounded-lg border border-rose-900/50 bg-rose-950/20 p-4">
+                  <div className="mb-2 text-[12px] font-medium text-rose-300">反对证据（legacy）</div>
+                  <ul className="space-y-1 text-[11px] text-slate-400">
+                    {snapshot.counter_evidence.opposing.map((item, i) => <li key={i}>· {item}</li>)}
+                  </ul>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* 历史频率层（v4 起） */}
             {snapshot.base_rate && <BaseRatePanel br={snapshot.base_rate} />}
@@ -976,14 +1113,14 @@ export default function BottomModelPage() {
             <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
               <div className="mb-2 text-[12px] font-medium text-slate-300">
                 历史底部类比
-                <span className="ml-2 text-[10px] font-normal text-slate-500">共同因子仅 3-6 个，低可信度的类比只能当线索</span>
+                <span className="ml-2 text-[10px] font-normal text-slate-500">display_only · 仅挑选已知底部，存在选择偏差，不参与评分</span>
               </div>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-left text-[10px] text-slate-500">
                     <th className="pb-1">历史底部</th><th className="pb-1 text-right">相似度</th>
                     <th className="pb-1 text-right">当年 Stress</th><th className="pb-1 text-right">共同因子</th>
-                    <th className="pb-1 text-right">可信度</th>
+                    <th className="pb-1 text-right">数据可比性</th>
                     <th className="pb-1 pl-3">备注</th>
                   </tr>
                 </thead>

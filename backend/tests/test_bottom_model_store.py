@@ -112,3 +112,20 @@ def test_model_runs_are_append_only(tmp_path):
     store.save_model_run({**base, "run_id": "run-b"})
     assert store._conn.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0] == 2
     store.close()
+
+
+def test_latest_audit_matching_uses_full_lineage_key(tmp_path):
+    store = _store(tmp_path)
+    store.save_audit("old-exact", {
+        "audit_id": "old-exact", "model_id": "bottom-v5",
+        "data_policy_id": "pit-final-v2", "dataset_id": "data-a",
+    }, "# old")
+    store.save_audit("new-wrong-dataset", {
+        "audit_id": "new-wrong-dataset", "model_id": "bottom-v5",
+        "data_policy_id": "pit-final-v2", "dataset_id": "data-b",
+    }, "# wrong")
+    matched = store.latest_audit_matching("bottom-v5", "pit-final-v2", "data-a")
+    assert matched is not None and matched["audit_id"] == "old-exact"
+    assert store.latest_audit_matching("bottom-v5", "pit-final-v1", "data-a") is None
+    assert store.latest_audit_matching("bottom-v4", "pit-final-v2", "data-a") is None
+    store.close()

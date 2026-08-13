@@ -22,6 +22,7 @@ from processors.bottom_model.factors import (
     clamp,
     classify_quadrant,
     compute_confirmation,
+    compute_demand_dimensions,
     compute_factors,
     compute_fake_bottom_filter,
     compute_seller_exhaustion,
@@ -38,8 +39,8 @@ from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM_VERSION = "bottom-v4"
-SCHEMA_VERSION = "2.0"
+ALGORITHM_VERSION = "bottom-v5"
+SCHEMA_VERSION = "2.1"
 MODEL_ID = ALGORITHM_VERSION
 DATA_POLICY_ID = "pit-final-v2"
 
@@ -104,8 +105,10 @@ def compute_core(data: dict[str, Rows],
     """
     factors = compute_factors(data, as_of)
     stress = compute_stress(factors)
+    demand_dimensions = compute_demand_dimensions(factors)
     confirmation_raw = compute_confirmation(data, as_of)
     fake_filter = compute_fake_bottom_filter(data)
+    seller_exhaustion = compute_seller_exhaustion(data)
     conf_score = confirmation_raw["score"]
     adjusted = (
         round(clamp(conf_score - fake_filter["total_penalty"]), 1)
@@ -123,8 +126,12 @@ def compute_core(data: dict[str, Rows],
         },
         "fake_bottom_filter": fake_filter,
         "quadrant": classify_quadrant(stress_score, adjusted),
-        "seller_exhaustion": compute_seller_exhaustion(data),
-        "counter_evidence": build_counter_evidence(factors, fake_filter),
+        "seller_exhaustion": seller_exhaustion,
+        "demand_dimensions": demand_dimensions,
+        "counter_evidence": build_counter_evidence(
+            factors, fake_filter, confirmation_raw, seller_exhaustion,
+            demand_dimensions,
+        ),
     }
 
 
@@ -216,7 +223,10 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
         metrics_meta[metric] = {
             "first_day": first_day, "last_day": last_day,
             "days": len(rows), "behind_days": behind,
+            "cadence": cadence_by_metric.get(metric, "daily"),
             "role": metric_contract(metric).get("role"),
+            "unit": metric_contract(metric).get("unit"),
+            "deprecated": bool(metric_contract(metric).get("deprecated")),
             "availability": observation,
             "pit_status": (observation or {}).get("quality_flag") or "PIT_UNAVAILABLE",
         }
@@ -326,7 +336,37 @@ def build_snapshot(store: BottomModelStore,
             data_quality.get("advisory_missing") or data_quality.get("advisory_stale")
         ) else "OK"
     )
-    latest_audit = store.latest_audit()
+    matched_audit = store.latest_audit_matching(MODEL_ID, DATA_POLICY_ID, dataset_id)
+    if matched_audit:
+        sample_sizes = matched_audit.get("sample_sizes") or {}
+        walk_metrics = ((matched_audit.get("walk_forward") or {}).get("metrics") or {})
+        errors = matched_audit.get("errors") or {}
+        audit_summary = {
+            "status": matched_audit.get("status"),
+            "pit_status": matched_audit.get("pit_status"),
+            "probability_publishable": matched_audit.get("probability_publishable", False),
+            "primary_oos_status": walk_metrics.get("validation_status"),
+            "event_n": sample_sizes.get("event_n"),
+            "non_overlapping_n_180d": sample_sizes.get("non_overlapping_n_180d"),
+            "n_eff": sample_sizes.get("n_eff"),
+            "false_positive_dates": [
+                item.get("day") for item in errors.get("false_positive_top10", [])[:3]
+            ],
+            "false_negative_dates": [
+                item.get("day") for item in errors.get("false_negative_top10", [])[:3]
+            ],
+        }
+        audit_match = {
+            "status": "MATCHED", "audit_id": matched_audit.get("audit_id"),
+            "reason": "model_id/data_policy_id/dataset_id exact match",
+            "summary": audit_summary,
+        }
+    else:
+        audit_match = {
+            "status": "NO_MATCHING_AUDIT", "audit_id": None,
+            "reason": "no audit with exact model_id/data_policy_id/dataset_id",
+            "summary": None,
+        }
     run_id = hashlib.sha256(
         f"{MODEL_ID}|{DATA_POLICY_ID}|{dataset_id}|{as_of_day}|{time.time_ns()}".encode(),
     ).hexdigest()[:24]
@@ -357,7 +397,8 @@ def build_snapshot(store: BottomModelStore,
         # day 是兼容字段（最后纳入评分的数据日）；as_of 是实际生成/决策时点。
         "as_of": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "validation_status": "INSUFFICIENT_EVIDENCE",
-        "audit_id": latest_audit.get("audit_id") if latest_audit else None,
+        "audit_id": audit_match["audit_id"],
+        "audit_match": audit_match,
         "prediction": {
             "kind": "score", "score": stress_score,
             "probability": None,
@@ -381,6 +422,7 @@ def build_snapshot(store: BottomModelStore,
         "metric_roles": {
             metric: metric_contract(metric).get("role") for metric in data
         },
+        "frozen_series_id": dataset_id,
         # 新快照的证据包只读取此冻结切片，不再随实时数据库变化。
         "frozen_series": {metric: rows[-120:] for metric, rows in data.items()},
     }

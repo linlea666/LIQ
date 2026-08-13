@@ -53,8 +53,9 @@ GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
     ),
     (
         "demand", "需求簇",
-        "四者都被当作\"谁在买\"的证据，但实测相关性很低——溢价与现货净 taker 的 "
-        "ρ 仅 0.04，说明美国机构定价与全球主动买单是两件事，可作为彼此独立的证据",
+        "四者经济含义不同：溢价与现货净 taker 是直接需求方向，ETF 是受日历影响的"
+        "资金流，稳定币增速只是流动性弹药。相关系数由本次冻结数据动态生成，"
+        "不能凭低相关直接宣称统计独立。",
         (
             ("coinbase_premium_rate", "Coinbase 溢价"),
             ("spot_net_taker_usd", "现货净 taker"),

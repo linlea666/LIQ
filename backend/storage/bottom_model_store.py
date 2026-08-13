@@ -513,6 +513,18 @@ class BottomModelStore:
             ).fetchone()
         return self.get_audit(row["audit_id"]) if row is not None else None
 
+    def latest_audit_matching(self, model_id: str, data_policy_id: str,
+                              dataset_id: str) -> Optional[dict[str, Any]]:
+        """只返回与快照三元组完全一致的最新审计，禁止跨数据集错误绑定。"""
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT audit_id FROM audits
+                   WHERE model_id=? AND data_policy_id=? AND dataset_id=?
+                   ORDER BY created_at DESC,audit_id DESC LIMIT 1""",
+                (model_id, data_policy_id, dataset_id),
+            ).fetchone()
+        return self.get_audit(row["audit_id"]) if row is not None else None
+
     def prune(self, snapshot_retention_days: int = 800) -> None:
         cutoff_ts = time.time() - max(90, snapshot_retention_days) * 86400
         cutoff_day = time.strftime("%Y-%m-%d", time.gmtime(cutoff_ts))

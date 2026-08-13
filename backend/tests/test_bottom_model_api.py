@@ -179,9 +179,9 @@ def test_evidence_pack_sections(tmp_path):
     assert "禁止跨窗口比较分位数" in pack
     assert "禁止重算或\"修正\"模型分数" in pack
     assert "整体证据质量 EQ" in pack
-    # §2 表头带证据质量列；§5 类比带可信度列
+    # §2 表头带证据质量列；§5 类比只描述数据可比性
     assert "| 子信号 | 当前值 | 混合分位 | 得分 | 证据质量 | 备注 |" in pack
-    assert "| 历史底部 | 相似度 | 共同因子 | 可信度 | 备注 |" in pack
+    assert "| 历史底部 | 相似度 | 共同因子 | 数据可比性 | 备注 |" in pack
     # §6 序列确实带数值
     assert "BTC 价格 (USD)" in pack
     # v4：§0 指令必须给出历史频率的正确用法、允许弃权，且输出结构收敛为 8 项
@@ -189,6 +189,8 @@ def test_evidence_pack_sections(tmp_path):
     assert "允许弃权" in pack
     assert "8. 模型审计与最终裁决" in pack
     assert "9. " not in pack.split("**输出结构**")[1].split("\n\n")[0]
+    for forbidden in ("独立检验", "模型可信", "不是反例"):
+        assert forbidden not in pack
     store.close()
 
 
@@ -200,6 +202,45 @@ def test_evidence_pack_is_reproducible_from_frozen_snapshot(tmp_path):
     before = build_evidence_pack(snap, store)
     store.upsert_series("btc_price_onchain", [("2099-01-01", 9e99)])
     assert build_evidence_pack(snap, store) == before
+    store.close()
+
+
+def test_legacy_evidence_pack_never_reads_live_series(tmp_path, monkeypatch):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    for metric, rows in _bottomish_data().items():
+        store.upsert_series(metric, rows)
+    snap = build_snapshot(store)
+    legacy = dict(snap)
+    legacy.pop("frozen_series", None)
+    monkeypatch.setattr(
+        store, "series",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live read forbidden")),
+    )
+    pack = build_evidence_pack(legacy, store, detail="full")
+    assert "legacy 快照不含 frozen_series" in pack
+    assert "不回读实时数据库" in pack
+    store.close()
+
+
+def test_evidence_pack_compact_and_full_share_frozen_lineage(tmp_path):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    for metric, rows in _bottomish_data().items():
+        store.upsert_series(metric, rows)
+    snap = build_snapshot(store)
+    full = build_evidence_pack(snap, store, detail="full")
+    compact = build_evidence_pack(snap, store, detail="compact")
+    assert len(compact) < len(full)
+    for value in (
+        snap["schema_version"], snap["model_id"], snap["data_policy_id"],
+        snap["dataset_id"], snap["frozen_series_id"],
+    ):
+        assert value in full and value in compact
+    # compact 的每个原始序列最多保留最近 7 个冻结点。
+    assert "detail=compact" in compact
+    store.upsert_series("btc_price_onchain", [("2099-01-01", 9e99)])
+    assert build_evidence_pack(snap, store, detail="compact") == compact
+    with pytest.raises(ValueError):
+        build_evidence_pack(snap, store, detail="invalid")
     store.close()
 
 
@@ -280,7 +321,7 @@ def test_api_service_not_ready_503():
     assert tc.get("/api/bottom-model/snapshot").status_code == 503
 
 
-def test_api_snapshot_history_health(client):
+def test_api_snapshot_history_health(client, monkeypatch):
     tc, svc = client
     snap = tc.get("/api/bottom-model/snapshot")
     assert snap.status_code == 200
@@ -302,7 +343,7 @@ def test_api_snapshot_history_health(client):
     bundled = tc.get("/api/bottom-model/audit/latest")
     assert bundled.status_code == 200
     assert bundled.json()["status"] == "INSUFFICIENT_EVIDENCE"
-    assert bundled.json()["audit_engine_version"] == "audit-v4"
+    assert bundled.json()["audit_engine_version"] == "audit-v5"
     assert bundled.json()["markdown"].count("\n## ") == 20
     svc.store.save_audit("audit-test", {
         "audit_id": "audit-test", "model_id": "bottom-v4",
@@ -312,6 +353,17 @@ def test_api_snapshot_history_health(client):
     latest = tc.get("/api/bottom-model/audit/latest")
     assert latest.status_code == 200 and latest.json()["audit_id"] == "audit-test"
     assert tc.get("/api/bottom-model/audit/audit-test").json()["markdown"] == "# report"
+
+    compact = tc.get("/api/bottom-model/evidence-pack?detail=compact")
+    assert compact.status_code == 200 and "detail=compact" in compact.text
+    assert tc.get("/api/bottom-model/evidence-pack?detail=invalid").status_code == 422
+
+    monkeypatch.setattr(svc, "trigger_run", lambda force=False: {
+        "started": True, "force": force,
+    })
+    triggered = tc.post("/api/bottom-model/run?force=true")
+    assert triggered.status_code == 200
+    assert triggered.json() == {"started": True, "force": True}
 
 
 def test_api_disabled_503(tmp_path):

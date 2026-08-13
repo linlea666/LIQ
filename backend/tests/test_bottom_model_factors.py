@@ -18,6 +18,7 @@ from processors.bottom_model.factors import (
     change_rate_series,
     classify_quadrant,
     compute_confirmation,
+    compute_demand_dimensions,
     compute_factors,
     compute_fake_bottom_filter,
     compute_seller_exhaustion,
@@ -216,27 +217,29 @@ def test_funding_oi_regime_branches():
 
     # 1. 资金费回升 + OI 未回堆 = 健康正常化
     healthy = _regime(_funding_oi(recovering, [3e10] * 31 + [2.4e10] * 29))
-    assert healthy["score"] == 100.0
+    assert healthy["score"] == 100.0 and healthy["state"] == "RECOVERED_HEALTHY"
 
     # 2. 资金费回升但 OI 30d 增幅 > 15% = 杠杆重新堆积（本轮新增的关键修正）
     rebuild = _regime(_funding_oi(recovering, [2e10] * 31 + [2.6e10] * 29))
-    assert rebuild["score"] == 25.0 and "杠杆重新堆积" in rebuild["note"]
+    assert rebuild["score"] == 25.0 and rebuild["state"] == "RECOVERED_RELEVERAGING"
+    assert "杠杆重新堆积" in rebuild["note"]
 
     # 3. 资金费仍为负 + OI 下降 = 恐慌出清进行中（压力事件，非确认）
     flushing = _regime(_funding_oi(extreme, [3e10] * 31 + [2.4e10] * 29))
-    assert flushing["score"] == 40.0
+    assert flushing["score"] == 40.0 and flushing["state"] == "ACTIVE_FLUSH"
 
     # 4. 资金费仍为负 + OI 上升 = 空头累积
     shorts = _regime(_funding_oi(extreme, [2e10] * 31 + [2.6e10] * 29))
-    assert shorts["score"] == 35.0
+    assert shorts["score"] == 35.0 and shorts["state"] == "ACTIVE_SHORT_BUILD"
 
     # 5. 两者均平稳
     calm = _regime(_funding_oi([0.001] * 90, [3e10] * 60))
-    assert calm["score"] == 70.0
+    assert calm["score"] == 50.0 and calm["state"] == "NO_EVENT_NEUTRAL"
 
-    # OI 缺失时退化为资金费单边判定，并在备注中说明
+    # OI 缺失时必须弃权，不能把资金费单边状态伪装成确认。
     no_oi = _regime({"funding_oiw": mk([0.01] * 30 + [-0.02] * 60 + [0.0] * 30)})
-    assert no_oi["score"] == 70.0 and "OI 数据不足" in no_oi["note"]
+    assert no_oi["score"] is None and no_oi["state"] == "UNSCORABLE"
+    assert no_oi["status"] == "UNSCORABLE" and "OI 数据不足" in no_oi["note"]
 
 
 def test_funding_shallow_dip_is_not_normalization_and_note_uses_percent_unit():
@@ -246,7 +249,7 @@ def test_funding_shallow_dip_is_not_normalization_and_note_uses_percent_unit():
     "从负极端回升"并给出 100 分的健康正常化确认。
     """
     shallow = _regime(_funding_oi([-0.0008] * 30 + [0.005] * 60, [3e10] * 60))
-    assert shallow["score"] == 70.0
+    assert shallow["score"] == 50.0 and shallow["state"] == "NO_EVENT_NEUTRAL"
     assert "-0.0008%" in shallow["note"] and "0.0050%/8h" in shallow["note"]
 
     deep = _regime(_funding_oi([-0.006] * 30 + [0.005] * 60,
@@ -360,6 +363,10 @@ def test_confirmation_and_fake_filter_bottomish():
     trigger_keys = {t["key"] for t in filt["triggers"]}
     assert "oi_rebuild" not in trigger_keys       # OI 是出清不是回堆
     assert "price_new_low" not in trigger_keys    # 未创新低
+    assert len(filt["evaluations"]) == 4
+    assert {item["status"] for item in filt["evaluations"]} <= {
+        "TRIGGERED", "CLEAR", "UNSCORABLE",
+    }
 
 
 def test_fake_filter_triggers_on_new_low_and_oi_rebuild():
@@ -375,6 +382,18 @@ def test_fake_filter_triggers_on_new_low_and_oi_rebuild():
     keys = {t["key"] for t in filt["triggers"]}
     assert {"price_new_low", "oi_rebuild", "etf_outflow"} <= keys
     assert filt["total_penalty"] >= 45
+    states = {item["key"]: item["status"] for item in filt["evaluations"]}
+    assert states["price_new_low"] == "TRIGGERED"
+    assert states["oi_rebuild"] == "TRIGGERED"
+    assert states["etf_outflow"] == "TRIGGERED"
+
+
+def test_fake_filter_missing_inputs_are_unscorable_not_safe():
+    filt = compute_fake_bottom_filter({})
+    assert filt["triggers"] == [] and filt["total_penalty"] == 0.0
+    assert len(filt["evaluations"]) == 4
+    assert all(item["status"] == "UNSCORABLE" for item in filt["evaluations"])
+    assert all(item["coverage"] == 0.0 for item in filt["evaluations"])
 
 
 def test_seller_exhaustion_and_counter_evidence():
@@ -382,10 +401,19 @@ def test_seller_exhaustion_and_counter_evidence():
     se = compute_seller_exhaustion(data)
     assert se is not None and se["score"] > 60
     factors = compute_factors(data)
+    confirmation = compute_confirmation(data)
     filt = compute_fake_bottom_filter(data)
-    ce = build_counter_evidence(factors, filt)
+    dimensions = compute_demand_dimensions(factors)
+    ce = build_counter_evidence(factors, filt, confirmation, se, dimensions)
     assert len(ce["supporting"]) >= 3
     assert isinstance(ce["opposing"], list)
+    assert len(ce["clusters"]) == 8
+    assert sum(ce["independent_counts"].values()) == 8
+    assert {cluster["key"] for cluster in ce["clusters"]} == {
+        "valuation_pressure", "capitulation_pressure", "leverage_clearance",
+        "seller_exhaustion", "direct_spot_demand", "liquidity_ammunition",
+        "price_confirmation", "macro_regime",
+    }
     assert compute_seller_exhaustion({}) is None
 
 
@@ -427,6 +455,53 @@ def test_demand_spot_subsignals_score_and_coverage():
     bare = next(f for f in compute_factors(_bottomish_data()) if f["key"] == "demand")
     assert 0.4 <= bare["coverage"] < 1.0
     assert bare["score"] is not None
+
+
+def test_signed_spot_demand_never_turns_net_selling_into_buying_support():
+    data = _bottomish_data()
+    # 最近净卖出幅度虽优于更早历史，但绝对方向仍为负。
+    data["coinbase_premium_rate"] = mk([-0.5] * 1170 + [-0.05] * 30)
+    data["spot_net_taker_usd"] = mk([-8e6] * 1170 + [-1e6] * 30)
+    factors = compute_factors(data)
+    demand = next(f for f in factors if f["key"] == "demand")
+    subs = {s["key"]: s for s in demand["sub_signals"]}
+    for key in ("coinbase_premium", "spot_net_taker"):
+        assert subs[key]["direction"] == "NET_SELLING"
+        assert 0.0 <= subs[key]["score"] <= 50.0
+
+    dimensions = compute_demand_dimensions(factors)
+    counter = build_counter_evidence(
+        factors,
+        compute_fake_bottom_filter(data),
+        compute_confirmation(data),
+        compute_seller_exhaustion(data),
+        dimensions,
+    )
+    direct = next(c for c in counter["clusters"] if c["key"] == "direct_spot_demand")
+    assert direct["stance"] == "mixed"
+    selling = [m for m in direct["members"] if m.get("direction") == "NET_SELLING"]
+    assert len(selling) == 2 and all(float(m["score"]) <= 50.0 for m in selling)
+
+
+def test_signed_spot_demand_zero_boundary_and_short_series_abstention():
+    data = _bottomish_data()
+    data["coinbase_premium_rate"] = mk([0.0] * 1200)
+    data["spot_net_taker_usd"] = mk([0.0] * 1200)
+    demand = next(f for f in compute_factors(data) if f["key"] == "demand")
+    subs = {s["key"]: s for s in demand["sub_signals"]}
+    for key in ("coinbase_premium", "spot_net_taker"):
+        assert subs[key]["score"] == 50.0
+        assert subs[key]["direction"] == "NEUTRAL"
+
+    data["coinbase_premium_rate"] = mk([0.1] * 10)
+    short = next(f for f in compute_factors(data) if f["key"] == "demand")
+    coinbase = next(s for s in short["sub_signals"] if s["key"] == "coinbase_premium")
+    assert coinbase["ok"] is False and coinbase["score"] is None
+
+    data["coinbase_premium_rate"] = mk([float("nan")] * 600 + [float("inf")] * 600)
+    invalid = next(f for f in compute_factors(data) if f["key"] == "demand")
+    coinbase = next(s for s in invalid["sub_signals"] if s["key"] == "coinbase_premium")
+    assert coinbase["ok"] is False and coinbase["score"] is None
 
 
 def test_demand_spot_subsignals_evidence_quality_tracks_span():

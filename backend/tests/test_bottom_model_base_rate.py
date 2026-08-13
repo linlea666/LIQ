@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from processors.bottom_model import base_rate as br
 from processors.bottom_model.base_rate import (
     _ForwardPrice,
+    _monotonicity,
     _replay_point,
     _window_stats,
     compute_base_rate,
@@ -76,6 +77,23 @@ def test_window_stats_point_estimate_uses_only_non_overlapping_events(monkeypatc
     assert duplicated["independent"] == once["independent"]
     assert duplicated["hit_rate"] == once["hit_rate"]
     assert duplicated["median_return"] == once["median_return"]
+
+
+def test_monotonicity_detects_non_monotonic_13_week_bins():
+    def window(weeks: int, rate: float | None, reliable: bool) -> dict:
+        return {"weeks": weeks, "hit_rate": rate, "reliable": reliable}
+
+    bins = []
+    for rate in (30.0, 20.0, 40.0):
+        bins.append({"windows": [
+            window(13, rate, True),
+            window(26, None, False),
+            window(52, None, False),
+        ]})
+    result = _monotonicity(bins)
+    assert result["claim"] == "NO_STATISTICAL_CLAIM"
+    assert result["by_weeks"]["13"]["status"] == "NON_MONOTONIC"
+    assert result["by_weeks"]["26"]["status"] == "UNSCORABLE"
 
 
 def test_forward_price_excludes_unfinished_window():
@@ -244,6 +262,11 @@ def test_compute_base_rate_end_to_end(tmp_path, monkeypatch):
     assert result["conditions"][0]["label"].startswith("当前象限")
     assert len(result["stress_ladder"]) == 4
     assert len(result["confirmation_ladder"]) == 4
+    assert result["validation_kind"] == "PIT_APPROX_RETROSPECTIVE_DESCRIPTION"
+    assert result["statistical_claim"] == "NO_STATISTICAL_CLAIM"
+    assert len(result["disjoint_bins"]["stress"]) == 5
+    assert len(result["disjoint_bins"]["confirmation"]) == 5
+    assert set(result["monotonicity"]) == {"stress", "confirmation"}
     assert result["caveats"]
     for cond in [result["baseline"], *result["conditions"]]:
         for window in cond["windows"]:

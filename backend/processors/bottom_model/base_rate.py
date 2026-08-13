@@ -2,8 +2,8 @@
 
 本模块回答的**不是**"现在见底的概率是多少"，而是"历史上模型给出同类读数时，
 往后 13/26/52 周的实际结果分布如何"。两者的区别是本模块存在的全部理由——
-前者需要一个可外推的概率模型（本项目没有，也不打算假装有），后者只是条件
-分布的观测值，是对规则引擎的一次**独立检验**。
+前者需要一个可外推的概率模型（本项目没有，也不打算假装有），后者只是
+PIT_APPROX 的样本内历史条件描述，不能称为严格样本外验证。
 
 三条防自欺的口径：
 
@@ -64,12 +64,14 @@ NEIGHBORHOOD_CONF = 10.0
 
 STRESS_LADDER: tuple[float, ...] = (45.0, 55.0, 65.0, 75.0)
 CONFIRMATION_LADDER: tuple[float, ...] = (35.0, 50.0, 65.0, 80.0)
+STRESS_BINS: tuple[float, ...] = (0.0, 45.0, 55.0, 65.0, 75.0, 100.0)
+CONFIRMATION_BINS: tuple[float, ...] = (0.0, 35.0, 50.0, 65.0, 80.0, 100.0)
 
 _WEEKLY_METRICS = {
     metric for spec in build_registry() if spec.cadence == "weekly"
     for metric in spec.metrics
 }
-REPLAY_FEATURE_SCHEMA = "feature-v2"
+REPLAY_FEATURE_SCHEMA = "feature-v3"
 
 
 def _to_date(day: str) -> Optional[date]:
@@ -118,6 +120,13 @@ def _replay_point(index: SeriesIndex, day: str,
                 factor.get("key", ""): factor.get("score")
                 for factor in core.get("factors") or [] if factor.get("key")
             },
+            "demand_dimensions": {
+                key: value.get("score")
+                for key, value in (core.get("demand_dimensions") or {}).items()
+            },
+            "seller_exhaustion": (
+                core.get("seller_exhaustion") or {}
+            ).get("score"),
             "stress_eq": (core.get("stress") or {}).get("evidence_quality"),
             "confirmation_eq": (core.get("confirmation") or {}).get("evidence_quality"),
             "confirmation_before_penalty": (
@@ -312,6 +321,52 @@ def _ladder(rows: list[dict[str, Any]], field: str, thresholds: tuple[float, ...
     return out
 
 
+def _disjoint_bins(rows: list[dict[str, Any]], field: str,
+                   boundaries: tuple[float, ...],
+                   fwd: _ForwardPrice) -> list[dict[str, Any]]:
+    """互斥分箱；最后一箱含上界100，避免累积门槛伪装成独立单调性证据。"""
+    output: list[dict[str, Any]] = []
+    for index, (lower, upper) in enumerate(zip(boundaries, boundaries[1:])):
+        is_last = index == len(boundaries) - 2
+        subset = [
+            row for row in rows
+            if isinstance(row.get(field), (int, float))
+            and float(row[field]) >= lower
+            and (float(row[field]) <= upper if is_last else float(row[field]) < upper)
+        ]
+        output.append({
+            "lower": lower, "upper": upper, "upper_inclusive": is_last,
+            "label": f"[{lower:.0f},{upper:.0f}{']' if is_last else ')'}",
+            "points": len(subset),
+            "windows": [_window_stats(subset, weeks, fwd) for weeks in FORWARD_WEEKS],
+        })
+    return output
+
+
+def _monotonicity(bins: list[dict[str, Any]]) -> dict[str, Any]:
+    """只判断互斥分箱点估计方向，不把结果升级为统计有效性结论。"""
+    result: dict[str, Any] = {"claim": "NO_STATISTICAL_CLAIM", "by_weeks": {}}
+    for window_index, weeks in enumerate(FORWARD_WEEKS):
+        usable = [
+            item["windows"][window_index] for item in bins
+            if item["windows"][window_index].get("reliable")
+            and item["windows"][window_index].get("hit_rate") is not None
+        ]
+        if len(usable) < 3:
+            status = "UNSCORABLE"
+        else:
+            rates = [float(item["hit_rate"]) for item in usable]
+            status = (
+                "POINT_ESTIMATE_MONOTONIC_UNCERTAIN"
+                if all(right >= left for left, right in zip(rates, rates[1:]))
+                else "NON_MONOTONIC"
+            )
+        result["by_weeks"][str(weeks)] = {
+            "status": status, "reliable_bins": len(usable),
+        }
+    return result
+
+
 def _band(value: float, width: float = 10.0) -> tuple[float, float]:
     lo = (int(value) // int(width)) * float(width)
     return lo, lo + width
@@ -372,9 +427,15 @@ def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str,
             "与当前双层读数最接近的历史时点，通常样本极小",
         ))
 
+    stress_bins = _disjoint_bins(scored, "stress", STRESS_BINS, fwd)
+    confirmation_bins = _disjoint_bins(
+        scored, "confirmation", CONFIRMATION_BINS, fwd,
+    )
     days = [r["day"] for r in scored]
     return {
         "algorithm_version": algorithm_version,
+        "validation_kind": "PIT_APPROX_RETROSPECTIVE_DESCRIPTION",
+        "statistical_claim": "NO_STATISTICAL_CLAIM",
         "data_policy_id": data_policy_id or None,
         "dataset_id": dataset_id or None,
         "hit_threshold_pct": round(HIT_THRESHOLD * 100, 0),
@@ -390,17 +451,26 @@ def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str,
         "conditions": conditions,
         "stress_ladder": _ladder(scored, "stress", STRESS_LADDER, fwd),
         "confirmation_ladder": _ladder(scored, "confirmation", CONFIRMATION_LADDER, fwd),
+        "legacy_ladder_kind": "legacy_cumulative_thresholds",
+        "disjoint_bins": {
+            "stress": stress_bins, "confirmation": confirmation_bins,
+        },
+        "monotonicity": {
+            "stress": _monotonicity(stress_bins),
+            "confirmation": _monotonicity(confirmation_bins),
+        },
         "caveats": [
             f"胜率 = 该时点起 N 周后**终点**价格涨幅 ≥ {HIT_THRESHOLD:.0%} 的比例，"
             "非窗口内最高价；窗口未走完的时点已排除。",
-            f"有效样本量看 independent（前向窗口互不重叠的观测数），不是 points；"
-            f"independent < {MIN_INDEPENDENT} 的格子已不输出胜率与中位数，"
+            f"描述性样本量优先看非重叠观测数（兼容字段 independent），不是 points；"
+            f"非重叠观测数 < {MIN_INDEPENDENT} 的格子已不输出胜率与中位数，"
             "只保留最差一次作为风险线索。",
             f"segments 是独立事件段数（相邻 {SEGMENT_GAP_DAYS} 天内合并），描述该"
             "条件出现在几段不同行情里，与样本独立性是两件事：连续覆盖全期的"
             "全样本基准只有 1 段。",
-            "hit_rate、median_return 与区间均只使用前向窗口互不重叠的子样本；"
-            "它们仍是历史条件分布描述，不是已校准概率。",
+            "hit_rate、median_return 与 Wilson 区间均只使用按最早日期贪心选择的"
+            "前向窗口互不重叠子样本；它们仍是 PIT_APPROX 样本内历史条件描述，"
+            "不是严格样本外验证或已校准概率。",
             "2017 年前多数衍生品与需求类指标无数据，早年分数的因子构成与"
             "今天不同，跨期可比性有限。",
             f"回放按 {algorithm_version} 重算，算法版本变化会使全表重新计算，"

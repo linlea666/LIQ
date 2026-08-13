@@ -40,7 +40,7 @@ PRIMARY_LABEL = "C_180_r20_mae20"
 BOOTSTRAP_ITERATIONS = 5000
 PERMUTATION_ITERATIONS = 1000
 EMBARGO_DAYS = 30
-AUDIT_ENGINE_VERSION = "audit-v4"
+AUDIT_ENGINE_VERSION = "audit-v5"
 
 
 def _finite(value: Any) -> Optional[float]:
@@ -636,7 +636,7 @@ def _challenger_models(rows: list[dict[str, Any]], label: str,
             )
             model.fit(train_x, train_y)
             probability = model.predict_proba(test_x)[:, 1].tolist()
-            # bottom-v4 没有已校准的单一组合概率；可排序的 Champion 主标尺
+            # 当前 Champion 没有已校准的单一组合概率；可排序的主标尺
             # 是 Stress。Confirmation/60:40 组合分别在消融中作为候选评估。
             # Challenger 与 Stress 仍必须在完全相同的 OOS 时点配对比较。
             train_champion = [float(row["stress"]) for row in train]
@@ -1459,7 +1459,7 @@ def _markdown(payload: dict[str, Any]) -> str:
         for item in payload["next_experiments"]
     ]
     sections = [
-        ("1. Executive Audit Conclusion", "**INSUFFICIENT EVIDENCE。** bottom-v4 是启发式证据评分，不是已校准概率。所有 legacy 回放均为 PIT_APPROX，没有严格 PIT OOS；主 180 天标签的 Walk-Forward 仅 6 个成熟点且没有正类，PR-AUC、MCC、Recall 均不可评分。样本内结果不能证明优于简单估值/等权基准。最大风险是 legacy 数据缺少真实 vintage，且生产旧快照已确认混入未来日与未收盘周线。Confirmation 和 60/40 组合没有显示稳定增量。经济显著性与概率校准均不可评分。当前只能保留为研究型状态指标。"),
+        ("1. Executive Audit Conclusion", f"**INSUFFICIENT EVIDENCE。** {payload['model_id']} 是启发式证据评分，不是已校准概率。历史数据状态为 {payload['pit_status']}，不能冒充严格 PIT OOS；主 180 天标签成熟 N={sample['primary_label_scorable_n']}，事件 N={sample['event_n']}，非重叠 N={sample['non_overlapping_n_180d']}，N_eff={sample['n_eff']}。Walk-Forward 状态={payload['walk_forward']['metrics'].get('validation_status')}。样本内结果不能证明优于简单估值/等权基准；经济显著性与概率校准未通过发布门槛。当前只能保留为研究型状态指标。"),
         ("2. Data Integrity Audit", f"dataset_id=`{payload['dataset_id']}`；policy={payload['data_policy_id']}；历史状态={payload['pit_status']}。{provenance_summary}\n\n未来日、未收盘周线和失败多输出已在新生产链路 fail-closed；旧历史仍不得冒充严格 PIT。逐指标缺失率、最大时间戳间隔、更新滞后、角色与来源见 JSON `indicator_audit`。第二数据源一致性：**UNSCORABLE**。"),
         ("3. Target / Label Audit", f"生成 Label A/B/C 共 {len(payload['labels'])} 个组合，完整 N/正例率见 JSON `labels`。主审计标签 `{PRIMARY_LABEL}` 同时约束 180 天终点收益与 MAE。所有标签均排除未走完前向窗口；不同时间尺度不混合。"),
         ("4. Sample Size Audit", f"Daily raw N={sample['daily_raw_n']}；weekly replay N={sample['weekly_raw_n']}；组合分数 N={sample['combined_score_n']}；主标签成熟 N={sample['primary_label_scorable_n']}；事件 N={sample['event_n']}；180 天非重叠 N={sample['non_overlapping_n_180d']}；N_eff={sample['n_eff']}。独立统计功效严重不足。"),

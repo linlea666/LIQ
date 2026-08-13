@@ -38,6 +38,8 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert snap["day"] == END.strftime("%Y-%m-%d")
     from processors.bottom_model.snapshot import ALGORITHM_VERSION
     assert snap["algorithm_version"] == ALGORITHM_VERSION
+    assert snap["algorithm_version"] == "bottom-v5"
+    assert snap["schema_version"] == "2.1"
     assert snap["data_policy_id"] == DATA_POLICY_ID
     assert snap["validation_status"] == "INSUFFICIENT_EVIDENCE"
     assert snap["prediction"]["probability"] is None
@@ -48,6 +50,13 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert snap["confirmation"]["score"] is not None
     assert snap["quadrant"]["key"] in {"panic_flush", "basing", "confirmed_recovery"}
     assert len(snap["factors"]) == 6
+    assert set(snap["demand_dimensions"]) == {
+        "direct_spot_demand", "liquidity_ammunition",
+    }
+    assert len(snap["fake_bottom_filter"]["evaluations"]) == 4
+    assert len(snap["counter_evidence"]["clusters"]) == 8
+    assert snap["audit_id"] is None
+    assert snap["audit_match"]["status"] == "NO_MATCHING_AUDIT"
     assert snap["price_context"]["price"] is not None
     # 类比：合成数据没有 2015-2022 历史 → 全部"共同因子不足"或被跳过
     assert isinstance(snap["analogs"], list)
@@ -65,6 +74,35 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert audit["groups"] and audit["cross_layer_overlaps"]
     # 快照已落库
     assert store.latest_snapshot()["day"] == snap["day"]
+    store.close()
+
+
+def test_snapshot_audit_binding_requires_exact_dataset_match(tmp_path):
+    store = _seeded_store(tmp_path)
+    store.save_audit("wrong-dataset", {
+        "audit_id": "wrong-dataset",
+        "model_id": "bottom-v5",
+        "data_policy_id": DATA_POLICY_ID,
+        "dataset_id": "dataset-other",
+        "status": "INSUFFICIENT_EVIDENCE",
+    }, "# wrong")
+    unmatched = build_snapshot(store)
+    assert unmatched["audit_id"] is None
+    assert unmatched["audit_match"]["status"] == "NO_MATCHING_AUDIT"
+
+    store.save_audit("exact", {
+        "audit_id": "exact",
+        "model_id": unmatched["model_id"],
+        "data_policy_id": unmatched["data_policy_id"],
+        "dataset_id": unmatched["dataset_id"],
+        "status": "INSUFFICIENT_EVIDENCE",
+        "pit_status": "PIT_APPROX",
+        "probability_publishable": False,
+    }, "# exact")
+    matched = build_snapshot(store)
+    assert matched["audit_id"] == "exact"
+    assert matched["audit_match"]["status"] == "MATCHED"
+    assert matched["audit_match"]["summary"]["pit_status"] == "PIT_APPROX"
     store.close()
 
 

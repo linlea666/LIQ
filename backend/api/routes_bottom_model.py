@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
@@ -38,13 +40,13 @@ async def get_history(limit: int = Query(400, ge=1, le=2000)):
 
 
 @router.get("/evidence-pack", response_class=PlainTextResponse)
-async def get_evidence_pack():
+async def get_evidence_pack(detail: Literal["full", "compact"] = Query("full")):
     service = _require_service()
     snapshot = service.latest()
     if snapshot is None:
         raise HTTPException(status_code=503, detail="Bottom model snapshot not ready")
     from processors.bottom_model.evidence_pack import build_evidence_pack
-    return build_evidence_pack(snapshot, service.store)
+    return build_evidence_pack(snapshot, service.store, detail=detail)
 
 
 @router.get("/health")

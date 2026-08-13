@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from bisect import bisect_left, bisect_right
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -317,7 +318,7 @@ def drawdown_series(rows: Rows) -> Rows:
 def _sub(key: str, label: str, score: Optional[float], weight: float,
          value: Optional[float] = None, percentile: Optional[float] = None,
          note: str = "", eq: Optional[float] = None,
-         eq_note: str = "") -> dict[str, Any]:
+         eq_note: str = "", direction: Optional[str] = None) -> dict[str, Any]:
     ok = score is not None
     return {
         "key": key, "label": label, "weight": weight, "ok": ok,
@@ -327,6 +328,7 @@ def _sub(key: str, label: str, score: Optional[float], weight: float,
         "note": note,
         "evidence_quality": eq,
         "eq_note": eq_note,
+        "direction": direction,
     }
 
 
@@ -359,15 +361,50 @@ def _pct_sub(key: str, label: str, rows: Rows, weight: float,
                 percentile=bp["pct"], note=note, eq=eq, eq_note=eq_note)
 
 
-def _mean_pct_sub(key: str, label: str, rows: Rows, weight: float,
-                  window: int = 30, invert: bool = False, note: str = "",
-                  as_of: Optional[str] = None, proxy: float = 1.0) -> dict[str, Any]:
-    """滚动均值的混合分位子信号：日级噪声大的流量类指标先平滑再定位分位。"""
-    mean_rows = rolling_mean_series(rows, window)
+def _signed_mean_pct_sub(key: str, label: str, rows: Rows, weight: float,
+                         window: int = 30, note: str = "",
+                         as_of: Optional[str] = None,
+                         proxy: float = 1.0) -> dict[str, Any]:
+    """有符号流量的方向分段评分。
+
+    历史分位只回答“相对过去处于什么位置”，不能覆盖当前值的正负方向。
+    因此净卖出映射到 0..50，净买入映射到 50..100；区间内部仍按历史
+    混合分位排序。该映射仍是启发式分数，不是概率。
+    """
+    finite_rows: Rows = []
+    for day, raw in rows:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            finite_rows.append((day, value))
+    mean_rows = rolling_mean_series(finite_rows, window)
     if not mean_rows:
         return _sub(key, label, None, weight, note=note or "数据不足")
-    return _pct_sub(key, label, mean_rows, weight, invert=invert, note=note,
-                    as_of=as_of, proxy=proxy)
+    bp = blended_percentile(mean_rows)
+    if bp is None:
+        return _sub(key, label, None, weight, note=note or "数据不足")
+    mean_value = last_value(mean_rows)
+    if mean_value is None:
+        return _sub(key, label, None, weight, note=note or "数据不足")
+    if mean_value < 0:
+        score, direction = 0.5 * bp["pct"], "NET_SELLING"
+    elif mean_value > 0:
+        score, direction = 50.0 + 0.5 * bp["pct"], "NET_BUYING"
+    else:
+        score, direction = 50.0, "NEUTRAL"
+    eq, eq_note = evidence_quality(mean_rows, as_of, bp["coverage"], proxy)
+    direction_note = {
+        "NET_SELLING": "30d 均值为负（净卖出），分位仅表示相对历史改善",
+        "NET_BUYING": "30d 均值为正（净买入），分位表示相对历史强度",
+        "NEUTRAL": "30d 均值为零",
+    }[direction]
+    return _sub(
+        key, label, score, weight, value=mean_value, percentile=bp["pct"],
+        note=f"{direction_note}；{note}" if note else direction_note,
+        eq=eq, eq_note=eq_note, direction=direction,
+    )
 
 
 def _factor(key: str, subs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -606,17 +643,17 @@ def _factor_leverage(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[st
 def _factor_demand(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[str, Any]:
     subs: list[dict[str, Any]] = []
     # 现货买盘直接证据放最前：2017-08 起覆盖 2018 与 2022 两个大底，是本因子
-    # 唯一不靠代理关系的需求证据（ETF 窗口仅 2024 起，稳定币只是场外弹药）。
-    # 实测两者相关系数仅 0.04，各自独立计权。
-    subs.append(_mean_pct_sub(
+    # 不靠代理关系的需求证据（ETF 窗口仅 2024 起，稳定币只是场外弹药）。
+    # 相关性与增量价值必须由匹配数据集的离线审计动态报告，生产规则不写死结论。
+    subs.append(_signed_mean_pct_sub(
         "coinbase_premium", "Coinbase 溢价·30d 均",
         d.get("coinbase_premium_rate", []), 1.0, as_of=as_of,
-        note="高分位 = 美国现货资金净买入；负值 = 美国资金在净卖出",
+        note="美国现货定价方向",
     ))
-    subs.append(_mean_pct_sub(
+    subs.append(_signed_mean_pct_sub(
         "spot_net_taker", "现货净 taker·30d 均",
         d.get("spot_net_taker_usd", []), 1.0, as_of=as_of,
-        note="高分位 = 主动买单相对主动卖单占优（现货成交，不含衍生品）",
+        note="现货成交，不含衍生品",
     ))
     # ETF 动量：30d 累计 + 7d/30d 反转结构
     etf = d.get("etf_flow_usd", [])
@@ -876,6 +913,53 @@ def compute_stress(factors: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     }
 
 
+def compute_demand_dimensions(factors: list[dict[str, Any]]) -> dict[str, Any]:
+    """把旧 demand 因子拆成两个可解释维度，聚合口径与因子引擎完全一致。"""
+    demand = next((factor for factor in factors if factor.get("key") == "demand"), None)
+    by_key = {
+        sub.get("key"): sub for sub in (demand or {}).get("sub_signals", [])
+        if sub.get("key")
+    }
+
+    def aggregate(key: str, label: str, members: tuple[str, ...]) -> dict[str, Any]:
+        selected = [by_key[item] for item in members if item in by_key]
+        available = [sub for sub in selected if sub.get("ok")]
+        nominal = sum(float(sub.get("weight") or 0.0) for sub in selected)
+        active = sum(float(sub.get("weight") or 0.0) for sub in available)
+        effective = sum(
+            float(sub.get("weight") or 0.0) * _eq_of(sub) / 100.0
+            for sub in available
+        )
+        score = (
+            sum(
+                float(sub.get("weight") or 0.0) * _eq_of(sub) / 100.0
+                * float(sub["score"])
+                for sub in available
+            ) / effective
+            if effective > 1e-9 else None
+        )
+        eq = 100.0 * effective / active if active > 1e-9 else None
+        return {
+            "key": key, "label": label,
+            "score": round(score, 1) if score is not None else None,
+            "evidence_quality": round(eq, 1) if eq is not None else None,
+            "coverage": round(active / nominal, 2) if nominal > 0 else 0.0,
+            "status": "SCORABLE" if score is not None else "UNSCORABLE",
+            "components": [dict(sub) for sub in selected],
+        }
+
+    return {
+        "direct_spot_demand": aggregate(
+            "direct_spot_demand", "直接现货需求",
+            ("coinbase_premium", "spot_net_taker", "etf_momentum"),
+        ),
+        "liquidity_ammunition": aggregate(
+            "liquidity_ammunition", "流动性弹药",
+            ("stablecoin_growth", "exchange_outflow"),
+        ),
+    }
+
+
 # ══════════════════════ Confirmation 层 ══════════════════════
 
 # 资金费"负极端"阈值。funding_oiw 上游单位是**百分比/8h**（中位 0.0063%，
@@ -895,12 +979,15 @@ def compute_confirmation(d: dict[str, Rows],
 
     def _check(key: str, label: str, score: Optional[float], note: str = "",
                eq: Optional[float] = None, eq_note: str = "",
-               weight: float = 1.0) -> None:
+               weight: float = 1.0, state: Optional[str] = None,
+               status: Optional[str] = None) -> None:
         checks.append({
             "key": key, "label": label, "ok": score is not None,
             "score": round(clamp(score), 1) if score is not None else None,
             "note": note, "weight": weight,
             "evidence_quality": eq, "eq_note": eq_note,
+            "state": state,
+            "status": status or ("SCORABLE" if score is not None else "UNSCORABLE"),
         })
 
     # 1. aSOPR 收复 1
@@ -960,20 +1047,30 @@ def compute_confirmation(d: dict[str, Rows],
         f_note = f"资金费 90d 低点 {low_90:.4f}% → 14d 均 {avg_14:.4f}%/8h"
         f_eq, f_eq_note = evidence_quality(funding, as_of, _sample_factor(funding))
         if oi_chg is None:
-            score = 70.0 if recovering else 40.0 if negative else 60.0
-            note = f"{f_note}；OI 数据不足，无法判定杠杆制度"
-            eq, eq_note = f_eq, f_eq_note
+            _check(
+                "funding_oi_regime", "资金费 × OI 制度", None,
+                f"{f_note}；OI 数据不足，二维制度不可评分",
+                f_eq, f_eq_note, state="UNSCORABLE", status="UNSCORABLE",
+            )
         else:
             if recovering and oi_chg > 0.15:
-                score, tag = 25.0, "资金费回升但 OI 快速回堆 = 杠杆重新堆积"
+                score, state, tag = 25.0, "RECOVERED_RELEVERAGING", \
+                    "资金费恢复但 OI 快速回堆 = 杠杆重新堆积"
             elif recovering:
-                score, tag = 100.0, "资金费正常化且 OI 未回堆 = 健康去杠杆后修复"
+                score, state, tag = 100.0, "RECOVERED_HEALTHY", \
+                    "资金费正常化且 OI 未快速回堆 = 健康去杠杆后修复"
             elif negative and oi_chg < 0:
-                score, tag = 40.0, "资金费为负 + OI 下降 = 恐慌出清进行中（压力事件，非确认）"
+                score, state, tag = 40.0, "ACTIVE_FLUSH", \
+                    "资金费为负 + OI 下降 = 出清进行中（压力事件，非确认）"
             elif negative:
-                score, tag = 35.0, "资金费为负 + OI 上升 = 空头持续累积"
+                score, state, tag = 35.0, "ACTIVE_SHORT_BUILD", \
+                    "资金费为负 + OI 上升 = 空头持续累积"
+            elif oi_chg > 0.15:
+                score, state, tag = 25.0, "NO_EVENT_RELEVERAGING", \
+                    "未见前置负极端但 OI 快速回堆 = 无正常化事件且杠杆增加"
             else:
-                score, tag = 70.0, "资金费未见负极端、OI 平稳，无正常化事件可确认"
+                score, state, tag = 50.0, "NO_EVENT_NEUTRAL", \
+                    "未见前置负极端、OI 未快速回堆 = 中性，无正常化事件可确认"
             flush = oi_flush_ratio(oi)
             flush_desc = f"，距 180d 峰值 {flush:.1%}" if flush is not None else ""
             note = f"{f_note}；OI 30d {oi_chg:+.1%}{flush_desc}——{tag}"
@@ -981,9 +1078,15 @@ def compute_confirmation(d: dict[str, Rows],
             # 二维判定的置信度取决于较弱的一侧
             eq = min(f_eq, oi_eq) if f_eq is not None and oi_eq is not None else f_eq
             eq_note = f_eq_note
-        _check("funding_oi_regime", "资金费 × OI 制度", score, note, eq, eq_note)
+            _check(
+                "funding_oi_regime", "资金费 × OI 制度", score, note, eq, eq_note,
+                state=state,
+            )
     else:
-        _check("funding_oi_regime", "资金费 × OI 制度", None, "数据不足")
+        _check(
+            "funding_oi_regime", "资金费 × OI 制度", None, "资金费数据不足",
+            state="UNSCORABLE", status="UNSCORABLE",
+        )
 
     # 5. 周线结构分阶段（HL 只是第一步，收复成本线与 HH 才是后续）
     stage = weekly_structure_stage(d)
@@ -1025,15 +1128,41 @@ def compute_confirmation(d: dict[str, Rows],
 def compute_fake_bottom_filter(d: dict[str, Rows]) -> dict[str, Any]:
     """假底触发器：每项触发对 Confirmation 施加惩罚（只降级、不否决 Stress）。"""
     triggers: list[dict[str, Any]] = []
+    evaluations: list[dict[str, Any]] = []
+
+    def evaluated(key: str, label: str, status: str, penalty: int,
+                  note: str, inputs: dict[str, Any],
+                  thresholds: dict[str, Any]) -> None:
+        evaluations.append({
+            "key": key, "label": label, "status": status,
+            "penalty": penalty, "note": note,
+            "coverage": 0.0 if status == "UNSCORABLE" else 1.0,
+            "inputs": inputs, "thresholds": thresholds,
+        })
+        if status == "TRIGGERED":
+            triggers.append({
+                "key": key, "label": label, "penalty": penalty, "note": note,
+            })
 
     oi_chg = change_rate(d.get("oi_agg_usd", []), 30)
     price_rows = d.get("btc_close_1d", []) or d.get("btc_price_onchain", [])
     price_chg = change_rate(price_rows, 30)
-    if oi_chg is not None and price_chg is not None and oi_chg > 0.15 and price_chg < 0.05:
-        triggers.append({
-            "key": "oi_rebuild", "label": "OI 快速回堆", "penalty": 15,
-            "note": f"30d OI {oi_chg:+.1%} 而价格仅 {price_chg:+.1%}，杠杆抢跑",
-        })
+    if oi_chg is None or price_chg is None:
+        evaluated(
+            "oi_rebuild", "OI 快速回堆", "UNSCORABLE", 15,
+            "OI或价格30d变化数据不足",
+            {"oi_change_30d": oi_chg, "price_change_30d": price_chg},
+            {"oi_gt": 0.15, "price_lt": 0.05},
+        )
+    else:
+        triggered = oi_chg > 0.15 and price_chg < 0.05
+        evaluated(
+            "oi_rebuild", "OI 快速回堆", "TRIGGERED" if triggered else "CLEAR", 15,
+            f"30d OI {oi_chg:+.1%} / 价格 {price_chg:+.1%}"
+            + ("，杠杆抢跑" if triggered else "，未同时越过触发阈值"),
+            {"oi_change_30d": oi_chg, "price_change_30d": price_chg},
+            {"oi_gt": 0.15, "price_lt": 0.05},
+        )
 
     funding = d.get("funding_oiw", [])
     if len(funding) >= 120:
@@ -1043,31 +1172,69 @@ def compute_fake_bottom_filter(d: dict[str, Rows]) -> dict[str, Any]:
             for i in range(13, len(funding))
         ]
         bp = blended_percentile(avg_series, avg_14)
-        if bp is not None and bp["pct"] > 80 and avg_14 > 0:
-            triggers.append({
-                "key": "funding_overheat", "label": "资金费转正过热", "penalty": 15,
-                "note": f"14d 均 {avg_14:.4f}%/8h 处 {bp['pct']:.0f} 分位，多头拥挤",
-            })
+        if bp is None:
+            evaluated(
+                "funding_overheat", "资金费转正过热", "UNSCORABLE", 15,
+                "资金费分位不可计算", {"avg_14": avg_14, "percentile": None},
+                {"percentile_gt": 80, "avg_gt": 0},
+            )
+        else:
+            triggered = bp["pct"] > 80 and avg_14 > 0
+            evaluated(
+                "funding_overheat", "资金费转正过热",
+                "TRIGGERED" if triggered else "CLEAR", 15,
+                f"14d 均 {avg_14:.4f}%/8h，历史分位 {bp['pct']:.0f}"
+                + ("，多头拥挤" if triggered else "，未达到过热条件"),
+                {"avg_14": avg_14, "percentile": bp["pct"]},
+                {"percentile_gt": 80, "avg_gt": 0},
+            )
+    else:
+        evaluated(
+            "funding_overheat", "资金费转正过热", "UNSCORABLE", 15,
+            "资金费历史不足120个观测", {"observations": len(funding)},
+            {"min_observations": 120},
+        )
 
     etf = d.get("etf_flow_usd", [])
     if len(etf) >= 40:
         avg_7, avg_30 = sma_tail(etf, 7) or 0.0, sma_tail(etf, 30) or 0.0
-        if avg_7 < 0 and avg_30 < 0:
-            triggers.append({
-                "key": "etf_outflow", "label": "ETF 持续流出", "penalty": 10,
-                "note": f"7d 均 {avg_7 / 1e6:+.0f}M / 30d 均 {avg_30 / 1e6:+.0f}M",
-            })
+        triggered = avg_7 < 0 and avg_30 < 0
+        evaluated(
+            "etf_outflow", "ETF 持续流出", "TRIGGERED" if triggered else "CLEAR", 10,
+            f"7d 均 {avg_7 / 1e6:+.0f}M / 30d 均 {avg_30 / 1e6:+.0f}M",
+            {"avg_7": avg_7, "avg_30": avg_30},
+            {"avg_7_lt": 0, "avg_30_lt": 0},
+        )
+    else:
+        evaluated(
+            "etf_outflow", "ETF 持续流出", "UNSCORABLE", 10,
+            "ETF历史不足40个观测", {"observations": len(etf)},
+            {"min_observations": 40},
+        )
 
     if len(price_rows) >= 97:
         recent_low = min(tail_values(price_rows, 7))
         prior_low = min(tail_values(price_rows, 97)[:-7])
-        if recent_low <= prior_low * 1.001:
-            triggers.append({
-                "key": "price_new_low", "label": "仍在创新低", "penalty": 20,
-                "note": "近 7d 跌破前 90d 低点，下跌结构未破坏",
-            })
+        triggered = recent_low <= prior_low * 1.001
+        evaluated(
+            "price_new_low", "仍在创新低", "TRIGGERED" if triggered else "CLEAR", 20,
+            "近7d跌破前90d低点，下跌结构未破坏" if triggered
+            else "近7d低点未跌破前90d低点",
+            {"recent_low_7d": recent_low, "prior_low_90d": prior_low},
+            {"recent_lte_prior_x": 1.001},
+        )
+    else:
+        evaluated(
+            "price_new_low", "仍在创新低", "UNSCORABLE", 20,
+            "价格历史不足97个观测", {"observations": len(price_rows)},
+            {"min_observations": 97},
+        )
 
-    return {"triggers": triggers, "total_penalty": sum(t["penalty"] for t in triggers)}
+    return {
+        "triggers": triggers,
+        "total_penalty": sum(t["penalty"] for t in triggers),
+        "evaluations": evaluations,
+    }
 
 
 # ══════════════════════ 卖方衰竭指数 ══════════════════════
@@ -1118,34 +1285,155 @@ def compute_seller_exhaustion(d: dict[str, Rows]) -> Optional[dict[str, Any]]:
 
 # ══════════════════════ 反证清单 ══════════════════════
 
-def build_counter_evidence(factors: list[dict[str, Any]],
-                           fake_filter: dict[str, Any]) -> dict[str, Any]:
-    """机械生成支持/反对底部的证据清单（供外部 AI 对抗性分析）。"""
-    supporting: list[str] = []
-    opposing: list[str] = []
-    for factor in factors:
-        for sub in factor["sub_signals"]:
-            if not sub["ok"]:
-                continue
-            desc = f"[{factor['label']}] {sub['label']}：{sub['score']:.0f} 分"
-            if sub["note"]:
-                desc += f"（{sub['note']}）"
-            if sub["score"] >= 70:
-                supporting.append(desc)
-            elif sub["score"] <= 30:
-                opposing.append(desc)
-    for trigger in fake_filter["triggers"]:
-        opposing.append(f"[假底过滤] {trigger['label']}：{trigger['note']}")
-    return {"supporting": supporting, "opposing": opposing}
+def build_counter_evidence(
+    factors: list[dict[str, Any]], fake_filter: dict[str, Any],
+    confirmation: Optional[dict[str, Any]] = None,
+    seller_exhaustion: Optional[dict[str, Any]] = None,
+    demand_dimensions: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """按独立经济维度生成对抗证据，旧字符串数组由维度结果兼容派生。"""
+    factor_by_key = {factor.get("key"): factor for factor in factors}
+    demand_dimensions = demand_dimensions or compute_demand_dimensions(factors)
+    checks = {
+        check.get("key"): check for check in (confirmation or {}).get("checks", [])
+        if check.get("key")
+    }
+    fake_by_key = {
+        item.get("key"): item for item in fake_filter.get("evaluations", [])
+        if item.get("key")
+    }
+
+    def member(layer: str, item: dict[str, Any]) -> dict[str, Any]:
+        score = item.get("score")
+        status = item.get("status") or (
+            "SCORABLE" if score is not None else "UNSCORABLE"
+        )
+        if layer == "fake_bottom_filter" and score is None:
+            score = 0.0 if status == "TRIGGERED" else 50.0 if status == "CLEAR" else None
+        return {
+            "layer": layer, "key": item.get("key"), "label": item.get("label"),
+            "score": score,
+            "evidence_quality": item.get("evidence_quality"),
+            "status": status,
+            "note": item.get("note", ""),
+            "direction": item.get("direction"),
+        }
+
+    def factor_members(key: str) -> list[dict[str, Any]]:
+        return [member("stress", sub) for sub in (
+            factor_by_key.get(key) or {}
+        ).get("sub_signals", [])]
+
+    def dimension_members(key: str) -> list[dict[str, Any]]:
+        return [member("demand_dimension", sub) for sub in (
+            demand_dimensions.get(key) or {}
+        ).get("components", [])]
+
+    def check_members(keys: tuple[str, ...]) -> list[dict[str, Any]]:
+        return [member("confirmation", checks[key]) for key in keys if key in checks]
+
+    seller_members = [
+        {
+            "layer": "seller_exhaustion", "key": key, "label": key,
+            "score": value, "evidence_quality": None, "status": "SCORABLE",
+            "note": "卖方衰竭派生组件", "direction": None,
+        }
+        for key, value in (seller_exhaustion or {}).get("components", {}).items()
+    ]
+
+    cluster_specs = [
+        ("valuation_pressure", "估值压力", factor_members("valuation")),
+        ("capitulation_pressure", "投降压力", factor_members("capitulation")),
+        ("leverage_clearance", "杠杆出清", factor_members("leverage")
+         + check_members(("funding_oi_regime",))
+         + [member("fake_bottom_filter", fake_by_key[key])
+            for key in ("oi_rebuild", "funding_overheat") if key in fake_by_key]),
+        ("seller_exhaustion", "卖方衰竭", seller_members),
+        ("direct_spot_demand", "直接现货需求", dimension_members("direct_spot_demand")
+         + check_members(("etf_turn",))
+         + [member("fake_bottom_filter", fake_by_key["etf_outflow"])]
+         if "etf_outflow" in fake_by_key else
+         dimension_members("direct_spot_demand") + check_members(("etf_turn",))),
+        ("liquidity_ammunition", "流动性弹药", dimension_members("liquidity_ammunition")),
+        ("price_confirmation", "价格确认", check_members(
+            ("sopr_reclaim", "price_reclaim_sth", "structure_stage"),
+        ) + ([member("fake_bottom_filter", fake_by_key["price_new_low"])]
+             if "price_new_low" in fake_by_key else [])),
+        ("macro_regime", "宏观制度", factor_members("macro")),
+    ]
+
+    clusters: list[dict[str, Any]] = []
+    for key, label, members in cluster_specs:
+        available = [item for item in members if isinstance(item.get("score"), (int, float))]
+        unavailable = [item for item in members if item.get("status") == "UNSCORABLE"]
+        # 有符号需求先服从绝对方向：净卖出即使处在较高历史分位，也不能被
+        # 归为直接买盘支持；若 ETF 转正与现货净卖出并存，维度必须显示 mixed。
+        supports = [
+            item for item in available
+            if float(item["score"]) >= 70 and item.get("direction") != "NET_SELLING"
+        ]
+        opposes = [
+            item for item in available
+            if float(item["score"]) <= 30 or item.get("direction") == "NET_SELLING"
+        ]
+        if supports and opposes:
+            stance = "mixed"
+        elif supports:
+            stance = "supporting"
+        elif opposes:
+            stance = "opposing"
+        elif available:
+            stance = "neutral"
+        else:
+            stance = "unknown"
+        primary = max(
+            available,
+            key=lambda item: (
+                float(item.get("evidence_quality") or 100.0)
+                * abs(float(item["score"]) - 50.0)
+            ),
+            default=None,
+        )
+        clusters.append({
+            "key": key, "label": label, "stance": stance,
+            "primary": primary, "members": members,
+            "available_n": len(available), "unknown_n": len(unavailable),
+        })
+
+    buckets: dict[str, list[str]] = {
+        "supporting": [], "opposing": [], "neutral": [], "unknown": [],
+    }
+    for cluster in clusters:
+        primary = cluster.get("primary") or {}
+        score = primary.get("score")
+        desc = f"[{cluster['label']}] {primary.get('label') or '数据不足'}"
+        if isinstance(score, (int, float)):
+            desc += f"：{score:.0f} 分"
+        if primary.get("note"):
+            desc += f"（{primary['note']}）"
+        bucket = cluster["stance"] if cluster["stance"] in buckets else "neutral"
+        if bucket == "mixed":
+            bucket = "neutral"
+            desc += "（维度内证据相互冲突）"
+        buckets[bucket].append(desc)
+
+    return {
+        **buckets,
+        "clusters": clusters,
+        "independent_counts": {
+            stance: sum(1 for cluster in clusters if cluster["stance"] == stance)
+            for stance in ("supporting", "opposing", "mixed", "neutral", "unknown")
+        },
+    }
 
 
 # ══════════════════════ 四象限状态 ══════════════════════
 
 QUADRANTS = {
-    "bear_market": "熊市进行",
-    "panic_flush": "恐慌出清",
-    "basing": "筑底改善",
-    "confirmed_recovery": "确认恢复",
+    "bear_market": "压力不足",
+    "panic_flush": "高压力／确认不足",
+    "basing": "高压力／早期确认",
+    "confirmed_recovery": "高压力／多项确认",
 }
 
 
@@ -1156,13 +1444,13 @@ def classify_quadrant(stress: Optional[float], confirmation: Optional[float]) ->
     # 动态展示，禁止把某次样本内结果硬编码成永恒结论。
     if stress < 55:
         note = "底部压力不足，市场未进入极端区" if confirmation is None or confirmation < 50 \
-            else "无极端压力下的修复 = 普通回调结束，非周期大底"
+            else "没有高压力背景，当前改善读数不构成周期底部确认"
         return {"key": "bear_market", "label": QUADRANTS["bear_market"], "note": note}
     if confirmation is None or confirmation < 35:
         return {"key": "panic_flush", "label": QUADRANTS["panic_flush"],
-                "note": "极端压力已现，改善迹象未确认；仅表示压力状态，不代表底部概率"}
+                "note": "高压力已现，但改善证据不足；仅表示状态，不代表底部概率"}
     if confirmation < 65:
         return {"key": "basing", "label": QUADRANTS["basing"],
-                "note": "压力极端 + 改善迹象萌芽；历史结果需按当前版本和时间尺度另行核验"}
+                "note": "高压力 + 部分早期确认；历史结果需按当前版本和时间尺度另行核验"}
     return {"key": "confirmed_recovery", "label": QUADRANTS["confirmed_recovery"],
-            "note": "压力极端 + 多项确认信号共振；这是规则状态，不是已校准概率"}
+            "note": "高压力 + 多项确认信号；这是规则状态，不是已校准概率"}
