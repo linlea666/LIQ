@@ -16,7 +16,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from processors.bottom_model.factors import Rows, align, liq_total_series, ratio_series
+from processors.bottom_model.factors import (
+    Rows,
+    align,
+    change_rate_series,
+    liq_total_series,
+    ratio_series,
+)
 
 # 相关性窗口（自然日）与最小重叠样本
 _WINDOW_DAYS = 1095
@@ -43,6 +49,17 @@ GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
             ("lth_realized_loss_abs", "LTH 已实现亏损"),
             ("sopr", "aSOPR"),
             ("sth_sopr", "STH-SOPR"),
+        ),
+    ),
+    (
+        "demand", "需求簇",
+        "四者都被当作\"谁在买\"的证据，但实测相关性很低——溢价与现货净 taker 的 "
+        "ρ 仅 0.04，说明美国机构定价与全球主动买单是两件事，可作为彼此独立的证据",
+        (
+            ("coinbase_premium_rate", "Coinbase 溢价"),
+            ("spot_net_taker_usd", "现货净 taker"),
+            ("etf_flow_usd", "ETF 净流"),
+            ("stablecoin_growth_30d", "稳定币 30d 增速"),
         ),
     ),
     (
@@ -131,6 +148,11 @@ def _series_map(data: dict[str, Rows]) -> dict[str, Rows]:
         (day, abs(v)) for day, v in data.get("lth_realized_loss", [])
     ]
     derived["liq_total_usd"] = liq_total_series(data)
+    # 稳定币市值是单调增长的水平量，用水平值算相关只会得到"都随时间上涨"的
+    # 伪相关；因子层用的也是 30d 增速，这里保持同一口径
+    derived["stablecoin_growth_30d"] = change_rate_series(
+        data.get("stablecoin_total_mcap", []), 30,
+    )
     return derived
 
 

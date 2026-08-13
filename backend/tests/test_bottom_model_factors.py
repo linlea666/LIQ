@@ -12,8 +12,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from processors.bottom_model.correlation import compute_correlation_audit, pearson
 from processors.bottom_model.factors import (
     PROXY_CME_VOL,
+    SeriesIndex,
     blended_percentile,
     build_counter_evidence,
+    change_rate_series,
     classify_quadrant,
     compute_confirmation,
     compute_factors,
@@ -26,6 +28,7 @@ from processors.bottom_model.factors import (
     oi_flush_ratio,
     percentile_rank,
     ratio_series,
+    rolling_mean_series,
     weekly_higher_high,
     weekly_higher_low,
     weekly_structure_stage,
@@ -393,3 +396,80 @@ def test_classify_quadrant():
     assert classify_quadrant(70, 50)["key"] == "basing"
     assert classify_quadrant(70, 80)["key"] == "confirmed_recovery"
     assert classify_quadrant(70, None)["key"] == "panic_flush"
+    # v4：note 必须带时间尺度限定——同一象限在 13 周与 52 周的表现可能相反
+    for stress, conf in ((40, 20), (70, 20), (70, 50), (70, 80)):
+        assert "周" in classify_quadrant(stress, conf)["note"]
+
+
+# ── v4：现货需求子信号 ──
+
+def _spot_demand_data(n=1200):
+    """在底部合成数据上补两个现货需求序列：长期净卖出，最近 30 天转为净买入。"""
+    data = _bottomish_data(n)
+    data["coinbase_premium_rate"] = mk([-0.2] * (n - 30) + [0.35] * 30)
+    data["spot_net_taker_usd"] = mk([-5e6] * (n - 30) + [8e6] * 30)
+    return data
+
+
+def test_demand_spot_subsignals_score_and_coverage():
+    demand = next(f for f in compute_factors(_spot_demand_data()) if f["key"] == "demand")
+    subs = {s["key"]: s for s in demand["sub_signals"]}
+    assert len(demand["sub_signals"]) == 5
+    # 30d 均值恰好处在历史最高 → 分位接近满分
+    assert subs["coinbase_premium"]["score"] > 90
+    assert subs["spot_net_taker"]["score"] > 90
+    assert demand["coverage"] == 1.0
+    # 缺这两个序列时覆盖率下降，但因子不弃权（3/5 仍高于 0.4 门槛）
+    bare = next(f for f in compute_factors(_bottomish_data()) if f["key"] == "demand")
+    assert 0.4 <= bare["coverage"] < 1.0
+    assert bare["score"] is not None
+
+
+def test_demand_spot_subsignals_evidence_quality_tracks_span():
+    """合成数据只有 3.3 年，跨度乘子应把 EQ 压到满分之下——EQ 反映的是窗口而非读数。"""
+    short = next(f for f in compute_factors(_spot_demand_data(1200)) if f["key"] == "demand")
+    long = next(f for f in compute_factors(_spot_demand_data(3000)) if f["key"] == "demand")
+    eq_of = lambda factor, key: next(  # noqa: E731
+        s["evidence_quality"] for s in factor["sub_signals"] if s["key"] == key
+    )
+    for key in ("coinbase_premium", "spot_net_taker"):
+        assert eq_of(short, key) < 60
+        assert eq_of(long, key) > eq_of(short, key)
+
+
+def test_mean_pct_sub_abstains_when_series_too_short():
+    data = _bottomish_data()
+    data["coinbase_premium_rate"] = mk([0.1] * 10)      # 不足 30 天滚动窗口
+    demand = next(f for f in compute_factors(data) if f["key"] == "demand")
+    sub = next(s for s in demand["sub_signals"] if s["key"] == "coinbase_premium")
+    assert sub["ok"] is False and sub["score"] is None
+
+
+def test_demand_cluster_correlation_declared():
+    """需求簇必须进相关性审计：四个指标都被当作"谁在买"的证据。"""
+    audit = compute_correlation_audit(_spot_demand_data())
+    group = next(g for g in audit["groups"] if g["key"] == "demand")
+    metrics = {pair["a"] for pair in group["pairs"]} | {pair["b"] for pair in group["pairs"]}
+    assert {"Coinbase 溢价", "现货净 taker"} <= metrics
+    # 稳定币走的是 30d 增速而非市值水平，否则单调增长会造出伪相关
+    assert "稳定币 30d 增速" in metrics
+
+
+# ── v4：序列原语 ──
+
+def test_change_rate_series_and_rolling_mean():
+    rows = mk([100.0, 110.0, 121.0, 133.1])
+    assert [round(v, 4) for _, v in change_rate_series(rows, 1)] == [0.1, 0.1, 0.1]
+    assert change_rate_series(mk([0.0, 5.0]), 1) == []      # 基准≈0 跳过
+    means = rolling_mean_series(mk([1.0, 2.0, 3.0, 4.0]), 2)
+    assert [v for _, v in means] == [1.5, 2.5, 3.5]
+    assert rolling_mean_series(mk([1.0]), 2) == []
+
+
+def test_series_index_truncate_matches_linear_filter():
+    data = {"a": mk([1.0, 2.0, 3.0, 4.0]), "b": mk([9.0])}
+    index = SeriesIndex(data)
+    for offset in range(6):
+        day = (END - timedelta(days=offset)).strftime("%Y-%m-%d")
+        expected = {m: [(d, v) for d, v in rows if d <= day] for m, rows in data.items()}
+        assert index.truncate(day) == expected

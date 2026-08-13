@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from processors.bottom_model.factors import (
+    SeriesIndex,
     Rows,
     build_counter_evidence,
     clamp,
@@ -25,13 +26,14 @@ from processors.bottom_model.factors import (
     compute_seller_exhaustion,
     compute_stress,
 )
+from processors.bottom_model.base_rate import compute_base_rate
 from processors.bottom_model.correlation import compute_correlation_audit
 from processors.bottom_model.metrics import build_registry, sanitize_series
 from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM_VERSION = "bottom-v3"
+ALGORITHM_VERSION = "bottom-v4"
 
 # 历史周期底部参考日（公认的周期低点附近，用于因子向量类比）
 HISTORICAL_BOTTOMS: tuple[tuple[str, str], ...] = (
@@ -57,10 +59,7 @@ def load_all_series(store: BottomModelStore) -> dict[str, Rows]:
 
 def truncate_asof(data: dict[str, Rows], day: str) -> dict[str, Rows]:
     """把所有序列截断到 day（含）——历史类比复用因子引擎的关键。"""
-    return {
-        metric: [(d, v) for d, v in rows if d <= day]
-        for metric, rows in data.items()
-    }
+    return SeriesIndex(data).truncate(day)
 
 
 def compute_core(data: dict[str, Rows],
@@ -105,10 +104,11 @@ def _factor_vector(core: dict[str, Any]) -> dict[str, float]:
 def compute_analogs(data: dict[str, Rows], current_core: dict[str, Any]) -> list[dict[str, Any]]:
     """当前因子向量 vs 历史底部同期向量的相似度（0-100）。"""
     current_vec = _factor_vector(current_core)
+    index = SeriesIndex(data)
     analogs: list[dict[str, Any]] = []
     for day, label in HISTORICAL_BOTTOMS:
         try:
-            past_core = compute_core(truncate_asof(data, day), day)
+            past_core = compute_core(index.truncate(day), day)
         except Exception:
             logger.warning("BottomModel analog compute failed | day=%s", day, exc_info=True)
             continue
@@ -262,6 +262,9 @@ def build_snapshot(store: BottomModelStore,
             "overall": round(sum(overall_eq) / len(overall_eq), 1) if overall_eq else None,
         },
         "correlation_audit": compute_correlation_audit(data),
+        "base_rate": compute_base_rate(
+            store, data, core, ALGORITHM_VERSION, compute_core,
+        ),
         "analogs": compute_analogs(data, core),
         "delta": compute_delta(store, stress_score, conf_score),
         "data_quality": compute_data_quality(store, data, as_of_day),

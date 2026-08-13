@@ -15,6 +15,7 @@ from processors.bottom_model.metrics import (
     build_registry,
     parse_exchange_balance,
     parse_fear_greed,
+    parse_spot_cvd,
     parse_stablecoin_mcap,
     parse_ts_rows,
 )
@@ -71,6 +72,30 @@ def test_parse_exchange_balance_sums_and_skips_none():
         ("2025-08-11", 500000.0), ("2025-08-12", 500000.0),
     ]
     assert parse_exchange_balance(None)["exchange_balance_btc"] == []
+
+
+def test_parse_spot_cvd_nets_taker_and_drops_placeholder_zeros():
+    """上游 2017-08 之前买卖量恒为 0，那是占位行而非"买卖平衡"的真实观测。"""
+    raw = [
+        {"time": D0, "agg_taker_buy_vol": 0, "agg_taker_sell_vol": 0},
+        {"time": D0 + DAY_MS, "agg_taker_buy_vol": "3e8", "agg_taker_sell_vol": 1e8},
+        {"time": D0 + 2 * DAY_MS, "agg_taker_buy_vol": 1e8, "agg_taker_sell_vol": 4e8},
+        {"time": 0, "agg_taker_buy_vol": 1e8, "agg_taker_sell_vol": 1},   # 非法时间戳
+        {"time": D0 + 3 * DAY_MS, "agg_taker_buy_vol": 1e8},              # 缺 sell
+        "junk",
+    ]
+    assert parse_spot_cvd(raw)["spot_net_taker_usd"] == [
+        ("2025-08-12", 2e8), ("2025-08-13", -3e8),
+    ]
+    assert parse_spot_cvd(None)["spot_net_taker_usd"] == []
+
+
+def test_spot_demand_specs_registered():
+    """两个现货需求指标必须在注册表里，否则采集器不会去取。"""
+    by_key = {spec.key: spec for spec in build_registry()}
+    assert by_key["coinbase_premium"].metrics == ("coinbase_premium_rate",)
+    assert by_key["spot_cvd"].metrics == ("spot_net_taker_usd",)
+    assert by_key["spot_cvd"].source == "coinglass"
 
 
 def test_parse_fear_greed_both_shapes():

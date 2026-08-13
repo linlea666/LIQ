@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+from bisect import bisect_right
 from datetime import datetime
 from typing import Any, Optional
 
@@ -99,6 +100,30 @@ def change_rate(rows: Rows, n: int) -> Optional[float]:
     if abs(base) < 1e-12:
         return None
     return (rows[-1][1] - base) / abs(base)
+
+
+def change_rate_series(rows: Rows, n: int) -> Rows:
+    """逐点 n 期变化率序列（基准≈0 的点跳过）。
+
+    与 change_rate 的单点版本同口径，供"当前变化率处于历史什么分位"这类
+    子信号构造分布；相关性审计也复用它，避免用水平量算出伪相关
+    （稳定币市值这类单调增长序列，水平值相关系数只反映时间趋势）。
+    """
+    return [
+        (rows[i][0], (rows[i][1] - rows[i - n][1]) / abs(rows[i - n][1]))
+        for i in range(n, len(rows))
+        if abs(rows[i - n][1]) > 1e-9
+    ]
+
+
+def rolling_mean_series(rows: Rows, window: int) -> Rows:
+    """滚动均值序列：把日级噪声大的流量指标转成可比的分位输入。"""
+    if len(rows) < window:
+        return []
+    return [
+        (rows[i][0], sum(v for _, v in rows[i - window + 1:i + 1]) / window)
+        for i in range(window - 1, len(rows))
+    ]
 
 
 def percentile_rank(values: list[float], value: float) -> Optional[float]:
@@ -215,6 +240,25 @@ def evidence_quality(rows: Rows, as_of: Optional[str] = None,
     return round(clamp(eq), 1), note
 
 
+class SeriesIndex:
+    """预建日期索引的序列集合，支持 O(log n) 按日截断。
+
+    历史类比只截断 4 次，全量重扫无所谓；历史频率层要截断上千次，
+    逐点线性过滤会变成 O(时点数 × 指标数 × 天数)。两者共用此类。
+    """
+
+    def __init__(self, data: dict[str, Rows]):
+        self._data = data
+        self._days = {metric: [d for d, _ in rows] for metric, rows in data.items()}
+
+    def truncate(self, day: str) -> dict[str, Rows]:
+        """返回所有序列截断到 day（含）的浅切片；语义等价于逐点过滤。"""
+        return {
+            metric: rows[:bisect_right(self._days[metric], day)]
+            for metric, rows in self._data.items()
+        }
+
+
 def align(rows_a: Rows, rows_b: Rows) -> list[tuple[str, float, float]]:
     """按日期对齐两序列（交集，升序）。"""
     map_b = dict(rows_b)
@@ -294,6 +338,17 @@ def _pct_sub(key: str, label: str, rows: Rows, weight: float,
     eq, eq_note = evidence_quality(rows, as_of, bp["coverage"], proxy)
     return _sub(key, label, score, weight, value=last_value(rows),
                 percentile=bp["pct"], note=note, eq=eq, eq_note=eq_note)
+
+
+def _mean_pct_sub(key: str, label: str, rows: Rows, weight: float,
+                  window: int = 30, invert: bool = False, note: str = "",
+                  as_of: Optional[str] = None, proxy: float = 1.0) -> dict[str, Any]:
+    """滚动均值的混合分位子信号：日级噪声大的流量类指标先平滑再定位分位。"""
+    mean_rows = rolling_mean_series(rows, window)
+    if not mean_rows:
+        return _sub(key, label, None, weight, note=note or "数据不足")
+    return _pct_sub(key, label, mean_rows, weight, invert=invert, note=note,
+                    as_of=as_of, proxy=proxy)
 
 
 def _factor(key: str, subs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -425,12 +480,7 @@ def _factor_capitulation(d: dict[str, Rows], as_of: Optional[str] = None) -> dic
     sth_chg = change_rate(d.get("sth_supply", []), 90)
     sth_supply = d.get("sth_supply", [])
     if sth_chg is not None and len(sth_supply) > 180:
-        chg_series: Rows = [
-            (sth_supply[i][0],
-             (sth_supply[i][1] - sth_supply[i - 90][1]) / abs(sth_supply[i - 90][1]))
-            for i in range(90, len(sth_supply))
-            if abs(sth_supply[i - 90][1]) > 1e-9
-        ]
+        chg_series = change_rate_series(sth_supply, 90)
         bp = blended_percentile(chg_series, sth_chg)
         eq, eq_note = evidence_quality(
             chg_series, as_of,
@@ -536,6 +586,19 @@ def _factor_leverage(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[st
 
 def _factor_demand(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[str, Any]:
     subs: list[dict[str, Any]] = []
+    # 现货买盘直接证据放最前：2017-08 起覆盖 2018 与 2022 两个大底，是本因子
+    # 唯一不靠代理关系的需求证据（ETF 窗口仅 2024 起，稳定币只是场外弹药）。
+    # 实测两者相关系数仅 0.04，各自独立计权。
+    subs.append(_mean_pct_sub(
+        "coinbase_premium", "Coinbase 溢价·30d 均",
+        d.get("coinbase_premium_rate", []), 1.0, as_of=as_of,
+        note="高分位 = 美国现货资金净买入；负值 = 美国资金在净卖出",
+    ))
+    subs.append(_mean_pct_sub(
+        "spot_net_taker", "现货净 taker·30d 均",
+        d.get("spot_net_taker_usd", []), 1.0, as_of=as_of,
+        note="高分位 = 主动买单相对主动卖单占优（现货成交，不含衍生品）",
+    ))
     # ETF 动量：30d 累计 + 7d/30d 反转结构
     etf = d.get("etf_flow_usd", [])
     if len(etf) >= 40:
@@ -561,10 +624,7 @@ def _factor_demand(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[str,
     sc = d.get("stablecoin_total_mcap", [])
     sc_chg = change_rate(sc, 30)
     if sc_chg is not None and len(sc) > 180:
-        chg_series: Rows = [
-            (sc[i][0], (sc[i][1] - sc[i - 30][1]) / abs(sc[i - 30][1]))
-            for i in range(30, len(sc)) if abs(sc[i - 30][1]) > 1e-9
-        ]
+        chg_series = change_rate_series(sc, 30)
         bp = blended_percentile(chg_series, sc_chg)
         eq, eq_note = evidence_quality(
             chg_series, as_of,
@@ -1064,15 +1124,21 @@ QUADRANTS = {
 def classify_quadrant(stress: Optional[float], confirmation: Optional[float]) -> dict[str, Any]:
     if stress is None:
         return {"key": "unknown", "label": "数据不足", "note": "有效因子权重不足"}
+    # note 里的时间尺度限定来自历史回放实测（v3/v4 两版结论一致），但刻意不写
+    # 具体百分比——那些数字随算法版本与新数据变化，由历史频率层动态给出
     if stress < 55:
         note = "底部压力不足，市场未进入极端区" if confirmation is None or confirmation < 50 \
             else "无极端压力下的修复 = 普通回调结束，非周期大底"
-        return {"key": "bear_market", "label": QUADRANTS["bear_market"], "note": note}
+        return {"key": "bear_market", "label": QUADRANTS["bear_market"],
+                "note": f"{note}；实测 13/26/52 周三个窗口均弱于全样本基准"}
     if confirmation is None or confirmation < 35:
         return {"key": "panic_flush", "label": QUADRANTS["panic_flush"],
-                "note": "极端压力已现，改善迹象未确认——历史大底多在此象限完成左侧"}
+                "note": "极端压力已现，改善迹象未确认——历史大底多在此象限完成左侧；"
+                        "实测收益优势出现在 52 周尺度，13 周内中位收益为负"}
     if confirmation < 65:
         return {"key": "basing", "label": QUADRANTS["basing"],
-                "note": "压力极端 + 改善迹象萌芽，筑底进行中"}
+                "note": "压力极端 + 改善迹象萌芽，筑底进行中；实测优势同样偏 26 周"
+                        "以上尺度，13 周内中位收益为负（左侧筑底需要时间）"}
     return {"key": "confirmed_recovery", "label": QUADRANTS["confirmed_recovery"],
-            "note": "压力极端 + 多项确认信号共振"}
+            "note": "压力极端 + 多项确认信号共振；实测在 26 与 52 周尺度均明显"
+                    "优于全样本基准"}

@@ -33,6 +33,27 @@ type CorrelationAudit = {
   cross_layer_overlaps: { topic: string; usage: string; note: string }[];
   structural_redundancies?: { topic: string; basis: string; conclusion: string }[];
 };
+// base_rate 为 bottom-v4 新增（历史频率层），v2/v3 快照缺失时面板整体不渲染
+type BaseRateWindow = {
+  weeks: number; points: number; independent: number; segments: number;
+  hit_rate: number | null; median_return: number | null;
+  worst_return: number | null; reliable: boolean;
+};
+type BaseRateCondition = {
+  label: string; description: string; points: number;
+  windows: BaseRateWindow[]; reliable: boolean;
+};
+type BaseRateLadderStep = { threshold: number; points: number; windows: BaseRateWindow[] };
+type BaseRate = {
+  algorithm_version: string; hit_threshold_pct: number;
+  forward_weeks: number[]; min_independent: number;
+  replay: { points: number; first_day: string | null; last_day: string | null; step_days: number };
+  baseline: BaseRateCondition;
+  conditions: BaseRateCondition[];
+  stress_ladder: BaseRateLadderStep[];
+  confirmation_ladder: BaseRateLadderStep[];
+  caveats: string[];
+};
 type Snapshot = {
   day: string; ts: number; algorithm_version: string;
   price_context: { price: number | null; ma_200w: number | null; sth_realized_price: number | null; lth_realized_price: number | null };
@@ -40,6 +61,7 @@ type Snapshot = {
   confirmation: { score: number | null; score_before_penalty: number | null; checks: Check[]; evidence_quality?: number | null };
   evidence_quality?: { stress: number | null; confirmation: number | null; overall: number | null };
   correlation_audit?: CorrelationAudit;
+  base_rate?: BaseRate | null;
   fake_bottom_filter: { triggers: Trigger[]; total_penalty: number };
   quadrant: { key: string; label: string; note: string };
   seller_exhaustion: { score: number; components: Record<string, number> } | null;
@@ -223,6 +245,159 @@ function ScoreDial({ label, score, sub, eq }: {
       </div>
       <div className={`mt-1 text-3xl font-semibold ${scoreTone(score)}`}>{fmt(score)}</div>
       {sub && <div className="mt-1 text-[10px] text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+/** 历史频率层（v4 起）：把当前读数放回历史，看同类状态后来实际发生了什么。
+ *  样本不足的格子后端已把 hit_rate 置空，前端一律显示为"样本太少"而不补算。 */
+function BaseRatePanel({ br }: { br: BaseRate }) {
+  const current = br.conditions[0];
+  if (!current) return null;
+  const baseOf = (weeks: number) => br.baseline.windows.find((w) => w.weeks === weeks);
+  const excess = (w: BaseRateWindow) => {
+    const base = baseOf(w.weeks);
+    if (!w.reliable || !base?.reliable || w.hit_rate == null || base.hit_rate == null) return null;
+    return w.hit_rate - base.hit_rate;
+  };
+  // 优势尺度 = 第一个胜率超出基准 5 个百分点以上的窗口。5pp 是拍的门槛，
+  // 但用意是避免把 1-2pp 的噪声讲成"历史上会涨"
+  const edge = current.windows.find((w) => (excess(w) ?? 0) >= 5);
+  const negative = current.windows.filter((w) => w.reliable && (w.median_return ?? 0) < 0);
+  const worst = current.windows.reduce<BaseRateWindow | null>(
+    (acc, w) => (w.worst_return != null && (acc?.worst_return == null || w.worst_return < acc.worst_return) ? w : acc),
+    null,
+  );
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div className="mb-1 text-[12px] font-medium text-slate-300">
+        这个状态历史上意味着什么
+        <span className="ml-2 text-[10px] font-normal text-slate-500">
+          {br.replay.first_day} 起 {br.replay.points} 个周级时点回放（{br.algorithm_version}）·
+          胜率 = N 周后涨幅 ≥ {br.hit_threshold_pct}%
+        </span>
+      </div>
+      <div className="mb-3 text-[10px] text-slate-500">
+        这是对模型的独立检验，不是模型的背书：分数由规则算出，下面的频率由价格算出，两者互不知情。
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        {current.windows.map((w) => {
+          const base = baseOf(w.weeks);
+          const ex = excess(w);
+          return (
+            <div key={w.weeks} className="rounded border border-slate-800 bg-slate-950/50 p-3">
+              <div className="text-[10px] text-slate-500">{w.weeks} 周后</div>
+              {w.reliable && w.hit_rate != null ? (
+                <>
+                  <div className={`text-2xl font-semibold ${
+                    ex == null ? "text-slate-300" : ex >= 5 ? "text-emerald-400"
+                      : ex <= -5 ? "text-rose-400" : "text-slate-300"}`}>
+                    {w.hit_rate.toFixed(0)}%
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    全样本基准 {base?.hit_rate?.toFixed(0) ?? "—"}%
+                    {ex != null && (
+                      <span className={ex >= 0 ? "text-emerald-500/80" : "text-rose-500/80"}>
+                        {" "}（{ex >= 0 ? "+" : ""}{ex.toFixed(0)}pp）
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-400">
+                    中位收益{" "}
+                    <span className={(w.median_return ?? 0) >= 0 ? "text-emerald-400/90" : "text-rose-400/90"}>
+                      {(w.median_return ?? 0) >= 0 ? "+" : ""}{w.median_return?.toFixed(1)}%
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-semibold text-slate-600">样本太少</div>
+                  <div className="text-[10px] text-slate-500">
+                    仅 {w.independent} 个不重叠观测（需 ≥ {br.min_independent}），不给频率
+                  </div>
+                </>
+              )}
+              <div className="mt-1 text-[10px] text-slate-600">
+                {w.points} 个时点 / {w.independent} 个不重叠观测 · 最差一次{" "}
+                {w.worst_return == null ? "—" : `${w.worst_return.toFixed(0)}%`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 space-y-1 rounded border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] text-slate-400">
+        <div className="text-slate-300">{current.label}</div>
+        <div>
+          {edge
+            ? `历史上同类状态的优势出现在 ${edge.weeks} 周尺度（胜率 ${edge.hit_rate?.toFixed(0)}%，高出全样本基准 ${(excess(edge) ?? 0).toFixed(0)} 个百分点）。`
+            : "历史上同类状态在三个窗口都没有明显跑赢全样本基准——模型说的「压力极端」并不自动等于「该买」。"}
+        </div>
+        {negative.length > 0 && (
+          <div>
+            但 {negative.map((w) => `${w.weeks} 周`).join(" 与 ")}尺度的中位收益为负
+            （{negative.map((w) => `${w.median_return?.toFixed(0)}%`).join("、")}），
+            意味着即便最终上涨，中途大概率还要更低——左侧筑底需要时间。
+          </div>
+        )}
+        {worst?.worst_return != null && (
+          <div>
+            同类状态最差的一次：{worst.weeks} 周后仍为 {worst.worst_return.toFixed(0)}%。
+          </div>
+        )}
+      </div>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">
+          其他条件与分档检验（含压力/确认层单调性、口径局限）
+        </summary>
+        <div className="mt-2 space-y-3 text-[11px]">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-[10px] text-slate-500">
+                <th className="pb-1">条件</th>
+                {br.forward_weeks.map((w) => <th key={w} className="pb-1 text-right">{w}周胜率</th>)}
+                <th className="pb-1 text-right">不重叠观测</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[br.baseline, ...br.conditions].map((cond) => (
+                <tr key={cond.label} className="border-t border-slate-800/60">
+                  <td className="py-1.5 text-slate-300">{cond.label}</td>
+                  {cond.windows.map((w) => (
+                    <td key={w.weeks} className={`py-1.5 text-right ${w.reliable ? "text-slate-300" : "text-slate-600"}`}>
+                      {w.reliable && w.hit_rate != null ? `${w.hit_rate.toFixed(0)}%` : "样本不足"}
+                    </td>
+                  ))}
+                  <td className="py-1.5 text-right text-slate-500">
+                    {cond.windows.map((w) => w.independent).join(" / ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {([
+            ["压力分档：越高越有效说明压力维度可靠", br.stress_ladder],
+            ["确认分档：若各档几乎相同，说明确认层是趋势跟随而非底部指标", br.confirmation_ladder],
+          ] as const).map(([title, ladder]) => (
+            <div key={title}>
+              <div className="mb-1 text-[10px] text-slate-500">{title}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {ladder.map((step) => (
+                  <span key={step.threshold} className="rounded border border-slate-800 px-1.5 py-px text-[10px] text-slate-400">
+                    ≥{step.threshold.toFixed(0)}：
+                    {step.windows.map((w) => (w.reliable && w.hit_rate != null ? `${w.hit_rate.toFixed(0)}%` : "—")).join(" / ")}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          <ul className="space-y-1 text-[10px] text-slate-500">
+            {br.caveats.map((item, i) => <li key={i}>· {item}</li>)}
+          </ul>
+        </div>
+      </details>
     </div>
   );
 }
@@ -729,6 +904,9 @@ export default function BottomModelPage() {
               </div>
             </div>
 
+            {/* 历史频率层（v4 起） */}
+            {snapshot.base_rate && <BaseRatePanel br={snapshot.base_rate} />}
+
             {/* 历史类比 */}
             <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
               <div className="mb-2 text-[12px] font-medium text-slate-300">
@@ -788,8 +966,9 @@ export default function BottomModelPage() {
             <div className="pb-4 text-center text-[10px] text-slate-600">
               历史大底样本仅 4 个，任何评分都不是交易指令 · 每日 UTC 01:00 自动更新 · 单一信号只加分不否决
               <br />
-              历史曲线跨 bottom-v2 / v3 两个算法版本：v3 起子信号按证据质量加权、
-              周线结构改为分阶段并只计入确认层，两版分数不完全可比
+              历史曲线跨 bottom-v2 / v3 / v4 三个算法版本：v3 起子信号按证据质量加权、
+              周线结构改为分阶段并只计入确认层；v4 的需求因子新增 Coinbase 溢价与现货净
+              taker 买入两项证据，各版分数不完全可比
             </div>
           </>
         )}

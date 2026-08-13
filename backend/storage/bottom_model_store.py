@@ -45,10 +45,17 @@ class BottomModelStore:
                 CREATE TABLE IF NOT EXISTS snapshots (
                     day TEXT PRIMARY KEY, ts INTEGER NOT NULL, payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS replay (
+                    day TEXT PRIMARY KEY,
+                    algorithm_version TEXT NOT NULL,
+                    stress REAL,
+                    confirmation REAL,
+                    quadrant TEXT NOT NULL DEFAULT ''
+                );
                 CREATE TABLE IF NOT EXISTS schema_meta (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
-                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','1');
+                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','2');
                 """
             )
 
@@ -179,6 +186,63 @@ class BottomModelStore:
                 "SELECT payload FROM snapshots ORDER BY day DESC LIMIT ?", (limit,)
             ).fetchall()
         return [json.loads(row["payload"]) for row in reversed(rows)]
+
+    # ── 历史回放（base rate 层）──
+
+    def replay_rows(self, algorithm_version: str) -> list[dict[str, Any]]:
+        """升序返回指定算法版本的回放点；版本不符的行不返回。
+
+        day 是主键，每天只保留最近算过的那个版本——算法版本变化时旧行被整表
+        覆盖，读取按版本过滤，于是版本切换自然触发一次全量重算。全表仅数百行、
+        重算数秒，不值得为多版本共存引入复合主键。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT day,stress,confirmation,quadrant FROM replay
+                   WHERE algorithm_version=? ORDER BY day ASC""",
+                (algorithm_version,),
+            ).fetchall()
+        return [
+            {
+                "day": row["day"],
+                "stress": None if row["stress"] is None else float(row["stress"]),
+                "confirmation": (
+                    None if row["confirmation"] is None else float(row["confirmation"])
+                ),
+                "quadrant": row["quadrant"],
+            }
+            for row in rows
+        ]
+
+    def upsert_replay(self, algorithm_version: str,
+                      rows: list[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        payload = [
+            (row["day"], algorithm_version, row.get("stress"),
+             row.get("confirmation"), row.get("quadrant") or "")
+            for row in rows if isinstance(row.get("day"), str)
+        ]
+        with self._lock, self._conn:
+            self._conn.executemany(
+                """INSERT INTO replay(day,algorithm_version,stress,confirmation,quadrant)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(day) DO UPDATE SET
+                     algorithm_version=excluded.algorithm_version,
+                     stress=excluded.stress,
+                     confirmation=excluded.confirmation,
+                     quadrant=excluded.quadrant""",
+                payload,
+            )
+        return len(payload)
+
+    def replay_versions(self) -> dict[str, int]:
+        """各算法版本的回放点数（诊断与失效判定用）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT algorithm_version AS v, COUNT(*) AS n FROM replay GROUP BY v"
+            ).fetchall()
+        return {row["v"]: int(row["n"]) for row in rows}
 
     def prune(self, snapshot_retention_days: int = 800) -> None:
         cutoff_ts = time.time() - max(90, snapshot_retention_days) * 86400

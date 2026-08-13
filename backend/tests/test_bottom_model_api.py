@@ -130,6 +130,68 @@ def test_evidence_pack_sections(tmp_path):
     assert "| 历史底部 | 相似度 | 共同因子 | 可信度 | 备注 |" in pack
     # §6 序列确实带数值
     assert "BTC 价格 (USD)" in pack
+    # v4：§0 指令必须给出历史频率的正确用法、允许弃权，且输出结构收敛为 8 项
+    assert "条件分布的观测值，不是预测概率" in pack
+    assert "允许弃权" in pack
+    assert "8. 模型审计与最终裁决" in pack
+    assert "9. " not in pack.split("**输出结构**")[1].split("\n\n")[0]
+    store.close()
+
+
+def _fake_window(weeks: int, reliable: bool) -> dict:
+    return {
+        "weeks": weeks, "points": 40 if reliable else 2,
+        "independent": 12 if reliable else 1, "segments": 9 if reliable else 1,
+        "hit_rate": 62.5 if reliable else None,
+        "median_return": 33.4 if reliable else None,
+        "worst_return": -41.2, "reliable": reliable,
+    }
+
+
+def _fake_base_rate() -> dict:
+    windows = [_fake_window(13, True), _fake_window(26, True), _fake_window(52, False)]
+    return {
+        "algorithm_version": "bottom-v4", "hit_threshold_pct": 30.0,
+        "forward_weeks": [13, 26, 52], "min_independent": 5,
+        "replay": {"points": 600, "first_day": "2013-12-10",
+                   "last_day": "2026-08-11", "step_days": 7},
+        "baseline": {"label": "全样本基准", "description": "对照组",
+                     "points": 600, "windows": windows, "reliable": True},
+        "conditions": [{"label": "当前象限 · 筑底改善", "description": "同象限时点",
+                        "points": 42, "windows": windows, "reliable": True}],
+        "stress_ladder": [{"threshold": 55.0, "points": 300, "windows": windows}],
+        "confirmation_ladder": [{"threshold": 35.0, "points": 400, "windows": windows}],
+        "caveats": ["终点收益口径，窗口未走完的时点已排除"],
+    }
+
+
+def test_evidence_pack_base_rate_section(tmp_path):
+    """§10 只在快照带 base_rate 时出现，且不得改动 §0-§9 的编号。"""
+    store = BottomModelStore(str(tmp_path / "bm"))
+    for metric, rows in _bottomish_data().items():
+        store.upsert_series(metric, rows)
+    snap = build_snapshot(store)
+
+    # v2/v3 历史快照没有 base_rate：章节仍在（§0 指令引用了它），但内容改为说明
+    without = build_evidence_pack({**snap, "base_rate": None}, store)
+    assert "## §10 历史频率层" in without
+    assert "本次快照不含历史频率层" in without
+    assert "| 条件 | 窗口 | 时点数 |" not in without
+
+    # 真实回放产出的结构也要能渲染（合成数据够 100 个周级时点）
+    assert snap["base_rate"]["algorithm_version"] == snap["algorithm_version"]
+    assert "§10 历史频率层" in build_evidence_pack(snap, store)
+
+    snap["base_rate"] = _fake_base_rate()
+    pack = build_evidence_pack(snap, store)
+    assert "§10 历史频率层" in pack
+    assert "§9 滚动上下文" in pack and "§8 相关性与重复计分声明" in pack
+    assert "全样本基准" in pack and "当前象限 · 筑底改善" in pack
+    # 不可靠窗口不得渲染出百分比
+    assert "样本不足（不给频率）" in pack
+    assert "62.5%" in pack
+    # §1 摘要处的交叉引用，避免读者漏掉末尾章节
+    assert "历史频率对照" in pack and "完整分档与口径见 §10" in pack
     store.close()
 
 

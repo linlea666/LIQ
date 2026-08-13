@@ -10,6 +10,7 @@
 - Coinglass 链上指标（SOPR/NUPL/200W/STH-RP 等）：2009~2010 起全历史
 - Coinglass 聚合 OI / CME OI：2021-02 起（limit=2000 上限）
 - Coinglass 聚合清算 / OI 加权资金费：2023-11 起（窗口最短，百分位需标注）
+- Coinglass Coinbase 溢价 / 聚合现货 CVD：2017-08 起（覆盖 2018 与 2022 大底）
 - BGeometrics：近 4 年（免费档）
 - Yahoo BTC=F 周线：2017-12（CME 上市）起
 """
@@ -205,6 +206,32 @@ def parse_exchange_balance(raw: Any) -> dict[str, Rows]:
     return {"exchange_balance_btc": sorted(days.items())}
 
 
+def parse_spot_cvd(raw: Any) -> dict[str, Rows]:
+    """聚合现货 CVD → 日净 taker 买入额（USD）。
+
+    两点口径处理：
+    - 上游从 2014-04 起返回行，但 2017-08-17 之前买卖量恒为 0（无数据的占位行）。
+      必须剔除，否则 0 会被当成"买卖平衡"的真实观测，把分位分布整体拉向中性。
+    - 只取每日净额（buy − sell），不用 cum_vol_delta：累积序列单调漂移，
+      其分位数只反映"距起点多久"而非需求强弱。
+    """
+    if not isinstance(raw, list):
+        return {"spot_net_taker_usd": []}
+    days: dict[str, float] = {}
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        day = _day_from_ms(row.get("time", row.get("timestamp")))
+        buy = _to_float(row.get("agg_taker_buy_vol"))
+        sell = _to_float(row.get("agg_taker_sell_vol"))
+        if day is None or buy is None or sell is None:
+            continue
+        if buy <= 0 and sell <= 0:
+            continue
+        days[day] = buy - sell
+    return {"spot_net_taker_usd": sorted(days.items())}
+
+
 def parse_yahoo_weekly(rows: Any) -> dict[str, Rows]:
     """YahooCMESource.fetch_weekly_history 输出 → 周级序列（day = 周一日期）。"""
     close: Rows = []
@@ -395,6 +422,24 @@ def build_registry() -> list[FetchSpec]:
             fetch=_cg("fetch_btc_etf_flow_history"),
             parse=lambda raw: parse_ts_rows(raw, {"etf_flow_usd": "flow_usd"}),
             note="ETF 日净流（2024-01 起）",
+        ),
+        FetchSpec(
+            key="coinbase_premium", source="coinglass", cadence="daily",
+            metrics=("coinbase_premium_rate",),
+            fetch=_cg("fetch_coinbase_premium", symbol="BTC", interval="1d",
+                      limit=4500),
+            parse=lambda raw: parse_ts_rows(
+                raw, {"coinbase_premium_rate": "premium_rate"},
+            ),
+            note="Coinbase 现货溢价率 %（2017-08 起）；美国现货买盘强度代理",
+        ),
+        FetchSpec(
+            key="spot_cvd", source="coinglass", cadence="daily",
+            metrics=("spot_net_taker_usd",),
+            fetch=_cg("fetch_spot_aggregated_cvd", symbol="BTC", interval="1d",
+                      limit=4500),
+            parse=parse_spot_cvd,
+            note="聚合现货日净 taker 买入 USD（2017-08 起有效，早期零行已剔除）",
         ),
         FetchSpec(
             key="stablecoin_mcap", source="coinglass", cadence="daily",
