@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from api.routes_bottom_model import router as bm_router, set_service
 from processors.bottom_model.evidence_pack import build_evidence_pack
 from processors.bottom_model.service import BottomModelService
+from processors.bottom_model import service as service_module
 from processors.bottom_model.snapshot import build_snapshot
 from storage.bottom_model_store import BottomModelStore
 from tests.test_bottom_model_factors import _bottomish_data
@@ -68,6 +69,17 @@ def test_should_run_when_snapshot_missing_or_old(tmp_path):
     assert svc._should_run_now() is False
 
 
+def test_should_rebuild_same_day_snapshot_after_model_or_policy_upgrade(tmp_path):
+    svc = _service(tmp_path)
+    object.__setattr__(svc._cfg, "daily_run_hour_utc", 0)
+    svc.store.save_snapshot("2099-12-31", {
+        "day": "2099-12-31", "algorithm_version": "bottom-v3",
+    })
+    assert svc._should_run_now() is True
+    build_snapshot(svc.store, as_of_day="2099-12-31")
+    assert svc._should_run_now() is False
+
+
 def test_should_retry_failed_fetch_after_cooldown(tmp_path):
     svc = _service(tmp_path)
     object.__setattr__(svc._cfg, "daily_run_hour_utc", 0)
@@ -96,6 +108,25 @@ def test_should_retry_failed_fetch_after_cooldown(tmp_path):
     assert svc._should_run_now() is False
 
 
+def test_old_snapshot_does_not_bypass_failed_fetch_cooldown(tmp_path):
+    """保留旧快照后，失败源仍只能按 2h 冷却重试，不能被每分钟调度打穿。"""
+    svc = _service(tmp_path)
+    object.__setattr__(svc._cfg, "daily_run_hour_utc", 0)
+    svc.store.save_snapshot("2000-01-01", {
+        "day": "2000-01-01", "algorithm_version": "bottom-v4",
+        "model_id": "bottom-v4", "data_policy_id": "pit-final-v2",
+    })
+    active_key = svc._collector.registry[0].key
+    svc.store.record_fetch(active_key, ok=False, error="http_429")
+    assert svc._should_run_now() is False
+    with svc.store._lock, svc.store._conn:
+        svc.store._conn.execute(
+            "UPDATE fetch_log SET last_attempt_ts=? WHERE metric=?",
+            (int(time.time()) - 3 * 3600, active_key),
+        )
+    assert svc._should_run_now() is True
+
+
 def test_trigger_run_guard(tmp_path):
     svc = _service(tmp_path)
 
@@ -105,6 +136,29 @@ def test_trigger_run_guard(tmp_path):
 
     svc._run_lock = _FakeLockedLock()  # type: ignore[assignment]
     assert svc.trigger_run() == {"started": False, "reason": "run_in_progress"}
+
+
+@pytest.mark.asyncio
+async def test_invalid_candidate_does_not_overwrite_last_valid_snapshot(tmp_path, monkeypatch):
+    svc = _service(tmp_path)
+    svc.store.save_snapshot("2026-08-10", {
+        "day": "2026-08-10", "quality_status": "OK", "marker": "last-valid",
+    })
+
+    async def collect(*, force=False):
+        return {"fetched": 1, "skipped_fresh": 0, "failed": 0, "elapsed_sec": 0.1}
+
+    monkeypatch.setattr(svc._collector, "run_once", collect)
+    monkeypatch.setattr(service_module, "build_snapshot", lambda store, persist=False: {
+        "day": "2026-08-11", "quality_status": "INVALID_DATA",
+        "blocking_reasons": ["STALE_MODEL_INPUTS"],
+        "stress": {"score": 60.0}, "confirmation": {"score": 40.0},
+        "quadrant": {"key": "basing"},
+    })
+    await svc.run_once()
+    assert svc.store.latest_snapshot()["marker"] == "last-valid"
+    assert svc.health()["last_run_summary"]["snapshot_persisted"] is False
+    assert svc.health()["last_run_summary"]["quality_status"] == "INVALID_DATA"
 
 
 # ── 证据包 ──
@@ -135,6 +189,17 @@ def test_evidence_pack_sections(tmp_path):
     assert "允许弃权" in pack
     assert "8. 模型审计与最终裁决" in pack
     assert "9. " not in pack.split("**输出结构**")[1].split("\n\n")[0]
+    store.close()
+
+
+def test_evidence_pack_is_reproducible_from_frozen_snapshot(tmp_path):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    for metric, rows in _bottomish_data().items():
+        store.upsert_series(metric, rows)
+    snap = build_snapshot(store)
+    before = build_evidence_pack(snap, store)
+    store.upsert_series("btc_price_onchain", [("2099-01-01", 9e99)])
+    assert build_evidence_pack(snap, store) == before
     store.close()
 
 
@@ -233,6 +298,20 @@ def test_api_snapshot_history_health(client):
     pack = tc.get("/api/bottom-model/evidence-pack")
     assert pack.status_code == 200
     assert "§2 六因子明细" in pack.text
+
+    bundled = tc.get("/api/bottom-model/audit/latest")
+    assert bundled.status_code == 200
+    assert bundled.json()["status"] == "INSUFFICIENT_EVIDENCE"
+    assert bundled.json()["audit_engine_version"] == "audit-v4"
+    assert bundled.json()["markdown"].count("\n## ") == 20
+    svc.store.save_audit("audit-test", {
+        "audit_id": "audit-test", "model_id": "bottom-v4",
+        "data_policy_id": "pit-final-v1", "dataset_id": "data-test",
+        "status": "INSUFFICIENT_EVIDENCE",
+    }, "# report")
+    latest = tc.get("/api/bottom-model/audit/latest")
+    assert latest.status_code == 200 and latest.json()["audit_id"] == "audit-test"
+    assert tc.get("/api/bottom-model/audit/audit-test").json()["markdown"] == "# report"
 
 
 def test_api_disabled_503(tmp_path):

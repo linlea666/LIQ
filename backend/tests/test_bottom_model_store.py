@@ -82,3 +82,33 @@ def test_coverage(tmp_path):
     cov = store.coverage()
     assert cov["a"] == {"first_day": "2026-08-01", "last_day": "2026-08-02", "count": 2}
     store.close()
+
+
+def test_append_observations_is_idempotent_and_versions_revisions(tmp_path):
+    store = _store(tmp_path)
+    row = [("2026-08-10", 1.0)]
+    assert store.append_observations("m", row, source="source", cadence="daily", unit="usd") == 1
+    assert store.append_observations("m", row, source="source", cadence="daily", unit="usd") == 0
+    assert store.append_observations("m", [("2026-08-10", 2.0)], source="source", cadence="daily", unit="usd") == 1
+    revisions = store._conn.execute(
+        "SELECT revision,value FROM observations WHERE metric='m' ORDER BY revision",
+    ).fetchall()
+    assert [(row["revision"], row["value"]) for row in revisions] == [(1, 1.0), (2, 2.0)]
+    latest = store.observation_meta("m", as_of_day="2026-08-10")
+    assert latest is not None
+    assert latest["available_at"] >= latest["ingested_at"]
+    assert store.observation_meta("m", as_of_day="2026-08-09") is None
+    store.close()
+
+
+def test_model_runs_are_append_only(tmp_path):
+    store = _store(tmp_path)
+    base = {
+        "model_id": "bottom-v4", "data_policy_id": "pit-final-v2",
+        "dataset_id": "data", "decision_as_of": "2026-08-13T01:00:00Z",
+        "quality_status": "OK",
+    }
+    store.save_model_run({**base, "run_id": "run-a"})
+    store.save_model_run({**base, "run_id": "run-b"})
+    assert store._conn.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0] == 2
+    store.close()

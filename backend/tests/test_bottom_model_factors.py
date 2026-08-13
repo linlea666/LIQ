@@ -396,9 +396,13 @@ def test_classify_quadrant():
     assert classify_quadrant(70, 50)["key"] == "basing"
     assert classify_quadrant(70, 80)["key"] == "confirmed_recovery"
     assert classify_quadrant(70, None)["key"] == "panic_flush"
-    # v4：note 必须带时间尺度限定——同一象限在 13 周与 52 周的表现可能相反
+    # 象限只描述当前证据状态；收益与概率必须来自独立审计结果，不能写死在文案中。
     for stress, conf in ((40, 20), (70, 20), (70, 50), (70, 80)):
-        assert "周" in classify_quadrant(stress, conf)["note"]
+        note = classify_quadrant(stress, conf)["note"]
+        assert note
+        assert "大概率" not in note
+        assert "优势" not in note
+        assert "%" not in note
 
 
 # ── v4：现货需求子信号 ──

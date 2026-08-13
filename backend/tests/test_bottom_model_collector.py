@@ -181,13 +181,74 @@ async def test_collector_only_sources_and_missing_source(tmp_path):
         store, _StubSource(), bgeometrics=None, yahoo_cme=_StubSource(),
         coinglass_spacing_sec=0.0, registry=registry,
     )
-    summary = await collector.run_once(only_sources={"coinglass"})
+    now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+    summary = await collector.run_once(only_sources={"coinglass"}, now=now)
     assert set(summary["specs"]) == {"cg_m"}
     # bgeometrics 源未配置 → no_source，不算失败
-    summary2 = await collector.run_once()
+    summary2 = await collector.run_once(now=now)
     assert summary2["specs"]["bg_m"]["status"] == "no_source"
     assert summary2["specs"]["y_m"]["status"] == "fetched"
     assert summary2["failed"] == 0
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_collector_quarantines_future_rows_and_rejects_partial_required_output(tmp_path):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+
+    async def fetch(_src):
+        return "payload"
+
+    partial = FetchSpec(
+        key="multi", source="coinglass", cadence="daily", metrics=("a", "b"),
+        fetch=fetch,
+        parse=lambda raw: {"a": [("2026-08-11", 1.0), ("2026-08-12", 2.0)], "b": []},
+    )
+    collector = BottomModelCollector(
+        store, _StubSource(), coinglass_spacing_sec=0, registry=[partial],
+    )
+    result = await collector.run_once(now=now)
+    assert result["failed"] == 1
+    assert "b:empty" in result["specs"]["multi"]["error"]
+    # 整组失败时已通过的 a 也不得落 legacy series；未来行只进隔离区。
+    assert store.series("a") == []
+    quarantined = store._conn.execute("SELECT reason,observation_day FROM quarantine").fetchall()
+    assert [(row["reason"], row["observation_day"]) for row in quarantined] == [
+        ("AFTER_DECISION_CUTOFF", "2026-08-12"),
+    ]
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_weekly_collector_excludes_unclosed_week(tmp_path):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+    spec = _spec("weekly_metric", "coinglass", [
+        ("2026-08-03", 1.0), ("2026-08-10", 2.0),
+    ], cadence="weekly")
+    collector = BottomModelCollector(store, _StubSource(), registry=[spec], coinglass_spacing_sec=0)
+    result = await collector.run_once(now=now)
+    assert result["fetched"] == 1
+    assert store.series("weekly_metric") == [("2026-08-03", 1.0)]
+    assert result["specs"]["weekly_metric"]["quarantined"] == 1
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_collector_does_not_mark_lagging_daily_output_success(tmp_path):
+    store = BottomModelStore(str(tmp_path / "bm"))
+    now = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+    collector = BottomModelCollector(
+        store, _StubSource(), registry=[
+            _spec("lagging", "coinglass", [("2026-08-10", 1.0)]),
+        ], coinglass_spacing_sec=0,
+    )
+    result = await collector.run_once(now=now)
+    assert result["failed"] == 1
+    assert "stale:1d>0d" in result["specs"]["lagging"]["error"]
+    assert store.last_success_day("lagging") == ""
+    assert store.series("lagging") == []
     store.close()
 
 
@@ -202,3 +263,6 @@ def test_registry_shape():
     assert {spec.cadence for spec in registry} <= {"daily", "weekly"}
     bg_count = sum(1 for spec in registry if spec.source == "bgeometrics")
     assert bg_count <= 8, "BGeometrics 端点数超过 8/h 免费配额，一轮无法完成"
+    from processors.bottom_model.metrics import METRIC_CONTRACTS
+    assert set(all_metrics) == set(METRIC_CONTRACTS)
+    assert METRIC_CONTRACTS["btc_vol_1d"]["role"] == "unused"

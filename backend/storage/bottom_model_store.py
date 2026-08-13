@@ -10,10 +10,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 
@@ -55,7 +57,70 @@ class BottomModelStore:
                 CREATE TABLE IF NOT EXISTS schema_meta (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
-                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','2');
+                CREATE TABLE IF NOT EXISTS observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metric TEXT NOT NULL,
+                    observation_day TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    observation_ts INTEGER NOT NULL,
+                    period_end_ts INTEGER NOT NULL,
+                    available_at INTEGER NOT NULL,
+                    ingested_at INTEGER NOT NULL,
+                    is_final INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    unit TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    payload_hash TEXT NOT NULL,
+                    schema_hash TEXT NOT NULL,
+                    quality_flag TEXT NOT NULL,
+                    UNIQUE(metric, observation_day, source, revision)
+                );
+                CREATE INDEX IF NOT EXISTS idx_observations_metric_day
+                    ON observations(metric, observation_day, revision DESC);
+                CREATE INDEX IF NOT EXISTS idx_observations_available
+                    ON observations(metric, available_at, is_final);
+                CREATE TABLE IF NOT EXISTS quarantine (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metric TEXT NOT NULL,
+                    observation_day TEXT NOT NULL,
+                    value REAL,
+                    source TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    ingested_at INTEGER NOT NULL,
+                    payload TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS replay_v2 (
+                    algorithm_version TEXT NOT NULL,
+                    data_policy_id TEXT NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    stress REAL,
+                    confirmation REAL,
+                    quadrant TEXT NOT NULL DEFAULT '',
+                    feature_payload TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY (algorithm_version, data_policy_id, dataset_id, day)
+                );
+                CREATE TABLE IF NOT EXISTS model_runs (
+                    run_id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL,
+                    data_policy_id TEXT NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    decision_as_of TEXT NOT NULL,
+                    quality_status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS audits (
+                    audit_id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL,
+                    data_policy_id TEXT NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    payload TEXT NOT NULL,
+                    markdown TEXT NOT NULL
+                );
+                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','4');
                 """
             )
 
@@ -119,6 +184,111 @@ class BottomModelStore:
             }
             for row in rows
         }
+
+    # ── append-only 点时观测 ──
+
+    @staticmethod
+    def _day_ts(day: str) -> int:
+        return int(datetime.strptime(day, "%Y-%m-%d").replace(
+            tzinfo=timezone.utc,
+        ).timestamp())
+
+    def append_observations(
+        self,
+        metric: str,
+        rows: list[tuple[str, float]],
+        *,
+        source: str,
+        cadence: str,
+        unit: str,
+        publication_lag_sec: int = 0,
+        quality_flag: str = "PIT_APPROX",
+        ingested_at: Optional[int] = None,
+    ) -> int:
+        """追加发生变化的观测版本；相同值重拉不制造重复 revision。"""
+        ingested = int(ingested_at or time.time())
+        period_sec = 7 * 86400 if cadence == "weekly" else 86400
+        schema_hash = hashlib.sha256(
+            f"{metric}|{source}|{cadence}|{unit}|v1".encode(),
+        ).hexdigest()
+        inserted = 0
+        with self._lock, self._conn:
+            for day, raw_value in rows:
+                try:
+                    value = float(raw_value)
+                    observation_ts = self._day_ts(day)
+                except (TypeError, ValueError):
+                    continue
+                if value != value or value in (float("inf"), float("-inf")):
+                    continue
+                previous = self._conn.execute(
+                    """SELECT value,revision FROM observations
+                       WHERE metric=? AND observation_day=? AND source=?
+                       ORDER BY revision DESC LIMIT 1""",
+                    (metric, day, source),
+                ).fetchone()
+                if previous is not None and float(previous["value"]) == value:
+                    continue
+                revision = int(previous["revision"]) + 1 if previous is not None else 1
+                period_end = observation_ts + period_sec
+                # 回填/修订不能冒充在历史周期结束时已经可得；在没有上游真实
+                # vintage 的情况下，最早可得时间只能保守取本次实际摄取时间。
+                available_at = max(
+                    period_end + max(0, int(publication_lag_sec)), ingested,
+                )
+                payload_hash = hashlib.sha256(
+                    f"{metric}|{day}|{value:.17g}|{source}".encode(),
+                ).hexdigest()
+                self._conn.execute(
+                    """INSERT INTO observations(
+                         metric,observation_day,value,observation_ts,period_end_ts,
+                         available_at,ingested_at,is_final,source,unit,revision,
+                         payload_hash,schema_hash,quality_flag
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        metric, day, value, observation_ts, period_end,
+                        available_at, ingested, int(period_end <= ingested), source,
+                        unit, revision, payload_hash, schema_hash, quality_flag,
+                    ),
+                )
+                inserted += 1
+        return inserted
+
+    def observation_meta(self, metric: str, *,
+                         as_of_day: Optional[str] = None) -> Optional[dict[str, Any]]:
+        where = "metric=?"
+        params: tuple[Any, ...] = (metric,)
+        if as_of_day is not None:
+            where += " AND observation_day<=?"
+            params += (as_of_day,)
+        with self._lock:
+            row = self._conn.execute(
+                f"""SELECT * FROM observations WHERE {where}
+                    ORDER BY observation_day DESC,revision DESC LIMIT 1""",
+                params,
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def quarantine_rows(
+        self, metric: str, rows: list[tuple[str, float]], *, source: str,
+        reason: str, payload: Optional[dict[str, Any]] = None,
+    ) -> int:
+        now = int(time.time())
+        clean = [
+            (metric, day, float(value), source, reason, now,
+             json.dumps(payload or {}, ensure_ascii=False))
+            for day, value in rows if isinstance(day, str)
+        ]
+        if not clean:
+            return 0
+        with self._lock, self._conn:
+            self._conn.executemany(
+                """INSERT INTO quarantine(
+                     metric,observation_day,value,source,reason,ingested_at,payload
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                clean,
+            )
+        return len(clean)
 
     # ── 采集账本 ──
 
@@ -189,13 +359,32 @@ class BottomModelStore:
 
     # ── 历史回放（base rate 层）──
 
-    def replay_rows(self, algorithm_version: str) -> list[dict[str, Any]]:
+    def replay_rows(self, algorithm_version: str, *, data_policy_id: str = "",
+                    dataset_id: str = "") -> list[dict[str, Any]]:
         """升序返回指定算法版本的回放点；版本不符的行不返回。
 
         day 是主键，每天只保留最近算过的那个版本——算法版本变化时旧行被整表
         覆盖，读取按版本过滤，于是版本切换自然触发一次全量重算。全表仅数百行、
         重算数秒，不值得为多版本共存引入复合主键。
         """
+        if data_policy_id and dataset_id:
+            with self._lock:
+                rows = self._conn.execute(
+                    """SELECT day,stress,confirmation,quadrant,feature_payload
+                       FROM replay_v2 WHERE algorithm_version=? AND data_policy_id=?
+                         AND dataset_id=? ORDER BY day ASC""",
+                    (algorithm_version, data_policy_id, dataset_id),
+                ).fetchall()
+            return [
+                {
+                    "day": row["day"],
+                    "stress": None if row["stress"] is None else float(row["stress"]),
+                    "confirmation": None if row["confirmation"] is None else float(row["confirmation"]),
+                    "quadrant": row["quadrant"],
+                    "features": json.loads(row["feature_payload"] or "{}"),
+                }
+                for row in rows
+            ]
         with self._lock:
             rows = self._conn.execute(
                 """SELECT day,stress,confirmation,quadrant FROM replay
@@ -215,9 +404,34 @@ class BottomModelStore:
         ]
 
     def upsert_replay(self, algorithm_version: str,
-                      rows: list[dict[str, Any]]) -> int:
+                      rows: list[dict[str, Any]], *, data_policy_id: str = "",
+                      dataset_id: str = "") -> int:
         if not rows:
             return 0
+        if data_policy_id and dataset_id:
+            payload_v2 = [
+                (
+                    algorithm_version, data_policy_id, dataset_id, row["day"],
+                    row.get("stress"), row.get("confirmation"),
+                    row.get("quadrant") or "",
+                    json.dumps(row.get("features") or {}, ensure_ascii=False),
+                )
+                for row in rows if isinstance(row.get("day"), str)
+            ]
+            with self._lock, self._conn:
+                self._conn.executemany(
+                    """INSERT INTO replay_v2(
+                         algorithm_version,data_policy_id,dataset_id,day,stress,
+                         confirmation,quadrant,feature_payload
+                       ) VALUES(?,?,?,?,?,?,?,?)
+                       ON CONFLICT(algorithm_version,data_policy_id,dataset_id,day)
+                       DO UPDATE SET stress=excluded.stress,
+                         confirmation=excluded.confirmation,
+                         quadrant=excluded.quadrant,
+                         feature_payload=excluded.feature_payload""",
+                    payload_v2,
+                )
+            return len(payload_v2)
         payload = [
             (row["day"], algorithm_version, row.get("stress"),
              row.get("confirmation"), row.get("quadrant") or "")
@@ -243,6 +457,61 @@ class BottomModelStore:
                 "SELECT algorithm_version AS v, COUNT(*) AS n FROM replay GROUP BY v"
             ).fetchall()
         return {row["v"]: int(row["n"]) for row in rows}
+
+    # ── 版本化模型运行与数学审计 ──
+
+    def save_model_run(self, payload: dict[str, Any]) -> None:
+        run_id = str(payload.get("run_id") or "")
+        if not run_id:
+            raise ValueError("model run requires run_id")
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO model_runs(
+                     run_id,model_id,data_policy_id,dataset_id,decision_as_of,
+                     quality_status,created_at,payload
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, payload.get("model_id", ""),
+                    payload.get("data_policy_id", ""), payload.get("dataset_id", ""),
+                    payload.get("decision_as_of", ""),
+                    payload.get("quality_status", "INVALID_DATA"), int(time.time()),
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+    def save_audit(self, audit_id: str, payload: dict[str, Any], markdown: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO audits(
+                     audit_id,model_id,data_policy_id,dataset_id,status,created_at,
+                     payload,markdown
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    audit_id, payload.get("model_id", ""),
+                    payload.get("data_policy_id", ""), payload.get("dataset_id", ""),
+                    payload.get("status", "INSUFFICIENT_EVIDENCE"), int(time.time()),
+                    json.dumps(payload, ensure_ascii=False), markdown,
+                ),
+            )
+
+    def get_audit(self, audit_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload,markdown FROM audits WHERE audit_id=?", (audit_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["payload"])
+        payload.setdefault("audit_id", audit_id)
+        payload["markdown"] = row["markdown"]
+        return payload
+
+    def latest_audit(self) -> Optional[dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT audit_id FROM audits ORDER BY created_at DESC,audit_id DESC LIMIT 1",
+            ).fetchone()
+        return self.get_audit(row["audit_id"]) if row is not None else None
 
     def prune(self, snapshot_retention_days: int = 800) -> None:
         cutoff_ts = time.time() - max(90, snapshot_retention_days) * 86400

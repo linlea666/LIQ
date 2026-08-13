@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from bisect import bisect_left
 from datetime import date, timedelta
+from math import sqrt
 from statistics import median
 from typing import Any, Callable, Optional
 
@@ -34,6 +35,7 @@ from processors.bottom_model.factors import (
     SeriesIndex,
     classify_quadrant,
 )
+from processors.bottom_model.metrics import build_registry
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,12 @@ NEIGHBORHOOD_CONF = 10.0
 
 STRESS_LADDER: tuple[float, ...] = (45.0, 55.0, 65.0, 75.0)
 CONFIRMATION_LADDER: tuple[float, ...] = (35.0, 50.0, 65.0, 80.0)
+
+_WEEKLY_METRICS = {
+    metric for spec in build_registry() if spec.cadence == "weekly"
+    for metric in spec.metrics
+}
+REPLAY_FEATURE_SCHEMA = "feature-v2"
 
 
 def _to_date(day: str) -> Optional[date]:
@@ -92,19 +100,40 @@ def replay_days(data: dict[str, Rows], start: str = REPLAY_START,
 
 def _replay_point(index: SeriesIndex, day: str,
                   compute_core: CoreFn) -> dict[str, Any]:
-    core = compute_core(index.truncate(day), day)
+    payload = index.truncate(day)
+    decision = date.fromisoformat(day)
+    last_complete_monday = decision - timedelta(days=decision.weekday() + 7)
+    weekly_cutoff = last_complete_monday.isoformat()
+    for metric in _WEEKLY_METRICS:
+        payload[metric] = [row for row in payload.get(metric, []) if row[0] <= weekly_cutoff]
+    core = compute_core(payload, day)
     stress = (core.get("stress") or {}).get("score")
     return {
         "day": day,
         "stress": stress,
         "confirmation": (core.get("confirmation") or {}).get("score"),
         "quadrant": (core.get("quadrant") or {}).get("key") or "",
+        "features": {
+            "factor_scores": {
+                factor.get("key", ""): factor.get("score")
+                for factor in core.get("factors") or [] if factor.get("key")
+            },
+            "stress_eq": (core.get("stress") or {}).get("evidence_quality"),
+            "confirmation_eq": (core.get("confirmation") or {}).get("evidence_quality"),
+            "confirmation_before_penalty": (
+                core.get("confirmation") or {}
+            ).get("score_before_penalty"),
+            "fake_bottom_penalty": (
+                core.get("fake_bottom_filter") or {}
+            ).get("total_penalty", 0.0),
+        },
     }
 
 
 def load_or_build_replay(store: Any, data: dict[str, Rows],
                          algorithm_version: str, compute_core: CoreFn,
-                         index: Optional[SeriesIndex] = None) -> list[dict[str, Any]]:
+                         index: Optional[SeriesIndex] = None, *,
+                         data_policy_id: str = "", dataset_id: str = "") -> list[dict[str, Any]]:
     """取回放表；版本不符则全量重算，版本相符只补新时点。
 
     算不出分数的时点（早年指标不足）也写入 stress=NULL，否则每次增量都会
@@ -114,7 +143,13 @@ def load_or_build_replay(store: Any, data: dict[str, Rows],
     targets = replay_days(data, REPLAY_START, REPLAY_STEP_DAYS)
     if not targets:
         return []
-    cached = store.replay_rows(algorithm_version)
+    cache_version = (
+        f"{algorithm_version}|{REPLAY_FEATURE_SCHEMA}"
+        if data_policy_id and dataset_id else algorithm_version
+    )
+    cached = store.replay_rows(
+        cache_version, data_policy_id=data_policy_id, dataset_id=dataset_id,
+    )
     known = {row["day"] for row in cached}
     missing = [day for day in targets if day not in known]
     if missing:
@@ -126,11 +161,17 @@ def load_or_build_replay(store: Any, data: dict[str, Rows],
             except Exception:                       # noqa: BLE001
                 logger.exception("bottom_model replay point failed: %s", day)
         if fresh:
-            store.upsert_replay(algorithm_version, fresh)
-            cached = store.replay_rows(algorithm_version)
+            store.upsert_replay(
+                cache_version, fresh, data_policy_id=data_policy_id,
+                dataset_id=dataset_id,
+            )
+            cached = store.replay_rows(
+                cache_version, data_policy_id=data_policy_id,
+                dataset_id=dataset_id,
+            )
         logger.info(
             "bottom_model replay %s: +%d points (total %d)",
-            algorithm_version, len(fresh), len(cached),
+            cache_version, len(fresh), len(cached),
         )
     # 回放表可能残留 targets 之外的旧时点（起点/步长调整过），按当前日历取用
     wanted = set(targets)
@@ -184,14 +225,33 @@ def count_independent(days: list[str], weeks: int) -> int:
 
     贪心取最早可用点并跳过其后 weeks 周，即为最大不重叠子集的最优解。
     """
-    parsed = sorted(d for d in (_to_date(x) for x in days) if d is not None)
-    picked = 0
+    return len(_select_non_overlapping([(day, None) for day in days], weeks))
+
+
+def _select_non_overlapping(samples: list[tuple[str, Any]],
+                            weeks: int) -> list[tuple[str, Any]]:
+    """按日期去重后取最大前向窗口不重叠子集，供所有点估计统一使用。"""
+    unique = {day: value for day, value in samples if _to_date(day) is not None}
+    ordered = sorted(unique.items())
+    selected: list[tuple[str, Any]] = []
     cutoff: Optional[date] = None
-    for day in parsed:
-        if cutoff is None or day >= cutoff:
-            picked += 1
-            cutoff = day + timedelta(weeks=weeks)
-    return picked
+    for day, value in ordered:
+        parsed = _to_date(day)
+        if parsed is not None and (cutoff is None or parsed >= cutoff):
+            selected.append((day, value))
+            cutoff = parsed + timedelta(weeks=weeks)
+    return selected
+
+
+def _wilson_interval(hits: int, n: int, z: float = 1.96) -> Optional[list[float]]:
+    if n <= 0:
+        return None
+    p = hits / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return [round(100 * max(0.0, centre - half), 1),
+            round(100 * min(1.0, centre + half), 1)]
 
 
 def _window_stats(rows: list[dict[str, Any]], weeks: int,
@@ -202,11 +262,13 @@ def _window_stats(rows: list[dict[str, Any]], weeks: int,
     ]
     if not samples:
         return {"weeks": weeks, "points": 0, "independent": 0, "segments": 0,
-                "hit_rate": None, "median_return": None, "worst_return": None,
+                "hit_rate": None, "hit_rate_ci95": None,
+                "median_return": None, "worst_return": None,
                 "reliable": False}
-    rets = [ret for _, ret in samples]
+    independent_samples = _select_non_overlapping(samples, weeks)
+    rets = [ret for _, ret in independent_samples]
     days = [day for day, _ in samples]
-    independent = count_independent(days, weeks)
+    independent = len(independent_samples)
     reliable = independent >= MIN_INDEPENDENT
     hits = sum(1 for ret in rets if ret >= HIT_THRESHOLD)
     return {
@@ -215,7 +277,8 @@ def _window_stats(rows: list[dict[str, Any]], weeks: int,
         "independent": independent,
         "segments": count_segments(days),
         # 样本不足时不输出频率与中位数：n=2 的"100%"没有信息量，只有误导
-        "hit_rate": round(100.0 * hits / len(samples), 1) if reliable else None,
+        "hit_rate": round(100.0 * hits / independent, 1) if reliable else None,
+        "hit_rate_ci95": _wilson_interval(hits, independent) if reliable else None,
         "median_return": round(100.0 * median(rets), 1) if reliable else None,
         # 最差一次是事实而非频率估计，样本再少也照实给出，作为风险线索
         "worst_return": round(100.0 * min(rets), 1),
@@ -256,7 +319,8 @@ def _band(value: float, width: float = 10.0) -> tuple[float, float]:
 
 def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str, Any],
                       algorithm_version: str, compute_core: CoreFn,
-                      index: Optional[SeriesIndex] = None) -> Optional[dict[str, Any]]:
+                      index: Optional[SeriesIndex] = None, *,
+                      data_policy_id: str = "", dataset_id: str = "") -> Optional[dict[str, Any]]:
     """当前读数的历史条件频率。数据不足时返回 None（快照字段留空）。"""
     price = data.get(PRICE_METRIC) or []
     if len(price) < 400:
@@ -264,6 +328,7 @@ def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str,
     try:
         replay = load_or_build_replay(
             store, data, algorithm_version, compute_core, index,
+            data_policy_id=data_policy_id, dataset_id=dataset_id,
         )
     except Exception:                               # noqa: BLE001
         logger.exception("bottom_model replay unavailable")
@@ -310,6 +375,8 @@ def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str,
     days = [r["day"] for r in scored]
     return {
         "algorithm_version": algorithm_version,
+        "data_policy_id": data_policy_id or None,
+        "dataset_id": dataset_id or None,
         "hit_threshold_pct": round(HIT_THRESHOLD * 100, 0),
         "forward_weeks": list(FORWARD_WEEKS),
         "min_independent": MIN_INDEPENDENT,
@@ -332,8 +399,8 @@ def compute_base_rate(store: Any, data: dict[str, Rows], current_core: dict[str,
             f"segments 是独立事件段数（相邻 {SEGMENT_GAP_DAYS} 天内合并），描述该"
             "条件出现在几段不同行情里，与样本独立性是两件事：连续覆盖全期的"
             "全样本基准只有 1 段。",
-            "即使 independent 达标，周级时点之间仍部分重叠，频率只是条件分布的"
-            "观测值，不是独立同分布样本下的概率估计。",
+            "hit_rate、median_return 与区间均只使用前向窗口互不重叠的子样本；"
+            "它们仍是历史条件分布描述，不是已校准概率。",
             "2017 年前多数衍生品与需求类指标无数据，早年分数的因子构成与"
             "今天不同，跨期可比性有限。",
             f"回放按 {algorithm_version} 重算，算法版本变化会使全表重新计算，"

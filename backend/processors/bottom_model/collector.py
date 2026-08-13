@@ -14,10 +14,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from processors.bottom_model.metrics import FetchSpec, build_registry
+from processors.bottom_model.metrics import FetchSpec, build_registry, metric_contract
 from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
@@ -131,9 +131,56 @@ class BottomModelCollector:
                 failed += 1
                 continue
 
+            accepted: dict[str, list[tuple[str, float]]] = {}
+            rejected = 0
+            for metric in spec.metrics:
+                rows = parsed.get(metric) or []
+                valid = [(day, value) for day, value in rows if day <= target_day]
+                future = [(day, value) for day, value in rows if day > target_day]
+                if future:
+                    rejected += self._store.quarantine_rows(
+                        metric, future, source=spec.source,
+                        reason="AFTER_DECISION_CUTOFF",
+                        payload={"target_day": target_day, "cadence": spec.cadence},
+                    )
+                accepted[metric] = valid
+
+            required_errors: list[str] = []
+            target = date.fromisoformat(target_day)
+            # “展示可容忍几天滞后”与“本轮采集是否完成”是两套口径。
+            # 采集默认必须命中目标日，否则账本会错误记成功并停止重试；只有
+            # global M2 等显式声明发布滞后的 spec 才允许例外。
+            tolerance = spec.staleness_days if spec.staleness_days is not None else 0
+            for metric in spec.required():
+                rows = accepted.get(metric) or []
+                if not rows:
+                    required_errors.append(f"{metric}:empty")
+                    continue
+                latest = date.fromisoformat(rows[-1][0])
+                if (target - latest).days > tolerance:
+                    required_errors.append(
+                        f"{metric}:stale:{(target - latest).days}d>{tolerance}d"
+                    )
+            if required_errors:
+                error = "required_output_invalid:" + ",".join(required_errors)
+                self._store.record_fetch(spec.key, ok=False, error=error)
+                results[spec.key] = {"status": "failed", "error": error}
+                failed += 1
+                continue
+
             total_rows = 0
-            for metric, rows in parsed.items():
+            observation_rows = 0
+            for metric, rows in accepted.items():
+                if not rows:
+                    continue
                 total_rows += self._store.upsert_series(metric, rows)
+                contract = metric_contract(metric)
+                observation_rows += self._store.append_observations(
+                    metric, rows, source=spec.source, cadence=spec.cadence,
+                    unit=str(contract.get("unit") or "unknown"),
+                    publication_lag_sec=spec.publication_lag_sec,
+                    quality_flag="PIT_APPROX",
+                )
             if total_rows <= 0:
                 error = "parsed_empty"
                 self._store.record_fetch(spec.key, ok=False, error=error)
@@ -145,7 +192,9 @@ class BottomModelCollector:
                 spec.key, ok=True, rows=total_rows, success_day=target_day,
             )
             results[spec.key] = {
-                "status": "fetched", "rows": total_rows, "target_day": target_day,
+                "status": "fetched", "rows": total_rows,
+                "observation_versions": observation_rows,
+                "quarantined": rejected, "target_day": target_day,
             }
             fetched += 1
 

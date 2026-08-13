@@ -157,7 +157,7 @@ class YahooCMESourceConfig:
 
 @dataclass(frozen=True)
 class BottomModelConfig:
-    """BTC 熊市底部概率模型模块配置。
+    """BTC 熊市底部证据与验证模型模块配置。
 
     - daily_run_hour_utc：每日自动采集+评分小时（UTC）。默认 1（北京 09:00），
       此时 Coinglass 链上指标（T-1 日更）与 BGeometrics 均已更新完整。

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -19,7 +20,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from processors.bottom_model.collector import BottomModelCollector, target_day_for
-from processors.bottom_model.snapshot import build_snapshot
+from processors.bottom_model.snapshot import (
+    ALGORITHM_VERSION,
+    DATA_POLICY_ID,
+    MODEL_ID,
+    build_snapshot,
+)
 from sources.bgeometrics import create_bgeometrics_source
 from sources.yahoo_cme import create_yahoo_cme_source
 from storage.bottom_model_store import BottomModelStore
@@ -38,6 +44,7 @@ class BottomModelService:
             data_dir = os.path.join(os.path.dirname(os.path.dirname(
                 os.path.dirname(__file__))), data_dir)
         self._store = BottomModelStore(data_dir)
+        self._seed_bundled_audit()
         self._bg = create_bgeometrics_source(settings.bgeometrics)
         self._yahoo = create_yahoo_cme_source(settings.yahoo_cme)
         self._collector = BottomModelCollector(
@@ -53,6 +60,33 @@ class BottomModelService:
         self._run_lock: Optional[asyncio.Lock] = None
         self._last_run_summary: Optional[dict[str, Any]] = None
         self._last_run_ts: float = 0.0
+
+    def _seed_bundled_audit(self) -> None:
+        """把随版本冻结的离线审计结果导入只读 API 存储。
+
+        生产容器不安装科学计算依赖；审计器在离线环境运行，生产仅导入已经
+        固定 dataset/model hash 的 JSON/Markdown。数据库中已有同 ID 时幂等跳过。
+        """
+        root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        audit_dir = os.path.join(root, "audit_results")
+        try:
+            with open(os.path.join(audit_dir, "index.json"), encoding="utf-8") as handle:
+                audit_id = str(json.load(handle).get("latest_audit_id") or "")
+            if not audit_id.startswith("audit-") or not audit_id.replace("-", "").isalnum():
+                raise ValueError("invalid bundled audit id")
+            if self._store.get_audit(audit_id) is not None:
+                return
+            with open(os.path.join(audit_dir, audit_id + ".json"), encoding="utf-8") as handle:
+                payload = json.load(handle)
+            with open(os.path.join(audit_dir, audit_id + ".md"), encoding="utf-8") as handle:
+                markdown = handle.read()
+            if payload.get("audit_id") != audit_id:
+                raise ValueError("bundled audit payload id mismatch")
+            self._store.save_audit(audit_id, payload, markdown)
+        except FileNotFoundError:
+            logger.info("No bundled Bottom Model audit result found")
+        except Exception:
+            logger.exception("Failed to import bundled Bottom Model audit result")
 
     # ── API 门面 ──
 
@@ -74,20 +108,43 @@ class BottomModelService:
     def history(self, limit: int = 400) -> list[dict[str, Any]]:
         return self._store.snapshot_history(limit)
 
+    def latest_audit(self) -> Optional[dict[str, Any]]:
+        return self._store.latest_audit()
+
+    def audit(self, audit_id: str) -> Optional[dict[str, Any]]:
+        return self._store.get_audit(audit_id)
+
     def _run_in_progress(self) -> bool:
         return self._run_lock is not None and self._run_lock.locked()
 
     def health(self) -> dict[str, Any]:
         latest = self._store.latest_snapshot()
+        collector_health = self._collector.health()
+        active_keys = {spec.key for spec in self._collector.registry}
+        failed_fetches = {
+            key: item["last_error"]
+            for key, item in collector_health["fetch_log"].items()
+            if key in active_keys and not item["last_ok"]
+        }
         return {
             "enabled": self.enabled,
             "running": self._running,
             "latest_day": latest["day"] if latest else None,
+            "latest_valid_day": latest["day"] if latest else None,
             "expected_day": target_day_for("daily"),
             "last_run_ts": int(self._last_run_ts) if self._last_run_ts else None,
             "last_run_summary": self._last_run_summary,
+            "quality_status": (
+                (self._last_run_summary or {}).get("quality_status")
+                or (latest or {}).get("quality_status")
+            ),
+            "blocking_reasons": (
+                (self._last_run_summary or {}).get("blocking_reasons")
+                or (["FETCH_FAILURE"] if failed_fetches else [])
+            ),
+            "failed_fetches": failed_fetches,
             "run_in_progress": self._run_in_progress(),
-            **self._collector.health(),
+            **collector_health,
         }
 
     # ── 生命周期 ──
@@ -137,9 +194,16 @@ class BottomModelService:
             return False
         expected_day = target_day_for("daily", now)
         latest = self._store.latest_snapshot()
-        if latest is None or latest.get("day", "") < expected_day:
-            return True
-        # 当日快照已出：仍有失败 spec 且距上次尝试 ≥2h → 轻量自愈重试。
+        requires_refresh = latest is None or latest.get("day", "") < expected_day
+        # 代码升级或数据政策升级也必须补算；只比较日期会让新镜像继续服务旧
+        # snapshot（线上曾出现运行 bottom-v4、页面仍返回 bottom-v3）。
+        requires_refresh = requires_refresh or bool(latest is not None and (
+            latest.get("algorithm_version") != ALGORITHM_VERSION
+            or latest.get("model_id") != MODEL_ID
+            or latest.get("data_policy_id") != DATA_POLICY_ID
+        ))
+        # 无论快照是否落后，失败 spec 都必须遵守冷却。否则“失败时保留最后
+        # 有效快照”会让 latest 永远落后，并使调度器每分钟重试、耗尽上游配额。
         # 只看注册表内的 spec——已停采指标的失败旧行会永久留在账本，
         # 不过滤会导致自愈循环每 2h 无谓触发且永远无法"修复"
         active_keys = {spec.key for spec in self._collector.registry}
@@ -149,8 +213,10 @@ class BottomModelService:
         ]
         if failed:
             newest_attempt = max(item["last_attempt_ts"] for item in failed)
-            return time.time() - newest_attempt >= _RETRY_MIN_INTERVAL_SEC
-        return False
+            if time.time() - newest_attempt < _RETRY_MIN_INTERVAL_SEC:
+                return False
+            return True
+        return requires_refresh
 
     async def run_once(self, force: bool = False) -> dict[str, Any]:
         """采集一轮（账本去重）+ 重建快照。串行化防止并发重入。"""
@@ -158,13 +224,23 @@ class BottomModelService:
             self._run_lock = asyncio.Lock()
         async with self._run_lock:
             summary = await self._collector.run_once(force=force)
-            snapshot = await asyncio.to_thread(build_snapshot, self._store)
+            # 先生成候选诊断；采集失败或阻断级数据质量问题都不得覆盖最后
+            # 有效快照。ABSTAINED 是有数据但证据覆盖不足，允许作为明确弃权落库。
+            snapshot = await asyncio.to_thread(
+                build_snapshot, self._store, persist=False,
+            )
+            persisted = summary["failed"] == 0 and snapshot.get("quality_status") != "INVALID_DATA"
+            if persisted:
+                self._store.save_snapshot(snapshot["day"], snapshot)
             self._store.prune(self._cfg.snapshot_retention_days)
             self._last_run_summary = {
                 "fetched": summary["fetched"],
                 "skipped_fresh": summary["skipped_fresh"],
                 "failed": summary["failed"],
                 "elapsed_sec": summary["elapsed_sec"],
+                "quality_status": snapshot.get("quality_status"),
+                "blocking_reasons": snapshot.get("blocking_reasons", []),
+                "snapshot_persisted": persisted,
             }
             self._last_run_ts = time.time()
             logger.info(

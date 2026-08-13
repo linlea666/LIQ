@@ -10,8 +10,9 @@ historical analog（历史类比）实现说明：
 from __future__ import annotations
 
 import logging
+import hashlib
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from processors.bottom_model.factors import (
@@ -28,12 +29,19 @@ from processors.bottom_model.factors import (
 )
 from processors.bottom_model.base_rate import compute_base_rate
 from processors.bottom_model.correlation import compute_correlation_audit
-from processors.bottom_model.metrics import build_registry, sanitize_series
+from processors.bottom_model.metrics import (
+    build_registry,
+    metric_contract,
+    sanitize_series,
+)
 from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
 ALGORITHM_VERSION = "bottom-v4"
+SCHEMA_VERSION = "2.0"
+MODEL_ID = ALGORITHM_VERSION
+DATA_POLICY_ID = "pit-final-v2"
 
 # 历史周期底部参考日（公认的周期低点附近，用于因子向量类比）
 HISTORICAL_BOTTOMS: tuple[tuple[str, str], ...] = (
@@ -60,6 +68,31 @@ def load_all_series(store: BottomModelStore) -> dict[str, Rows]:
 def truncate_asof(data: dict[str, Rows], day: str) -> dict[str, Rows]:
     """把所有序列截断到 day（含）——历史类比复用因子引擎的关键。"""
     return SeriesIndex(data).truncate(day)
+
+
+def apply_data_policy(data: dict[str, Rows], decision_as_of: str) -> dict[str, Rows]:
+    """按决策时点截断并排除未收盘周线；兼容 legacy series 的读时防线。"""
+    decision = date.fromisoformat(decision_as_of)
+    current_monday = decision - timedelta(days=decision.weekday())
+    last_complete_monday = current_monday - timedelta(days=7)
+    weekly_metrics = {
+        metric for spec in build_registry() if spec.cadence == "weekly"
+        for metric in spec.metrics
+    }
+    out: dict[str, Rows] = {}
+    for metric, rows in data.items():
+        cutoff = last_complete_monday.isoformat() if metric in weekly_metrics \
+            else decision_as_of
+        out[metric] = [(day, value) for day, value in rows if day <= cutoff]
+    return out
+
+
+def dataset_fingerprint(data: dict[str, Rows]) -> str:
+    digest = hashlib.sha256()
+    for metric in sorted(data):
+        for day, value in data[metric]:
+            digest.update(f"{metric}|{day}|{value:.17g}\n".encode())
+    return digest.hexdigest()
 
 
 def compute_core(data: dict[str, Rows],
@@ -108,7 +141,7 @@ def compute_analogs(data: dict[str, Rows], current_core: dict[str, Any]) -> list
     analogs: list[dict[str, Any]] = []
     for day, label in HISTORICAL_BOTTOMS:
         try:
-            past_core = compute_core(index.truncate(day), day)
+            past_core = compute_core(apply_data_policy(index.truncate(day), day), day)
         except Exception:
             logger.warning("BottomModel analog compute failed | day=%s", day, exc_info=True)
             continue
@@ -157,11 +190,20 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
                 tolerance_override[metric] = spec.staleness_days
     as_of = datetime.strptime(as_of_day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     missing: list[str] = []
+    blocking_missing: list[str] = []
+    advisory_missing: list[str] = []
     stale: list[dict[str, Any]] = []
+    blocking_stale: list[dict[str, Any]] = []
+    advisory_stale: list[dict[str, Any]] = []
     metrics_meta: dict[str, Any] = {}
     for metric, rows in data.items():
         if not rows:
             missing.append(metric)
+            role = metric_contract(metric).get("role")
+            if role == "model_input":
+                blocking_missing.append(metric)
+            elif role != "unused":
+                advisory_missing.append(metric)
             continue
         first_day, last_day = rows[0][0], rows[-1][0]
         behind = (as_of - datetime.strptime(last_day, "%Y-%m-%d")
@@ -170,12 +212,21 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
             metric,
             _STALENESS_TOLERANCE.get(cadence_by_metric.get(metric, "daily"), 3),
         )
+        observation = store.observation_meta(metric, as_of_day=as_of_day)
         metrics_meta[metric] = {
             "first_day": first_day, "last_day": last_day,
             "days": len(rows), "behind_days": behind,
+            "role": metric_contract(metric).get("role"),
+            "availability": observation,
+            "pit_status": (observation or {}).get("quality_flag") or "PIT_UNAVAILABLE",
         }
         if behind > tolerance:
-            stale.append({"metric": metric, "last_day": last_day, "behind_days": behind})
+            item = {"metric": metric, "last_day": last_day, "behind_days": behind}
+            stale.append(item)
+            if metric_contract(metric).get("role") == "model_input":
+                blocking_stale.append(item)
+            elif metric_contract(metric).get("role") != "unused":
+                advisory_stale.append(item)
     # 只报告注册表内 spec 的失败——已停采指标的失败旧行不应永久误报
     failed_fetches = {
         key: item["last_error"]
@@ -183,9 +234,13 @@ def compute_data_quality(store: BottomModelStore, data: dict[str, Rows],
         if key in active_spec_keys and not item["last_ok"]
     }
     return {
-        "ok": not missing and not stale,
+        "ok": not blocking_missing and not blocking_stale and not failed_fetches,
         "missing": missing,
+        "blocking_missing": blocking_missing,
+        "advisory_missing": advisory_missing,
         "stale": stale,
+        "blocking_stale": blocking_stale,
+        "advisory_stale": advisory_stale,
         "failed_fetches": failed_fetches,
         "metrics": metrics_meta,
     }
@@ -234,15 +289,16 @@ def compute_delta(store: BottomModelStore, stress: Optional[float],
 
 
 def build_snapshot(store: BottomModelStore,
-                   as_of_day: Optional[str] = None) -> dict[str, Any]:
+                   as_of_day: Optional[str] = None, *,
+                   persist: bool = True) -> dict[str, Any]:
     """组装并落库当日快照。as_of_day 默认 = 数据允许的最新日（价格序列末日）。"""
     data = load_all_series(store)
     if as_of_day is None:
         price_rows = data.get("btc_price_onchain") or data.get("btc_close_1d") or []
         as_of_day = price_rows[-1][0] if price_rows \
             else time.strftime("%Y-%m-%d", time.gmtime())
-    else:
-        data = truncate_asof(data, as_of_day)
+    data = apply_data_policy(data, as_of_day)
+    dataset_id = dataset_fingerprint(data)
 
     core = compute_core(data, as_of_day)
     stress_score = core["stress"]["score"] if core["stress"] else None
@@ -250,10 +306,66 @@ def build_snapshot(store: BottomModelStore,
     stress_eq = (core["stress"] or {}).get("evidence_quality")
     conf_eq = core["confirmation"].get("evidence_quality")
     overall_eq = [eq for eq in (stress_eq, conf_eq) if eq is not None]
+    data_quality = compute_data_quality(store, data, as_of_day)
+    blockers = []
+    if data_quality.get("blocking_missing"):
+        blockers.append("MISSING_MODEL_INPUTS")
+    if data_quality.get("blocking_stale"):
+        blockers.append("STALE_MODEL_INPUTS")
+    if data_quality.get("failed_fetches"):
+        blockers.append("FETCH_FAILURE")
+    if conf_score is None:
+        blockers.append("INSUFFICIENT_CONFIRMATION_COVERAGE")
+    invalid_data = any(reason in blockers for reason in (
+        "MISSING_MODEL_INPUTS", "STALE_MODEL_INPUTS", "FETCH_FAILURE",
+    ))
+    quality_status = (
+        "INVALID_DATA" if invalid_data
+        else "ABSTAINED" if stress_score is None or conf_score is None
+        else "DEGRADED" if (
+            data_quality.get("advisory_missing") or data_quality.get("advisory_stale")
+        ) else "OK"
+    )
+    latest_audit = store.latest_audit()
+    run_id = hashlib.sha256(
+        f"{MODEL_ID}|{DATA_POLICY_ID}|{dataset_id}|{as_of_day}|{time.time_ns()}".encode(),
+    ).hexdigest()[:24]
+    base_rate = compute_base_rate(
+        store, data, core, ALGORITHM_VERSION, compute_core,
+        data_policy_id=DATA_POLICY_ID, dataset_id=dataset_id,
+    )
+    current_condition = ((base_rate or {}).get("conditions") or [None])[0]
+    time_scales = [
+        {
+            "days": int(window["weeks"]) * 7,
+            "historical_frequency": window.get("hit_rate"),
+            "ci95": window.get("hit_rate_ci95"),
+            "independent_n": window.get("independent"),
+            "median_terminal_return": window.get("median_return"),
+            "kind": "historical_frequency",
+        }
+        for window in ((current_condition or {}).get("windows") or [])
+    ]
     snapshot = {
         "day": as_of_day,
         "ts": int(time.time()),
         "algorithm_version": ALGORITHM_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "model_id": MODEL_ID,
+        "data_policy_id": DATA_POLICY_ID,
+        "dataset_id": dataset_id,
+        # day 是兼容字段（最后纳入评分的数据日）；as_of 是实际生成/决策时点。
+        "as_of": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "validation_status": "INSUFFICIENT_EVIDENCE",
+        "audit_id": latest_audit.get("audit_id") if latest_audit else None,
+        "prediction": {
+            "kind": "score", "score": stress_score,
+            "probability": None,
+            "historical_frequency": "base_rate",
+            "time_scales": time_scales,
+        },
+        "quality_status": quality_status,
+        "blocking_reasons": blockers,
         "price_context": _price_context(data),
         **core,
         "evidence_quality": {
@@ -262,12 +374,27 @@ def build_snapshot(store: BottomModelStore,
             "overall": round(sum(overall_eq) / len(overall_eq), 1) if overall_eq else None,
         },
         "correlation_audit": compute_correlation_audit(data),
-        "base_rate": compute_base_rate(
-            store, data, core, ALGORITHM_VERSION, compute_core,
-        ),
+        "base_rate": base_rate,
         "analogs": compute_analogs(data, core),
         "delta": compute_delta(store, stress_score, conf_score),
-        "data_quality": compute_data_quality(store, data, as_of_day),
+        "data_quality": data_quality,
+        "metric_roles": {
+            metric: metric_contract(metric).get("role") for metric in data
+        },
+        # 新快照的证据包只读取此冻结切片，不再随实时数据库变化。
+        "frozen_series": {metric: rows[-120:] for metric, rows in data.items()},
     }
-    store.save_snapshot(as_of_day, snapshot)
+    store.save_model_run({
+        "run_id": run_id, "model_id": MODEL_ID,
+        "data_policy_id": DATA_POLICY_ID, "dataset_id": dataset_id,
+        "decision_as_of": snapshot["as_of"], "quality_status": quality_status,
+        "blocking_reasons": blockers,
+        "validation_status": snapshot["validation_status"],
+        "prediction": snapshot["prediction"],
+        "stress": stress_score, "confirmation": conf_score,
+        "quadrant": (core.get("quadrant") or {}).get("key"),
+        "audit_id": snapshot.get("audit_id"),
+    })
+    if persist:
+        store.save_snapshot(as_of_day, snapshot)
     return snapshot

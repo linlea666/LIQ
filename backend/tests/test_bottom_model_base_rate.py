@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from processors.bottom_model import base_rate as br
 from processors.bottom_model.base_rate import (
     _ForwardPrice,
+    _replay_point,
     _window_stats,
     compute_base_rate,
     count_independent,
@@ -64,6 +65,19 @@ def test_window_stats_withholds_frequency_when_sample_too_small():
     assert ok["reliable"] is True and ok["hit_rate"] is not None
 
 
+def test_window_stats_point_estimate_uses_only_non_overlapping_events(monkeypatch):
+    monkeypatch.setattr(br, "MIN_INDEPENDENT", 2)
+    price = mk([100 + (i % 80) for i in range(500)])
+    fwd = _ForwardPrice(price)
+    days = _days(*[7 * i for i in range(30)])
+    once = _window_stats([{"day": day} for day in days], 4, fwd)
+    duplicated = _window_stats([{"day": day} for day in days for _ in range(5)], 4, fwd)
+    assert duplicated["points"] == once["points"] * 5
+    assert duplicated["independent"] == once["independent"]
+    assert duplicated["hit_rate"] == once["hit_rate"]
+    assert duplicated["median_return"] == once["median_return"]
+
+
 def test_forward_price_excludes_unfinished_window():
     price = mk([100.0 * (1 + i / 100) for i in range(200)])
     fwd = _ForwardPrice(price)
@@ -78,6 +92,26 @@ def test_replay_days_weekly_cadence():
     days = replay_days(data, (END - timedelta(days=28)).strftime("%Y-%m-%d"), 7)
     assert days == _days(28, 21, 14, 7, 0)
     assert replay_days({}, "2013-01-01", 7) == []
+
+
+def test_replay_excludes_current_unclosed_global_m2_week():
+    captured = {}
+    data = {
+        "btc_price_onchain": [("2026-08-12", 100.0)],
+        "global_m2_yoy": [("2026-08-03", 1.0), ("2026-08-10", 99.0)],
+    }
+
+    def core(payload, as_of=None):
+        captured.update(payload)
+        return {
+            "stress": {"score": 60.0, "evidence_quality": 100.0},
+            "confirmation": {"score": 40.0, "score_before_penalty": 40.0},
+            "quadrant": {"key": "basing"}, "factors": [],
+            "fake_bottom_filter": {"total_penalty": 0.0},
+        }
+
+    _replay_point(br.SeriesIndex(data), "2026-08-12", core)
+    assert captured["global_m2_yoy"] == [("2026-08-03", 1.0)]
 
 
 # ── 回放缓存与版本失效 ──
@@ -132,6 +166,25 @@ def test_replay_only_computes_new_days(tmp_path, monkeypatch):
     store.close()
 
 
+def test_replay_v2_invalidates_on_dataset_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(br, "REPLAY_START", (END - timedelta(days=28)).strftime("%Y-%m-%d"))
+    store = BottomModelStore(str(tmp_path / "bm"))
+    data = {"btc_price_onchain": mk([100.0] * 60)}
+    calls: list = []
+    load_or_build_replay(
+        store, data, "test-v1", _fake_core(calls),
+        data_policy_id="pit-v1", dataset_id="data-a",
+    )
+    first_n = len(calls)
+    calls.clear()
+    load_or_build_replay(
+        store, data, "test-v1", _fake_core(calls),
+        data_policy_id="pit-v1", dataset_id="data-b",
+    )
+    assert len(calls) == first_n
+    store.close()
+
+
 def test_replay_stores_null_scores_without_retrying(tmp_path, monkeypatch):
     """算不出分数的早年时点也要入表，否则每次增量都会重试它们。"""
     monkeypatch.setattr(br, "REPLAY_START", (END - timedelta(days=28)).strftime("%Y-%m-%d"))
@@ -148,6 +201,25 @@ def test_replay_stores_null_scores_without_retrying(tmp_path, monkeypatch):
     calls.clear()
     load_or_build_replay(store, data, "test-v1", core)
     assert calls == []
+    store.close()
+
+
+def test_replay_point_excludes_the_still_open_week(tmp_path, monkeypatch):
+    monkeypatch.setattr(br, "REPLAY_START", "2026-08-11")  # Tuesday
+    store = BottomModelStore(str(tmp_path / "bm"))
+    data = {
+        "btc_price_onchain": mk([100.0] * 60),
+        "btc_low_1w": [("2026-08-03", 90.0), ("2026-08-10", 1.0)],
+    }
+    seen: list[str] = []
+
+    def core(payload, as_of=None):
+        seen.extend(day for day, _ in payload.get("btc_low_1w", []))
+        return {"stress": {"score": 60.0}, "confirmation": {"score": 40.0}, "quadrant": {"key": "basing"}}
+
+    load_or_build_replay(store, data, "test-final-week", core)
+    assert "2026-08-03" in seen
+    assert "2026-08-10" not in seen
     store.close()
 
 

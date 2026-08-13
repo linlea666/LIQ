@@ -26,6 +26,54 @@ logger = logging.getLogger(__name__)
 
 Rows = list[tuple[str, float]]
 
+# 指标角色是模型契约的一部分，不允许再靠全文搜索猜测“采集了是否生效”。
+# model_input: 进入生产规则或辅助状态；display_only: 仅上下文展示；
+# audit_only: 仅离线审计；unused: 已进入弃用流程且不参与任何决策。
+METRIC_CONTRACTS: dict[str, dict[str, Any]] = {
+    "btc_close_1d": {"role": "model_input", "unit": "usd"},
+    "btc_vol_1d": {"role": "unused", "unit": "usd", "deprecated": True},
+    "btc_close_1w": {"role": "model_input", "unit": "usd"},
+    "btc_high_1w": {"role": "model_input", "unit": "usd"},
+    "btc_low_1w": {"role": "model_input", "unit": "usd"},
+    "btc_price_onchain": {"role": "model_input", "unit": "usd"},
+    "ma_200w": {"role": "model_input", "unit": "usd"},
+    "sth_realized_price": {"role": "model_input", "unit": "usd"},
+    "lth_realized_price": {"role": "display_only", "unit": "usd"},
+    "nupl": {"role": "model_input", "unit": "ratio"},
+    "sth_sopr": {"role": "model_input", "unit": "ratio"},
+    "lth_sopr": {"role": "model_input", "unit": "ratio"},
+    "sth_supply": {"role": "model_input", "unit": "btc"},
+    "reserve_risk": {"role": "model_input", "unit": "ratio"},
+    "puell_multiple": {"role": "model_input", "unit": "ratio"},
+    "oi_agg_usd": {"role": "model_input", "unit": "usd"},
+    "cme_oi_usd": {"role": "model_input", "unit": "usd"},
+    "liq_long_usd": {"role": "model_input", "unit": "usd"},
+    "liq_short_usd": {"role": "model_input", "unit": "usd"},
+    "funding_oiw": {"role": "model_input", "unit": "percent_per_8h"},
+    "etf_flow_usd": {"role": "model_input", "unit": "usd"},
+    "coinbase_premium_rate": {"role": "model_input", "unit": "percent"},
+    "spot_net_taker_usd": {"role": "model_input", "unit": "usd"},
+    "stablecoin_total_mcap": {"role": "model_input", "unit": "usd"},
+    "fear_greed": {"role": "model_input", "unit": "index"},
+    "exchange_balance_btc": {"role": "model_input", "unit": "btc"},
+    "global_m2_yoy": {"role": "model_input", "unit": "percent"},
+    "mvrv_zscore": {"role": "model_input", "unit": "zscore"},
+    "sth_mvrv": {"role": "model_input", "unit": "ratio"},
+    "sopr": {"role": "model_input", "unit": "ratio"},
+    "realized_loss": {"role": "model_input", "unit": "usd"},
+    "realized_profit": {"role": "model_input", "unit": "usd"},
+    "lth_realized_loss": {"role": "model_input", "unit": "usd"},
+    "cme_close_1w": {"role": "display_only", "unit": "usd"},
+    "cme_vol_1w": {"role": "model_input", "unit": "contracts"},
+}
+
+
+def metric_contract(metric: str) -> dict[str, Any]:
+    """返回稳定的指标角色/单位契约；未知指标默认 fail-closed。"""
+    return dict(METRIC_CONTRACTS.get(metric, {
+        "role": "unused", "unit": "unknown", "deprecated": True,
+    }))
+
 # BTC-only 模块的固定取数参数（与 config.yaml coins.BTC 一致）
 _BTC_EXCHANGE = "Binance"
 _BTC_PAIR = "BTCUSDT"
@@ -266,6 +314,15 @@ class FetchSpec:
     # 新鲜度容忍覆盖（天）：None = 按 cadence 默认；用于上游固有滞后的
     # 指标（如 global_m2_yoy 滞后约 1 个月），避免 data_quality 恒报 stale
     staleness_days: Optional[int] = None
+    # 多输出接口只有 required_metrics 全部通过完整性与时效检查，才允许整组落库。
+    # None 表示 metrics 全部必需；显式空元组表示无必需输出（当前没有这种 spec）。
+    required_metrics: Optional[tuple[str, ...]] = None
+    # 上游未提供历史发布时间/vintage 时，只能使用确定性的近似发布滞后；
+    # 对应观测会标为 PIT_APPROX，绝不冒充严格 point-in-time 数据。
+    publication_lag_sec: int = 0
+
+    def required(self) -> tuple[str, ...]:
+        return self.metrics if self.required_metrics is None else self.required_metrics
 
 
 def _cg(method: str, /, **kwargs) -> Callable[[Any], Awaitable[Any]]:
@@ -298,6 +355,7 @@ def build_registry() -> list[FetchSpec]:
         FetchSpec(
             key="btc_price_1d", source="coinglass", cadence="daily",
             metrics=("btc_close_1d", "btc_vol_1d"),
+            required_metrics=("btc_close_1d",),
             fetch=_cg("fetch_price_history", exchange=_BTC_EXCHANGE,
                       symbol=_BTC_PAIR, interval="1d", limit=2000),
             parse=lambda raw: parse_ts_rows(
@@ -509,6 +567,7 @@ def build_registry() -> list[FetchSpec]:
         FetchSpec(
             key="cme_weekly", source="yahoo_cme", cadence="weekly",
             metrics=("cme_close_1w", "cme_vol_1w"),
+            required_metrics=("cme_vol_1w",),
             fetch=_yahoo_fetch, parse=parse_yahoo_weekly,
             note="BTC=F 前月合约周线（2017-12 起）；恐慌周量百分位用",
         ),

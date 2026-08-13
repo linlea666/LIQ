@@ -36,7 +36,7 @@ type CorrelationAudit = {
 // base_rate 为 bottom-v4 新增（历史频率层），v2/v3 快照缺失时面板整体不渲染
 type BaseRateWindow = {
   weeks: number; points: number; independent: number; segments: number;
-  hit_rate: number | null; median_return: number | null;
+  hit_rate: number | null; hit_rate_ci95?: number[] | null; median_return: number | null;
   worst_return: number | null; reliable: boolean;
 };
 type BaseRateCondition = {
@@ -56,6 +56,11 @@ type BaseRate = {
 };
 type Snapshot = {
   day: string; ts: number; algorithm_version: string;
+  schema_version?: string; model_id?: string; data_policy_id?: string; dataset_id?: string;
+  as_of?: string; validation_status?: string; audit_id?: string | null;
+  prediction?: { kind: "score" | "calibrated_probability"; score: number | null; probability: number | null };
+  quality_status?: "OK" | "DEGRADED" | "ABSTAINED" | "INVALID_DATA";
+  blocking_reasons?: string[];
   price_context: { price: number | null; ma_200w: number | null; sth_realized_price: number | null; lth_realized_price: number | null };
   stress: { score: number; active_weight: number; abstained: string[]; evidence_quality?: number | null } | null;
   confirmation: { score: number | null; score_before_penalty: number | null; checks: Check[]; evidence_quality?: number | null };
@@ -69,10 +74,11 @@ type Snapshot = {
   counter_evidence: { supporting: string[]; opposing: string[] };
   analogs: Analog[];
   delta: { stress_7d: number | null; stress_30d: number | null; confirmation_7d: number | null; confirmation_30d: number | null };
-  data_quality: { ok: boolean; missing: string[]; stale: { metric: string; last_day: string; behind_days: number }[]; failed_fetches: Record<string, string> };
+  data_quality: { ok: boolean; missing: string[]; blocking_missing?: string[]; stale: { metric: string; last_day: string; behind_days: number }[]; blocking_stale?: { metric: string; last_day: string; behind_days: number }[]; failed_fetches: Record<string, string> };
 };
 type HistoryItem = {
   day: string;
+  algorithm_version?: string; model_id?: string; data_policy_id?: string;
   stress?: { score: number } | null;
   confirmation?: { score: number | null } | null;
 };
@@ -163,9 +169,7 @@ function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
   const qkey = snapshot.quadrant.key;
   const headline = VERDICT[qkey] ?? VERDICT.unknown;
   const stageIdx = STAGES.findIndex((s) => s.key === qkey);
-  const pendingChecks = snapshot.confirmation.checks.filter(
-    (c) => c.ok && (c.score ?? 0) < 100,
-  );
+  const pendingChecks = snapshot.confirmation.checks.filter((c) => (c.score ?? 0) < 100);
   const triggers = snapshot.fake_bottom_filter.triggers;
   const tone = QUADRANT_TONE[qkey] ?? QUADRANT_TONE.unknown;
   const overallEq = snapshot.evidence_quality?.overall ?? null;
@@ -203,7 +207,7 @@ function VerdictBanner({ snapshot }: { snapshot: Snapshot }) {
         <div className="space-y-1">
           {qkey !== "confirmed_recovery" && pendingChecks.length > 0 && (
             <div className="opacity-85">
-              距离「底部确认」还差：{pendingChecks.map((c) => c.label).join("、")}
+              尚未满足的确认项：{pendingChecks.map((c) => `${c.label}${c.ok ? "" : "（缺失）"}`).join("、")}
             </div>
           )}
           {triggers.length > 0 && (
@@ -278,7 +282,7 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
         </span>
       </div>
       <div className="mb-3 text-[10px] text-slate-500">
-        这是对模型的独立检验，不是模型的背书：分数由规则算出，下面的频率由价格算出，两者互不知情。
+        这是独立计算的历史条件分布，不是严格样本外检验或模型背书：分数由规则算出，频率由价格算出。
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
@@ -302,6 +306,11 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
                         {" "}（{ex >= 0 ? "+" : ""}{ex.toFixed(0)}pp）
                       </span>
                     )}
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    95% Wilson CI {w.hit_rate_ci95?.length === 2
+                      ? `${w.hit_rate_ci95[0].toFixed(0)}%–${w.hit_rate_ci95[1].toFixed(0)}%`
+                      : "—"}
                   </div>
                   <div className="mt-1 text-[10px] text-slate-400">
                     中位收益{" "}
@@ -331,14 +340,14 @@ function BaseRatePanel({ br }: { br: BaseRate }) {
         <div className="text-slate-300">{current.label}</div>
         <div>
           {edge
-            ? `历史上同类状态的优势出现在 ${edge.weeks} 周尺度（胜率 ${edge.hit_rate?.toFixed(0)}%，高出全样本基准 ${(excess(edge) ?? 0).toFixed(0)} 个百分点）。`
+            ? `历史描述频率在 ${edge.weeks} 周尺度高于全样本基准（${edge.hit_rate?.toFixed(0)}%，高出 ${(excess(edge) ?? 0).toFixed(0)} 个百分点）；这不是已校准概率。`
             : "历史上同类状态在三个窗口都没有明显跑赢全样本基准——模型说的「压力极端」并不自动等于「该买」。"}
         </div>
         {negative.length > 0 && (
           <div>
             但 {negative.map((w) => `${w.weeks} 周`).join(" 与 ")}尺度的中位收益为负
             （{negative.map((w) => `${w.median_return?.toFixed(0)}%`).join("、")}），
-            意味着即便最终上涨，中途大概率还要更低——左侧筑底需要时间。
+            这些是终点收益，未计算路径内 MAE，不能据此推断中途是否还会创新低。
           </div>
         )}
         {worst?.worst_return != null && (
@@ -632,6 +641,7 @@ function CopyEvidenceButton() {
 export default function BottomModelPage() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [runtimeHealth, setRuntimeHealth] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
 
@@ -646,15 +656,16 @@ export default function BottomModelPage() {
 
   const load = useCallback(async () => {
     try {
-      const [snapRes, histRes] = await Promise.all([
+      const [snapRes, histRes, health] = await Promise.all([
         fetch(`${API_BASE}/api/bottom-model/snapshot`),
         fetch(`${API_BASE}/api/bottom-model/history?limit=400`),
+        fetchHealth(),
       ]);
+      setRuntimeHealth(health);
       if (!snapRes.ok) {
         if (snapRes.status === 503) {
           // 区分"采集进行中 / 服务未启动 / 等待调度"——首轮冷采集受
           // Coinglass 限流约束，可达十余分钟，期间快照接口持续 503
-          const health = await fetchHealth();
           if (health?.run_in_progress) {
             setError("首轮采集进行中（受数据源限流约束，约需 5-15 分钟），完成后本页自动刷新");
           } else if (health && health.running === false) {
@@ -667,8 +678,17 @@ export default function BottomModelPage() {
         }
         return;
       }
-      setSnapshot(await snapRes.json());
-      if (histRes.ok) setHistory((await histRes.json()).items ?? []);
+      const snap: Snapshot = await snapRes.json();
+      setSnapshot(snap);
+      if (histRes.ok) {
+        const all: HistoryItem[] = (await histRes.json()).items ?? [];
+        setHistory(all.filter((item) => {
+          if (snap.model_id && snap.data_policy_id) {
+            return item.model_id === snap.model_id && item.data_policy_id === snap.data_policy_id;
+          }
+          return item.algorithm_version === snap.algorithm_version;
+        }));
+      }
       setError("");
     } catch {
       setError("无法连接后端");
@@ -699,6 +719,24 @@ export default function BottomModelPage() {
   }, [fetchHealth, load]);
 
   const demandFactor = snapshot?.factors.find((f) => f.key === "demand");
+  const groupedDemand = (keys: string[]) => {
+    const values = (demandFactor?.sub_signals ?? [])
+      .filter((sub) => keys.includes(sub.key) && sub.score != null);
+    const totalWeight = values.reduce((sum, sub) => sum + sub.weight, 0);
+    const score = totalWeight > 0
+      ? values.reduce((sum, sub) => sum + (sub.score as number) * sub.weight, 0) / totalWeight
+      : null;
+    const eqValues = values.filter((sub) => sub.evidence_quality != null);
+    const eqWeight = eqValues.reduce((sum, sub) => sum + sub.weight, 0);
+    const eq = eqWeight > 0
+      ? eqValues.reduce((sum, sub) => sum + (sub.evidence_quality as number) * sub.weight, 0) / eqWeight
+      : null;
+    return { score, eq };
+  };
+  const directDemand = groupedDemand(["coinbase_premium", "spot_net_taker", "etf_momentum"]);
+  const liquidityAmmo = groupedDemand(["stablecoin_growth", "exchange_outflow"]);
+  const lastRun = runtimeHealth?.last_run_summary as Record<string, unknown> | null | undefined;
+  const lastRunBlocked = lastRun?.snapshot_persisted === false;
   const dq = snapshot?.data_quality;
   const dqIssues = useMemo(() => {
     if (!dq) return 0;
@@ -714,7 +752,7 @@ export default function BottomModelPage() {
           <div>
             <div className="flex items-center gap-3">
               <Link href="/" className="text-[12px] text-slate-500 hover:text-slate-300">← 主页</Link>
-              <h1 className="text-lg font-semibold text-slate-100">BTC 熊市底部概率模型</h1>
+              <h1 className="text-lg font-semibold text-slate-100">BTC 熊市底部证据与验证模型</h1>
             </div>
             <div className="mt-1 text-[11px] text-slate-500">
               日级慢变量 · 规则引擎（无 AI 参与）· 数据日 {snapshot?.day ?? "—"} · {snapshot?.algorithm_version ?? ""}
@@ -735,13 +773,37 @@ export default function BottomModelPage() {
         )}
 
         {snapshot && (
+          <div className="rounded-md border border-amber-800/60 bg-amber-950/30 px-4 py-3 text-[11px] text-amber-200">
+            <span className="font-semibold">验证结论：{snapshot.validation_status ?? "INSUFFICIENT_EVIDENCE"}</span>
+            <span className="ml-2 text-amber-300/80">
+              当前输出是规则分数与历史描述频率，不是已校准底部概率；probability = {snapshot.prediction?.probability ?? "null"}。
+            </span>
+            <div className="mt-1 text-[10px] text-slate-400">
+              数据状态 {snapshot.quality_status ?? "LEGACY"}
+              {(snapshot.blocking_reasons?.length ?? 0) > 0 && ` · 阻断：${snapshot.blocking_reasons?.join("、")}`}
+              {snapshot.audit_id && ` · 审计 ${snapshot.audit_id}`}
+            </div>
+          </div>
+        )}
+
+        {snapshot && lastRunBlocked && (
+          <div className="rounded-md border border-rose-900/60 bg-rose-950/30 px-4 py-3 text-[11px] text-rose-200">
+            当前展示的是最后有效快照；最近一轮因数据问题未覆盖它。
+            <span className="ml-2 text-rose-300/80">
+              阻断原因：{Array.isArray(lastRun?.blocking_reasons)
+                ? (lastRun.blocking_reasons as string[]).join("、") : "INVALID_DATA"}
+            </span>
+          </div>
+        )}
+
+        {snapshot && (
           <>
             {/* 小白结论横幅 */}
             <VerdictBanner snapshot={snapshot} />
 
             {/* 四仪表盘：压力极端不等于底部——把"卖方是否卖完""需求是否接管"
                 与压力并列，分歧本身比单一综合分更有信息量 */}
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <ScoreDial label="市场压力（有多惨）" score={snapshot.stress?.score ?? null}
                 eq={snapshot.stress?.evidence_quality ?? null}
                 sub={`Δ7d ${fmtSigned(snapshot.delta.stress_7d)} · Δ30d ${fmtSigned(snapshot.delta.stress_30d)}`} />
@@ -750,9 +812,12 @@ export default function BottomModelPage() {
                   ? Object.entries(snapshot.seller_exhaustion.components)
                     .map(([k, v]) => `${EXHAUSTION_LABEL[k] ?? k} ${v.toFixed(0)}`).join(" · ")
                   : "数据不足"} />
-              <ScoreDial label="流动性/需求（谁在买）" score={demandFactor?.score ?? null}
-                eq={demandFactor?.evidence_quality ?? null}
-                sub={demandFactor ? `覆盖 ${(demandFactor.coverage * 100).toFixed(0)}% · 稳定币弹药≠已进场买盘` : "数据不足"} />
+              <ScoreDial label="直接现货需求（谁在买）" score={directDemand.score}
+                eq={directDemand.eq}
+                sub="Coinbase 溢价 · 现货 taker · ETF 流" />
+              <ScoreDial label="流动性弹药（能不能买）" score={liquidityAmmo.score}
+                eq={liquidityAmmo.eq}
+                sub="稳定币与交易所余额，仅作弹药/持币代理，不代表已进场" />
               <ScoreDial label="改善确认（开始好转吗）" score={snapshot.confirmation.score}
                 eq={snapshot.confirmation.evidence_quality ?? null}
                 sub={`假底惩罚前 ${fmt(snapshot.confirmation.score_before_penalty)} · Δ7d ${fmtSigned(snapshot.delta.confirmation_7d)}`} />
@@ -964,11 +1029,9 @@ export default function BottomModelPage() {
             )}
 
             <div className="pb-4 text-center text-[10px] text-slate-600">
-              历史大底样本仅 4 个，任何评分都不是交易指令 · 每日 UTC 01:00 自动更新 · 单一信号只加分不否决
+              当前评级：研究型状态指标 · 任何评分都不是概率或交易指令 · 每日 UTC 01:00 自动更新
               <br />
-              历史曲线跨 bottom-v2 / v3 / v4 三个算法版本：v3 起子信号按证据质量加权、
-              周线结构改为分阶段并只计入确认层；v4 的需求因子新增 Coinbase 溢价与现货净
-              taker 买入两项证据，各版分数不完全可比
+              历史曲线仅连接同一 model_id + data_policy_id；旧版本和不同数据政策的分数不直接连线比较
             </div>
           </>
         )}

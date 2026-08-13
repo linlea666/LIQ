@@ -396,7 +396,7 @@ market_action:
   max_history: 200            # per-coin 历史保留条数（~8.3d @ 1h）
   include_prompt_in_api: true # /api/market-action/report 默认返回 prompt_debug
 
-# ── BTC 熊市底部概率模型（Bottom Model · 仅 BTC，日级更新） ──
+# ── BTC 熊市底部证据与验证模型（Bottom Model · 仅 BTC，日级更新） ──
 # 数据骨架：Coinglass（P 系列日级慢数据）+ BGeometrics + Yahoo CME。
 # 每日 UTC 01:00（北京 09:00）自动采集+评分，此时上游 T-1 数据已齐。
 # coinglass_spacing_sec：模块内相邻 Coinglass 请求最小间隔，防止

@@ -17,8 +17,8 @@
 from __future__ import annotations
 
 import logging
-from bisect import bisect_right
-from datetime import datetime
+from bisect import bisect_left, bisect_right
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -93,37 +93,56 @@ def sma_tail(rows: Rows, n: int) -> Optional[float]:
 
 
 def change_rate(rows: Rows, n: int) -> Optional[float]:
-    """最近值相对 n 天前的变化率；基准接近 0 时返回 None。"""
-    if len(rows) <= n:
+    """最近值相对 n 个自然日前最后可得值的变化率。"""
+    if len(rows) < 2:
         return None
-    base = rows[-1 - n][1]
+    try:
+        target = (date.fromisoformat(rows[-1][0]) - timedelta(days=n)).isoformat()
+    except (TypeError, ValueError):
+        return None
+    idx = bisect_right([day for day, _ in rows], target) - 1
+    if idx < 0:
+        return None
+    base = rows[idx][1]
     if abs(base) < 1e-12:
         return None
     return (rows[-1][1] - base) / abs(base)
 
 
 def change_rate_series(rows: Rows, n: int) -> Rows:
-    """逐点 n 期变化率序列（基准≈0 的点跳过）。
+    """逐点 n 个自然日变化率序列（基准≈0 的点跳过）。
 
     与 change_rate 的单点版本同口径，供"当前变化率处于历史什么分位"这类
     子信号构造分布；相关性审计也复用它，避免用水平量算出伪相关
     （稳定币市值这类单调增长序列，水平值相关系数只反映时间趋势）。
     """
-    return [
-        (rows[i][0], (rows[i][1] - rows[i - n][1]) / abs(rows[i - n][1]))
-        for i in range(n, len(rows))
-        if abs(rows[i - n][1]) > 1e-9
-    ]
+    days = [day for day, _ in rows]
+    out: Rows = []
+    for i, (day, value) in enumerate(rows):
+        try:
+            target = (date.fromisoformat(day) - timedelta(days=n)).isoformat()
+        except (TypeError, ValueError):
+            continue
+        j = bisect_right(days, target, 0, i) - 1
+        if j >= 0 and abs(rows[j][1]) > 1e-9:
+            out.append((day, (value - rows[j][1]) / abs(rows[j][1])))
+    return out
 
 
 def rolling_mean_series(rows: Rows, window: int) -> Rows:
-    """滚动均值序列：把日级噪声大的流量指标转成可比的分位输入。"""
-    if len(rows) < window:
+    """自然日滚动均值；稀疏序列不会再把 30 行伪装成 30 天。"""
+    if len(rows) < 2:
         return []
-    return [
-        (rows[i][0], sum(v for _, v in rows[i - window + 1:i + 1]) / window)
-        for i in range(window - 1, len(rows))
-    ]
+    days = [day for day, _ in rows]
+    out: Rows = []
+    for i, (day, _) in enumerate(rows):
+        cutoff = (date.fromisoformat(day) - timedelta(days=window - 1)).isoformat()
+        left = bisect_left(days, cutoff, 0, i + 1)
+        bucket = rows[left:i + 1]
+        if bucket and (date.fromisoformat(day) - date.fromisoformat(bucket[0][0])).days \
+                >= max(1, window - 2):
+            out.append((day, sum(v for _, v in bucket) / len(bucket)))
+    return out
 
 
 def percentile_rank(values: list[float], value: float) -> Optional[float]:
@@ -985,9 +1004,18 @@ def compute_confirmation(d: dict[str, Rows],
         if eff_w > 1e-9 else None
     )
     nominal_w = sum(c["weight"] for c in ok_checks)
+    total_w = sum(c["weight"] for c in checks)
+    coverage = nominal_w / total_w if total_w > 0 else 0.0
+    # Confirmation 的阈值只有在至少 60% 名义证据存在时才有同一语义；
+    # 否则即使剩余项目分数很高也必须弃权，禁止缺失项被静默重归一化。
+    if coverage < 0.60:
+        base = None
     return {
         "score": round(base, 1) if base is not None else None,
         "evidence_quality": round(100.0 * eff_w / nominal_w, 1) if nominal_w > 0 else None,
+        "active_weight": round(nominal_w, 2),
+        "coverage": round(coverage, 2),
+        "abstained": [c["key"] for c in checks if not c["ok"]],
         "checks": checks,
     }
 
@@ -1124,21 +1152,17 @@ QUADRANTS = {
 def classify_quadrant(stress: Optional[float], confirmation: Optional[float]) -> dict[str, Any]:
     if stress is None:
         return {"key": "unknown", "label": "数据不足", "note": "有效因子权重不足"}
-    # note 里的时间尺度限定来自历史回放实测（v3/v4 两版结论一致），但刻意不写
-    # 具体百分比——那些数字随算法版本与新数据变化，由历史频率层动态给出
+    # 象限 note 只解释规则状态；历史频率与时间尺度必须由版本化 base_rate
+    # 动态展示，禁止把某次样本内结果硬编码成永恒结论。
     if stress < 55:
         note = "底部压力不足，市场未进入极端区" if confirmation is None or confirmation < 50 \
             else "无极端压力下的修复 = 普通回调结束，非周期大底"
-        return {"key": "bear_market", "label": QUADRANTS["bear_market"],
-                "note": f"{note}；实测 13/26/52 周三个窗口均弱于全样本基准"}
+        return {"key": "bear_market", "label": QUADRANTS["bear_market"], "note": note}
     if confirmation is None or confirmation < 35:
         return {"key": "panic_flush", "label": QUADRANTS["panic_flush"],
-                "note": "极端压力已现，改善迹象未确认——历史大底多在此象限完成左侧；"
-                        "实测收益优势出现在 52 周尺度，13 周内中位收益为负"}
+                "note": "极端压力已现，改善迹象未确认；仅表示压力状态，不代表底部概率"}
     if confirmation < 65:
         return {"key": "basing", "label": QUADRANTS["basing"],
-                "note": "压力极端 + 改善迹象萌芽，筑底进行中；实测优势同样偏 26 周"
-                        "以上尺度，13 周内中位收益为负（左侧筑底需要时间）"}
+                "note": "压力极端 + 改善迹象萌芽；历史结果需按当前版本和时间尺度另行核验"}
     return {"key": "confirmed_recovery", "label": QUADRANTS["confirmed_recovery"],
-            "note": "压力极端 + 多项确认信号共振；实测在 26 与 52 周尺度均明显"
-                    "优于全样本基准"}
+            "note": "压力极端 + 多项确认信号共振；这是规则状态，不是已校准概率"}

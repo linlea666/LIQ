@@ -314,7 +314,7 @@ class Engine:
             settings=self._settings,
             push_callback=_push_trend,
         )
-        # BTC 底部概率模型：日级慢数据独立子系统，复用 Coinglass 客户端；
+        # BTC 底部证据与验证模型：日级慢数据独立子系统，复用 Coinglass 客户端；
         # 只消费原始序列（不引用其他模块的加工评分），纯 REST 无 WS 推送。
         from processors.bottom_model.service import BottomModelService
         self.bottom_model_service = BottomModelService(

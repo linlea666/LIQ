@@ -1,0 +1,33 @@
+{
+  "kind": "production_server_frozen_sqlite_copy",
+  "verification_status": "READ_ONLY_VERIFIED",
+  "frozen_at": "2026-08-13 (Asia/Shanghai; exact second not recorded)",
+  "source_database": "/www/wwwroot/LIQ/backend/data/bottom_model/bottom_model.sqlite3",
+  "sqlite_quick_check": "ok",
+  "legacy_schema_version": "2",
+  "legacy_counts": {
+    "series": 95684,
+    "snapshots": 2,
+    "replay": 0,
+    "fetch_log": 29
+  },
+  "legacy_snapshots": [
+    {
+      "day": "2026-08-11",
+      "algorithm_version": "bottom-v2",
+      "stress": 71.8,
+      "confirmation": 64.0,
+      "future_metric_day": "2026-08-12"
+    },
+    {
+      "day": "2026-08-12",
+      "algorithm_version": "bottom-v3",
+      "stress": 67.0,
+      "confirmation": 39.3,
+      "future_metric_day": "2026-08-13"
+    }
+  ],
+  "legacy_snapshot_contamination": "2026-08-12 snapshot referenced 2026-08-13 BTC daily close/volume, aggregate OI, CME OI, liquidations, funding and fear-greed; it also had access to the still-open weekly bar starting 2026-08-10.",
+  "runtime_version_mismatch": "Running image source declared bottom-v4 while the latest stored snapshot remained bottom-v3.",
+  "remote_mutation": false
+}

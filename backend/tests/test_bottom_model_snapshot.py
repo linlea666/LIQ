@@ -8,6 +8,7 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from processors.bottom_model.snapshot import (
+    DATA_POLICY_ID,
     build_snapshot,
     compute_core,
     truncate_asof,
@@ -37,6 +38,12 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert snap["day"] == END.strftime("%Y-%m-%d")
     from processors.bottom_model.snapshot import ALGORITHM_VERSION
     assert snap["algorithm_version"] == ALGORITHM_VERSION
+    assert snap["data_policy_id"] == DATA_POLICY_ID
+    assert snap["validation_status"] == "INSUFFICIENT_EVIDENCE"
+    assert snap["prediction"]["probability"] is None
+    assert snap["quality_status"] == "INVALID_DATA"
+    assert "MISSING_MODEL_INPUTS" in snap["blocking_reasons"]
+    assert snap["as_of"].endswith("Z")
     assert snap["stress"]["score"] > 55
     assert snap["confirmation"]["score"] is not None
     assert snap["quadrant"]["key"] in {"panic_flush", "basing", "confirmed_recovery"}
@@ -109,3 +116,14 @@ def test_compute_core_pure_function_no_side_effects():
     core2 = compute_core(data)
     assert core1["stress"] == core2["stress"]
     assert core1["quadrant"] == core2["quadrant"]
+
+
+def test_snapshot_auto_asof_truncates_future_daily_and_unclosed_weekly(tmp_path):
+    store = _seeded_store(tmp_path)
+    store.upsert_series("oi_agg_usd", [("2026-08-12", 9e99)])
+    store.upsert_series("btc_low_1w", [("2026-08-10", 1.0)])
+    snap = build_snapshot(store)
+    assert snap["day"] == "2026-08-11"
+    assert snap["frozen_series"]["oi_agg_usd"][-1][0] <= "2026-08-11"
+    assert snap["frozen_series"]["btc_low_1w"][-1][0] <= "2026-08-03"
+    store.close()

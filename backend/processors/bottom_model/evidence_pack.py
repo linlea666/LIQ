@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from processors.bottom_model.factors import percentile_rank, values_of
@@ -163,22 +165,26 @@ def _factor_section(factors: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _rolling_context_section(store: BottomModelStore) -> list[str]:
-    """§9 滚动上下文：当前值 / 多窗口变化 / 分位及其 30 期前对比 / 历史区间。"""
+def _rolling_context_section(data: dict[str, list[list[Any]]]) -> list[str]:
+    """§9 自然日上下文；不再把稀疏序列的 N 行误称为 N 天。"""
     lines = [
-        "| 指标 | 当前值 | Δ7期 | Δ30期 | Δ90期 | 全历史分位 | 30期前分位 | 历史区间 |",
+        "| 指标 | 当前值 | Δ7天 | Δ30天 | Δ90天 | 冻结窗口分位 | 30天前分位 | 冻结区间 |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for metric, label, fmt, mode, cadence in _CONTEXT_SPEC:
-        rows = sanitize_series(metric, store.series(metric))
-        if len(rows) < 30:
+        rows = sanitize_series(metric, data.get(metric) or [])
+        if len(rows) < 2:
             continue
-        step = 7 if cadence == "weekly" else 1
+        days = [day for day, _ in rows]
         current = rows[-1][1]
         vals = values_of(rows)
 
+        def _index_days_ago(periods: int) -> int:
+            target = (date.fromisoformat(rows[-1][0]) - timedelta(days=periods)).isoformat()
+            return bisect_right(days, target) - 1
+
         def _delta(periods: int) -> str:
-            idx = len(rows) - 1 - periods * step
+            idx = _index_days_ago(periods)
             if idx < 0:
                 return "—"
             past = rows[idx][1]
@@ -186,7 +192,7 @@ def _rolling_context_section(store: BottomModelStore) -> list[str]:
                 return f"{(current - past) / abs(past):+.1%}" if abs(past) > 1e-12 else "—"
             return f"{current - past:+.4g}"
 
-        prev_idx = len(rows) - 1 - 30 * step
+        prev_idx = _index_days_ago(30)
         prev_pct = percentile_rank(vals, rows[prev_idx][1]) if prev_idx >= 0 else None
         lines.append(
             f"| {label} | {_fmt(current, fmt)} | {_delta(7)} | {_delta(30)} | "
@@ -340,7 +346,7 @@ def build_evidence_pack(snapshot: dict[str, Any],
     eq_summary = snapshot.get("evidence_quality") or {}
 
     lines: list[str] = [
-        "# BTC 熊市底部概率模型 · 证据包",
+        "# BTC 熊市底部证据与验证模型 · 日常证据包",
         f"\n数据日：{snapshot.get('day')} ｜ 算法：{snapshot.get('algorithm_version')} ｜ "
         "生成方式：确定性规则引擎（无 AI 参与）",
         "\n## §0 分析指令\n",
@@ -416,10 +422,12 @@ def build_evidence_pack(snapshot: dict[str, Any],
             f"{analog.get('note', '')} |"
         )
 
-    if store is not None:
+    frozen = snapshot.get("frozen_series") or {}
+    if frozen or store is not None:
         lines.append("\n## §6 关键指标原始序列（近段尾部，升序）\n")
         for metric, label, days, fmt in _SERIES_SPEC:
-            rows = sanitize_series(metric, store.series(metric, limit=days))
+            source_rows = frozen.get(metric) if frozen else store.series(metric, limit=days)
+            rows = sanitize_series(metric, source_rows or [])[-days:]
             if not rows:
                 continue
             body = ", ".join(fmt.format(v) for _, v in rows)
@@ -454,12 +462,15 @@ def build_evidence_pack(snapshot: dict[str, Any],
         lines.append("\n## §8 相关性与重复计分声明\n")
         lines.extend(_correlation_section(audit))
 
-    if store is not None:
+    if frozen or store is not None:
         lines.append("\n## §9 滚动上下文（变化速度与所处分位）\n")
         lines.append(
-            "分位均在该指标**全历史**分布中计算；周级序列的\"期\"为周，其余为日。\n"
+            "变化窗口按自然日定位；分位与区间只基于快照冻结切片，保证证据包可复现。\n"
         )
-        lines.extend(_rolling_context_section(store))
+        context_data = frozen or {
+            metric: store.series(metric, limit=120) for metric, *_ in _CONTEXT_SPEC
+        }
+        lines.extend(_rolling_context_section(context_data))
 
     # 章节无条件出现：§0 的指令引用了 §10，缺席会让外部 AI 找一个不存在的编号
     lines.append("\n## §10 历史频率层（模型读数的实测对照）\n")

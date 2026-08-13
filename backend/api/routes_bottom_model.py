@@ -1,4 +1,4 @@
-"""BTC 熊市底部概率模型 REST API（只读 + 手动触发）。"""
+"""BTC 熊市底部证据与验证模型 REST API（只读 + 手动触发）。"""
 
 from __future__ import annotations
 
@@ -51,6 +51,24 @@ async def get_evidence_pack():
 async def get_health():
     service = _require_service(allow_disabled=True)
     return service.health()
+
+
+@router.get("/audit/latest")
+async def get_latest_audit():
+    service = _require_service()
+    audit = service.latest_audit()
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Mathematical audit not available")
+    return audit
+
+
+@router.get("/audit/{audit_id}")
+async def get_audit(audit_id: str):
+    service = _require_service()
+    audit = service.audit(audit_id)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Mathematical audit not found")
+    return audit
 
 
 @router.post("/run")

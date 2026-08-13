@@ -1,0 +1,9 @@
+{
+  "latest_audit_id": "audit-8a30c484c88ceb525ea9",
+  "source": "server frozen SQLite copy",
+  "decision_as_of": "2026-08-12",
+  "dataset_id": "64cf5d0a473b1d15fe459fca28692696aaf12d58cd7aef7db056ae902de50383",
+  "data_policy_id": "pit-final-v2",
+  "audit_engine_version": "audit-v4",
+  "status": "INSUFFICIENT_EVIDENCE"
+}
