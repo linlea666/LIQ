@@ -248,6 +248,13 @@ function Side({
 }
 
 export default function SpotOrderBookPanel({ spotBook, coin, onSelectZone }: Props) {
+  const maxUsd = useMemo(() => {
+    if (!spotBook) return 0;
+    const all = [...spotBook.asks, ...spotBook.bids];
+    if (!all.length) return 0;
+    return Math.max(...all.map((x) => x.total_usd), 1);
+  }, [spotBook]);
+
   if (!spotBook) {
     return (
       <div className="flex h-full items-center justify-center px-3 py-6 text-[11px] text-slate-500">
@@ -255,12 +262,6 @@ export default function SpotOrderBookPanel({ spotBook, coin, onSelectZone }: Pro
       </div>
     );
   }
-  const maxUsd = useMemo(() => {
-    const all = [...spotBook.asks, ...spotBook.bids];
-    if (!all.length) return 0;
-    return Math.max(...all.map((x) => x.total_usd), 1);
-  }, [spotBook]);
-
   if (!spotBook.asks.length && !spotBook.bids.length) {
     return (
       <div className="flex h-full items-center justify-center px-3 py-6 text-[11px] text-slate-500">

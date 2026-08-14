@@ -365,6 +365,7 @@ notifications:
     # 触发：accepted_scenario 切换 + bias∈{long,short} + conf≥min + 非 range_bound + dq=ok
     # 强信号：confidence≥strong + continuity.stance=reversal → 独立 dedup_key + 短 cooldown + 紫橙色卡片
     include_market_action: true
+    include_bottom_model: true       # BTC 日线底部模型首次进入多项确认区时提醒
     market_action_min_confidence: 75       # 普通通道 confidence 门槛
     market_action_strong_confidence: 85    # 强信号通道阈值（同时要求 reversal）
     market_action_strong_cooldown_minutes: 20  # 强信号独立冷却（普通通道沿用 cooldown_minutes）

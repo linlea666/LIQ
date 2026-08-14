@@ -2397,6 +2397,42 @@ export interface BrainEvent {
   source: string;
 }
 
+export type DataStatus = "fresh" | "stale" | "pending" | "missing";
+
+export interface DataMeta {
+  as_of: number;
+  staleness_sec: number;
+  status: DataStatus;
+  pending_reason: string;
+  source: string;
+}
+
+export type BrainMarketBias = "bullish" | "bearish" | "neutral" | "insufficient";
+export type BrainEvidenceGrade = "strong" | "medium" | "weak" | "insufficient";
+
+export interface BrainMarketRead {
+  bias: BrainMarketBias;
+  evidence_grade: BrainEvidenceGrade;
+  title: string;
+  summary: string;
+  flow_state:
+    | "aligned_buy"
+    | "aligned_sell"
+    | "spot_strong_split"
+    | "spot_weak_split"
+    | "unclear"
+    | "insufficient";
+  leverage_state:
+    | "deleveraging"
+    | "leverage_building"
+    | "small_change"
+    | "unavailable"
+    | "conflict";
+  funding_state: "long_crowded" | "short_crowded" | "neutral" | "unavailable";
+  evidence: string[];
+  cautions: string[];
+}
+
 export interface BrainDataQuality {
   liquidity_wall_quality: string;
   usd_usdt_basis_pct: number | null;
@@ -2408,6 +2444,7 @@ export interface BrainDataQuality {
   is_partial_ready: boolean;
   ready_count: number;
   total_count: number;
+  context_sources: Record<string, DataMeta>;
 }
 
 export interface BrainContextChips {
@@ -2415,10 +2452,12 @@ export interface BrainContextChips {
   regime_description: string;
   oi_delta_1h_pct: number | null;
   funding_interpretation: string;
+  funding_rate_8h_pct: number | null;
   cvd_contract_trend: string;
   cvd_spot_trend: string;
   nearest_magnet_above: number | null;
   nearest_magnet_below: number | null;
+  market_read: BrainMarketRead;
 }
 
 export type SetupType =

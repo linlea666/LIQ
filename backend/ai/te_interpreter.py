@@ -41,6 +41,7 @@ from openai import AsyncOpenAI
 
 from config.settings import get_settings
 from models.te_interpretation import TEAIInterpretation
+from utils.time_series import percent_change_at_lookback
 
 logger = logging.getLogger(__name__)
 
@@ -446,8 +447,7 @@ def _compact_flow_metrics(
 ) -> Optional[dict]:
     """funding + OI 压缩（含 4h% 现算）。
 
-    4h% 算法：从 oi_history（5m 间隔）取当前与第 -48 条（4h 前）相比。
-    不足 48 条 → 返回 None（不报错）。
+    4h% 算法：按时间戳查找严格 4h 基线；缺口超过半根 5m 时不输出。
     """
     has_any = funding or multi_funding or oi
     if not has_any:
@@ -516,15 +516,17 @@ def _compact_flow_metrics(
         except Exception:
             pass
 
-    # 4h%：从 oi_history 现算（5m 粒度 × 48 = 4h）
+    # 4h%：按时间戳对齐，避免位置下标的 47/48 间隔偏差及缺口误标。
     try:
-        if oi_history and len(oi_history) >= 48:
-            current_point = oi_history[-1]
-            past_point = oi_history[-48]
-            cur_v = float(current_point.get("oi_usd", 0) or 0)
-            past_v = float(past_point.get("oi_usd", 0) or 0)
-            if past_v > 0:
-                oi_block["change_4h_pct"] = round((cur_v - past_v) / past_v * 100.0, 2)
+        if oi_history:
+            change_4h = percent_change_at_lookback(
+                oi_history, lookback_sec=14_400,
+                ts_getter=lambda p: p.get("ts", 0),
+                value_getter=lambda p: p.get("oi_usd", 0),
+                max_baseline_lag_sec=150,
+            )
+            if change_4h is not None:
+                oi_block["change_4h_pct"] = round(change_4h, 2)
     except Exception:
         pass
 

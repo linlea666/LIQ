@@ -609,18 +609,9 @@ async def get_trading_brain(
     if maps:
         liq = maps.get("1d") or maps.get("7d") or maps.get("30d")
 
-    cvd_c = ""
-    cvd_s = ""
-    if state.cvd_contract:
-        cvd_c = state.cvd_contract.trend_1h or ""
-    if state.cvd_spot:
-        cvd_s = state.cvd_spot.trend_1h or ""
-    oi_d1h = None
-    if state.oi is not None:
-        oi_d1h = state.oi.change_1h_pct
-    fund_txt = ""
-    if state.funding and state.funding.interpretation:
-        fund_txt = state.funding.interpretation
+    from processors.market_read import build_market_read_from_state
+
+    market_context = build_market_read_from_state(state)
 
     # P1-A 修复：跨帧持久化 setup state，让状态机能真正抵达 confirmed/cooldown/missed
     # （而非每次 build 都被 opportunity_engine 重置为 forming/waiting）。
@@ -633,10 +624,13 @@ async def get_trading_brain(
         kl=kl,
         op=op,
         liq=liq,
-        cvd_contract_trend=cvd_c,
-        cvd_spot_trend=cvd_s,
-        oi_delta_1h_pct=oi_d1h,
-        funding_interpretation=fund_txt,
+        cvd_contract_trend=market_context["cvd_contract_trend"],
+        cvd_spot_trend=market_context["cvd_spot_trend"],
+        oi_delta_1h_pct=market_context["oi_delta_1h_pct"],
+        funding_interpretation=market_context["funding_interpretation"],
+        funding_rate_8h_pct=market_context["funding_rate_8h_pct"],
+        market_read=market_context["market_read"],
+        context_sources=market_context["source_meta"],
         max_zones=max_zones,
         prev_setup_states=prev_states,
     )

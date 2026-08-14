@@ -122,6 +122,13 @@ def _safe_age(state: Any, attr: str, now: float) -> Optional[float]:
                 break
     if ts is None and isinstance(obj, (int, float)):
         ts = obj
+    # CVDData 等序列模型的权威 as_of 是最后一个数据点。
+    if (ts is None or ts <= 0) and getattr(obj, "series", None):
+        try:
+            last = obj.series[-1]
+            ts = getattr(last, "ts", None)
+        except (AttributeError, IndexError, TypeError):
+            ts = None
     if ts is None or ts <= 0:
         return None
     if ts > 1e12:

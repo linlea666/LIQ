@@ -280,6 +280,8 @@ class EmailNotificationConfig:
     # 触发口径：accepted_scenario 切换 + bias∈{long,short} + conf≥min + 非 range_bound + dq=ok
     # 强信号通道（confidence≥strong + continuity.stance=reversal）走独立 dedup_key + 短 cooldown
     include_market_action: bool = True
+    # Bottom Model 日线确认区提醒。独立于短线信号通道，但仍受 enabled 总开关控制。
+    include_bottom_model: bool = True
     market_action_min_confidence: int = 75
     market_action_strong_confidence: int = 85
     market_action_strong_cooldown_minutes: int = 20
@@ -656,6 +658,7 @@ def _build_settings(raw: dict) -> Settings:
         include_key_levels=email_raw.get("include_key_levels", True),
         # MAA 通道（默认开 · 阈值与 dataclass 默认一致）
         include_market_action=email_raw.get("include_market_action", True),
+        include_bottom_model=email_raw.get("include_bottom_model", True),
         market_action_min_confidence=int(email_raw.get("market_action_min_confidence", 75) or 75),
         market_action_strong_confidence=int(email_raw.get("market_action_strong_confidence", 85) or 85),
         market_action_strong_cooldown_minutes=int(

@@ -8,6 +8,7 @@ import html
 import logging
 import smtplib
 import ssl
+from dataclasses import dataclass
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -25,6 +26,14 @@ _BJ_TZ = timezone(timedelta(hours=8))
 
 # 避免 "Email notification skipped" 每 tick 刷屏：配置缺失仅首次告警一次
 _warned_missing_config = False
+
+
+@dataclass(frozen=True)
+class EmailSendResult:
+    """SMTP 发送结果；给持久化 outbox 留下可诊断但不含凭据的错误。"""
+
+    ok: bool
+    error: str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -434,12 +443,37 @@ async def send_html_email(
     idempotency_key: str = "",
 ) -> bool:
     """复用现有SMTP传输；调用方仅负责主题和HTML，不改变旧通知语义。"""
+    result = await send_html_email_result(
+        subject,
+        html_body,
+        config,
+        log_context=log_context,
+        idempotency_key=idempotency_key,
+    )
+    return result.ok
+
+
+async def send_html_email_result(
+    subject: str,
+    html_body: str,
+    config: "EmailNotificationConfig",
+    *,
+    log_context: str = "",
+    idempotency_key: str = "",
+) -> EmailSendResult:
+    """发送 HTML 邮件并返回错误详情；旧 bool 接口由 ``send_html_email`` 包装。"""
     global _warned_missing_config
-    if not config.to or not config.smtp_user:
+    if (
+        not config.to
+        or not config.smtp_host
+        or int(config.smtp_port or 0) <= 0
+        or not config.smtp_user
+        or not config.smtp_pass
+    ):
         if not _warned_missing_config:
-            logger.warning("Email notification skipped: no recipients or smtp_user configured (suppressing further warnings)")
+            logger.warning("Email notification skipped: SMTP configuration incomplete (suppressing further warnings)")
             _warned_missing_config = True
-        return False
+        return EmailSendResult(False, "SMTP configuration incomplete")
     # 配置已恢复，重置抑制标志，确保未来再次丢失时能提醒
     _warned_missing_config = False
 
@@ -452,20 +486,20 @@ async def send_html_email(
         msg["Message-ID"] = f"<{digest}@liq.local>"
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    def _send():
+    def _send() -> EmailSendResult:
         try:
             ctx = ssl.create_default_context()
             with smtplib.SMTP_SSL(config.smtp_host, config.smtp_port, context=ctx, timeout=15) as server:
                 server.login(config.smtp_user, config.smtp_pass)
                 server.sendmail(config.smtp_user, config.to, msg.as_string())
-            return True
-        except Exception:
+            return EmailSendResult(True)
+        except Exception as exc:
             logger.error("Failed to send alert email", exc_info=True)
-            return False
+            return EmailSendResult(False, f"{type(exc).__name__}: {exc}"[:500])
 
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _send)
-    if result:
+    if result.ok:
         logger.info("Alert email sent | %s | %s", log_context, subject)
     return result
 

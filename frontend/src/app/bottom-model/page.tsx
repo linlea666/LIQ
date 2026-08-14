@@ -115,6 +115,11 @@ type HistoryItem = {
   stress?: { score: number } | null;
   confirmation?: { score: number | null } | null;
 };
+type EmailAlertHealth = {
+  enabled: boolean; configured: boolean;
+  pending: number; failed: number; sent: number; suppressed: number; expired: number;
+  last_sent_at: number | null; last_error: string;
+};
 
 const fmt = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : v.toFixed(digits);
@@ -168,6 +173,39 @@ const VERDICT: Record<string, string> = {
   confirmed_recovery: "高压力，出现多项确认",
   unknown: "数据不足，暂无法判断",
 };
+const QUADRANT_EXPLANATION = [
+  { key: "bear_market", title: "压力不足", body: "市场还没有出现足够强的历史底部压力特征，不能据此判断见底。" },
+  { key: "panic_flush", title: "高压力／确认不足", body: "跌得够惨，但需求、卖方衰竭或价格转好证据还不够。" },
+  { key: "basing", title: "高压力／早期确认", body: "压力已经较高，也出现部分改善，但还没凑齐多项确认。" },
+  { key: "confirmed_recovery", title: "高压力／多项确认", body: "压力与多项改善证据同时成立；首次进入此区才发邮件，但不保证这里是最低点。" },
+] as const;
+
+function EmailAlertStatus({ health }: { health: EmailAlertHealth | null }) {
+  const channel = !health ? "状态加载中"
+    : !health.enabled ? "提醒已关闭"
+    : !health.configured ? "提醒已开启，但 SMTP 配置不完整"
+    : "提醒已开启，配置完整";
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+      <div className="text-[12px] font-medium text-slate-300">底部确认邮件</div>
+      <div className={`mt-1 text-[11px] ${health?.enabled && health.configured ? "text-emerald-400" : "text-amber-300"}`}>
+        {channel}
+      </div>
+      <div className="mt-2 text-[10px] leading-5 text-slate-500">
+        仅当有效日线快照首次进入“高压力／多项确认”时发送；持续处于确认区、同日重跑和服务重启不会重复。
+      </div>
+      {health && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-400">
+          <span>待发送 {health.pending}</span><span>失败 {health.failed}</span>
+          <span>已发送 {health.sent}</span><span>已抑制 {health.suppressed}</span>
+          <span>已过期 {health.expired}</span>
+          <span>最近发送 {health.last_sent_at ? new Date(health.last_sent_at * 1000).toLocaleString("zh-CN") : "—"}</span>
+        </div>
+      )}
+      {health?.last_error && <div className="mt-2 text-[10px] text-rose-400">最近错误：{health.last_error}</div>}
+    </div>
+  );
+}
 
 function legacyDemandDimension(snapshot: Snapshot, keys: string[]) {
   const demand = snapshot.factors.find((factor) => factor.key === "demand");
@@ -831,6 +869,7 @@ export default function BottomModelPage() {
       }
     : legacyLiquidityAmmo;
   const lastRun = runtimeHealth?.last_run_summary as Record<string, unknown> | null | undefined;
+  const emailAlertHealth = (runtimeHealth?.email_alert ?? null) as EmailAlertHealth | null;
   const lastRunBlocked = lastRun?.snapshot_persisted === false;
   const dq = snapshot?.data_quality;
   const dqIssues = useMemo(() => {
@@ -897,6 +936,25 @@ export default function BottomModelPage() {
           <>
             {/* 小白结论横幅 */}
             <VerdictBanner snapshot={snapshot} />
+
+            <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr]">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+                <div className="mb-3 text-[12px] font-medium text-slate-300">四象限白话说明</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {QUADRANT_EXPLANATION.map((item) => (
+                    <div key={item.key} className={`rounded-md border px-3 py-2 ${
+                      snapshot.quadrant.key === item.key
+                        ? QUADRANT_TONE[item.key]
+                        : "border-slate-800 bg-slate-950/40 text-slate-400"
+                    }`}>
+                      <div className="text-[11px] font-medium">{item.title}{snapshot.quadrant.key === item.key && " · 当前"}</div>
+                      <div className="mt-1 text-[10px] leading-4 opacity-75">{item.body}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <EmailAlertStatus health={emailAlertHealth} />
+            </div>
 
             {/* 四仪表盘：压力极端不等于底部——把"卖方是否卖完""需求是否接管"
                 与压力并列，分歧本身比单一综合分更有信息量 */}

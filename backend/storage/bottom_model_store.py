@@ -120,7 +120,32 @@ class BottomModelStore:
                     payload TEXT NOT NULL,
                     markdown TEXT NOT NULL
                 );
-                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','4');
+                CREATE TABLE IF NOT EXISTS bottom_email_outbox (
+                    alert_id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL,
+                    data_policy_id TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(
+                        status IN ('PENDING','SENT','FAILED','SUPPRESSED','EXPIRED')
+                    ),
+                    subject TEXT NOT NULL,
+                    html_body TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_attempt_at INTEGER NOT NULL DEFAULT 0,
+                    sent_at INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    UNIQUE(model_id,data_policy_id,day,state)
+                );
+                CREATE INDEX IF NOT EXISTS idx_bottom_email_due
+                    ON bottom_email_outbox(status,next_attempt_at);
+                CREATE INDEX IF NOT EXISTS idx_bottom_email_day
+                    ON bottom_email_outbox(day);
+                INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','5');
                 """
             )
 
@@ -334,12 +359,42 @@ class BottomModelStore:
     # ── 每日评分快照 ──
 
     def save_snapshot(self, day: str, payload: dict[str, Any]) -> None:
+        self.save_snapshot_with_bottom_alert(day, payload)
+
+    def save_snapshot_with_bottom_alert(
+        self,
+        day: str,
+        payload: dict[str, Any],
+        alert: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """同事务保存有效快照与可选邮件事件；返回事件是否首次入队。"""
+        inserted = False
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT INTO snapshots(day,ts,payload) VALUES(?,?,?)
                    ON CONFLICT(day) DO UPDATE SET ts=excluded.ts,payload=excluded.payload""",
                 (day, int(time.time()), json.dumps(payload, ensure_ascii=False)),
             )
+            if alert is not None:
+                now = int(alert.get("created_at") or time.time())
+                cur = self._conn.execute(
+                    """INSERT OR IGNORE INTO bottom_email_outbox(
+                         alert_id,model_id,data_policy_id,day,state,status,subject,
+                         html_body,attempts,next_attempt_at,expires_at,created_at,
+                         updated_at,last_attempt_at,sent_at,last_error
+                       ) VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?,0,0,'')""",
+                    (
+                        str(alert["alert_id"]), str(alert["model_id"]),
+                        str(alert["data_policy_id"]), day,
+                        str(alert.get("state") or "confirmed_recovery"),
+                        str(alert.get("status") or "PENDING"),
+                        str(alert["subject"]), str(alert["html_body"]),
+                        int(alert.get("next_attempt_at") or now),
+                        int(alert.get("expires_at") or now + 86400), now, now,
+                    ),
+                )
+                inserted = cur.rowcount > 0
+        return inserted
 
     def latest_snapshot(self) -> Optional[dict[str, Any]]:
         with self._lock:
@@ -356,6 +411,162 @@ class BottomModelStore:
                 "SELECT payload FROM snapshots ORDER BY day DESC LIMIT ?", (limit,)
             ).fetchall()
         return [json.loads(row["payload"]) for row in reversed(rows)]
+
+    def previous_ok_snapshot(
+        self,
+        *,
+        model_id: str,
+        data_policy_id: str,
+        before_day: str,
+    ) -> Optional[dict[str, Any]]:
+        """返回同模型/政策下更早的最近 OK 快照；无历史时明确返回 None。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM snapshots WHERE day<? ORDER BY day DESC",
+                (before_day,),
+            ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if (
+                payload.get("model_id") == model_id
+                and payload.get("data_policy_id") == data_policy_id
+                and payload.get("quality_status") == "OK"
+            ):
+                return payload
+        return None
+
+    # ── 底部确认邮件 outbox ──
+
+    def claim_due_bottom_alerts(
+        self,
+        *,
+        now: Optional[int] = None,
+        limit: int = 10,
+        lease_sec: int = 120,
+    ) -> list[dict[str, Any]]:
+        """领取到期项并延后 next_attempt，避免同进程并发重复发送。"""
+        current = int(time.time() if now is None else now)
+        self.expire_bottom_alerts(now=current)
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                """SELECT * FROM bottom_email_outbox
+                   WHERE status='PENDING' AND next_attempt_at<=? AND expires_at>?
+                   ORDER BY created_at ASC LIMIT ?""",
+                (current, current, max(1, min(int(limit), 50))),
+            ).fetchall()
+            ids = [str(row["alert_id"]) for row in rows]
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                self._conn.execute(
+                    f"""UPDATE bottom_email_outbox SET next_attempt_at=?,updated_at=?
+                        WHERE alert_id IN ({placeholders})""",
+                    (current + max(30, int(lease_sec)), current, *ids),
+                )
+        return [dict(row) for row in rows]
+
+    def mark_bottom_alert_sent(self, alert_id: str, *, now: Optional[int] = None) -> None:
+        current = int(time.time() if now is None else now)
+        with self._lock, self._conn:
+            self._conn.execute(
+                """UPDATE bottom_email_outbox
+                   SET status='SENT',attempts=attempts+1,last_attempt_at=?,sent_at=?,
+                       updated_at=?,last_error=''
+                   WHERE alert_id=? AND status='PENDING'""",
+                (current, current, current, alert_id),
+            )
+
+    def mark_bottom_alert_failed(
+        self,
+        alert_id: str,
+        error: str,
+        *,
+        now: Optional[int] = None,
+    ) -> None:
+        current = int(time.time() if now is None else now)
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT attempts FROM bottom_email_outbox WHERE alert_id=? AND status='PENDING'",
+                (alert_id,),
+            ).fetchone()
+            if row is None:
+                return
+            attempts = int(row["attempts"]) + 1
+            if attempts >= 4:
+                status, next_attempt = "FAILED", current
+            else:
+                retry_delays = {1: 15 * 60, 2: 60 * 60, 3: 3 * 60 * 60}
+                status = "PENDING"
+                next_attempt = current + retry_delays[attempts]
+            self._conn.execute(
+                """UPDATE bottom_email_outbox
+                   SET status=?,attempts=?,next_attempt_at=?,last_attempt_at=?,
+                       updated_at=?,last_error=? WHERE alert_id=?""",
+                (status, attempts, next_attempt, current, current, error[:500], alert_id),
+            )
+
+    def defer_bottom_alert(
+        self,
+        alert_id: str,
+        error: str,
+        *,
+        now: Optional[int] = None,
+        delay_sec: int = 600,
+    ) -> None:
+        """配置暂缺时延后发送，但不消耗 SMTP 尝试次数。"""
+        current = int(time.time() if now is None else now)
+        with self._lock, self._conn:
+            self._conn.execute(
+                """UPDATE bottom_email_outbox SET next_attempt_at=?,updated_at=?,last_error=?
+                   WHERE alert_id=? AND status='PENDING'""",
+                (current + max(60, int(delay_sec)), current, error[:500], alert_id),
+            )
+
+    def suppress_bottom_alert(self, alert_id: str, *, now: Optional[int] = None) -> None:
+        current = int(time.time() if now is None else now)
+        with self._lock, self._conn:
+            self._conn.execute(
+                """UPDATE bottom_email_outbox
+                   SET status='SUPPRESSED',updated_at=?,last_error=''
+                   WHERE alert_id=? AND status='PENDING'""",
+                (current, alert_id),
+            )
+
+    def expire_bottom_alerts(self, *, now: Optional[int] = None) -> int:
+        current = int(time.time() if now is None else now)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                """UPDATE bottom_email_outbox SET status='EXPIRED',updated_at=?
+                   WHERE status='PENDING' AND expires_at<=?""",
+                (current, current),
+            )
+        return int(cur.rowcount)
+
+    def bottom_alert_health(self) -> dict[str, Any]:
+        with self._lock:
+            counts = self._conn.execute(
+                "SELECT status,COUNT(*) AS n FROM bottom_email_outbox GROUP BY status"
+            ).fetchall()
+            last_sent = self._conn.execute(
+                "SELECT MAX(sent_at) AS ts FROM bottom_email_outbox WHERE status='SENT'"
+            ).fetchone()
+            latest_error = self._conn.execute(
+                """SELECT last_error FROM bottom_email_outbox
+                   WHERE status IN ('PENDING','FAILED') AND last_error!=''
+                   ORDER BY updated_at DESC LIMIT 1"""
+            ).fetchone()
+        by_status = {str(row["status"]): int(row["n"]) for row in counts}
+        return {
+            "pending": by_status.get("PENDING", 0),
+            "failed": by_status.get("FAILED", 0),
+            "sent": by_status.get("SENT", 0),
+            "suppressed": by_status.get("SUPPRESSED", 0),
+            "expired": by_status.get("EXPIRED", 0),
+            "last_sent_at": int(last_sent["ts"]) if last_sent and last_sent["ts"] else None,
+            "last_error": str(latest_error["last_error"]) if latest_error else "",
+        }
 
     # ── 历史回放（base rate 层）──
 
@@ -530,6 +741,7 @@ class BottomModelStore:
         cutoff_day = time.strftime("%Y-%m-%d", time.gmtime(cutoff_ts))
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM snapshots WHERE day<?", (cutoff_day,))
+            self._conn.execute("DELETE FROM bottom_email_outbox WHERE day<?", (cutoff_day,))
 
     def close(self) -> None:
         with self._lock:

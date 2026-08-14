@@ -39,8 +39,10 @@ from models.trading_brain import (
     BrainSpotBook,
     BrainSpotBookItem,
     BrainZoneRoles,
+    BrainMarketRead,
     TradingBrainSnapshot,
 )
+from models.data_meta import DataMeta
 
 
 @dataclass
@@ -997,6 +999,9 @@ def build_trading_brain_snapshot(
     cvd_spot_trend: str = "",
     oi_delta_1h_pct: Optional[float] = None,
     funding_interpretation: str = "",
+    funding_rate_8h_pct: Optional[float] = None,
+    market_read: Optional[BrainMarketRead] = None,
+    context_sources: Optional[dict[str, DataMeta]] = None,
     max_zones: int = 24,
     prev_setup_states: Optional[dict[str, "Any"]] = None,
 ) -> TradingBrainSnapshot:
@@ -1072,10 +1077,12 @@ def build_trading_brain_snapshot(
         regime_description=kl.regime_description if kl else "",
         oi_delta_1h_pct=oi_delta_1h_pct,
         funding_interpretation=funding_interpretation[:120] if funding_interpretation else "",
+        funding_rate_8h_pct=funding_rate_8h_pct,
         cvd_contract_trend=cvd_contract_trend or "",
         cvd_spot_trend=cvd_spot_trend or "",
         nearest_magnet_above=mag_above,
         nearest_magnet_below=mag_below,
+        market_read=market_read or BrainMarketRead(),
     )
 
     ts = int(op.ts_sec) if op and op.ts_sec else (int(kl.ts) if kl and kl.ts else now_sec)
@@ -1090,6 +1097,7 @@ def build_trading_brain_snapshot(
         is_partial_ready=is_partial_ready,
         ready_count=ready_count,
         total_count=total_count,
+        context_sources=context_sources or {},
     )
 
     # Phase 2：从 zones 派生 TradeSetupCandidate（不输出交易指令）

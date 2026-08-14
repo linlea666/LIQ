@@ -12,6 +12,8 @@ from typing import Literal, Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from models.data_meta import DataMeta
+
 if TYPE_CHECKING:
     from models.sweep_watch import BrainSweepWatch  # noqa: F401
 
@@ -155,6 +157,34 @@ class BrainDataQuality(BaseModel):
     """已就绪的核心源数量（最大 = total_count）。"""
     total_count: int = 3
     """核心源总数：当前=3（KL、挂单墙、清算地图）。"""
+    context_sources: dict[str, DataMeta] = Field(default_factory=dict)
+    """顶栏资金流源的独立时效；不再借用关键位聚合质量猜测。"""
+
+
+MarketBias = Literal["bullish", "bearish", "neutral", "insufficient"]
+FlowState = Literal[
+    "aligned_buy", "aligned_sell", "spot_strong_split", "spot_weak_split",
+    "unclear", "insufficient",
+]
+LeverageState = Literal[
+    "deleveraging", "leverage_building", "small_change", "unavailable", "conflict",
+]
+FundingState = Literal["long_crowded", "short_crowded", "neutral", "unavailable"]
+EvidenceGrade = Literal["strong", "medium", "weak", "insufficient"]
+
+
+class BrainMarketRead(BaseModel):
+    """多源确定性白话结论；只解释证据，不生成交易指令。"""
+
+    bias: MarketBias = "insufficient"
+    evidence_grade: EvidenceGrade = "insufficient"
+    title: str = "证据不足 · 等待数据"
+    summary: str = "核心资金流数据尚未齐备，暂不判断方向。"
+    flow_state: FlowState = "insufficient"
+    leverage_state: LeverageState = "unavailable"
+    funding_state: FundingState = "unavailable"
+    evidence: list[str] = Field(default_factory=list)
+    cautions: list[str] = Field(default_factory=list)
 
 
 class BrainContextChips(BaseModel):
@@ -164,10 +194,12 @@ class BrainContextChips(BaseModel):
     regime_description: str = ""
     oi_delta_1h_pct: Optional[float] = None
     funding_interpretation: str = ""
+    funding_rate_8h_pct: Optional[float] = None
     cvd_contract_trend: str = ""
     cvd_spot_trend: str = ""
     nearest_magnet_above: Optional[float] = None
     nearest_magnet_below: Optional[float] = None
+    market_read: BrainMarketRead = Field(default_factory=BrainMarketRead)
 
 
 SetupType = Literal[

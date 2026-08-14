@@ -161,6 +161,19 @@ def test_safe_age_dict_with_ts_sec():
     assert "orderbook_pressure" not in f.missing_sources
 
 
+def test_safe_age_reads_last_series_point_for_legacy_cvd():
+    """旧 CVDData 无顶层 ts 时，最后一根 series.ts 仍是权威 as_of。"""
+    now = time.time()
+    s = _fake_state(cvd_age=None)
+    s.cvd_contract = types.SimpleNamespace(
+        ts=0,
+        series=[types.SimpleNamespace(ts=int(now - 40))],
+    )
+    f = compute_freshness(s)
+    assert "cvd" not in f.missing_sources
+    assert 35 <= f.sources_age_seconds["cvd"] <= 45
+
+
 def test_compute_freshness_score_decreases_with_stale_count():
     """每多一个 stale/missing core → score 降一档（共 9 个核心源）"""
     s_stale_2 = _fake_state(

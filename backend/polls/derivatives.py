@@ -34,6 +34,11 @@ from sources.funding_official import (
     fetch_official_pair as fetch_official_funding_pair,
     to_okx_inst_id,
 )
+from utils.time_series import (
+    dedupe_sorted_points,
+    normalize_epoch_seconds,
+    percent_change_at_lookback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,29 +136,39 @@ async def poll_oi(
     if not data:
         return
 
+    incoming: list[OISnapshot] = []
     for item in data:
         try:
             oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
-            ts = int(item.get("time", item.get("t", 0)))
-            if oi_usd > 0:
-                snapshot = OISnapshot(
+            ts = normalize_epoch_seconds(item.get("time", item.get("t", 0)))
+            if oi_usd > 0 and ts > 0:
+                incoming.append(OISnapshot(
                     coin=coin.ccy, ts=ts, oi=oi_usd, oi_usd=oi_usd,
-                )
-                state.oi_history.append(snapshot)
-        except (ValueError, KeyError):
+                ))
+        except (ValueError, KeyError, TypeError):
             continue
 
-    if state.oi_history:
-        current = state.oi_history[-1]
-        first = state.oi_history[0]
-        change_1h = 0.0
-        if first.oi_usd > 0:
-            change_1h = (current.oi_usd - first.oi_usd) / first.oi_usd * 100
+    merged = dedupe_sorted_points(
+        [*state.oi_history, *incoming], ts_getter=lambda p: p.ts,
+    )
+    max_points = state.oi_history.maxlen or 720
+    state.oi_history.clear()
+    state.oi_history.extend(merged[-max_points:])
 
-        recent_5m = list(state.oi_history)[-30:]
-        change_5m = 0.0
-        if recent_5m and recent_5m[0].oi_usd > 0:
-            change_5m = (current.oi_usd - recent_5m[0].oi_usd) / recent_5m[0].oi_usd * 100
+    if state.oi_history:
+        points = list(state.oi_history)
+        current = points[-1]
+        change_5m = percent_change_at_lookback(
+            points, lookback_sec=300, ts_getter=lambda p: p.ts,
+            value_getter=lambda p: p.oi_usd, max_baseline_lag_sec=150,
+        )
+        change_1h = percent_change_at_lookback(
+            points, lookback_sec=3600, ts_getter=lambda p: p.ts,
+            value_getter=lambda p: p.oi_usd, max_baseline_lag_sec=150,
+        )
+        # 不把缺少固定窗口基线伪装成 0%；保留上一份完整快照。
+        if change_5m is None or change_1h is None:
+            return
 
         trend = "stable"
         if change_1h > 3:
@@ -170,14 +185,25 @@ async def poll_oi(
         )
 
     oi_1h = await cg.fetch_oi_aggregated_history(
-        coin.symbol_cg, interval="1h", limit=24,
+        coin.symbol_cg, interval="1h", limit=25,
     )
     if oi_1h and isinstance(oi_1h, list) and len(oi_1h) >= 2:
         try:
-            first_val = float(oi_1h[0].get("close", oi_1h[0].get("openInterest", 0)))
-            last_val = float(oi_1h[-1].get("close", oi_1h[-1].get("openInterest", 0)))
-            if first_val > 0:
-                state.oi_change_24h_pct = round((last_val - first_val) / first_val * 100, 2)
+            hourly = [
+                {
+                    "ts": normalize_epoch_seconds(item.get("time", item.get("t", 0))),
+                    "value": float(item.get("close", item.get("openInterest", 0))),
+                }
+                for item in oi_1h
+                if isinstance(item, dict)
+            ]
+            change_24h = percent_change_at_lookback(
+                hourly, lookback_sec=86_400,
+                ts_getter=lambda p: p["ts"], value_getter=lambda p: p["value"],
+                max_baseline_lag_sec=1800,
+            )
+            if change_24h is not None:
+                state.oi_change_24h_pct = round(change_24h, 2)
         except (ValueError, KeyError, TypeError):
             pass
 

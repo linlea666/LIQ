@@ -15,6 +15,7 @@ from models.orderbook_ext import LargeOrder, LargeOrderSnapshot
 from models.orderbook_pressure import LargeOrderLifecycle
 from processors.cvd import detect_cvd_price_divergence
 from sources.coinglass import CoinglassSource
+from utils.time_series import dedupe_sorted_points, normalize_epoch_seconds
 
 if TYPE_CHECKING:
     from engine import CoinState
@@ -40,9 +41,8 @@ def calc_cvd_trend(points: list[CVDPoint], lookback: int = 12) -> tuple[str, flo
         return "flat", 0.0
     recent = points[-lookback:]
     delta_sum = sum(p.delta for p in recent)
-    start_cvd = recent[0].cvd
-    end_cvd = recent[-1].cvd
-    diff = end_cvd - start_cvd
+    # 12 根 5m delta 的和才是完整 1h；端点 CVD 相减只覆盖 11 个间隔。
+    diff = delta_sum
     abs_values = [abs(p.delta) for p in recent if p.delta != 0]
     median_abs = sorted(abs_values)[len(abs_values) // 2] if abs_values else 1.0
     threshold = max(median_abs * 0.5, abs(delta_sum) * 0.05)
@@ -63,7 +63,7 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
         points = []
         for item in contract_data:
             try:
-                ts = int(item.get("time", item.get("t", 0)))
+                ts = normalize_epoch_seconds(item.get("time", item.get("t", 0)))
                 buy = float(item.get("agg_taker_buy_vol", item.get("buyVolUsd", 0)))
                 sell = float(item.get("agg_taker_sell_vol", item.get("sellVolUsd", 0)))
                 cvd_val = float(item.get("cum_vol_delta", item.get("cvd", buy - sell)))
@@ -74,11 +74,13 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
             except (ValueError, KeyError):
                 continue
 
+        points = dedupe_sorted_points(points, ts_getter=lambda p: p.ts)
         if points:
             trend, delta_1h = calc_cvd_trend(points)
             state.cvd_contract = CVDData(
                 coin=coin.ccy, inst_type="CONTRACTS",
-                series=points, trend_1h=trend, delta_1h=delta_1h,
+                ts=points[-1].ts, series=points,
+                trend_1h=trend, delta_1h=delta_1h,
             )
             if state.candle_prices:
                 state.cvd_contract = detect_cvd_price_divergence(
@@ -92,7 +94,7 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
         points = []
         for item in spot_data:
             try:
-                ts = int(item.get("time", item.get("t", 0)))
+                ts = normalize_epoch_seconds(item.get("time", item.get("t", 0)))
                 buy = float(item.get("agg_taker_buy_vol", item.get("buyVolUsd", 0)))
                 sell = float(item.get("agg_taker_sell_vol", item.get("sellVolUsd", 0)))
                 cvd_val = float(item.get("cum_vol_delta", item.get("cvd", buy - sell)))
@@ -102,11 +104,13 @@ async def poll_cvd(cg: CoinglassSource, coin: CoinConfig, state: CoinState) -> N
                 ))
             except (ValueError, KeyError):
                 continue
+        points = dedupe_sorted_points(points, ts_getter=lambda p: p.ts)
         if points:
             trend, delta = calc_cvd_trend(points)
             state.cvd_spot = CVDData(
                 coin=coin.ccy, inst_type="SPOT",
-                series=points, trend_1h=trend, delta_1h=delta,
+                ts=points[-1].ts, series=points,
+                trend_1h=trend, delta_1h=delta,
             )
             if state.candle_prices:
                 state.cvd_spot = detect_cvd_price_divergence(

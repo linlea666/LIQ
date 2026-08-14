@@ -179,7 +179,7 @@ function ZoneRow({
           className="flex items-center gap-1"
           title="SA = 扫单吸引（杠杆拥挤+磁铁邻近+主动攻击+撤墙风险+变薄综合分）"
         >
-          <span className="text-[9px] text-slate-500">SA</span>
+          <span className="text-[9px] text-slate-500">扫单吸引(SA)</span>
           <MiniBar value={sa} kind="risk" />
         </div>
         <div
@@ -190,7 +190,7 @@ function ZoneRow({
               : "SR = 阻力信任（已校准）：突破后会不会被压回"
           }
         >
-          <span className="text-[9px] text-slate-500">SR</span>
+          <span className="text-[9px] text-slate-500">防守可信(SR)</span>
           <MiniBar value={sr ?? 0} kind="trust" />
         </div>
       </div>
@@ -198,7 +198,7 @@ function ZoneRow({
       {/* 第四行：BTR / 脆性 数字（无条形，节省空间） */}
       <div className="mt-0.5 flex items-center gap-3 text-[9px] text-slate-500">
         <span title="BTR = 打穿风险（≥0.7 高：不建议提前接，等扫单反应）">
-          BTR <span className="tabular-nums text-slate-400">{btr.toFixed(2)}</span>
+          继续打穿风险(BTR) <span className="tabular-nums text-slate-400">{btr.toFixed(2)}</span>
         </span>
         <span title="脆性（同区合约层 active_attack / wall_removal_risk 综合，0=无攻击 / 1=正在被攻击）">
           脆 <span className="tabular-nums text-slate-400">{frag.toFixed(2)}</span>
@@ -285,11 +285,11 @@ export default function SweepStackPanel({
             扫单堆积带
           </span>
           <span className="text-[10px] text-slate-500">
-            按扫单吸引力 (SA) 排序 · 不限距离 · 全局视图
+            按扫单吸引力排序 · 不限距离 · 全局视图
           </span>
         </div>
         <div className="text-[10px] text-slate-500">
-          SA 高 = 哪里最招扫 ｜ SR 高 = 反弹力强 ｜ BTR 高 = 扫到会继续杀
+          扫单吸引高 = 更招扫 ｜ 防守可信高 = 更可能反弹/压回 ｜ 打穿风险高 = 更可能继续穿越
         </div>
       </div>
 

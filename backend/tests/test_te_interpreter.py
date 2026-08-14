@@ -805,6 +805,37 @@ def test_extras_fingerprint_buckets_empty():
     assert _extras_fingerprint_buckets({}) == {}
 
 
+def test_compact_flow_oi_4h_uses_timestamp_aligned_baseline():
+    from ai.te_interpreter import _compact_flow_metrics
+
+    base = 1_700_000_000
+    history = [
+        {"ts": base + i * 300, "oi_usd": 100.0 + i}
+        for i in range(49)
+    ]
+    out = _compact_flow_metrics(
+        None, None, {"current_usd": 148.0}, history, None,
+    )
+    assert out is not None
+    assert out["oi"]["change_4h_pct"] == 48.0
+
+
+def test_compact_flow_oi_4h_does_not_widen_missing_window():
+    from ai.te_interpreter import _compact_flow_metrics
+
+    base = 1_700_000_000
+    history = [
+        {"ts": base + i * 300, "oi_usd": 100.0 + i}
+        for i in range(49)
+        if i != 0
+    ]
+    out = _compact_flow_metrics(
+        None, None, {"current_usd": 148.0}, history, None,
+    )
+    assert out is not None
+    assert "change_4h_pct" not in out["oi"]
+
+
 def test_shadow_log_includes_new_fields(tmp_path, monkeypatch):
     """回归：补全后的 log_interpretation 必须包含 4 个新字段。"""
     from models.te_interpretation import (

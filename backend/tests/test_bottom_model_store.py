@@ -76,6 +76,86 @@ def test_snapshot_roundtrip_and_prune(tmp_path):
     store.close()
 
 
+def _alert(day: str, *, now: int = 1_000) -> dict:
+    return {
+        "alert_id": f"alert-{day}",
+        "model_id": "bottom-v5",
+        "data_policy_id": "pit-final-v2",
+        "state": "confirmed_recovery",
+        "status": "PENDING",
+        "subject": "subject",
+        "html_body": "<p>body</p>",
+        "created_at": now,
+        "next_attempt_at": now,
+        "expires_at": now + 86400,
+    }
+
+
+def test_snapshot_and_bottom_alert_are_atomic_and_deduplicated(tmp_path):
+    store = _store(tmp_path)
+    day = "2026-08-12"
+    assert store.save_snapshot_with_bottom_alert(day, {"day": day}, _alert(day)) is True
+    assert store.save_snapshot_with_bottom_alert(day, {"day": day}, _alert(day)) is False
+    assert store.bottom_alert_health()["pending"] == 1
+
+    broken = _alert("2026-08-13")
+    del broken["subject"]
+    try:
+        store.save_snapshot_with_bottom_alert("2026-08-13", {"day": "2026-08-13"}, broken)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("malformed alert must abort the transaction")
+    assert all(item["day"] != "2026-08-13" for item in store.snapshot_history())
+    store.close()
+
+
+def test_bottom_alert_retry_schedule_expiry_and_config_defer(tmp_path):
+    store = _store(tmp_path)
+    day = "2026-08-12"
+    store.save_snapshot_with_bottom_alert(day, {"day": day}, _alert(day))
+    item = store.claim_due_bottom_alerts(now=1_000)[0]
+    store.defer_bottom_alert(item["alert_id"], "config missing", now=1_000)
+    row = store._conn.execute(
+        "SELECT * FROM bottom_email_outbox WHERE alert_id=?", (item["alert_id"],),
+    ).fetchone()
+    assert row["attempts"] == 0 and row["next_attempt_at"] == 1_600
+
+    expected = [(1, 2_500, "PENDING"), (2, 7_000, "PENDING"),
+                (3, 18_800, "PENDING"), (4, 8_000, "FAILED")]
+    for attempt, next_at, status in expected:
+        now = [1_600, 3_400, 8_000, 8_000][attempt - 1]
+        store.mark_bottom_alert_failed(item["alert_id"], "smtp failed", now=now)
+        row = store._conn.execute(
+            "SELECT * FROM bottom_email_outbox WHERE alert_id=?", (item["alert_id"],),
+        ).fetchone()
+        assert (row["attempts"], row["next_attempt_at"], row["status"]) == (
+            attempt, next_at, status,
+        )
+
+    expired = _alert("2026-08-13", now=2_000)
+    expired["expires_at"] = 2_100
+    store.save_snapshot_with_bottom_alert("2026-08-13", {"day": "2026-08-13"}, expired)
+    assert store.expire_bottom_alerts(now=2_100) == 1
+    assert store.bottom_alert_health()["expired"] == 1
+    store.close()
+
+
+def test_bottom_alert_survives_restart_and_prunes_with_snapshots(tmp_path):
+    root = tmp_path / "bm"
+    store = BottomModelStore(str(root))
+    old_day = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 900 * 86400))
+    store.save_snapshot_with_bottom_alert(old_day, {"day": old_day}, _alert(old_day))
+    store.close()
+
+    reopened = BottomModelStore(str(root))
+    assert reopened.bottom_alert_health()["pending"] == 1
+    assert reopened.save_snapshot_with_bottom_alert(old_day, {"day": old_day}, _alert(old_day)) is False
+    reopened.prune(snapshot_retention_days=800)
+    assert reopened.bottom_alert_health()["pending"] == 0
+    reopened.close()
+
+
 def test_coverage(tmp_path):
     store = _store(tmp_path)
     store.upsert_series("a", [("2026-08-01", 1.0), ("2026-08-02", 2.0)])

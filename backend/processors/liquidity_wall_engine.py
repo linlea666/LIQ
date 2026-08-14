@@ -52,6 +52,11 @@ from models.orderbook_pressure import (
     WallZoneStatus,
     WallZoneTrend,
 )
+from processors.market_thresholds import (
+    FUNDING_LONG_CROWDED_PCT,
+    FUNDING_SHORT_CROWDED_PCT,
+    OI_STRONG_CHANGE_PCT,
+)
 
 if TYPE_CHECKING:
     from engine import CoinState
@@ -123,11 +128,11 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "consumed_lo_full_threshold": 0.30,    # large_order 已成交 ≥30% wall 总厚度 → 满分
 
     # M2：crowding 阈值
-    "funding_high_pct": 0.05,              # ≥ 0.05% (8h) → high
-    "funding_low_pct": -0.02,              # ≤ -0.02% → low/short_crowded
+    "funding_high_pct": FUNDING_LONG_CROWDED_PCT,  # ≥ 0.05% (8h) → high
+    "funding_low_pct": FUNDING_SHORT_CROWDED_PCT,  # ≤ -0.02% → short_crowded
     "ls_extreme_high": 2.5,                # 多空比 > 2.5 = top_long
     "ls_extreme_low": 0.4,                 # < 0.4 = top_short
-    "oi_delta_strong_pct": 1.0,            # 单周期 ≥ 1% 算显著
+    "oi_delta_strong_pct": OI_STRONG_CHANGE_PCT,   # 单周期 ≥ 1% 算显著
     "oi_margin_dominant_ratio": 0.65,      # > 65% 一方 = dominant
 
     # M2：sweep & break_through

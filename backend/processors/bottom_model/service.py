@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -26,6 +28,8 @@ from processors.bottom_model.snapshot import (
     MODEL_ID,
     build_snapshot,
 )
+from notifications.bottom_model_alert import build_bottom_model_email
+from notifications.email_alert import send_html_email_result
 from sources.bgeometrics import create_bgeometrics_source
 from sources.yahoo_cme import create_yahoo_cme_source
 from storage.bottom_model_store import BottomModelStore
@@ -34,6 +38,36 @@ logger = logging.getLogger(__name__)
 
 _SCHEDULER_TICK_SEC = 600       # 调度检查间隔
 _RETRY_MIN_INTERVAL_SEC = 7200  # 失败 spec 重试最小间隔
+_ALERT_EXPIRE_SEC = 24 * 3600
+
+
+def _email_config_complete(config: Any) -> bool:
+    return bool(
+        config is not None
+        and getattr(config, "to", None)
+        and getattr(config, "smtp_host", "")
+        and int(getattr(config, "smtp_port", 0) or 0) > 0
+        and getattr(config, "smtp_user", "")
+        and getattr(config, "smtp_pass", "")
+    )
+
+
+def _redact_email_error(value: str, config: Any = None) -> str:
+    """健康接口仅返回短诊断，不暴露邮箱地址或疑似认证字段。"""
+    clean = re.sub(r"[\w.+-]+@[\w.-]+", "***@***", str(value or ""))
+    clean = re.sub(
+        r"(?i)(password|passwd|smtp_pass|authorization|auth)\s*[:=]\s*\S+",
+        r"\1=***",
+        clean,
+    )
+    if config is not None:
+        for secret in (
+            getattr(config, "smtp_user", ""),
+            getattr(config, "smtp_pass", ""),
+        ):
+            if secret:
+                clean = clean.replace(str(secret), "***")
+    return clean[:240]
 
 
 class BottomModelService:
@@ -52,12 +86,28 @@ class BottomModelService:
             bgeometrics=self._bg, yahoo_cme=self._yahoo,
             coinglass_spacing_sec=self._cfg.coinglass_spacing_sec,
         )
+        notifications = getattr(settings, "notifications", None)
+        self._email_cfg = getattr(notifications, "email", None)
+        configured_page_url = os.getenv("BOTTOM_MODEL_PAGE_URL", "").strip()
+        if not configured_page_url:
+            server = getattr(settings, "server", None)
+            origins = getattr(server, "cors_origins", []) if server is not None else []
+            configured_page_url = next(
+                (
+                    str(origin).rstrip("/") + "/bottom-model"
+                    for origin in reversed(origins or [])
+                    if "localhost" not in str(origin) and "127.0.0.1" not in str(origin)
+                ),
+                "",
+            )
+        self._bottom_page_url = configured_page_url
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._manual_task: Optional[asyncio.Task] = None
         # 懒创建：Python 3.9 的 asyncio.Lock() 构造期即要求事件循环，
         # 而本服务在 Engine.__init__（同步上下文）中实例化
         self._run_lock: Optional[asyncio.Lock] = None
+        self._email_lock: Optional[asyncio.Lock] = None
         self._last_run_summary: Optional[dict[str, Any]] = None
         self._last_run_ts: float = 0.0
 
@@ -126,6 +176,15 @@ class BottomModelService:
             for key, item in collector_health["fetch_log"].items()
             if key in active_keys and not item["last_ok"]
         }
+        outbox_health = self._store.bottom_alert_health()
+        outbox_health["last_error"] = _redact_email_error(
+            outbox_health["last_error"], self._email_cfg,
+        )
+        channel_enabled = bool(
+            self._email_cfg is not None
+            and getattr(self._email_cfg, "enabled", False)
+            and getattr(self._email_cfg, "include_bottom_model", True)
+        )
         return {
             "enabled": self.enabled,
             "running": self._running,
@@ -144,6 +203,11 @@ class BottomModelService:
             ),
             "failed_fetches": failed_fetches,
             "run_in_progress": self._run_in_progress(),
+            "email_alert": {
+                "enabled": channel_enabled,
+                "configured": _email_config_complete(self._email_cfg),
+                **outbox_health,
+            },
             **collector_health,
         }
 
@@ -180,6 +244,7 @@ class BottomModelService:
     async def _run(self) -> None:
         while self._running:
             try:
+                await self._process_bottom_alerts()
                 if self._should_run_now():
                     await self.run_once()
             except asyncio.CancelledError:
@@ -218,6 +283,93 @@ class BottomModelService:
             return True
         return requires_refresh
 
+    def _build_bottom_alert(self, snapshot: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """只为同模型/政策的有效日线状态跃迁创建一次确定性提醒。"""
+        if snapshot.get("quality_status") != "OK":
+            return None
+        if (snapshot.get("quadrant") or {}).get("key") != "confirmed_recovery":
+            return None
+        day = str(snapshot.get("day") or "")
+        model_id = str(snapshot.get("model_id") or snapshot.get("algorithm_version") or "")
+        data_policy_id = str(snapshot.get("data_policy_id") or "")
+        if not day or not model_id or not data_policy_id:
+            return None
+        previous = self._store.previous_ok_snapshot(
+            model_id=model_id,
+            data_policy_id=data_policy_id,
+            before_day=day,
+        )
+        # 首次部署/模型升级没有可比历史时不补发旧状态。
+        if previous is None:
+            return None
+        if (previous.get("quadrant") or {}).get("key") == "confirmed_recovery":
+            return None
+        subject, html_body = build_bottom_model_email(
+            snapshot,
+            page_url=self._bottom_page_url,
+        )
+        now = int(time.time())
+        raw_key = f"{model_id}|{data_policy_id}|{day}|confirmed_recovery"
+        alert_id = "bottom-" + hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:32]
+        enabled = bool(
+            self._email_cfg is not None
+            and getattr(self._email_cfg, "enabled", False)
+            and getattr(self._email_cfg, "include_bottom_model", True)
+        )
+        return {
+            "alert_id": alert_id,
+            "model_id": model_id,
+            "data_policy_id": data_policy_id,
+            "state": "confirmed_recovery",
+            "status": "PENDING" if enabled else "SUPPRESSED",
+            "subject": subject,
+            "html_body": html_body,
+            "created_at": now,
+            "next_attempt_at": now,
+            "expires_at": now + _ALERT_EXPIRE_SEC,
+        }
+
+    async def _process_bottom_alerts(self, *, now: Optional[int] = None) -> None:
+        """有界处理持久化 outbox；配置缺失不消耗四次 SMTP 尝试。"""
+        if self._email_lock is None:
+            self._email_lock = asyncio.Lock()
+        async with self._email_lock:
+            current = int(time.time() if now is None else now)
+            items = self._store.claim_due_bottom_alerts(now=current, limit=10)
+            for item in items:
+                channel_enabled = bool(
+                    self._email_cfg is not None
+                    and getattr(self._email_cfg, "enabled", False)
+                    and getattr(self._email_cfg, "include_bottom_model", True)
+                )
+                if not channel_enabled:
+                    self._store.suppress_bottom_alert(item["alert_id"], now=current)
+                    continue
+                if not _email_config_complete(self._email_cfg):
+                    self._store.defer_bottom_alert(
+                        item["alert_id"],
+                        "SMTP configuration incomplete",
+                        now=current,
+                    )
+                    continue
+                result = await send_html_email_result(
+                    item["subject"],
+                    item["html_body"],
+                    self._email_cfg,
+                    log_context="BTC bottom model",
+                    idempotency_key=item["alert_id"],
+                )
+                if result.ok:
+                    self._store.mark_bottom_alert_sent(item["alert_id"], now=current)
+                else:
+                    self._store.mark_bottom_alert_failed(
+                        item["alert_id"],
+                        _redact_email_error(
+                            result.error or "SMTP send failed", self._email_cfg,
+                        ),
+                        now=current,
+                    )
+
     async def run_once(self, force: bool = False) -> dict[str, Any]:
         """采集一轮（账本去重）+ 重建快照。串行化防止并发重入。"""
         if self._run_lock is None:
@@ -231,7 +383,10 @@ class BottomModelService:
             )
             persisted = summary["failed"] == 0 and snapshot.get("quality_status") != "INVALID_DATA"
             if persisted:
-                self._store.save_snapshot(snapshot["day"], snapshot)
+                alert = self._build_bottom_alert(snapshot)
+                self._store.save_snapshot_with_bottom_alert(
+                    snapshot["day"], snapshot, alert,
+                )
             self._store.prune(self._cfg.snapshot_retention_days)
             self._last_run_summary = {
                 "fetched": summary["fetched"],
@@ -250,7 +405,8 @@ class BottomModelService:
                 snapshot["confirmation"].get("score"),
                 snapshot["quadrant"].get("key"),
             )
-            return snapshot
+        await self._process_bottom_alerts()
+        return snapshot
 
     def trigger_run(self, force: bool = False) -> dict[str, Any]:
         """手动触发（后台执行，立即返回）。"""

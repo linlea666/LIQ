@@ -23,22 +23,91 @@ def _make_coin(ccy="BTC", symbol_cg="BTC", symbol_pair="BTCUSDT", exchange="Bina
 # poll_oi
 # ──────────────────────────────────────────────
 
+_OI_BASE_TS = 1_700_000_000
+
+
 class TestPollOI:
 
+    BASE_TS = _OI_BASE_TS
     SAMPLE = [
-        {"time": 1700000000, "close": 40_000_000_000},
-        {"time": 1700000300, "close": 40_200_000_000},
-        {"time": 1700000600, "close": 40_500_000_000},
+        {"time": _OI_BASE_TS + i * 300, "close": 40_000_000_000 + i * 100_000_000}
+        for i in range(13)
     ]
+
+    @classmethod
+    def hourly(cls, *, milliseconds: bool = False):
+        return [
+            {
+                "time": (cls.BASE_TS + i * 3600) * (1000 if milliseconds else 1),
+                "close": 40_000_000_000 + i * 100_000_000,
+            }
+            for i in range(25)
+        ]
 
     @pytest.mark.asyncio
     async def test_oi_trend_calculated(self, cg, btc_state):
-        cg.fetch_oi_aggregated_history = AsyncMock(return_value=self.SAMPLE)
+        cg.fetch_oi_aggregated_history = AsyncMock(
+            side_effect=[self.SAMPLE, self.hourly()],
+        )
         coin = _make_coin()
         await poll_oi(cg, coin, btc_state)
         assert btc_state.oi is not None
-        assert btc_state.oi.current_usd == 40_500_000_000
+        assert btc_state.oi.current_usd == 41_200_000_000
+        assert btc_state.oi.change_5m_pct == pytest.approx(0.24, abs=0.01)
+        assert btc_state.oi.change_1h_pct == pytest.approx(3.0, abs=0.01)
+        assert btc_state.oi_change_24h_pct == pytest.approx(6.0, abs=0.01)
         assert btc_state.oi.trend in ("stable", "surging", "declining")
+        assert cg.fetch_oi_aggregated_history.await_args_list[1].kwargs["limit"] == 25
+
+    @pytest.mark.asyncio
+    async def test_oi_overlapping_polls_are_timestamp_deduped(self, cg, btc_state):
+        coin = _make_coin()
+        cg.fetch_oi_aggregated_history = AsyncMock(
+            side_effect=[self.SAMPLE, self.hourly()],
+        )
+        await poll_oi(cg, coin, btc_state)
+
+        shifted = [
+            {"time": self.BASE_TS + i * 300, "close": 40_000_000_000 + i * 100_000_000}
+            for i in range(1, 14)
+        ]
+        cg.fetch_oi_aggregated_history = AsyncMock(
+            side_effect=[shifted, self.hourly()],
+        )
+        await poll_oi(cg, coin, btc_state)
+
+        assert len(btc_state.oi_history) == 14
+        assert len({point.ts for point in btc_state.oi_history}) == 14
+        assert btc_state.oi is not None
+        expected = (41_300_000_000 - 40_100_000_000) / 40_100_000_000 * 100
+        assert btc_state.oi.change_1h_pct == pytest.approx(round(expected, 2))
+
+    @pytest.mark.asyncio
+    async def test_oi_millisecond_timestamps_are_normalized(self, cg, btc_state):
+        data = [dict(item, time=item["time"] * 1000) for item in self.SAMPLE]
+        cg.fetch_oi_aggregated_history = AsyncMock(
+            side_effect=[data, self.hourly(milliseconds=True)],
+        )
+        await poll_oi(cg, _make_coin(), btc_state)
+        assert btc_state.oi is not None
+        assert btc_state.oi.ts == self.BASE_TS + 12 * 300
+        assert btc_state.oi_change_24h_pct == pytest.approx(6.0, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_oi_missing_exact_baseline_keeps_previous_snapshot(self, cg, btc_state):
+        from models.flow import OIData
+
+        btc_state.oi = OIData(
+            coin="BTC", ts=123, current_usd=1, change_1h_pct=9.9, change_5m_pct=9.9,
+        )
+        # latest-1h 应为 index=0；删掉后没有合格的 1h 基线。
+        gapped = [item for i, item in enumerate(self.SAMPLE) if i != 0]
+        cg.fetch_oi_aggregated_history = AsyncMock(
+            side_effect=[gapped, self.hourly()],
+        )
+        await poll_oi(cg, _make_coin(), btc_state)
+        assert btc_state.oi.ts == 123
+        assert btc_state.oi.change_1h_pct == 9.9
 
 
 # ──────────────────────────────────────────────

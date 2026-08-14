@@ -17,6 +17,7 @@ from processors.bottom_model.evidence_pack import build_evidence_pack
 from processors.bottom_model.service import BottomModelService
 from processors.bottom_model import service as service_module
 from processors.bottom_model.snapshot import build_snapshot
+from notifications.email_alert import EmailSendResult
 from storage.bottom_model_store import BottomModelStore
 from tests.test_bottom_model_factors import _bottomish_data
 
@@ -41,10 +42,28 @@ class _FakeBottomCfg:
 
 
 @dataclass
+class _FakeEmailCfg:
+    enabled: bool = False
+    include_bottom_model: bool = True
+    smtp_host: str = "smtp.example.com"
+    smtp_port: int = 465
+    smtp_user: str = "sender@example.com"
+    smtp_pass: str = "secret"
+    from_name: str = "LIQ"
+    to: list[str] = field(default_factory=lambda: ["receiver@example.com"])
+
+
+@dataclass
+class _FakeNotificationsCfg:
+    email: _FakeEmailCfg = field(default_factory=_FakeEmailCfg)
+
+
+@dataclass
 class _FakeSettings:
     bottom_model: _FakeBottomCfg = field(default_factory=_FakeBottomCfg)
     bgeometrics: _FakeBGCfg = field(default_factory=_FakeBGCfg)
     yahoo_cme: _FakeYahooCfg = field(default_factory=_FakeYahooCfg)
+    notifications: _FakeNotificationsCfg = field(default_factory=_FakeNotificationsCfg)
 
 
 def _service(tmp_path, seed: bool = True) -> BottomModelService:
@@ -159,6 +178,116 @@ async def test_invalid_candidate_does_not_overwrite_last_valid_snapshot(tmp_path
     assert svc.store.latest_snapshot()["marker"] == "last-valid"
     assert svc.health()["last_run_summary"]["snapshot_persisted"] is False
     assert svc.health()["last_run_summary"]["quality_status"] == "INVALID_DATA"
+
+
+def _state_snapshot(day: str, quadrant: str, *, quality: str = "OK",
+                    model_id: str = "bottom-v5") -> dict:
+    return {
+        "day": day,
+        "algorithm_version": model_id,
+        "model_id": model_id,
+        "data_policy_id": "pit-final-v2",
+        "quality_status": quality,
+        "quadrant": {"key": quadrant, "label": quadrant},
+        "stress": {"score": 70.0},
+        "confirmation": {"score": 80.0, "checks": []},
+        "factors": [],
+        "data_quality": {"missing": [], "stale": [], "failed_fetches": {}},
+    }
+
+
+def test_bottom_alert_requires_first_valid_transition_and_same_lineage(tmp_path):
+    svc = _service(tmp_path, seed=False)
+    current = _state_snapshot("2026-08-12", "confirmed_recovery")
+    # 无历史、模型升级、无效候选均不补发。
+    assert svc._build_bottom_alert(current) is None
+    svc.store.save_snapshot("2026-08-11", _state_snapshot(
+        "2026-08-11", "basing", model_id="bottom-v4",
+    ))
+    assert svc._build_bottom_alert(current) is None
+    svc.store.save_snapshot("2026-08-11", _state_snapshot(
+        "2026-08-11", "basing", quality="DEGRADED",
+    ))
+    assert svc._build_bottom_alert(current) is None
+
+    svc.store.save_snapshot("2026-08-11", _state_snapshot("2026-08-11", "basing"))
+    alert = svc._build_bottom_alert(current)
+    assert alert is not None and alert["status"] == "SUPPRESSED"
+    assert svc.store.save_snapshot_with_bottom_alert(current["day"], current, alert) is True
+    # 同日强制重跑不重复入队。
+    assert svc.store.save_snapshot_with_bottom_alert(current["day"], current, alert) is False
+
+    # 持续确认不提醒；退出为 basing 后未来重入可以再次提醒。
+    assert svc._build_bottom_alert(_state_snapshot(
+        "2026-08-13", "confirmed_recovery",
+    )) is None
+    svc.store.save_snapshot("2026-08-13", _state_snapshot("2026-08-13", "basing"))
+    assert svc._build_bottom_alert(_state_snapshot(
+        "2026-08-14", "confirmed_recovery",
+    )) is not None
+
+
+@pytest.mark.asyncio
+async def test_bottom_alert_outbox_sends_immediately_and_reports_health(tmp_path, monkeypatch):
+    svc = _service(tmp_path, seed=False)
+    svc._email_cfg.enabled = True
+    svc.store.save_snapshot("2026-08-11", _state_snapshot("2026-08-11", "basing"))
+    current = _state_snapshot("2026-08-12", "confirmed_recovery")
+    alert = svc._build_bottom_alert(current)
+    assert alert is not None and alert["status"] == "PENDING"
+    svc.store.save_snapshot_with_bottom_alert(current["day"], current, alert)
+    sent: list[tuple[str, str]] = []
+
+    async def send(subject, html_body, config, **kwargs):
+        sent.append((subject, kwargs["idempotency_key"]))
+        return EmailSendResult(True)
+
+    monkeypatch.setattr(service_module, "send_html_email_result", send)
+    await svc._process_bottom_alerts(now=int(time.time()))
+    assert sent and sent[0][0] == "BTC 底部证据进入多项确认区"
+    health = svc.health()["email_alert"]
+    assert health["enabled"] is True and health["configured"] is True
+    assert health["sent"] == 1 and health["pending"] == 0
+
+
+def test_bottom_alert_health_redacts_credentials(tmp_path):
+    svc = _service(tmp_path, seed=False)
+    svc._email_cfg.enabled = True
+    svc.store.save_snapshot("2026-08-11", _state_snapshot("2026-08-11", "basing"))
+    current = _state_snapshot("2026-08-12", "confirmed_recovery")
+    alert = svc._build_bottom_alert(current)
+    assert alert is not None
+    svc.store.save_snapshot_with_bottom_alert(current["day"], current, alert)
+    svc.store.defer_bottom_alert(
+        alert["alert_id"],
+        "auth=secret sender@example.com",
+    )
+    exposed = svc.health()["email_alert"]["last_error"]
+    assert "secret" not in exposed and "sender@example.com" not in exposed
+
+
+@pytest.mark.asyncio
+async def test_bottom_alert_missing_config_does_not_consume_attempt_and_disabled_suppresses(tmp_path):
+    svc = _service(tmp_path, seed=False)
+    svc._email_cfg.enabled = True
+    svc._email_cfg.smtp_pass = ""
+    svc.store.save_snapshot("2026-08-11", _state_snapshot("2026-08-11", "basing"))
+    current = _state_snapshot("2026-08-12", "confirmed_recovery")
+    alert = svc._build_bottom_alert(current)
+    assert alert is not None
+    alert["created_at"] = 2_000_000_000
+    alert["next_attempt_at"] = 2_000_000_000
+    alert["expires_at"] = 2_000_086_400
+    svc.store.save_snapshot_with_bottom_alert(current["day"], current, alert)
+    await svc._process_bottom_alerts(now=2_000_000_000)
+    row = svc.store._conn.execute("SELECT * FROM bottom_email_outbox").fetchone()
+    assert row["status"] == "PENDING" and row["attempts"] == 0
+    assert svc.health()["email_alert"]["configured"] is False
+
+    svc._email_cfg.enabled = False
+    await svc._process_bottom_alerts(now=2_000_000_600)
+    row = svc.store._conn.execute("SELECT * FROM bottom_email_outbox").fetchone()
+    assert row["status"] == "SUPPRESSED"
 
 
 # ── 证据包 ──

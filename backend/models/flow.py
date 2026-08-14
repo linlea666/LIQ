@@ -20,6 +20,7 @@ class CVDData(BaseModel):
     """CVD 数据集"""
     coin: str
     inst_type: str  # "CONTRACTS" | "SPOT"
+    ts: int = 0
     series: list[CVDPoint]
     trend_1h: str = ""
     delta_1h: float = 0

@@ -10,7 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from models.key_level import KeyLevelSnapshotV2, KeyLevelV2
 from models.liquidation import LiqCluster, LiquidationMap, LiqLeverageGroup
 from models.orderbook_pressure import OrderbookPressureSnapshot, WallEvent, WallZone
-from models.trading_brain import TradingBrainSnapshot
+from models.data_meta import DataMeta
+from models.trading_brain import BrainMarketRead, TradingBrainSnapshot
 from processors.trading_brain_builder import build_trading_brain_snapshot, merge_tolerance
 
 
@@ -144,6 +145,31 @@ def test_missing_sources_notes_and_partial_snapshot():
     )
     assert isinstance(snap, TradingBrainSnapshot)
     assert len(snap.data_quality.notes) >= 3
+
+
+def test_market_read_and_context_meta_are_exposed_without_breaking_raw_fields():
+    market_read = BrainMarketRead(
+        bias="bullish", evidence_grade="medium",
+        title="资金流分化 · 现货偏强", summary="测试摘要",
+        flow_state="spot_strong_split", leverage_state="small_change",
+        funding_state="neutral",
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=50_000.0, atr=100.0,
+        kl=None, op=None, liq=None,
+        cvd_spot_trend="rising", cvd_contract_trend="declining",
+        oi_delta_1h_pct=-0.62, funding_interpretation="中性",
+        funding_rate_8h_pct=0.0059,
+        market_read=market_read,
+        context_sources={
+            "cvd_spot": DataMeta(as_of=123, status="fresh", source="test"),
+        },
+    )
+    assert snap.context.cvd_spot_trend == "rising"
+    assert snap.context.oi_delta_1h_pct == -0.62
+    assert snap.context.funding_rate_8h_pct == 0.0059
+    assert snap.context.market_read.title == "资金流分化 · 现货偏强"
+    assert snap.data_quality.context_sources["cvd_spot"].source == "test"
 
 
 def test_wall_events_recent_only():

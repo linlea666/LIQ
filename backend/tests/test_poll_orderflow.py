@@ -107,3 +107,32 @@ class TestCalcCVDTrend:
         from models.flow import CVDPoint
         trend, _ = calc_cvd_trend([CVDPoint(ts=0, buy_vol=1, sell_vol=0, delta=1, cvd=1)])
         assert trend == "flat"
+
+
+@pytest.mark.asyncio
+async def test_poll_cvd_normalizes_dedupes_and_sets_as_of(cg, btc_state):
+    base = 1_700_000_000
+    contract = [
+        {
+            "time": (base + i * 300) * 1000,
+            "agg_taker_buy_vol": 200 + i,
+            "agg_taker_sell_vol": 100,
+            "cum_vol_delta": 100 + i,
+        }
+        for i in range(12)
+    ]
+    contract.insert(4, dict(contract[3]))
+    spot = [dict(item) for item in reversed(contract)]
+    cg.fetch_aggregated_cvd_history = AsyncMock(return_value=contract)
+    cg.fetch_spot_aggregated_cvd = AsyncMock(return_value=spot)
+
+    await poll_cvd(cg, _make_coin(), btc_state)
+
+    assert btc_state.cvd_contract is not None
+    assert btc_state.cvd_spot is not None
+    assert len(btc_state.cvd_contract.series) == 12
+    assert btc_state.cvd_contract.ts == base + 11 * 300
+    assert btc_state.cvd_spot.ts == base + 11 * 300
+    assert [p.ts for p in btc_state.cvd_spot.series] == sorted(
+        p.ts for p in btc_state.cvd_spot.series
+    )

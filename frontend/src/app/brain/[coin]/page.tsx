@@ -13,6 +13,7 @@ import OpportunityBoard from "@/components/Brain/OpportunityBoard";
 import EventTimeline from "@/components/Brain/EventTimeline";
 import SpotOrderBookPanel from "@/components/Brain/SpotOrderBookPanel";
 import FuturesHeatmap from "@/components/Brain/FuturesHeatmap";
+import BeginnerGlossary from "@/components/Brain/BeginnerGlossary";
 import { ROLE_COLORS } from "@/components/Brain/types";
 
 export default function TradingBrainPage() {
@@ -35,17 +36,15 @@ export default function TradingBrainPage() {
     return () => clearInterval(t);
   }, [coinParam, loadTradingBrain]);
 
-  // 默认选中距现价最近的 zone
-  useEffect(() => {
-    if (!snap) return;
-    if (selectedId && snap.zones.some((z) => z.zone_id === selectedId)) return;
-    const z0 = snap.zones[0];
-    if (z0) setSelectedId(z0.zone_id);
-  }, [snap, selectedId]);
+  // 无副作用派生默认选区：快照变化时若旧 ID 消失，直接回退最近 zone。
+  const effectiveSelectedId =
+    selectedId && snap?.zones.some((z) => z.zone_id === selectedId)
+      ? selectedId
+      : snap?.zones[0]?.zone_id ?? null;
 
   const selectedZone = useMemo(
-    () => snap?.zones.find((z) => z.zone_id === selectedId) ?? null,
-    [snap, selectedId],
+    () => snap?.zones.find((z) => z.zone_id === effectiveSelectedId) ?? null,
+    [snap, effectiveSelectedId],
   );
 
   return (
@@ -106,6 +105,8 @@ export default function TradingBrainPage() {
             )}
           </div>
 
+          <BeginnerGlossary />
+
           {/* W4-T1 阶段 4：扫单观察台（双向 / 5 态机 / 3 派生分 / trace 抽屉） */}
           <div className="shrink-0 border-b border-slate-800 bg-slate-950/30 px-3 py-2">
             <SweepWatchPanel
@@ -120,7 +121,7 @@ export default function TradingBrainPage() {
             <SweepStackPanel
               coin={snap.coin}
               zones={snap.zones}
-              selectedId={selectedId}
+              selectedId={effectiveSelectedId}
               onSelectZone={setSelectedId}
             />
           </div>
@@ -140,7 +141,7 @@ export default function TradingBrainPage() {
                 lastPrice={snap.last_price}
                 atr={snap.atr}
                 coin={snap.coin}
-                selectedId={hoverZoneId ?? selectedId}
+                selectedId={hoverZoneId ?? effectiveSelectedId}
                 onSelect={setSelectedId}
               />
             </section>
