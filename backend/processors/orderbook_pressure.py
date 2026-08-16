@@ -558,6 +558,14 @@ def compute_pressure_snapshot(
 
     # 数据完全缺失（两路都空）→ 返回空 snapshot 但不报错
     if not depth_raws and not large_raws:
+        # P4 修复：此路径不进墙引擎，但重挂指纹注册表仍需感知"本帧无墙"，
+        # 否则 missing_since 永不写入 → 墙消失后重现漏计 reappear
+        try:
+            from processors.liquidity_wall_engine import _track_zone_reappearance
+            _track_zone_reappearance(state.coin, [], now, cfg)
+        except Exception:  # noqa: BLE001 — 追踪失败不影响空 snapshot 返回
+            logger.debug("reappearance tracking on empty frame failed | coin=%s",
+                         state.coin, exc_info=True)
         return OrderbookPressureSnapshot(
             coin=state.coin, ts_sec=now, last_price=last_price,
             atr=getattr(state, "atr", None) or None,

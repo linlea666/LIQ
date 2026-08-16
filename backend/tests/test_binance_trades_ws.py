@@ -44,6 +44,106 @@ def _agg_msg(symbol: str, price: float, qty: float, is_maker_buy: bool,
     })
 
 
+class TestFlushResilience:
+    """flush 失败回滚 + 关停 final flush（防丢 pending 累计）。"""
+
+    @pytest.mark.asyncio
+    async def test_flush_failure_merges_pending_back(self, monkeypatch):
+        ws = _mk_ws()
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_000, 10, False))
+        assert len(ws._pending) == 1
+        key = next(iter(ws._pending))
+        buy_before = ws._pending[key][0]
+
+        import processors.orderflow_stats as ofs
+
+        def _boom():
+            raise RuntimeError("store unavailable")
+        monkeypatch.setattr(ofs, "get_orderflow_store", _boom)
+
+        await ws._flush_pending()
+        # 失败后 pending 不丢：桶还在且数值不变
+        assert key in ws._pending
+        assert ws._pending[key][0] == pytest.approx(buy_before)
+
+    @pytest.mark.asyncio
+    async def test_flush_now_writes_pending(self, monkeypatch):
+        ws = _mk_ws()
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_000, 10, False))
+
+        written = []
+
+        class _FakeStore:
+            def add_whale_trades(self, coin, market, hour_ts, buy, sell):
+                written.append((coin, market, hour_ts, buy, sell))
+
+        import processors.orderflow_stats as ofs
+        monkeypatch.setattr(ofs, "get_orderflow_store", lambda: _FakeStore())
+
+        await ws.flush_now()
+        assert len(written) == 1
+        assert written[0][0] == "BTC" and written[0][3] > 0
+        assert not ws._pending
+
+
+class _FakeResp:
+    def __init__(self, rows):
+        self._rows = rows
+        self.status = 200
+
+    async def json(self):
+        return self._rows
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, pages):
+        self._pages = list(pages)
+        self.calls: list[dict] = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append(dict(params or {}))
+        return _FakeResp(self._pages.pop(0) if self._pages else [])
+
+
+class TestFuturesRestPoll:
+    """合约侧 REST aggTrades 轮询（fstream WS 推送不可用的替代路径）。"""
+
+    @pytest.mark.asyncio
+    async def test_poll_processes_and_tracks_from_id(self, monkeypatch):
+        ws = _mk_ws()
+        ts_ms = int(time.time() * 1000)
+        rows = [
+            {"a": 100, "p": "63000", "q": "10", "m": False, "T": ts_ms},   # $630k whale 买
+            {"a": 101, "p": "63000", "q": "0.01", "m": True, "T": ts_ms},  # 小单忽略
+        ]
+        fake = _FakeSession([rows, [{"a": 102, "p": "63000", "q": "9",
+                                     "m": True, "T": ts_ms}]])
+
+        async def _sess():
+            return fake
+        monkeypatch.setattr(ws, "get_session", _sess)
+
+        last_id: dict[str, int] = {}
+        await ws._poll_futures_symbol("BTC", "BTCUSDT", last_id)
+        assert last_id["BTCUSDT"] == 101
+        assert fake.calls[0].get("fromId") is None          # 首轮无 fromId
+        assert ws._whale_count["futures"] == 1
+        key = next(iter(ws._pending))
+        assert key[1] == "futures" and ws._pending[key][0] > 0
+
+        # 第二轮：fromId = last+1 续读；qty 9 < 10 且 $567k ≥ $500k → whale 卖
+        await ws._poll_futures_symbol("BTC", "BTCUSDT", last_id)
+        assert fake.calls[1]["fromId"] == 102
+        assert last_id["BTCUSDT"] == 102
+        assert ws._whale_count["futures"] == 2
+
+
 class TestWhaleDetection:
     def test_below_both_thresholds_ignored(self):
         ws = _mk_ws()

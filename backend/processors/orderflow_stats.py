@@ -37,6 +37,8 @@ class OrderflowStatsAggregator:
         self._store = store
         # (coin, market) → {order_id: last_executed_usd_value}
         self._exec_baseline: dict[tuple[str, str], dict[int, float]] = {}
+        # (coin, market) → 上次 executed flush 时刻（增量归属小时用）
+        self._last_exec_flush_ts: dict[tuple[str, str], int] = {}
         self._last_cleanup_ts = time.time()
 
     # ── 主入口 ─────────────────────────────────────────────────────────
@@ -106,7 +108,8 @@ class OrderflowStatsAggregator:
             self._exec_baseline[key] = baseline
 
         now = int(time.time())
-        hour_ts = now - now % 3600
+        prev_flush = self._last_exec_flush_ts.get(key)
+        self._last_exec_flush_ts[key] = now
         bid_delta = 0.0
         ask_delta = 0.0
         seen_ids: set[int] = set()
@@ -134,6 +137,10 @@ class OrderflowStatsAggregator:
                     del baseline[oid]
 
         if not first_run and (bid_delta > 0 or ask_delta > 0):
+            # 增量产生于 (上次 flush, 本次 flush] 窗口 → 归属窗口起点所在小时，
+            # 避免刚跨整点的 flush 把上一小时末尾的成交记入下一小时桶
+            attr_ts = prev_flush if prev_flush is not None else now
+            hour_ts = attr_ts - attr_ts % 3600
             self._store.add_large_executed(coin, market, hour_ts, bid_delta, ask_delta)
 
     # ── 日桶汇总 ───────────────────────────────────────────────────────

@@ -588,7 +588,14 @@ def _wall_event_message(ev: WallEvent) -> str:
     }
     base = mapping.get(str(ev.event_type), str(ev.event_type))
     side = "买侧" if ev.side == "bid" else "卖侧"
-    return f"{side}{base}"
+    msg = f"{side}{base}"
+    # P4：近距撤单提示透传（价格逼近却无成交即撤 → 钓鱼单嫌疑，直观化给用户）
+    dist = getattr(ev, "price_distance_at_removal", None)
+    if dist is not None and str(ev.event_type) in (
+        "wall_removed", "wall_consumed_and_removed",
+    ):
+        msg += f"｜距墙仅 {abs(float(dist)):.2f}% 即撤"
+    return msg
 
 
 def _build_events(

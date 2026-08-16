@@ -173,6 +173,7 @@ class TestRuntimeProfile:
         assert n == 1
         meta = whp.get_profile_meta("BTC")
         assert meta is not None and meta["zones"] == 1
+        assert meta["skipped_files"] == 0
 
         z = WallZone(
             side="bid", price_low=99_000, price_high=99_200, price_mid=99_100,
@@ -180,12 +181,61 @@ class TestRuntimeProfile:
             max_usd_1h=1_000_000, avg_usd_1h=900_000, bin_count=1,
             seen_count=3, visible_minutes=15, persistence_score=0.3,
         )
-        z.wall_zone_id = "aaa"
         whp.attach_history_profile("BTC", [z])
         # 3 个不同小时桶 / 168h
         assert z.history_presence_7d == pytest.approx(3 / 168, abs=0.002)
         # 只有 consumed 事件 → 兑现率 1.0
         assert z.history_consumed_ratio == pytest.approx(1.0)
+
+    def test_attach_tolerates_bucket_drift(self, tmp_path):
+        # zone 价格与归档价差 ~0.15%（不足一个 0.2% 桶但可能跨桶边界）
+        # → 邻桶（idx±1）命中兜底
+        now = int(time.time())
+        import datetime
+        today = datetime.datetime.fromtimestamp(
+            now, tz=whp._TZ_CN).strftime("%Y%m%d")
+        self._write_archive(tmp_path, "BTC", today,
+                            [self._snapshot_row(now - 600)])
+        whp.refresh_profile("BTC", history_root=str(tmp_path), now=now)
+
+        z = WallZone(
+            side="bid", price_low=99_000, price_high=99_400,
+            price_mid=99_250,   # 与归档 99_100 差 0.15%
+            peak_price=99_250, distance_pct=-0.3, current_usd=1_000_000,
+            max_usd_1h=1_000_000, avg_usd_1h=900_000, bin_count=1,
+            seen_count=3, visible_minutes=15, persistence_score=0.3,
+        )
+        whp.attach_history_profile("BTC", [z])
+        assert z.history_presence_7d is not None
+
+    def test_oversized_file_skipped(self, tmp_path):
+        # 构造一个解压后超限的 gz（伪造：真写一个 > 上限的稀疏文件太慢，
+        # 这里临时调低上限验证跳过路径）
+        now = int(time.time())
+        import datetime
+        today = datetime.datetime.fromtimestamp(
+            now, tz=whp._TZ_CN).strftime("%Y%m%d")
+        yesterday = datetime.datetime.fromtimestamp(
+            now - 86400, tz=whp._TZ_CN).strftime("%Y%m%d")
+        # 昨天：一个"大"文件（多行）；今天：正常小文件
+        big_rows = [self._snapshot_row(now - 86400 + i) for i in range(50)]
+        self._write_archive(tmp_path, "BTC", yesterday, big_rows, gz=True)
+        self._write_archive(tmp_path, "BTC", today,
+                            [self._snapshot_row(now - 600)])
+
+        orig = whp._MAX_DAY_UNCOMPRESSED_BYTES
+        whp._MAX_DAY_UNCOMPRESSED_BYTES = 1024   # 1KB，昨天的必超限
+        try:
+            n = whp.refresh_profile("BTC", history_root=str(tmp_path), now=now)
+        finally:
+            whp._MAX_DAY_UNCOMPRESSED_BYTES = orig
+        assert n == 1
+        meta = whp.get_profile_meta("BTC")
+        assert meta["skipped_files"] == 1
+        # 只有今天 1 帧 1 个小时桶
+        table = whp._PROFILE_CACHE["BTC"]
+        assert list(table.values())[0]["presence_7d"] == pytest.approx(
+            1 / 168, abs=0.002)
 
     def test_missing_archive_keeps_none(self, tmp_path):
         n = whp.refresh_profile("BTC", history_root=str(tmp_path))
@@ -196,7 +246,6 @@ class TestRuntimeProfile:
             max_usd_1h=1_000_000, avg_usd_1h=900_000, bin_count=1,
             seen_count=3, visible_minutes=15, persistence_score=0.3,
         )
-        z.wall_zone_id = "aaa"
         whp.attach_history_profile("BTC", [z])
         assert z.history_presence_7d is None
         assert z.history_consumed_ratio is None

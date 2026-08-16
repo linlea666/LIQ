@@ -1016,6 +1016,11 @@ class Engine:
             ws = get_trades_ws()
             if ws is not None:
                 ws.stop()
+                # 关停前把 pending whale 累计落盘（否则最多丢 60s 增量）
+                try:
+                    await ws.flush_now()
+                except Exception:
+                    logger.debug("trades_ws final flush failed", exc_info=True)
                 await ws.close()
         except Exception:
             logger.debug("trades_ws stop failed", exc_info=True)
@@ -1173,8 +1178,12 @@ class Engine:
             logger.error("[orderflow_stats] init failed, loop disabled", exc_info=True)
             return
         loop = asyncio.get_running_loop()
+        first = True
         while self._running:
-            await asyncio.sleep(300)
+            # 首跑 60s：进程若被频繁重启（如 OOM 循环），固定 300s 首跑会导致
+            # 聚合永远没机会执行、orderflow 库空转
+            await asyncio.sleep(60 if first else 300)
+            first = False
             for ccy in self._settings.supported_coins:
                 state = self._states.get(ccy)
                 if state is None:
@@ -1197,7 +1206,9 @@ class Engine:
         loop = asyncio.get_running_loop()
         first = True
         while self._running:
-            await asyncio.sleep(300 if first else 6 * 3600)
+            # 首跑 120s（OOM 复盘：原 300s 与 orderflow 首跑同窗，且流式化后
+            # 读档成本低，可尽早让画像可用）；此后每 6h
+            await asyncio.sleep(120 if first else 6 * 3600)
             first = False
             for ccy in self._settings.supported_coins:
                 try:

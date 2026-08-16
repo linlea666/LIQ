@@ -6,7 +6,12 @@
     合约（fstream）+ 现货（stream.binance.com）× BTC/ETH/SOL 共 6 流。
 
 职责：
-    1. 订阅 6 路 aggTrade combined stream（两条 WS 连接，每市场一条）
+    1. 现货：订阅 3 路 aggTrade combined stream（一条 WS 连接）
+       合约：REST /fapi/v1/aggTrades fromId 连续轮询（30s/币）
+       —— 生产诊断（scripts/diagnose_fstream.py）证实 fstream 对本部署
+       网络路径「连接/订阅成功但市场数据零推送」（LIST_SUBSCRIPTIONS 可
+       确认订阅在案，REST 正常），本地与服务器同病 → WS 不可用是网络层
+       事实，合约侧改 REST 轮询（whale 统计对 30s 延迟不敏感）
     2. 本地阈值过滤（接线激活 config.yaml processors.orderbook 的
        whale_threshold_usd / whale_threshold_{btc,eth,sol} 死配置）：
          whale = 单笔聚合成交 usd ≥ whale_threshold_usd
@@ -19,8 +24,8 @@
     （aiohttp heartbeat=30 + 45s 应用级读超时防 TCP 半开 + 指数退避重连）；
     连接管理复用 DataSource.get_session。
 
-资源核算：6 流高峰 ~100-200 msg/s，仅做浮点比较与 dict 累加，
-    实测同类负载 CPU +3-5%、内存 +30-50MB（有界 deque）。
+资源核算：spot 3 流高峰 ~50-100 msg/s，仅做浮点比较与 dict 累加；
+    futures REST 6 req/min（weight 20/req，限额 2400/min，占用 <1%）。
 """
 from __future__ import annotations
 
@@ -45,6 +50,12 @@ _RECONNECT_MAX_SEC = 60
 
 _FUTURES_WS_BASE = "wss://fstream.binance.com/stream"
 _SPOT_WS_BASE = "wss://stream.binance.com:9443/stream"
+
+# 合约 REST 轮询（fstream WS 推送在本部署网络路径不可用，见模块 docstring）
+_FUTURES_REST_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
+_REST_POLL_INTERVAL_SEC = 30
+_REST_PAGE_LIMIT = 1000
+_REST_MAX_PAGES = 5                # 单轮每币最多补 5000 条（极端行情尽力而为）
 
 
 class BinanceTradesWS(DataSource):
@@ -92,11 +103,11 @@ class BinanceTradesWS(DataSource):
     # ── 生命周期 ───────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """常驻协程：两条 WS 流 + 定期冲桶。engine 负责创建 task。"""
+        """常驻协程：spot WS 流 + futures REST 轮询 + 定期冲桶。engine 负责创建 task。"""
         self._running = True
         try:
             await asyncio.gather(
-                self._stream_loop("futures"),
+                self._futures_rest_loop(),
                 self._stream_loop("spot"),
                 self._flush_loop(),
             )
@@ -107,6 +118,10 @@ class BinanceTradesWS(DataSource):
 
     def stop(self) -> None:
         self._running = False
+
+    async def flush_now(self) -> None:
+        """立即把 pending whale 累计落盘（关停路径调用，防丢最多 60s 增量）。"""
+        await self._flush_pending()
 
     # ── 消费接口（whale 明细 / 大额事件 / 统计）────────────────────────
 
@@ -127,6 +142,7 @@ class BinanceTradesWS(DataSource):
     def stats(self) -> dict:
         return {
             "running": self._running,
+            "futures_mode": "rest_poll",   # fstream WS 推送不可用（见模块 docstring）
             "msg_count": dict(self._msg_count),
             "whale_count": dict(self._whale_count),
             "last_msg_age_sec": {
@@ -193,65 +209,144 @@ class BinanceTradesWS(DataSource):
             coin = self._symbol_to_coin.get(symbol)
             if not coin:
                 return
-            price = float(data.get("p", 0) or 0)
-            qty = float(data.get("q", 0) or 0)
-            if price <= 0 or qty <= 0:
-                return
-            self._msg_count[market] += 1
             now = time.time()
-            self._last_msg_ts[market] = now
-
-            usd = price * qty
-            qty_thr = self._whale_qty.get(coin, float("inf"))
-            if usd < self._whale_usd and qty < qty_thr:
-                return
-
-            # m=True → 买方是 maker → taker 主动卖
-            side = "sell" if bool(data.get("m")) else "buy"
-            trade_ts = int(data.get("T", now * 1000)) // 1000
-            self._whale_count[market] += 1
-
-            hour_ts = trade_ts - trade_ts % 3600
-            bucket = self._pending.setdefault((coin, market, hour_ts), [0.0, 0.0])
-            if side == "buy":
-                bucket[0] += usd
-            else:
-                bucket[1] += usd
-
-            self._recent_whales[coin].append({
-                "ts": trade_ts, "market": market, "side": side,
-                "price": price, "qty": qty, "usd": usd,
-            })
-            if usd >= self._big_trade_usd:
-                self._big_events[coin].append({
-                    "ts": trade_ts, "market": market, "side": side,
-                    "price": price, "usd": usd,
-                })
-                logger.info(
-                    "[trades_ws] big trade | %s %s %s $%.1fM @ %.2f",
-                    coin, market, side, usd / 1e6, price,
-                )
+            self._process_trade(
+                market, coin,
+                price=float(data.get("p", 0) or 0),
+                qty=float(data.get("q", 0) or 0),
+                is_maker_buy=bool(data.get("m")),
+                trade_ts=int(data.get("T", now * 1000)) // 1000,
+            )
         except (ValueError, TypeError, KeyError):
             pass
+
+    def _process_trade(
+        self, market: str, coin: str, *,
+        price: float, qty: float, is_maker_buy: bool, trade_ts: int,
+    ) -> None:
+        """单笔聚合成交的阈值判定与累计（WS 与 REST 轮询共用）。"""
+        if price <= 0 or qty <= 0 or trade_ts <= 0:
+            return
+        self._msg_count[market] += 1
+        self._last_msg_ts[market] = time.time()
+
+        usd = price * qty
+        qty_thr = self._whale_qty.get(coin, float("inf"))
+        if usd < self._whale_usd and qty < qty_thr:
+            return
+
+        # m=True → 买方是 maker → taker 主动卖
+        side = "sell" if is_maker_buy else "buy"
+        self._whale_count[market] += 1
+
+        hour_ts = trade_ts - trade_ts % 3600
+        bucket = self._pending.setdefault((coin, market, hour_ts), [0.0, 0.0])
+        if side == "buy":
+            bucket[0] += usd
+        else:
+            bucket[1] += usd
+
+        self._recent_whales[coin].append({
+            "ts": trade_ts, "market": market, "side": side,
+            "price": price, "qty": qty, "usd": usd,
+        })
+        if usd >= self._big_trade_usd:
+            self._big_events[coin].append({
+                "ts": trade_ts, "market": market, "side": side,
+                "price": price, "usd": usd,
+            })
+            logger.info(
+                "[trades_ws] big trade | %s %s %s $%.1fM @ %.2f",
+                coin, market, side, usd / 1e6, price,
+            )
+
+    # ── 内部：合约 REST 轮询 ───────────────────────────────────────────
+
+    async def _futures_rest_loop(self) -> None:
+        """fromId 连续轮询 /fapi/v1/aggTrades（fstream WS 推送不可用的替代）。
+
+        首轮无 fromId 拿最近 1000 条（约数分钟量，trade_ts 真实所以桶归属
+        与 deque 时间过滤都正确）；此后 fromId=last+1 无缝续读。
+        """
+        last_id: dict[str, int] = {}
+        logger.info("[trades_ws] futures REST poll started | interval=%ds",
+                    _REST_POLL_INTERVAL_SEC)
+        while self._running:
+            for coin, symbol in self._coin_symbols.items():
+                if not self._running:
+                    break
+                try:
+                    await self._poll_futures_symbol(coin, symbol, last_id)
+                except Exception:
+                    logger.debug("[trades_ws] futures REST poll failed | %s",
+                                 symbol, exc_info=True)
+            await asyncio.sleep(_REST_POLL_INTERVAL_SEC)
+
+    async def _poll_futures_symbol(
+        self, coin: str, symbol: str, last_id: dict[str, int],
+    ) -> None:
+        session = await self.get_session()
+        for _ in range(_REST_MAX_PAGES):
+            params: dict[str, Any] = {"symbol": symbol, "limit": _REST_PAGE_LIMIT}
+            if symbol in last_id:
+                params["fromId"] = last_id[symbol] + 1
+            async with session.get(
+                _FUTURES_REST_URL, params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug("[trades_ws] aggTrades HTTP %d | %s",
+                                 resp.status, symbol)
+                    return
+                rows = await resp.json()
+            if not isinstance(rows, list) or not rows:
+                return
+            for r in rows:
+                try:
+                    self._process_trade(
+                        "futures", coin,
+                        price=float(r.get("p", 0) or 0),
+                        qty=float(r.get("q", 0) or 0),
+                        is_maker_buy=bool(r.get("m")),
+                        trade_ts=int(r.get("T", 0) or 0) // 1000,
+                    )
+                except (ValueError, TypeError):
+                    continue
+            last_id[symbol] = int(rows[-1].get("a", 0) or 0)
+            if len(rows) < _REST_PAGE_LIMIT:
+                return
 
     # ── 内部：冲桶 ─────────────────────────────────────────────────────
 
     async def _flush_loop(self) -> None:
-        loop = asyncio.get_running_loop()
         while self._running:
             await asyncio.sleep(_FLUSH_INTERVAL_SEC)
-            pending, self._pending = self._pending, {}
-            if not pending:
-                continue
-            try:
-                from processors.orderflow_stats import get_orderflow_store
-                store = get_orderflow_store()
-                for (coin, market, hour_ts), (buy, sell) in pending.items():
-                    await loop.run_in_executor(
-                        None, store.add_whale_trades, coin, market, hour_ts, buy, sell,
-                    )
-            except Exception:
-                logger.warning("[trades_ws] flush to store failed", exc_info=True)
+            await self._flush_pending()
+
+    async def _flush_pending(self) -> None:
+        """冲桶：失败时把未落盘的累计合并回 _pending，等下轮重试（不丢数据）。"""
+        pending, self._pending = self._pending, {}
+        if not pending:
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            from processors.orderflow_stats import get_orderflow_store
+            store = get_orderflow_store()
+            while pending:
+                key, (buy, sell) = next(iter(pending.items()))
+                coin, market, hour_ts = key
+                await loop.run_in_executor(
+                    None, store.add_whale_trades, coin, market, hour_ts, buy, sell,
+                )
+                pending.pop(key)
+        except Exception:
+            logger.warning("[trades_ws] flush to store failed | pending_kept=%d",
+                           len(pending), exc_info=True)
+            # 未写入的桶合并回去（flush 期间可能有新增，累加而非覆盖）
+            for key, (buy, sell) in pending.items():
+                bucket = self._pending.setdefault(key, [0.0, 0.0])
+                bucket[0] += buy
+                bucket[1] += sell
 
 
 # ── process 单例 ──────────────────────────────────────────────────────

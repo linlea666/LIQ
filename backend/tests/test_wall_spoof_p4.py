@@ -168,6 +168,31 @@ class TestReappearanceTracking:
         zones = self._step("BTC", ["aaa"], t0 + 130)
         assert zones[0].reappeared_count == 1
 
+    def test_empty_frame_via_pressure_snapshot_marks_missing(self):
+        # 修复回归：depth/large 双路皆空时 compute_pressure_snapshot 走
+        # early-return（不进墙引擎），此前 missing_since 永不写入 → 漏计 reappear
+        from types import SimpleNamespace
+        from processors.orderbook_pressure import compute_pressure_snapshot
+
+        t0 = 1_700_000_000
+        self._step("BTC", ["aaa"], t0)                 # 墙在场
+
+        empty_state = SimpleNamespace(
+            coin="BTC",
+            ticker=SimpleNamespace(last=99_500.0),
+            orderbook_depth_snapshot=None,
+            large_orders_history=[],
+        )
+        snap = compute_pressure_snapshot(empty_state, now_sec=t0 + 10)
+        assert snap is not None and snap.data_quality == "missing"
+
+        from processors.liquidity_wall_engine import _REAPPEAR_REGISTRY
+        assert _REAPPEAR_REGISTRY["BTC"]["aaa"]["missing_since"] == t0 + 10
+
+        # 120s 后重现 → 正确计 1 次 reappear
+        zones = self._step("BTC", ["aaa"], t0 + 10 + 120)
+        assert zones[0].reappeared_count == 1
+
     def test_gc_after_long_absence(self):
         from processors.liquidity_wall_engine import (
             _REAPPEAR_GC_SECONDS,

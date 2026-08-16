@@ -115,6 +115,34 @@ async def get_orderflow_daily(
     return {"coin": coin, "market": market, "days": days, "rows": rows}
 
 
+@router.get("/orderflow/{coin}/whales")
+async def get_orderflow_whales(
+    coin: str,
+    hours: int = Query(24, ge=1, le=24, description="回看小时数（deque 只留 24h）"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """近 24h whale 单笔明细（Binance aggTrade 阈值过滤，内存 deque）。
+
+    进程重启后 deque 清空，属 best-effort 明细流；
+    小时/日级累计请用 hourly/daily 端点的 whale_buy_usd/whale_sell_usd。
+    """
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+    from sources.binance_trades_ws import get_trades_ws
+    ws = get_trades_ws()
+    if ws is None:
+        return {"coin": coin, "available": False, "rows": []}
+    rows = ws.recent_whales(coin, within_sec=hours * 3600)
+    rows.sort(key=lambda w: w["ts"], reverse=True)
+    return {
+        "coin": coin,
+        "available": True,
+        "stats": ws.stats(),
+        "rows": rows[:limit],
+    }
+
+
 @router.get("/liquidation-heatmap/{coin}")
 async def get_liquidation_heatmap(coin: str, range_: str = Query("24h", alias="range")):
     """获取清算热力图（aggregated-heatmap/model1）。
