@@ -1,0 +1,1431 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "leaderBoardList": [
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/84ed6a3984bd46b4acdb12ef6e3a42eb.png",
+          "symbol": "SOL",
+          "chainId": "CT_501",
+          "contractAddress": "So11111111111111111111111111111111111111111",
+          "tokenAge": 1748833658000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 43149742039.90847,
+          "priceChange": -0.07
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "100",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Remove Holdings",
+              "languageKey": "wmp-label-title-smart-money-reduce-position"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 195662,
+          "socialHypeEn": 195662,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Bank Leumi Partners with Galaxy, Bitwise Continues SOL Accumulation, Solana Proposal Increases Transaction Costs",
+          "socialSummaryBriefTranslated": "以色列国民银行与Galaxy合作，Bitwise继续积累SOL，Solana提案提高交易成本",
+          "socialSummaryDetail": "Israel's Bank Leumi will allow its 2.5 million clients to trade Solana via a partnership with Galaxy by 2027, marking a significant step in digital asset services in Israel. Bitwise has not sold any SOL for two weeks and continues to accumulate SOL for its ETF. Solana's proposal SIMD-0553 could increase transaction costs for resource-heavy operations, potentially reducing supply inflation and increasing scarcity.",
+          "socialSummaryDetailTranslated": "以色列国民银行将通过与Galaxy的合作，允许其250万客户在2027年前交易Solana，这标志着以色列数字资产服务的重要一步。Bitwise两周内未出售任何SOL，继续为其ETF积累SOL。Solana的提案SIMD-0553可能会增加资源密集型操作的交易成本，可能减少供应通胀并增加稀缺性。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2072491934422016000/PyYbZpWR_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1755983593925378048/kYutau0B_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2069156164118761472/1JvlRfZB_normal.jpg"
+          ],
+          "kolCount": 19,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786734000000,
+              "socialHype": 119301.0
+            },
+            {
+              "time": 1786737600000,
+              "socialHype": 146770.0
+            },
+            {
+              "time": 1786741200000,
+              "socialHype": 162856.0
+            },
+            {
+              "time": 1786744800000,
+              "socialHype": 169717.0
+            },
+            {
+              "time": 1786748400000,
+              "socialHype": 180560.0
+            },
+            {
+              "time": 1786752000000,
+              "socialHype": 188434.0
+            },
+            {
+              "time": 1786755600000,
+              "socialHype": 214524.0
+            },
+            {
+              "time": 1786759200000,
+              "socialHype": 221183.0
+            },
+            {
+              "time": 1786762800000,
+              "socialHype": 233438.0
+            },
+            {
+              "time": 1786766400000,
+              "socialHype": 238233.0
+            },
+            {
+              "time": 1786770000000,
+              "socialHype": 246368.0
+            },
+            {
+              "time": 1786773600000,
+              "socialHype": 255074.0
+            },
+            {
+              "time": 1786777200000,
+              "socialHype": 262840.0
+            },
+            {
+              "time": 1786780800000,
+              "socialHype": 273743.0
+            },
+            {
+              "time": 1786784400000,
+              "socialHype": 280711.0
+            },
+            {
+              "time": 1786788000000,
+              "socialHype": 292916.0
+            },
+            {
+              "time": 1786791600000,
+              "socialHype": 280634.0
+            },
+            {
+              "time": 1786795200000,
+              "socialHype": 288111.0
+            },
+            {
+              "time": 1786798800000,
+              "socialHype": 299844.0
+            },
+            {
+              "time": 1786802400000,
+              "socialHype": 235018.0
+            },
+            {
+              "time": 1786806000000,
+              "socialHype": 191633.0
+            },
+            {
+              "time": 1786809600000,
+              "socialHype": 198416.0
+            },
+            {
+              "time": 1786813200000,
+              "socialHype": 203952.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 208901.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/5796FD103D107E3909ECAF644E3AEC89.jpg",
+          "symbol": "ANSEM",
+          "chainId": "CT_501",
+          "contractAddress": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+          "tokenAge": 1781643948000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 238422296.02224132,
+          "priceChange": 0.52
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Remove Holdings",
+              "languageKey": "wmp-label-title-smart-money-reduce-position"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 24947,
+          "socialHypeEn": 24947,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "ANSEM Shows Strong Upward Trend, Fee-Sharing Boosts Value, Community Engagement Grows",
+          "socialSummaryBriefTranslated": "ANSEM显示出强劲的上升趋势，分成机制提升了价值，社区参与度增长",
+          "socialSummaryDetail": "ANSEM has experienced a notable 30% upward trend, with some investors touting it as a \"generational\" opportunity after a significant 3900x increase from an initial call at 107K to over 420M. The token's recent rise includes a 24% lift on August 15, attributed to fee-sharing mechanisms generating $1.7k daily on $3.4m volume. Despite limited new information, community engagement remains strong, with recent promotional activities like a $1000 ANSEM giveaway.",
+          "socialSummaryDetailTranslated": "ANSEM经历了显著的30%上升趋势，一些投资者称其为“世代”机会，此前从107K的初始呼叫到超过4.2亿，涨幅达3900倍。该代币最近的上涨包括8月15日的24%涨幅，归因于分成机制在340万美元的交易量上每日产生1700美元的收益。尽管新信息有限，社区参与度依然强劲，最近的促销活动包括1000美元的ANSEM赠送。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1696225706768740353/ta6goKxa_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1797419043990700032/r9umtdCW_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1874758416658509824/UPaVddbm_normal.jpg"
+          ],
+          "kolCount": 6,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786734000000,
+              "socialHype": 546.0
+            },
+            {
+              "time": 1786737600000,
+              "socialHype": 579.0
+            },
+            {
+              "time": 1786741200000,
+              "socialHype": 595.0
+            },
+            {
+              "time": 1786744800000,
+              "socialHype": 589.0
+            },
+            {
+              "time": 1786748400000,
+              "socialHype": 599.0
+            },
+            {
+              "time": 1786752000000,
+              "socialHype": 606.0
+            },
+            {
+              "time": 1786755600000,
+              "socialHype": 607.0
+            },
+            {
+              "time": 1786759200000,
+              "socialHype": 5146.0
+            },
+            {
+              "time": 1786762800000,
+              "socialHype": 7502.0
+            },
+            {
+              "time": 1786766400000,
+              "socialHype": 8647.0
+            },
+            {
+              "time": 1786770000000,
+              "socialHype": 9747.0
+            },
+            {
+              "time": 1786773600000,
+              "socialHype": 10715.0
+            },
+            {
+              "time": 1786777200000,
+              "socialHype": 10712.0
+            },
+            {
+              "time": 1786780800000,
+              "socialHype": 11417.0
+            },
+            {
+              "time": 1786784400000,
+              "socialHype": 11859.0
+            },
+            {
+              "time": 1786788000000,
+              "socialHype": 12158.0
+            },
+            {
+              "time": 1786791600000,
+              "socialHype": 12520.0
+            },
+            {
+              "time": 1786795200000,
+              "socialHype": 13113.0
+            },
+            {
+              "time": 1786798800000,
+              "socialHype": 13568.0
+            },
+            {
+              "time": 1786802400000,
+              "socialHype": 13969.0
+            },
+            {
+              "time": 1786806000000,
+              "socialHype": 14318.0
+            },
+            {
+              "time": 1786809600000,
+              "socialHype": 14834.0
+            },
+            {
+              "time": 1786813200000,
+              "socialHype": 17858.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 22122.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/03948830A94CCB14F97AB464A628ADD3.webp",
+          "symbol": "DEALER",
+          "chainId": "CT_501",
+          "contractAddress": "6f8ZQhxqfigdv7UszZ1rirbV7Sgv83s3rxv1N2Zopump",
+          "tokenAge": 1785961877000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 3673633.1198503654,
+          "priceChange": -6.31
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Surging",
+              "languageKey": "wmp-label-title-volume-surging"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 17254,
+          "socialHypeEn": 17254,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "$Dealer Hits New ATH, $Dealer Promises Breakout, Enthusiasts Await $Dealer Momentum",
+          "socialSummaryBriefTranslated": "$Dealer 创下新历史高点，$Dealer 承诺突破，爱好者期待 $Dealer 动能",
+          "socialSummaryDetail": "The $DEALER token has recently reached a new all-time high, marking a 4x increase, with traders anticipating further gains due to strong momentum. Enthusiasts highlight its promising upward trend and suggest a potential breakout as part of the Ansem meme index. Despite no significant news, the community is optimistic about $DEALER's future performance, driven by positive sentiment from key opinion leaders.",
+          "socialSummaryDetailTranslated": "$DEALER 代币最近达到了新的历史高点，涨幅达到4倍，交易者预计由于强劲的动能将有进一步的上涨。爱好者强调其有前景的上升趋势，并建议作为 Ansem 表情包指数的一部分可能出现突破。尽管没有重大新闻，社区对 $DEALER 的未来表现持乐观态度，这主要得益于关键意见领袖的积极情绪。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1846384980488040449/aUE7bBD5_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1702572497118416896/8rW_ZZ35_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1832629224529895424/3Xrq2JaT_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786813200000,
+              "socialHype": 2398.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 12013.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/C0A06325F67CE07056E6010F23E360D2.png",
+          "symbol": "TAO",
+          "chainId": "CT_501",
+          "contractAddress": "taoC6xyv2v8tDLcev4uaGUgV4vdQsWJrGft2kcBRrBY",
+          "tokenAge": 1777653824000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 1017325.4506455993,
+          "priceChange": -1.97
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 16116,
+          "socialHypeEn": 16116,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "TAO Liquidity Analysis, Decentralized AI vs. Tokenized Finance, Axis Robotics Partnership",
+          "socialSummaryBriefTranslated": "TAO流动性分析，去中心化AI与代币化金融，Axis Robotics合作伙伴关系",
+          "socialSummaryDetail": "TAO is gaining attention as it sits at a critical support level, with liquidity being a key factor in potential price movements. TAO's decentralized AI capabilities are being highlighted, particularly in competition with tokenized financial infrastructures like LINK. Additionally, a new partnership with Axis Robotics aims to enhance robotics models on Bittensor subnet, showcasing TAO's integration in cutting-edge AI developments. Despite these advancements, there's a disconnect between reported subnet revenue and market reflection, raising concerns.",
+          "socialSummaryDetailTranslated": "TAO因处于关键支撑位而受到关注，流动性是潜在价格变动的关键因素。TAO的去中心化AI能力备受关注，特别是在与像LINK这样的代币化金融基础设施的竞争中。此外，与Axis Robotics的新合作旨在提升Bittensor子网的机器人模型，展示了TAO在前沿AI发展中的整合。尽管有这些进展，报告的子网收入与市场反映之间存在脱节，引发了担忧。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1696225706768740353/ta6goKxa_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1964533406399942657/6mf-WCsr_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1828153514670862336/fvQwd3FR_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/92db7ceab5e942e3959a79d7c4cf7850.png",
+          "symbol": "PUMP",
+          "chainId": "CT_501",
+          "contractAddress": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+          "tokenAge": 1752153028000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 2369665794.181444,
+          "priceChange": -1.21
+        },
+        "tagInfoList": {
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 14129,
+          "socialHypeEn": 14129,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Token Unlock Event, Buyback and Burn Activity, Positive Market Sentiment",
+          "socialSummaryBriefTranslated": "代币解锁事件，回购和销毁活动，积极的市场情绪",
+          "socialSummaryDetail": "Pump.fun recently unlocked 4.85 billion PUMP tokens valued at $13.6 million, distributed across 125 wallets, marking a key supply event. A daily buyback-and-burn was executed, involving 262.1 million PUMP and 10.2K SOL, showcasing strong commitment to reducing supply. Despite limited news, PUMP's price increased by 19.65% over a week, reflecting positive market sentiment and strategic tokenomics.",
+          "socialSummaryDetailTranslated": "Pump.fun 最近解锁了价值1360万美元的48.5亿PUMP代币，分布在125个钱包中，标志着一个关键的供应事件。每天执行回购和销毁，涉及2.621亿PUMP和1.02万SOL，展示了减少供应的强烈承诺。尽管新闻有限，PUMP价格在一周内上涨了19.65%，反映出积极的市场情绪和战略性的代币经济学。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1551771778472497152/ocyqhsbm_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1935670392456417280/yBuGi08Y_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2072692527271190528/GZeqVrUe_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/59A93DBF526C6815F1AD459FD80734A8.png",
+          "symbol": "BSOL",
+          "chainId": "CT_501",
+          "contractAddress": "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1",
+          "tokenAge": 1651889217000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 68906757.33361834,
+          "priceChange": -0.01
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 11929,
+          "socialHypeEn": 11929,
+          "socialHypeCn": 0,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "Bitwise Tokenization Initiative, Superstate Partnership, BSOL ETF Development",
+          "socialSummaryBriefTranslated": "Bitwise 代币化计划，Superstate 合作伙伴关系，BSOL ETF 开发",
+          "socialSummaryDetail": "Bitwise is considering tokenizing its Solana Staking ETF, BSOL, by integrating it on-chain, allowing investors to hold shares in a tokenized form on Solana. BSOL, managing nearly $600 million in assets, is expected to be Bitwise's inaugural ETF. Superstate, a known partner for on-chain securities, is involved in this initiative. This move is separate from BlazeStake's bSOL, a liquid staking token on Solana.",
+          "socialSummaryDetailTranslated": "Bitwise 正在考虑通过链上集成将其 Solana 质押 ETF——BSOL 代币化，使投资者能够以代币化形式在 Solana 上持有股份。BSOL 管理着近 6 亿美元的资产，预计将成为 Bitwise 的首个 ETF。Superstate 是链上证券的知名合作伙伴，参与了此计划。此举与 BlazeStake 的 bSOL（Solana 上的流动质押代币）无关。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2044686598285979648/44RaDI4-_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/985B2288ADB90BAA37B514D16AA6E6A9.png",
+          "symbol": "PNUT",
+          "chainId": "CT_501",
+          "contractAddress": "2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump",
+          "tokenAge": 1730384500000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 42508149.337475404,
+          "priceChange": -1.69
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 4541,
+          "socialHypeEn": 4541,
+          "socialHypeCn": 0,
+          "sentiment": "Negative",
+          "socialSummaryBrief": "0xLeaf Exits Crypto, $PNUT Value Rises, Speculation on PNUT Successor",
+          "socialSummaryBriefTranslated": "0xLeaf退出加密货币，$PNUT价值上升，关于PNUT继任者的猜测",
+          "socialSummaryDetail": "Prominent crypto figure 0xLeaf, known for turning $100,000 into millions through strategic investments in tokens like PNUT, announced his exit from the crypto scene after a significant loss of $60 million. During a recent market update, $PNUT saw a modest 0.26% increase in value. Speculation surrounds the emergence of a potential successor to PNUT, though no concrete evidence supports this claim yet.",
+          "socialSummaryDetailTranslated": "知名加密人物0xLeaf以通过对PNUT等代币的战略投资将10万美元变成数百万而闻名，在损失6000万美元后宣布退出加密领域。在最近的市场更新中，$PNUT价值小幅上涨0.26%。关于PNUT潜在继任者的猜测正在流传，但目前尚无确凿证据支持这一说法。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1957040658851700736/FR9SuEN-_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1942157094129446912/gYR4wn8c_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1596778804399087618/fOECvUoo_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/3cf5c21d68094530a64c64c53dacbdd9.png",
+          "symbol": "MELANIA",
+          "chainId": "CT_501",
+          "contractAddress": "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1P",
+          "tokenAge": 1737316310000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 70024076.12906033,
+          "priceChange": 0.01
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 4046,
+          "socialHypeEn": 4046,
+          "socialHypeCn": 0,
+          "sentiment": "Negative",
+          "socialSummaryBrief": "Wallet Buys $681K Pre-Announcement, $39M Gain in 24 Hours, MELANIA Down 99.83% Since Launch",
+          "socialSummaryBriefTranslated": "钱包在公告前购买了价值68.1万美元的代币，24小时内获利3900万美元，MELANIA自发行以来下跌了99.83%",
+          "socialSummaryDetail": "A significant event involved a wallet purchasing $681K of the MELANIA token just 64 seconds before its announcement, leading to a staggering $39M gain within 24 hours. This has prompted discussions about the predictability and coordination of such trades. The token has seen a dramatic decline of 99.83% since launch, raising concerns about the standard operating procedures in the market.",
+          "socialSummaryDetailTranslated": "一项重大事件涉及一个钱包在MELANIA代币公告前仅64秒购买了价值68.1万美元的代币，导致24小时内获得了惊人的3900万美元收益。这引发了关于此类交易的可预测性和协调性的讨论。该代币自发行以来已大幅下跌99.83%，引发了对市场标准操作程序的担忧。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1957040658851700736/FR9SuEN-_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/06A65C0E6E3B230591600848E5D9A272.jpg",
+          "symbol": "TBB",
+          "chainId": "CT_501",
+          "contractAddress": "42cXQvAAr7hcPBPWAS4ocVtDyeJ4Fa6gRR2uG4gppump",
+          "tokenAge": 1782777991000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 13835285.222082995,
+          "priceChange": -3.43
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Add Holdings",
+              "languageKey": "wmp-label-title-smart-money-add-position"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 3544,
+          "socialHypeEn": 3544,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "TBB Poker Event, Reward Conversion to TBB, Community Engagement",
+          "socialSummaryBriefTranslated": "TBB扑克活动，奖励转换为TBB，社区参与",
+          "socialSummaryDetail": "TBB witnessed a community-driven Poker Event, organized with the help of influencers like @QueenofDogecoin, drawing significant participation. A user converted 5% rewards from a Crypto Visa Debit Card into TBB, showing increased user engagement. Despite a 4.5% decline in price, TBB's market cap stands at $14.76M, with active community discussions indicating a positive sentiment.",
+          "socialSummaryDetailTranslated": "TBB见证了一场由社区驱动的扑克活动，在@QueenofDogecoin等影响者的帮助下组织，吸引了大量参与。一位用户将加密Visa借记卡的5%奖励转换为TBB，显示出用户参与度的提升。尽管价格下跌了4.5%，TBB的市值仍为1476万美元，活跃的社区讨论表明了积极的情绪。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2085483146561105921/CwQzrAEz_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1920931336363405319/rY09b-cu_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2082476759392698368/LTB7_hF6_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/5F1F526E6D415241046E956882139636.jpg",
+          "symbol": "NEET",
+          "chainId": "CT_501",
+          "contractAddress": "Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+          "tokenAge": 1745713919000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 26387333.82614199,
+          "priceChange": -4.16
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Add Holdings",
+              "languageKey": "wmp-label-title-smart-money-add-position"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 2063,
+          "socialHypeEn": 2063,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Influencers Endorse NEET, NEET Price Surge, Social Media Buzz on NEET",
+          "socialSummaryBriefTranslated": "网红支持NEET，NEET价格飙升，社交媒体热议NEET",
+          "socialSummaryDetail": "NEET has seen a significant rise, attributed to social media buzz and influencer endorsements. The token's price increased by 16.07%, with a trading volume of $1,818,950. Influencers on social media are recommending NEET, highlighting its potential as a memecoin within the Solana ecosystem, alongside others like TOAD and CATE. The market cap has reached approximately $26.86 million, reflecting growing investor interest.",
+          "socialSummaryDetailTranslated": "NEET显著上涨，归因于社交媒体热议和网红推荐。该代币价格上涨了16.07%，交易量达1,818,950美元。社交媒体上的网红们推荐NEET，强调其作为Solana生态系统内的迷因币潜力，类似于TOAD和CATE。市值已达到约2,686万美元，反映出投资者兴趣的增长。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2088579225460658176/nTBYylu3_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2079443921076203520/nIT7qUGF_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2072337467399675904/yXOL27BV_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/FB066974C81ABEA3D8E305D549ADA9EF.jpg",
+          "symbol": "LOOK",
+          "chainId": "CT_501",
+          "contractAddress": "9223LqDuoJXyhCtvi54DUQPGS8Xf29kUEQRr7Sfhmoon",
+          "tokenAge": 1756937278000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 317825.1415005733,
+          "priceChange": -0.86
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 1352,
+          "socialHypeEn": 1352,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "New Launchpad Accepts LOOK, Seyong Endorses, LOOK Price Surge",
+          "socialSummaryBriefTranslated": "新的启动平台接受LOOK，Seyong支持，LOOK价格飙升",
+          "socialSummaryDetail": "A new launchpad on BNB has begun accepting purchases in the token LOOK, with the support of notable figures like Seyong. This event has generated excitement and humor within the community, leading to increased interest. The LOOK token on Solana has shown a significant price increase of 32-36% in the last 24 hours, indicating a positive market response.",
+          "socialSummaryDetailTranslated": "BNB上的一个新启动平台开始接受LOOK代币购买，得到了像Seyong这样的知名人士支持。此事件在社区内引发了兴奋和幽默，导致兴趣增加。Solana上的LOOK代币在过去24小时内价格显著上涨了32-36%，显示出积极的市场反应。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1306401440768942080/WlZw0z4n_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2008939719036461056/9BXUdChW_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/E3D98D86FBE0FF005938F1A0E297DC87.png",
+          "symbol": "MCD",
+          "chainId": "CT_501",
+          "contractAddress": "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+          "tokenAge": 1749634701000,
+          "decimals": 8
+        },
+        "marketInfo": {
+          "marketCap": 15108409.501569543,
+          "priceChange": -1.38
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Xstock",
+              "languageKey": "wmp-label-title-xstock"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 1141,
+          "socialHypeEn": 475,
+          "socialHypeCn": 666,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "McDonald's Launches Red Bull Drink, MCDx Token Steady, No Recent High-Impact News",
+          "socialSummaryBriefTranslated": "麦当劳推出红牛饮料，MCDx代币保持稳定，近期无重大新闻",
+          "socialSummaryDetail": "McDonald's has introduced a new drink, the Red Bull Dragonberry Energizer, to its menu, potentially boosting customer engagement. However, there are no recent high-impact events or news specifically about the MCDx token, which tracks McDonald's stock. The token continues to reflect McDonald's share price and remains steady in market activity, with no significant updates or developments reported.",
+          "socialSummaryDetailTranslated": "麦当劳在菜单中推出了一款新饮料——红牛龙莓能量饮料，可能会提升客户参与度。然而，关于追踪麦当劳股票的MCDx代币，近期没有重大事件或新闻。该代币继续反映麦当劳的股价，市场活动保持稳定，暂无重大更新或进展。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2067480691072548864/0vrGlEM9_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1958356920081031168/gAr_8qot_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/9BC6556926B6B69332A48AEF6195F4D3.jpg",
+          "symbol": "TESTICLE",
+          "chainId": "CT_501",
+          "contractAddress": "4TyZGqRLG3VcHTGMcLBoPUmqYitMVojXinAmkL8xpump",
+          "tokenAge": 1766279404000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 949451.8063900176,
+          "priceChange": 0.95
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 980,
+          "socialHypeEn": 980,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "TESTICLE Token Rally, Community Shilling, KOL's 17x Return Mention",
+          "socialSummaryBriefTranslated": "TESTICLE 代币上涨，社区推广，KOL 提及17倍回报",
+          "socialSummaryDetail": "The TESTICLE token experienced a significant rally, surging by 34% within 24 hours, as reported by the Pump.fun Ecosystem account. Previously, a KOL mentioned TESTICLE's impressive growth from a 70k market cap, achieving a 17x return. Despite the lack of high-impact news, community interest remains high, with a growing holder count and active shilling by influencers.",
+          "socialSummaryDetailTranslated": "据 Pump.fun 生态系统账号报道，TESTICLE 代币经历了显著上涨，24小时内飙升了34%。此前，一位KOL提到TESTICLE从7万市值起步，实现了17倍的回报。尽管缺乏重大利好消息，社区兴趣依然高涨，持有者数量不断增加，且有影响力的人士积极推广。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2020019414221942784/9wXEQTCX_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/D56228551F96ECB4C89AEBF56FD0DC66.webp",
+          "symbol": "LICKINGCAT",
+          "chainId": "CT_501",
+          "contractAddress": "EjD5Y9NVhXmtEqU7wYvAyZvDWZFQeEuHXFatJmTbpump",
+          "tokenAge": 1786189452000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 915059.8282691241,
+          "priceChange": -27.86
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 851,
+          "socialHypeEn": 851,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "World Licking Cat Ad Strategy, 40% Price Drop, Early Adopter Success",
+          "socialSummaryBriefTranslated": "世界舔猫广告策略，价格下跌40%，早期采用者成功",
+          "socialSummaryDetail": "World Licking Cat introduces a unique ad strategy where brands can get 'licked' on their website, and ad revenue will be used to buy back and burn $LICKINGCAT tokens. Despite a 40% to 43% price drop, with a market cap around $855K-$910K, the token maintains interest with a visitor surge on their site. Early adopters have seen returns up to 84x from initial investments.",
+          "socialSummaryDetailTranslated": "世界舔猫推出了一种独特的广告策略，品牌可以在其网站上被“舔”，广告收入将用于回购并销毁$LICKINGCAT代币。尽管价格下跌了40%至43%，市值约为85.5万至91万美元，该代币仍保持关注度，网站访问量激增。早期采用者的投资回报最高达84倍。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2028071489837412352/I_L4yoL5_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2080065774480412672/JkLkQgWc_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2025858719091744768/F_H4vROy_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/6F3500270922B506631257CE1F22F6F8.jpg",
+          "symbol": "NEST",
+          "chainId": "CT_501",
+          "contractAddress": "68Nq68CrtLVpyvK5Un7UADiNczaGf39hBbj3diRsYj6D",
+          "tokenAge": 1781218354000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 2679115.5471325475,
+          "priceChange": 1.21
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 569,
+          "socialHypeEn": 0,
+          "socialHypeCn": 569,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "No Significant Developments, Active Trading Continues, Low Engagement on Official Posts",
+          "socialSummaryBriefTranslated": "无重大进展，活跃交易持续，官方帖子参与度低",
+          "socialSummaryDetail": "Despite active trading activity with a price range of ~$0.0025–$0.003 and a market cap of $2–3M, there are no significant developments or news on NEST token. Official accounts shared non-substantive updates like \"More Nest\" and \"SOLANA 🪺\" with low engagement, and no new partnerships or protocol upgrades were announced. The token's trading volume remains in the low hundreds of thousands USD.",
+          "socialSummaryDetailTranslated": "尽管交易活跃，价格区间约为0.0025美元至0.003美元，市值在200万至300万美元之间，但NEST代币没有重大进展或新闻。官方账号发布了诸如“更多Nest”和“SOLANA 🪺”等无实质内容的更新，参与度较低，且未宣布新的合作伙伴关系或协议升级。该代币的交易量仍维持在几十万美元的低水平。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2067480691072548864/0vrGlEM9_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/02f33b5f003848d4b069147d90e19ef4.png",
+          "symbol": "FARTCOIN",
+          "chainId": "CT_501",
+          "contractAddress": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+          "tokenAge": 1729231505000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 141057748.1357838,
+          "priceChange": 0
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 403,
+          "socialHypeEn": 0,
+          "socialHypeCn": 403,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "FARTCOIN on Top Altcoin Watchlist, Dip Wheeler's Support, Community Interest Grows",
+          "socialSummaryBriefTranslated": "FARTCOIN位列顶级山寨币观察名单，获得Dip Wheeler的支持，社区兴趣增长",
+          "socialSummaryDetail": "FARTCOIN has been highlighted as one of the top altcoins to watch, alongside popular tokens such as $LINK and $ETHFI. Despite limited new events, it has been receiving community attention, particularly with support from KOLs like Dip Wheeler. The market data shows FARTCOIN trading between $0.135-$0.143, with a market cap around $140M. Its mention on various altcoin watchlists indicates growing interest.",
+          "socialSummaryDetailTranslated": "FARTCOIN被列为值得关注的顶级山寨币之一，与热门代币如$LINK和$ETHFI并列。尽管新事件有限，但它一直受到社区关注，特别是得到了像Dip Wheeler这样的关键意见领袖的支持。市场数据显示FARTCOIN的交易价格在$0.135-$0.143之间，市值约为1.4亿美元。它在各种山寨币观察名单上的出现表明兴趣正在增长。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1897349963702554624/cKgEHo7L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2008228506124054528/qDvIdGlf_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1612936440240898049/b8uRB78r_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/0103A1E377563701885BA4E5BC95D644.png",
+          "symbol": "BOME",
+          "chainId": "CT_501",
+          "contractAddress": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+          "tokenAge": 1710123364000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 64007594.18637437,
+          "priceChange": -6.72
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            },
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 136,
+          "socialHypeEn": 136,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "BOME 19.30% Increase, Meme Coin Surge, Accumulation Phase Payoff",
+          "socialSummaryBriefTranslated": "BOME上涨19.30%，表情包币暴涨，积累阶段回报显现",
+          "socialSummaryDetail": "BOME token experienced a notable 19.30% increase, following a period of accumulation, indicating renewed investor interest. This surge is part of a broader trend in meme coins, with tokens like $CASHCAT and $TIBBIR also seeing significant gains. Despite no major announcements, BOME's 80% profit rise since May highlights the impact of market dynamics and investor patience.",
+          "socialSummaryDetailTranslated": "BOME代币经历了显著的19.30%涨幅，继一段积累期后，显示出投资者兴趣的回归。这波上涨是表情包币更广泛趋势的一部分，类似$CASHCAT和$TIBBIR等代币也取得了显著收益。尽管没有重大公告，自五月以来BOME利润上涨了80%，凸显了市场动态和投资者耐心的影响。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1592751376785735680/HYzgXzOk_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1879936670545371136/QpdoxF1N_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1942157094129446912/gYR4wn8c_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/95A78596DDEE2E63E64106A639321349.webp",
+          "symbol": "JIMOTHY",
+          "chainId": "CT_501",
+          "contractAddress": "Ge87EtsjwRQbHaqQmKRno69RFTwh9bfSsm99XNxTpump",
+          "tokenAge": 1784176657000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 7901238.913938059,
+          "priceChange": 9.71
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Pumpfun",
+              "languageKey": "wmp-label-title-pumpfun"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Add Holdings",
+              "languageKey": "wmp-label-title-smart-money-add-position"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 75,
+          "socialHypeEn": 75,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "JIMOTHY Trending in Meme Community, JIMOTHY Achieves 2581x Growth, Active Trading on Solana DEXes",
+          "socialSummaryBriefTranslated": "JIMOTHY 在表情包社区中流行，JIMOTHY 实现了 2581 倍的增长，在 Solana 去中心化交易所上活跃交易",
+          "socialSummaryDetail": "The token JIMOTHY has been trending with significant mentions across social media, highlighting its strong meme community. It has shown impressive growth, achieving a 2581x increase according to trading groups. Despite no recent high-impact developments, JIMOTHY remains popular among traders and meme coin enthusiasts, with active trading on Solana DEXes and a steady market presence. The token's popularity stems from its meme coin status and community-driven hype.",
+          "socialSummaryDetailTranslated": "代币 JIMOTHY 在社交媒体上获得了大量提及，显示出其强大的表情包社区。根据交易群组的数据，它表现出令人印象深刻的增长，达到了 2581 倍的增长。尽管近期没有重大影响力的发展，JIMOTHY 仍然在交易者和表情包币爱好者中保持受欢迎，在 Solana 去中心化交易所上活跃交易，市场表现稳定。该代币的受欢迎程度源于其表情包币身份和社区驱动的热度。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1831735422457622529/fML7cGFs_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1939096370796810240/lZzOOZtt_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2027916999167512583/-_BY-uEm_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/A2157EF97EAB642369E67B07A0E61799.png",
+          "symbol": "MANLET",
+          "chainId": "CT_501",
+          "contractAddress": "HxQhDGYqyjorgogMJx7YbBHADEDxuHhLnMMmr6VYpyn",
+          "tokenAge": 1785968942000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 3803322.4867154285,
+          "priceChange": 4.92
+        },
+        "tagInfoList": {
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Remove Holdings",
+              "languageKey": "wmp-label-title-smart-money-reduce-position"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 34,
+          "socialHypeEn": 34,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Flywheel Mechanism Activated, Influencer Support from Ansem, Community Enthusiasm with 30x Growth",
+          "socialSummaryBriefTranslated": "飞轮机制已启动，Ansem的影响者支持，社区热情带来30倍增长",
+          "socialSummaryDetail": "MANLET token has been gaining traction due to the activation of the flywheel mechanism and its operation alongside other tokens like ANSEM and STONK. Support from influential figures like Ansem, who holds 2% of Solangeles, and the community's enthusiasm for MANLET, evident from the 30x growth from a 50k market cap, contributes to the positive sentiment. However, no new high-impact news has been reported recently.",
+          "socialSummaryDetailTranslated": "由于飞轮机制的启动及其与ANSEM和STONK等其他代币的协同运作，MANLET代币正在获得关注。像Ansem这样的影响力人物支持，他持有Solangeles的2%，以及社区对MANLET的热情，从5万美元市值增长30倍，均助长了积极的市场情绪。然而，最近没有报道新的重大新闻。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2087664984666898432/Asd0ZTu3_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1846384980488040449/aUE7bBD5_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2078780800208912385/15FMpf7D_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/58ecf0401417426f8232f9f6d89258e9.png",
+          "symbol": "RAY",
+          "chainId": "CT_501",
+          "contractAddress": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+          "tokenAge": 1712522701000,
+          "decimals": 6
+        },
+        "marketInfo": {
+          "marketCap": 344840799.61137545,
+          "priceChange": -0.1
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 22,
+          "socialHypeEn": 22,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Raydium Utility Highlighted",
+          "socialSummaryBriefTranslated": "Raydium 功能亮点",
+          "socialSummaryDetail": "A user on Twitter highlights the utility of Raydium in the context of earning $ray through a specific trading pair, emphasizing the platform's broad use in various transactions and activities. Despite the focus on Raydium, no significant news or events about the RAY token have been reported in major crypto news outlets recently.",
+          "socialSummaryDetailTranslated": "一位 Twitter 用户强调了 Raydium 在通过特定交易对赚取 $ray 方面的实用性，强调了该平台在各种交易和活动中的广泛应用。尽管关注点在 Raydium 上，但最近主要加密新闻媒体并未报道关于 RAY 代币的重大新闻或事件。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2087664984666898432/Asd0ZTu3_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2033834177288945664/xx3Jq-Am_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2072337467399675904/yXOL27BV_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      }
+    ]
+  },
+  "success": true
+}

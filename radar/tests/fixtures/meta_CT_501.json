@@ -1,0 +1,57 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "tokenId": "8DEFB51E4DA546820A932E7953D1765D",
+    "name": "What 5 Years Does To You",
+    "symbol": "5YEARS",
+    "chainId": "CT_501",
+    "chainIconUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+    "chainName": "Solana",
+    "contractAddress": "GAZwMXNE9zCtmAoCpdUZz4afrRSrksukT47KErVrY2oC",
+    "decimals": 6,
+    "icon": "/images/web3-data/public/token/logos/8DEFB51E4DA546820A932E7953D1765D.jpg",
+    "nativeAddressFlag": false,
+    "lsdFlag": 0,
+    "aiNarrativeFlag": 0,
+    "links": [
+      {
+        "label": "website",
+        "link": "https://x.com/Jay_S0L/status/2088681178593108326"
+      },
+      {
+        "label": "x",
+        "link": "https://x.com/Jay_S0L/status/2088681178593108326"
+      }
+    ],
+    "previewLink": {
+      "website": [
+        "https://x.com/Jay_S0L/status/2088681178593108326"
+      ],
+      "x": [],
+      "tg": []
+    },
+    "tokenAddresses": [
+      {
+        "chainId": "CT_501",
+        "contractAddress": "GAZwMXNE9zCtmAoCpdUZz4afrRSrksukT47KErVrY2oC",
+        "nativeAddressFlag": false,
+        "lsdFlag": 0,
+        "decimals": 6
+      }
+    ],
+    "createTime": 1786819458000,
+    "creatorAddress": "FbW62BpSY2R1kzNdbH5qiWwgeP7kpPXVJJdLtazNk2H3",
+    "auditInfo": {
+      "iconSensitiveLabels": [],
+      "nameSensitiveLabels": [],
+      "symbolSensitiveLabels": [],
+      "isBlacklist": false,
+      "isWhitelist": false
+    },
+    "description": null,
+    "rwaType": 0
+  },
+  "success": true
+}

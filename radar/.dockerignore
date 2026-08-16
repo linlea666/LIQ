@@ -1,0 +1,7 @@
+data/
+tests/
+*.pyc
+__pycache__/
+.pytest_cache/
+radar.env
+README.md

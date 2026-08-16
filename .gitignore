@@ -55,3 +55,13 @@ backend/scripts/coinglass_probe_samples/**/*.json
 # Phase C：多家交易所 OP probe 输出（用于决策评估，决策定档后存档为文档第 12 节）
 # 仅入库脚本本身（probe_multi_exchange.py），输出 JSON 不入仓
 backend/scripts/multi_exchange_probe/
+# ── 潜力币雷达模块 ──────────────────────────────────────────────────────
+# 运行时生成：SQLite 库/WAL、原始响应归档
+radar/data/
+# JSONL 运维日志（按天滚动 + gzip）
+radar/logs/
+# 数据库备份（含全部历史警报与结局，体积可观且不应进仓）
+radar/backups/
+radar/.venv/
+# SMTP 凭据（顶部的 .env 规则已覆盖，此处显式标注以免被误提交）
+radar/.env

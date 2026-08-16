@@ -1,0 +1,18 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "requestId": "942e3fc8-7e55-4ffd-b521-9549691d97d1",
+    "hasResult": false,
+    "isHidden": false,
+    "isSupported": true,
+    "showYellowDot": null,
+    "riskLevelEnum": "LOW",
+    "riskLevel": -1,
+    "extraInfo": null,
+    "riskItems": [],
+    "riskAlert": null
+  },
+  "success": true
+}

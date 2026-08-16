@@ -1,6 +1,11 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:8000";
 
+// 雷达是独立容器、独立端口。刻意不复用 API_BASE：
+// 两个服务的可用性彼此独立，主后端挂了雷达页面仍应能用
+export const RADAR_API_BASE =
+  process.env.NEXT_PUBLIC_RADAR_API_BASE || "http://localhost:8802";
+
 export const SUPPORTED_COINS = ["BTC", "ETH", "SOL"] as const;
 export type CoinType = (typeof SUPPORTED_COINS)[number];
 export const DEFAULT_COIN: CoinType = "BTC";

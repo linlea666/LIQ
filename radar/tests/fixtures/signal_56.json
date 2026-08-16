@@ -1,0 +1,2790 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": [
+    {
+      "signalId": 44404,
+      "ticker": "MarsCoin",
+      "chainId": "56",
+      "contractAddress": "0xfe189e97832da1573e4e4ff034f4ffc3a15c7777",
+      "logoUrl": "/images/web3-data/public/token/logos/48A4FF23E0BD635D9685D80171D074CC.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": true,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Perps Leverage": [
+          {
+            "tagName": "5",
+            "languageKey": "wmp-label-title-perps-leverage"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Alpha",
+            "languageKey": "wmp-label-title-alpha"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 852000,
+      "signalTriggerTime": 1786810655000,
+      "totalTokenValue": "3386.359081998566980769",
+      "alertPrice": "0.042917544497945869",
+      "alertMarketCap": "42917476.662250074102502045",
+      "currentPrice": "0.044786",
+      "currentMarketCap": "44831043.746909451988571763871206668958133501357237569791358444",
+      "highestPrice": "0.049895000000000000",
+      "highestPriceTime": 1786815307000,
+      "exitRate": 0,
+      "status": "timeout",
+      "maxGain": "0.1626",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44397,
+      "ticker": "UtilityRWANFT",
+      "chainId": "56",
+      "contractAddress": "0x318f72b71f9e8a69be6653982faa0811b7c47777",
+      "logoUrl": "/images/web3-data/public/token/logos/8E28BFCDB1EECBEA401BD2C71722E5E2.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 399000,
+      "signalTriggerTime": 1786803390000,
+      "totalTokenValue": "2825.719973066186893683",
+      "alertPrice": "0.000146008402978332",
+      "alertMarketCap": "133267.817781695503802870",
+      "currentPrice": "0.000020328",
+      "currentMarketCap": "18043.281263705501947287108634360444229358196654869514166436",
+      "highestPrice": "0.000267270000000000",
+      "highestPriceTime": 1786804083000,
+      "exitRate": 81,
+      "status": "outDecline",
+      "maxGain": "0.8305",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44388,
+      "ticker": "DTC",
+      "chainId": "56",
+      "contractAddress": "0x40e8a453afca8ede2f48dacfe913e03209257777",
+      "logoUrl": "/images/web3-data/public/token/logos/272cc146ce6346278cd69424869b921f.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 661000,
+      "signalTriggerTime": 1786786895000,
+      "totalTokenValue": "5072.321755055060489662",
+      "alertPrice": "0.000743406976846843",
+      "alertMarketCap": "678017.548209151890986480",
+      "currentPrice": "0.00031702",
+      "currentMarketCap": "278922.813452923901240393458089099014781965221708979073367251",
+      "highestPrice": "0.000860740000000000",
+      "highestPriceTime": 1786787805000,
+      "exitRate": 66,
+      "status": "timeout",
+      "maxGain": "5.3217",
+      "signalCount": 4
+    },
+    {
+      "signalId": 44387,
+      "ticker": "DNB",
+      "chainId": "56",
+      "contractAddress": "0x3b95f471c40109a712da2ac25cf28eec687b7777",
+      "logoUrl": "/images/web3-data/public/token/logos/DC266424400D587C8FFD970A8E62EC5E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 24000,
+      "signalTriggerTime": 1786786560000,
+      "totalTokenValue": "2039.887784944373784930",
+      "alertPrice": "0.000130221550485278",
+      "alertMarketCap": "130024.698646467657252606",
+      "currentPrice": "0.0000053622",
+      "currentMarketCap": "5328.204328995751245022277006671881706314339073080800029748",
+      "highestPrice": "0.000130221550485278",
+      "highestPriceTime": null,
+      "exitRate": 55,
+      "status": "outDecline",
+      "maxGain": "0",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44385,
+      "ticker": "巨兽BEHEMOTH",
+      "chainId": "56",
+      "contractAddress": "0x4e8fc9e5a6d2b9c6e7ca8b923661ca4e78087777",
+      "logoUrl": "/images/web3-data/public/token/logos/2D470F3F0E6856116D2662FC253A9C8B.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 12000,
+      "signalTriggerTime": 1786784381000,
+      "totalTokenValue": "3502.400808249807739523",
+      "alertPrice": "0.000103188236766045",
+      "alertMarketCap": "103188.236766045340059071",
+      "currentPrice": "0.00005952",
+      "currentMarketCap": "59718.232122741671368764316663064000000000",
+      "highestPrice": "0.000254940000000000",
+      "highestPriceTime": 1786784641000,
+      "exitRate": 91,
+      "status": "timeout",
+      "maxGain": "1.4706",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44375,
+      "ticker": "Chinamaxxing",
+      "chainId": "56",
+      "contractAddress": "0x7c117f5a0cf52ee0e403b47038e230f658117777",
+      "logoUrl": "/images/web3-data/public/token/logos/87E5A988823A79DDBC490CB58E4A22A7.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 324000,
+      "signalTriggerTime": 1786775853000,
+      "totalTokenValue": "3656.338203555277972628",
+      "alertPrice": "0.000256855977177501",
+      "alertMarketCap": "256855.977177501058600323",
+      "currentPrice": "0.00011137",
+      "currentMarketCap": "111295.81697781971956862610030427000000000",
+      "highestPrice": "0.000290190000000000",
+      "highestPriceTime": 1786776415000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.2261",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44372,
+      "ticker": ".bnb",
+      "chainId": "56",
+      "contractAddress": "0xb16d429ffc7b35ed7337a9451f7e8e6b7dde7777",
+      "logoUrl": "/images/web3-data/public/token/logos/EDCF40D9FEECBFF6E2761E0C22FBB1B7.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 422000,
+      "signalTriggerTime": 1786773557000,
+      "totalTokenValue": "3209.573874198109108516",
+      "alertPrice": "0.000230856680423115",
+      "alertMarketCap": "230856.680423115050220464",
+      "currentPrice": "0.000028291",
+      "currentMarketCap": "28281.910391477595304505826750659000000000",
+      "highestPrice": "0.000253190000000000",
+      "highestPriceTime": 1786773934000,
+      "exitRate": 91,
+      "status": "timeout",
+      "maxGain": "0.8066",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44370,
+      "ticker": "旺旺",
+      "chainId": "56",
+      "contractAddress": "0x17408ab69373feab24c5d5daa568b707b3207777",
+      "logoUrl": "/images/web3-data/public/token/logos/4A904EB12CD8016DD2365DA38A679F8C.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 723000,
+      "signalTriggerTime": 1786768449000,
+      "totalTokenValue": "2191.881057567191034660",
+      "alertPrice": "0.000076526879985194",
+      "alertMarketCap": "76526.879985194041395529",
+      "currentPrice": "0.000048364",
+      "currentMarketCap": "48507.026095334077795568875928293000000000",
+      "highestPrice": "0.000547560000000000",
+      "highestPriceTime": 1786768860000,
+      "exitRate": 71,
+      "status": "timeout",
+      "maxGain": "6.1551",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44282,
+      "ticker": "trustmebro",
+      "chainId": "56",
+      "contractAddress": "0xd60fe961b473dca9027f228167193d834e247777",
+      "logoUrl": "/images/web3-data/public/token/logos/F01049E86C8E059694A396F4D141D98D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 13000,
+      "signalTriggerTime": 1786708985000,
+      "totalTokenValue": "2154.294324199004248800",
+      "alertPrice": "0.000240154540437945",
+      "alertMarketCap": "229179.172672159895329571",
+      "currentPrice": "0.000071272",
+      "currentMarketCap": "67599.029002570577554269945479546482782329020749678986116785",
+      "highestPrice": "0.000297760000000000",
+      "highestPriceTime": 1786709347000,
+      "exitRate": 41,
+      "status": "timeout",
+      "maxGain": "0.2399",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44280,
+      "ticker": "SpaceXcoin",
+      "chainId": "56",
+      "contractAddress": "0xf225e70162837a811c77dc2bb413a5c06e97ffff",
+      "logoUrl": "/images/web3-data/public/token/logos/007BA767199AFA58E9C3261B1025F453.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": "Fourmeme",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 96000,
+      "signalTriggerTime": 1786703408000,
+      "totalTokenValue": "11631.291518514762964573",
+      "alertPrice": "0.001847405310422094",
+      "alertMarketCap": "1847405.306602870553736617",
+      "currentPrice": "0.0014052",
+      "currentMarketCap": "1406769.212882271462893518591037723502826892273459712570991866",
+      "highestPrice": "0.003148100000000000",
+      "highestPriceTime": 1786705083000,
+      "exitRate": 26,
+      "status": "timeout",
+      "maxGain": "14.1493",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44274,
+      "ticker": "41",
+      "chainId": "56",
+      "contractAddress": "0x7c850f2a106014330d839258f274a62d7dff7777",
+      "logoUrl": "/images/web3-data/public/token/logos/08FE8585B33D845A5B6CEEE123593152.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 828000,
+      "signalTriggerTime": 1786689401000,
+      "totalTokenValue": "2465.147433443898674187",
+      "alertPrice": "0.000373227992600355",
+      "alertMarketCap": "373227.992600355148484785",
+      "currentPrice": "0.000055833",
+      "currentMarketCap": "55601.670050075565662412437437265000000000",
+      "highestPrice": "0.000420050000000000",
+      "highestPriceTime": 1786690377000,
+      "exitRate": 79,
+      "status": "timeout",
+      "maxGain": "0.9586",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44169,
+      "ticker": "utility",
+      "chainId": "56",
+      "contractAddress": "0xede00776439f9c49c592e43eee34777a51847777",
+      "logoUrl": "/images/web3-data/public/token/logos/CA7AC7A93D808E26CFCB580A8B5C6C00.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 880000,
+      "signalTriggerTime": 1786635873000,
+      "totalTokenValue": "4481.849913554856301711",
+      "alertPrice": "0.007238201740769943",
+      "alertMarketCap": "7238201.740769660366545174",
+      "currentPrice": "0.0036187",
+      "currentMarketCap": "3620560.946257822800227703024500072766087133333145797402612023",
+      "highestPrice": "0.009184200000000000",
+      "highestPriceTime": 1786647073000,
+      "exitRate": 24,
+      "status": "timeout",
+      "maxGain": "13.5893",
+      "signalCount": 8
+    },
+    {
+      "signalId": 44168,
+      "ticker": "币有",
+      "chainId": "56",
+      "contractAddress": "0xe9337dde3dd9e97f1f45a56412767ce5098e7777",
+      "logoUrl": "/images/web3-data/public/token/logos/9FEE2CF91C3DB1A2AE54995DE8FA31E2.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 255000,
+      "signalTriggerTime": 1786635172000,
+      "totalTokenValue": "2281.845730881897156600",
+      "alertPrice": "0.005905196937027860",
+      "alertMarketCap": "5905196.936654185223001279",
+      "currentPrice": "0.0051283",
+      "currentMarketCap": "5114133.388433181120719426057638959531803134643071623862639904",
+      "highestPrice": "0.006773300000000000",
+      "highestPriceTime": 1786696015000,
+      "exitRate": 0,
+      "status": "timeout",
+      "maxGain": "0.1653",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44148,
+      "ticker": "FlapBuddy",
+      "chainId": "56",
+      "contractAddress": "0xcca85147d64610860542b7fc52c872ec1f927777",
+      "logoUrl": "/images/web3-data/public/token/logos/B99DBFB0294932A6A5E6FAB372D6D047.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 182000,
+      "signalTriggerTime": 1786628498000,
+      "totalTokenValue": "6616.479535154557203396",
+      "alertPrice": "0.000323515418384956",
+      "alertMarketCap": "317218.932619209840556143",
+      "currentPrice": "0.000019295",
+      "currentMarketCap": "15873.861772730980577722814313505860016701744343211084536876",
+      "highestPrice": "0.000794860000000000",
+      "highestPriceTime": 1786650009000,
+      "exitRate": 86,
+      "status": "timeout",
+      "maxGain": "3.3529",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44145,
+      "ticker": "bBroker",
+      "chainId": "56",
+      "contractAddress": "0xf1969f437fe3c485468fb17b0d9861c24dcd7777",
+      "logoUrl": "/images/web3-data/public/token/logos/4172F9E89F9B5170CCC8C71D2FED7B8D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 9,
+      "direction": "buy",
+      "timeFrame": 216000,
+      "signalTriggerTime": 1786628168000,
+      "totalTokenValue": "8817.796716177800184557",
+      "alertPrice": "0.000321754785421399",
+      "alertMarketCap": "316375.693170123536842337",
+      "currentPrice": "0.00036193",
+      "currentMarketCap": "288412.013508126635493507483180540073981463064515594384427744",
+      "highestPrice": "0.003388500000000000",
+      "highestPriceTime": 1786649815000,
+      "exitRate": 84,
+      "status": "timeout",
+      "maxGain": "19.3418",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44022,
+      "ticker": "GME",
+      "chainId": "56",
+      "contractAddress": "0x86a62b9ec2014f0111117a331cae7ba8e073ffff",
+      "logoUrl": "/images/web3-data/public/token/logos/548F34108CEFE9377BA75B83AC0D442B.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": "Fourmeme",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 869000,
+      "signalTriggerTime": 1786552851000,
+      "totalTokenValue": "5075.890288801776365550",
+      "alertPrice": "0.003267701120899413",
+      "alertMarketCap": "3267701.120899412574087652",
+      "currentPrice": "0.000011385",
+      "currentMarketCap": "11418.777959485977207135914314762932980005772171089821410708",
+      "highestPrice": "0.005207100000000000",
+      "highestPriceTime": 1786631623000,
+      "exitRate": 43,
+      "status": "timeout",
+      "maxGain": "0.5935",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43994,
+      "ticker": "🧧",
+      "chainId": "56",
+      "contractAddress": "0x4e8cb4bfc4e481df6b9b710b64e361aa8b1a7777",
+      "logoUrl": "/images/web3-data/public/token/logos/6B294887530DB946936989F777E6847F.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 880000,
+      "signalTriggerTime": 1786545044000,
+      "totalTokenValue": "2246.717612381061427807",
+      "alertPrice": "0.000749715558117816",
+      "alertMarketCap": "749715.558117816428491820",
+      "currentPrice": "0.000019516",
+      "currentMarketCap": "19523.742520029701562240565400438911845292081805245823594256",
+      "highestPrice": "0.000809530000000000",
+      "highestPriceTime": 1786545066000,
+      "exitRate": 52,
+      "status": "outDecline",
+      "maxGain": "0.0798",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43991,
+      "ticker": "GME",
+      "chainId": "56",
+      "contractAddress": "0x5956c055cd90bc2e12c7f4c4f3ff5172cc4c7777",
+      "logoUrl": "/images/web3-data/public/token/logos/40018529AB9AF7D6B8E7133C3586DD7B.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 6,
+      "direction": "buy",
+      "timeFrame": 608000,
+      "signalTriggerTime": 1786540980000,
+      "totalTokenValue": "3527.234915168076049409",
+      "alertPrice": "0.000135959254326407",
+      "alertMarketCap": "135959.254326407222595599",
+      "currentPrice": "0.000009809",
+      "currentMarketCap": "9786.710197210440923392812902412000000000",
+      "highestPrice": "0.000478060000000000",
+      "highestPriceTime": 1786541389000,
+      "exitRate": 83,
+      "status": "outDecline",
+      "maxGain": "2.5162",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43985,
+      "ticker": "GME",
+      "chainId": "56",
+      "contractAddress": "0x2cee25fe4f13ec3d94558d41b3c7e0f4ee087777",
+      "logoUrl": "/images/web3-data/public/token/logos/3276A11649B9762F1B49EFE346B81FD5.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 895000,
+      "signalTriggerTime": 1786540609000,
+      "totalTokenValue": "9670.191673406591348279",
+      "alertPrice": "0.000644100312253094",
+      "alertMarketCap": "644100.312249956369779507",
+      "currentPrice": "0.000039573",
+      "currentMarketCap": "39395.144311172075417159119122117060397671651623553305980296",
+      "highestPrice": "0.000691960000000000",
+      "highestPriceTime": 1786540639000,
+      "exitRate": 68,
+      "status": "timeout",
+      "maxGain": "2.9583",
+      "signalCount": 5
+    },
+    {
+      "signalId": 43982,
+      "ticker": "GME",
+      "chainId": "56",
+      "contractAddress": "0xaf96f36b7a9c53193f34f544b269470599c2ffff",
+      "logoUrl": "/images/web3-data/public/token/logos/60C68906E685F6BEB27A97CBF19765B1.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": "Fourmeme",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 6,
+      "direction": "buy",
+      "timeFrame": 304000,
+      "signalTriggerTime": 1786540109000,
+      "totalTokenValue": "2861.368984567587757095",
+      "alertPrice": "0.000069202090036869",
+      "alertMarketCap": "69202.090036869129839570",
+      "currentPrice": "0.0000089835",
+      "currentMarketCap": "8966.04696618540870357400252487000000000",
+      "highestPrice": "0.000096749000000000",
+      "highestPriceTime": 1786540177000,
+      "exitRate": 64,
+      "status": "timeout",
+      "maxGain": "0.3981",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43970,
+      "ticker": "GMEB",
+      "chainId": "56",
+      "contractAddress": "0x46ceefda28dd7207059ed19b0acdc026955bb15c",
+      "logoUrl": "/images/web3-data/public/token/logos/b8b568c477304420a6bffa211478aa0e.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": true,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Compliance Related Token": [
+          {
+            "tagName": "Alpha Stock",
+            "languageKey": "wmp-label-alpha-stock"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Alpha",
+            "languageKey": "wmp-label-title-alpha"
+          }
+        ],
+        "Tokenized Stocks Trade Time": [
+          {
+            "tagName": "7*24",
+            "languageKey": "wmp-label-title-7-24"
+          }
+        ],
+        "Tokenized Stocks Launch Platform": [
+          {
+            "tagName": "BStocks.finance",
+            "languageKey": "wmp-label-title-bstocks-finance"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 314000,
+      "signalTriggerTime": 1786539397000,
+      "totalTokenValue": "2009.271020864714122677",
+      "alertPrice": "18.881415696572600000",
+      "alertMarketCap": "2348355.230581654898802676",
+      "currentPrice": "18.84403",
+      "currentMarketCap": "8372578856.00",
+      "highestPrice": "19.051060000000000000",
+      "highestPriceTime": 1786539756000,
+      "exitRate": 28,
+      "status": "timeout",
+      "maxGain": "0.009",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43883,
+      "ticker": "BOT",
+      "chainId": "56",
+      "contractAddress": "0xea77aeb05a90b5fa65b9bd60e95556ef4bc37777",
+      "logoUrl": "/images/web3-data/public/token/logos/3318104A70093CEB4E42F21394E272C7.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 877000,
+      "signalTriggerTime": 1786470441000,
+      "totalTokenValue": "3270.873420631391587215",
+      "alertPrice": "0.000456862883090921",
+      "alertMarketCap": "456862.883090921138703512",
+      "currentPrice": "0.00039043",
+      "currentMarketCap": "388845.507312190858362762860613182046541869289896792147131641",
+      "highestPrice": "0.001620700000000000",
+      "highestPriceTime": 1786479832000,
+      "exitRate": 72,
+      "status": "timeout",
+      "maxGain": "5.0859",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43882,
+      "ticker": "BOT",
+      "chainId": "56",
+      "contractAddress": "0x22211a886e82cbd2a9dd7b327aa3ce978fab7777",
+      "logoUrl": "/images/web3-data/public/token/logos/3C9D0F6545B326FDEAEACBE7923DFA50.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 317000,
+      "signalTriggerTime": 1786468907000,
+      "totalTokenValue": "2950.145829646826224590",
+      "alertPrice": "0.000141090415434826",
+      "alertMarketCap": "141090.415434825718503672",
+      "currentPrice": "0.0000052013",
+      "currentMarketCap": "5182.28966756336010252453084324000000000",
+      "highestPrice": "0.000294980000000000",
+      "highestPriceTime": 1786469371000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "1.0907",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43867,
+      "ticker": "Grok Bot",
+      "chainId": "56",
+      "contractAddress": "0xa91939854172b54197a1bae5be25157c91c17777",
+      "logoUrl": "/images/web3-data/public/token/logos/66ECED6A547EDFE25087A41A3C3F863E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 200000,
+      "signalTriggerTime": 1786467108000,
+      "totalTokenValue": "3899.056495034828131950",
+      "alertPrice": "0.000174803692736338",
+      "alertMarketCap": "174803.692736337527170221",
+      "currentPrice": "0.0000039053",
+      "currentMarketCap": "3889.572582509119476419400217889342232044605040652762219408",
+      "highestPrice": "0.000174803692736338",
+      "highestPriceTime": null,
+      "exitRate": 98,
+      "status": "outDecline",
+      "maxGain": "0",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43829,
+      "ticker": "BMAIL",
+      "chainId": "56",
+      "contractAddress": "0xd917d4c65b12c63715a3bf6710433c2f3dfe7777",
+      "logoUrl": "/images/web3-data/public/token/logos/64B3BCA07E25FE4B09D8170BAA5A8E76.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 791000,
+      "signalTriggerTime": 1786444523000,
+      "totalTokenValue": "2539.898585790163866411",
+      "alertPrice": "0.000119177720893561",
+      "alertMarketCap": "119177.720893561206505797",
+      "currentPrice": "0.0000037494",
+      "currentMarketCap": "3748.953161152829154078684492411000000000",
+      "highestPrice": "0.000141150000000000",
+      "highestPriceTime": 1786445629000,
+      "exitRate": 64,
+      "status": "timeout",
+      "maxGain": "0.1844",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43819,
+      "ticker": "梗王",
+      "chainId": "56",
+      "contractAddress": "0xf41987607c37e02fea46c3bc7a79690c96017777",
+      "logoUrl": "/images/web3-data/public/token/logos/563732403C4D6EA17C1EBDB18F3910E2.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 41000,
+      "signalTriggerTime": 1786435217000,
+      "totalTokenValue": "2547.900788699729508210",
+      "alertPrice": "0.000057661675389407",
+      "alertMarketCap": "57661.675389406567156615",
+      "currentPrice": "0.0000039923",
+      "currentMarketCap": "3984.913051388722592952807798763782757532246373190453868398",
+      "highestPrice": "0.000081095000000000",
+      "highestPriceTime": 1786435221000,
+      "exitRate": 97,
+      "status": "outDecline",
+      "maxGain": "0.4064",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43817,
+      "ticker": "BSTX",
+      "chainId": "56",
+      "contractAddress": "0x439f516b038892c691ca29b4768fbcc754b07777",
+      "logoUrl": "",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 289000,
+      "signalTriggerTime": 1786432219000,
+      "totalTokenValue": "3063.707712862151336469",
+      "alertPrice": "0.000125527669176666",
+      "alertMarketCap": "125527.669176666057062862",
+      "currentPrice": "0.000011207",
+      "currentMarketCap": "11169.517393726627322180408572670721732465754076212392789462",
+      "highestPrice": "0.000317140000000000",
+      "highestPriceTime": 1786432618000,
+      "exitRate": 67,
+      "status": "outDecline",
+      "maxGain": "1.5265",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43816,
+      "ticker": "牛人",
+      "chainId": "56",
+      "contractAddress": "0x1bc093f82f19282ca0303a9a0d428b46ec437777",
+      "logoUrl": "/images/web3-data/public/token/logos/F5FDCAA1D7D9C177633ECDFAAED745B1.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 780000,
+      "signalTriggerTime": 1786432152000,
+      "totalTokenValue": "2472.778621272042483646",
+      "alertPrice": "0.000050397253894722",
+      "alertMarketCap": "50397.253894722266789455",
+      "currentPrice": "0.000011241",
+      "currentMarketCap": "11230.99902653842594785287204266000000000",
+      "highestPrice": "0.000051073000000000",
+      "highestPriceTime": 1786432155000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.0134",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43707,
+      "ticker": "DGX-1",
+      "chainId": "56",
+      "contractAddress": "0x1b749adf5bd596ca22435bb925383f6edbe27777",
+      "logoUrl": "/images/web3-data/public/token/logos/37422F41A4E4BC7A9F20A71FB7142B55.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 73000,
+      "signalTriggerTime": 1786377735000,
+      "totalTokenValue": "2161.510861545900230000",
+      "alertPrice": "0.000198390762732461",
+      "alertMarketCap": "198390.762732460951773656",
+      "currentPrice": "0.0000032428",
+      "currentMarketCap": "3235.889908791443872392046380043000000000",
+      "highestPrice": "0.000217860000000000",
+      "highestPriceTime": 1786377811000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0981",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43706,
+      "ticker": "DGX-1",
+      "chainId": "56",
+      "contractAddress": "0xa99feec3160843b295c011609a50a19e269b7777",
+      "logoUrl": "",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "NVDAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 36000,
+      "signalTriggerTime": 1786377574000,
+      "totalTokenValue": "4101.236868491750116800",
+      "alertPrice": "0.000125606393942371",
+      "alertMarketCap": "125606.393942370511975479",
+      "currentPrice": "0.0000027553",
+      "currentMarketCap": "2739.97558517018431124779630302000000000",
+      "highestPrice": "0.000147600000000000",
+      "highestPriceTime": 1786378015000,
+      "exitRate": 98,
+      "status": "outDecline",
+      "maxGain": "0.4542",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43690,
+      "ticker": "黄袍",
+      "chainId": "56",
+      "contractAddress": "0x7ef2bea4942c338f2d0f9044bd14950993377777",
+      "logoUrl": "/images/web3-data/public/token/logos/59FE7E86900681A2776845B43AC7FAEC.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "xAUT",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 855000,
+      "signalTriggerTime": 1786371276000,
+      "totalTokenValue": "5442.827162738928277590",
+      "alertPrice": "0.000356835082739681",
+      "alertMarketCap": "356835.082738727293319189",
+      "currentPrice": "0.000049185",
+      "currentMarketCap": "49292.985939165870139632004679932359236315425803911946669045",
+      "highestPrice": "0.000679810000000000",
+      "highestPriceTime": 1786371829000,
+      "exitRate": 96,
+      "status": "timeout",
+      "maxGain": "0.9051",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43684,
+      "ticker": "黄袍",
+      "chainId": "56",
+      "contractAddress": "0x988d6f060b0bd496d153ec7624bed41b30737777",
+      "logoUrl": "",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 372000,
+      "signalTriggerTime": 1786370230000,
+      "totalTokenValue": "6210.760354203769675740",
+      "alertPrice": "0.000106820023668191",
+      "alertMarketCap": "106820.023667941269990959",
+      "currentPrice": "0.0000028127",
+      "currentMarketCap": "2809.425913748558369749292166059567659512267441141206607510",
+      "highestPrice": "0.000132610000000000",
+      "highestPriceTime": 1786370296000,
+      "exitRate": 68,
+      "status": "outDecline",
+      "maxGain": "0.6147",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43681,
+      "ticker": "DRESS",
+      "chainId": "56",
+      "contractAddress": "0x646aa2823d257e997b55bc2dc51fd2c387c17777",
+      "logoUrl": "/images/web3-data/public/token/logos/F8BD3A8778F7DD1EA04F361ACB025BAE.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 17000,
+      "signalTriggerTime": 1786369878000,
+      "totalTokenValue": "2014.979601068232714630",
+      "alertPrice": "0.000202447468219536",
+      "alertMarketCap": "202447.468219535839084194",
+      "currentPrice": "0.0000076481",
+      "currentMarketCap": "7632.188755921377065180634741271000000000",
+      "highestPrice": "0.000247920000000000",
+      "highestPriceTime": 1786369884000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.2246",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43679,
+      "ticker": "余额宝",
+      "chainId": "56",
+      "contractAddress": "0xaef0c86f199f70cc61c4bccb3362b9383bbd7777",
+      "logoUrl": "/images/web3-data/public/token/logos/6659FB24674C2A24F4EF40C30EB86209.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "BABAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 841000,
+      "signalTriggerTime": 1786369755000,
+      "totalTokenValue": "4676.463184468874529110",
+      "alertPrice": "0.000069555426317243",
+      "alertMarketCap": "69555.426317242883204647",
+      "currentPrice": "0.000016713",
+      "currentMarketCap": "16764.486825779159832437844996782000000000",
+      "highestPrice": "0.000151540000000000",
+      "highestPriceTime": 1786370989000,
+      "exitRate": 73,
+      "status": "timeout",
+      "maxGain": "1.1787",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43677,
+      "ticker": "范小勤",
+      "chainId": "56",
+      "contractAddress": "0x728554c42295301d5bb1d2021712fba9540c7777",
+      "logoUrl": "/images/web3-data/public/token/logos/F5094AF4E3064B1457725A1729D6BF0C.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "BABAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 841000,
+      "signalTriggerTime": 1786368331000,
+      "totalTokenValue": "5730.390375420515383950",
+      "alertPrice": "0.000148092091944102",
+      "alertMarketCap": "148092.091944101884929302",
+      "currentPrice": "0.0000078767",
+      "currentMarketCap": "7844.153123845817011859940750172000000000",
+      "highestPrice": "0.000193010000000000",
+      "highestPriceTime": 1786368400000,
+      "exitRate": 81,
+      "status": "outDecline",
+      "maxGain": "2.664",
+      "signalCount": 3
+    },
+    {
+      "signalId": 43654,
+      "ticker": "闲鱼币",
+      "chainId": "56",
+      "contractAddress": "0xb67ae9ad6685208435d31080c20516eb18b27777",
+      "logoUrl": "/images/web3-data/public/token/logos/BAE7773002BFA4E6DBAAB066DD1E583F.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "BABAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 61000,
+      "signalTriggerTime": 1786367556000,
+      "totalTokenValue": "3411.968672624447366160",
+      "alertPrice": "0.000068059547877639",
+      "alertMarketCap": "68059.547877639415041938",
+      "currentPrice": "0.000003407",
+      "currentMarketCap": "3393.744127423703441542823994972000000000",
+      "highestPrice": "0.000085483000000000",
+      "highestPriceTime": 1786367566000,
+      "exitRate": 91,
+      "status": "outDecline",
+      "maxGain": "0.3181",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43651,
+      "ticker": "币安太子",
+      "chainId": "56",
+      "contractAddress": "0x67e96fda46764ff6b996494fc1e6e454d40a7777",
+      "logoUrl": "/images/web3-data/public/token/logos/FBFBE560F158F2BDEA0E1BBA6A292AFC.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 743000,
+      "signalTriggerTime": 1786362996000,
+      "totalTokenValue": "2464.053919262241104195",
+      "alertPrice": "0.000472940672145916",
+      "alertMarketCap": "472940.672145915778289116",
+      "currentPrice": "0.000022896",
+      "currentMarketCap": "22888.3427933742808193401305854112790299593789716543477188",
+      "highestPrice": "0.000517560000000000",
+      "highestPriceTime": 1786363548000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.5379",
+      "signalCount": 5
+    },
+    {
+      "signalId": 43649,
+      "ticker": "10U战神",
+      "chainId": "56",
+      "contractAddress": "0xd1d9da3a290fa80fdc50e872cae2e70935117777",
+      "logoUrl": "/images/web3-data/public/token/logos/DC7CA3B2EC109974BA9AF0D8FBE87424.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 458000,
+      "signalTriggerTime": 1786359583000,
+      "totalTokenValue": "2158.672631804483107500",
+      "alertPrice": "0.000084325491124196",
+      "alertMarketCap": "84325.491124195851522159",
+      "currentPrice": "0.000013821",
+      "currentMarketCap": "13809.944216714283946839446787145000000000",
+      "highestPrice": "0.000280100000000000",
+      "highestPriceTime": 1786361881000,
+      "exitRate": 96,
+      "status": "timeout",
+      "maxGain": "2.3217",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43648,
+      "ticker": "ASTEROID",
+      "chainId": "56",
+      "contractAddress": "0x9a46455aed44f9c505fc9177612cfe3d3501ffff",
+      "logoUrl": "/images/web3-data/public/token/logos/4439C5E36B7CD75565C322096EDB8850.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": "Fourmeme",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 465000,
+      "signalTriggerTime": 1786356501000,
+      "totalTokenValue": "2045.137864299799004588",
+      "alertPrice": "0.000063496942106125",
+      "alertMarketCap": "63496.942106125262776182",
+      "currentPrice": "0.00001863",
+      "currentMarketCap": "18645.807955204578405607215625272000000000",
+      "highestPrice": "0.000090463000000000",
+      "highestPriceTime": 1786359016000,
+      "exitRate": 87,
+      "status": "timeout",
+      "maxGain": "0.4247",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43634,
+      "ticker": "Binance Royal",
+      "chainId": "56",
+      "contractAddress": "0x4c65593fefc32d05b4a71fb8e1804da9d5217777",
+      "logoUrl": "/images/web3-data/public/token/logos/ABFC9A359CCE6E854D1C4FCFAC9088E2.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 137000,
+      "signalTriggerTime": 1786350549000,
+      "totalTokenValue": "2084.752185505186295000",
+      "alertPrice": "0.000345381030808407",
+      "alertMarketCap": "345381.030808406787531952",
+      "currentPrice": "0.0000045968",
+      "currentMarketCap": "4608.502623225941701069953399695543853108740960577411252426",
+      "highestPrice": "0.000448770000000000",
+      "highestPriceTime": 1786350585000,
+      "exitRate": 92,
+      "status": "timeout",
+      "maxGain": "6.8932",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43623,
+      "ticker": "Cabal",
+      "chainId": "56",
+      "contractAddress": "0x932fcab81efa7f1f7ff655d87f7ea44890537777",
+      "logoUrl": "/images/web3-data/public/token/logos/A0FBE0A6950A3ACDFB7CE9838B00B4E5.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 824000,
+      "signalTriggerTime": 1786340335000,
+      "totalTokenValue": "2286.232160768876488200",
+      "alertPrice": "0.000132786946294553",
+      "alertMarketCap": "132786.946294552924593196",
+      "currentPrice": "0.0000030152",
+      "currentMarketCap": "3004.018191119688530012815737284000000000",
+      "highestPrice": "0.000189860000000000",
+      "highestPriceTime": 1786340437000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.4298",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43589,
+      "ticker": "CSI",
+      "chainId": "56",
+      "contractAddress": "0x2f31614f7a8bb702f7898d379b3c23db73b87777",
+      "logoUrl": "/images/web3-data/public/token/logos/9965F0ADC02D737EF0D666134E5451FA.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 462000,
+      "signalTriggerTime": 1786312349000,
+      "totalTokenValue": "2006.586371699262864162",
+      "alertPrice": "0.000830837567088893",
+      "alertMarketCap": "830837.567088893067688103",
+      "currentPrice": "0.0000071837",
+      "currentMarketCap": "7259.577178760536149496483464195000000000",
+      "highestPrice": "0.000996750000000000",
+      "highestPriceTime": 1786312909000,
+      "exitRate": 42,
+      "status": "timeout",
+      "maxGain": "0.1997",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43587,
+      "ticker": "BOT",
+      "chainId": "56",
+      "contractAddress": "0xbcad9b1b85af1cd81437252bf50b87235c0b7777",
+      "logoUrl": "/images/web3-data/public/token/logos/A752CE1D3260A5877A8BF137EFA1E0FB.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 620000,
+      "signalTriggerTime": 1786307440000,
+      "totalTokenValue": "2044.352930197286204100",
+      "alertPrice": "0.000777354215969896",
+      "alertMarketCap": "777354.215969671580592204",
+      "currentPrice": "0.0000098039",
+      "currentMarketCap": "9759.550394759015909373653534280653481510668192039716453303",
+      "highestPrice": "0.001111400000000000",
+      "highestPriceTime": 1786466829000,
+      "exitRate": 98,
+      "status": "timeout",
+      "maxGain": "0.4297",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43475,
+      "ticker": "CIMMER",
+      "chainId": "56",
+      "contractAddress": "0x78a20f5152f53a1eeaa2c7ebb0690761e8d07777",
+      "logoUrl": "/images/web3-data/public/token/logos/B55BE695A0B3EA021C1AFF1098E37418.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 87000,
+      "signalTriggerTime": 1786285322000,
+      "totalTokenValue": "2018.939103688745339526",
+      "alertPrice": "0.000059735113873634",
+      "alertMarketCap": "59735.113873633763772304",
+      "currentPrice": "0.0000030015",
+      "currentMarketCap": "2999.273300386516991332250864693000000000",
+      "highestPrice": "0.000085357000000000",
+      "highestPriceTime": 1786300667000,
+      "exitRate": 89,
+      "status": "timeout",
+      "maxGain": "0.4289",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43474,
+      "ticker": "CHEESE",
+      "chainId": "56",
+      "contractAddress": "0x696b057564c6b5251a1fd9b90fbf20c454e96666",
+      "logoUrl": "/images/web3-data/public/token/logos/A1BCD9ED6F1374C073388FB0A036935F.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 9,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 344000,
+      "signalTriggerTime": 1786284528000,
+      "totalTokenValue": "2237.551821230899319550",
+      "alertPrice": "0.000000935161279945",
+      "alertMarketCap": "393412.998859881039358662",
+      "currentPrice": "0.00000025676",
+      "currentMarketCap": "107838.679056084763833477441511473510000000",
+      "highestPrice": "0.000001481300000000",
+      "highestPriceTime": 1786285738000,
+      "exitRate": 0,
+      "status": "timeout",
+      "maxGain": "0.584",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43467,
+      "ticker": "FREYA",
+      "chainId": "56",
+      "contractAddress": "0x0f5d09d2f3e1f7daa13b4e8037454972eea87777",
+      "logoUrl": "/images/web3-data/public/token/logos/DFA2750BEB00BE2B1CBB39FCE8D1C073.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 11,
+      "direction": "buy",
+      "timeFrame": 458000,
+      "signalTriggerTime": 1786266741000,
+      "totalTokenValue": "7243.902110573540954150",
+      "alertPrice": "0.000665242158095074",
+      "alertMarketCap": "212877.490590423684722099",
+      "currentPrice": "0.000047875",
+      "currentMarketCap": "15310.609260128929906710526438315401808999830458281681537354",
+      "highestPrice": "0.000976720000000000",
+      "highestPriceTime": 1786267537000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.4682",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43460,
+      "ticker": "币安城",
+      "chainId": "56",
+      "contractAddress": "0x9ecfbb6c0ce91d5ac00e1f7378880523cb8d7777",
+      "logoUrl": "/images/web3-data/public/token/logos/98657C99BDC5590435D5848C457B97FD.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 369000,
+      "signalTriggerTime": 1786260647000,
+      "totalTokenValue": "4706.190516177148075510",
+      "alertPrice": "0.000293803850572749",
+      "alertMarketCap": "293803.850572748909553882",
+      "currentPrice": "0.000035796",
+      "currentMarketCap": "35764.821474729649380645963478614811428596954055361366381064",
+      "highestPrice": "0.000849030000000000",
+      "highestPriceTime": 1786338334000,
+      "exitRate": 72,
+      "status": "timeout",
+      "maxGain": "3.3117",
+      "signalCount": 3
+    },
+    {
+      "signalId": 43456,
+      "ticker": "TUT",
+      "chainId": "56",
+      "contractAddress": "0xcaae2a2f939f51d97cdfa9a86e79e3f085b799f3",
+      "logoUrl": "/images/web3-data/public/token/logos/c7c6c30b91464754a79fb89e4ba0b6ab.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": "Fourmeme",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 50000,
+      "signalTriggerTime": 1786260149000,
+      "totalTokenValue": "8367.370811032439666529",
+      "alertPrice": "0.115333148217316333",
+      "alertMarketCap": "96123842.112336798659334203",
+      "currentPrice": "0.035937",
+      "currentMarketCap": "29543205.384449128129301741334259105259322127459262981368165828",
+      "highestPrice": "0.248330000000000000",
+      "highestPriceTime": 1786320967000,
+      "exitRate": 3,
+      "status": "timeout",
+      "maxGain": "1.1532",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43434,
+      "ticker": "Exchange the world",
+      "chainId": "56",
+      "contractAddress": "0x71db1b68d692f2764f7b4dcd07236a60a0f77777",
+      "logoUrl": "/images/web3-data/public/token/logos/D262B489D86AED8BFD08E9D489E55B06.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+      "tokenDecimals": 18,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 531000,
+      "signalTriggerTime": 1786241273000,
+      "totalTokenValue": "2613.067712533640328120",
+      "alertPrice": "0.000129006473248393",
+      "alertMarketCap": "129006.473248393456416500",
+      "currentPrice": "0.000070163",
+      "currentMarketCap": "70165.505265770974673537045138525000000000",
+      "highestPrice": "0.000271680000000000",
+      "highestPriceTime": 1786539604000,
+      "exitRate": 0,
+      "status": "timeout",
+      "maxGain": "1.1059",
+      "signalCount": 1
+    }
+  ],
+  "success": true
+}

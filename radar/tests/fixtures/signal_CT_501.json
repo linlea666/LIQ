@@ -1,0 +1,5035 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": [
+    {
+      "signalId": 44444,
+      "ticker": "FATDOG",
+      "chainId": "CT_501",
+      "contractAddress": "5pyE5xrrV9nivbLiM5LqALcWiHGraeehGKZVTHUbpump",
+      "logoUrl": "/images/web3-data/public/token/logos/E19200CEA3A35BEBCF40F43499F45E63.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 818000,
+      "signalTriggerTime": 1786813984000,
+      "totalTokenValue": "1238.666516742225524777",
+      "alertPrice": "0.000052774788211799",
+      "alertMarketCap": "50953.968075243743003949",
+      "currentPrice": "0.0000029666",
+      "currentMarketCap": "2862.711172852823720349952966893468490162126578",
+      "highestPrice": "0.000057251000000000",
+      "highestPriceTime": 1786814719000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0848",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44409,
+      "ticker": "fatdog",
+      "chainId": "CT_501",
+      "contractAddress": "Boqj1AxUGZSPFxyNrt2x9aEeR97R45JmUg1dPwKVpump",
+      "logoUrl": "/images/web3-data/public/token/logos/62FDE9832C0B5B26A9E6531355227233.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 139000,
+      "signalTriggerTime": 1786812379000,
+      "totalTokenValue": "1481.642806569264413897",
+      "alertPrice": "0.000074735507298448",
+      "alertMarketCap": "73787.231275838966358266",
+      "currentPrice": "0.00009539",
+      "currentMarketCap": "89264.516772412984763361209498321542059613314747",
+      "highestPrice": "0.000206200000000000",
+      "highestPriceTime": 1786817163000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.7591",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44403,
+      "ticker": "Lopunny",
+      "chainId": "CT_501",
+      "contractAddress": "3EJnCDWV29PisxfrpRbjS1kUXFR5SnaPUMC9zynkpump",
+      "logoUrl": "/images/web3-data/public/token/logos/AAFABF3B992AC2BD698B2C49D7680EB3.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          },
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 375000,
+      "signalTriggerTime": 1786810395000,
+      "totalTokenValue": "2105.913716860765758785",
+      "alertPrice": "0.000071323990744599",
+      "alertMarketCap": "68348.154286620995688852",
+      "currentPrice": "0.000021682",
+      "currentMarketCap": "20764.315584577020562722801612437488279720500672",
+      "highestPrice": "0.000153350000000000",
+      "highestPriceTime": 1786814322000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.15",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44402,
+      "ticker": "uni",
+      "chainId": "CT_501",
+      "contractAddress": "9kRQJNBbzv2igELvLvdQTXDWb4Nevm4Ri4BDcdgvRYLo",
+      "logoUrl": "/images/web3-data/public/token/logos/A0D8F9C2861BAC2709974F3AE2FA5FF9.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 417000,
+      "signalTriggerTime": 1786804572000,
+      "totalTokenValue": "2243.359248914285675052",
+      "alertPrice": "0.000069669339728884",
+      "alertMarketCap": "67695.034468903865137427",
+      "currentPrice": "0.000013427",
+      "currentMarketCap": "13037.024155545292076092368780426037388372056010",
+      "highestPrice": "0.000130480000000000",
+      "highestPriceTime": 1786807015000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.8728",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44389,
+      "ticker": "LUNA",
+      "chainId": "CT_501",
+      "contractAddress": "3dNkp3EsN5NGgDuRgSK2v7bRSzgQpcjLueN6cZjDpump",
+      "logoUrl": "/images/web3-data/public/token/logos/690EA0F9AEA8EF12EF714528E25FAF53.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 845000,
+      "signalTriggerTime": 1786799674000,
+      "totalTokenValue": "1802.335332487509010394",
+      "alertPrice": "0.000121217094446653",
+      "alertMarketCap": "117949.913849440213864016",
+      "currentPrice": "0.000047342",
+      "currentMarketCap": "46080.122006778729820511429804126799363824837670",
+      "highestPrice": "0.000381440000000000",
+      "highestPriceTime": 1786812598000,
+      "exitRate": 57,
+      "status": "timeout",
+      "maxGain": "2.1468",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44376,
+      "ticker": "CHARLIE",
+      "chainId": "CT_501",
+      "contractAddress": "C2ZpM1riZX236KbRGb56S5k6GE2ZbB26D6B8FjTYpump",
+      "logoUrl": "/images/web3-data/public/token/logos/542A25729714FC3AAFF04C010C90BC16.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 863000,
+      "signalTriggerTime": 1786778901000,
+      "totalTokenValue": "1700.640397968464327933",
+      "alertPrice": "0.000065685689901078",
+      "alertMarketCap": "63289.516962178746088428",
+      "currentPrice": "0.000021844",
+      "currentMarketCap": "21054.673734202099770412127580250942985967499025",
+      "highestPrice": "0.000114190000000000",
+      "highestPriceTime": 1786779435000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "0.7384",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44348,
+      "ticker": "TRENCHY",
+      "chainId": "CT_501",
+      "contractAddress": "8FFAVQQhNAfsDWmW4x6yUtiiiH5QwuqiG1TSrQEncoin",
+      "logoUrl": "/images/web3-data/public/token/logos/CF98A3259B04C4B30071E79E6B7AAF7B.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 159000,
+      "signalTriggerTime": 1786746451000,
+      "totalTokenValue": "2970.609485575721220000",
+      "alertPrice": "0.000066434661910894",
+      "alertMarketCap": "66434.661910893934406577",
+      "currentPrice": "0.0000042936",
+      "currentMarketCap": "4296.026320561846713279867579337348740946180020",
+      "highestPrice": "0.000097147000000000",
+      "highestPriceTime": 1786746841000,
+      "exitRate": 91,
+      "status": "timeout",
+      "maxGain": "0.4623",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44346,
+      "ticker": "YOUDECIDE",
+      "chainId": "CT_501",
+      "contractAddress": "4puQGAPpgYzHDaHs2iVSni8zdrkLzT7ZRjzpdQnLcoin",
+      "logoUrl": "/images/web3-data/public/token/logos/8C0801EF6ECE8D1F3D2DB4B6D84F1414.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 177000,
+      "signalTriggerTime": 1786743515000,
+      "totalTokenValue": "2824.901348558454208718",
+      "alertPrice": "0.000442742282492361",
+      "alertMarketCap": "442742.282492361118374089",
+      "currentPrice": "0.000018754",
+      "currentMarketCap": "15008.81038620105141803557584840394028834761023",
+      "highestPrice": "0.000600760000000000",
+      "highestPriceTime": 1786745217000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.0162",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44344,
+      "ticker": "Trenchooor",
+      "chainId": "CT_501",
+      "contractAddress": "CMMNcCNvnmydhqgxHKmBkKBt7FMyoEv6vgrCkJk6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/136AD877632F80F3A2C853928B514F70.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 477000,
+      "signalTriggerTime": 1786741240000,
+      "totalTokenValue": "2070.615797777919593374",
+      "alertPrice": "0.000057875798008557",
+      "alertMarketCap": "55563.332310907049504034",
+      "currentPrice": "0.0000026996",
+      "currentMarketCap": "2590.145616301376206645983031158161723799276260",
+      "highestPrice": "0.000084618000000000",
+      "highestPriceTime": 1786741599000,
+      "exitRate": 59,
+      "status": "outDecline",
+      "maxGain": "0.4621",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44340,
+      "ticker": "bliss",
+      "chainId": "CT_501",
+      "contractAddress": "3mAk9t55CSLpc1rwk9RqFzmVKmVVYaLWRLk93QoEpump",
+      "logoUrl": "/images/web3-data/public/token/logos/6D6790514CB53CFC53F98B521AF40D5C.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 527000,
+      "signalTriggerTime": 1786739781000,
+      "totalTokenValue": "1484.694612935427056106",
+      "alertPrice": "0.000058671162879500",
+      "alertMarketCap": "56709.439102515836285543",
+      "currentPrice": "0.000001938024315132979398509594136901",
+      "currentMarketCap": "1872.416641912633487972137723814251023086960345",
+      "highestPrice": "0.000082960000000000",
+      "highestPriceTime": 1786740729000,
+      "exitRate": 98,
+      "status": "outDecline",
+      "maxGain": "0.414",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44334,
+      "ticker": "Trenchy",
+      "chainId": "CT_501",
+      "contractAddress": "5cWGJjnLJFLdnp8g7kqqdXf1Q7MLhzVw8HLbrotrench",
+      "logoUrl": "/images/web3-data/public/token/logos/6D7C45DA16AFE78088DEC26A61F1BA8C.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "LaunchLab",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "LaunchLab",
+            "languageKey": "wmp-label-title-launchlab"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 265000,
+      "signalTriggerTime": 1786738153000,
+      "totalTokenValue": "1076.043847381329611600",
+      "alertPrice": "0.000060872049908402",
+      "alertMarketCap": "60872.049908401812847254",
+      "currentPrice": "0.0000017825",
+      "currentMarketCap": "1781.927683094095282456804152874014978664381924",
+      "highestPrice": "0.000074489000000000",
+      "highestPriceTime": 1786738155000,
+      "exitRate": 81,
+      "status": "outDecline",
+      "maxGain": "0.2237",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44329,
+      "ticker": "FATNOOB",
+      "chainId": "CT_501",
+      "contractAddress": "8cKm1sTQhuXLoN9SAjQgxDCCEDHizEoJKFNSdjoGnxcD",
+      "logoUrl": "/images/web3-data/public/token/logos/FC5BA3D5D3DD119ADDE6BB1BA2288462.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 424000,
+      "signalTriggerTime": 1786736633000,
+      "totalTokenValue": "1273.068938640006901953",
+      "alertPrice": "0.000120461831737784",
+      "alertMarketCap": "117810.541318987919017591",
+      "currentPrice": "0.000049773",
+      "currentMarketCap": "45627.652195809486466832461756460550009384989784",
+      "highestPrice": "0.000318640000000000",
+      "highestPriceTime": 1786740447000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.6452",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44328,
+      "ticker": "ISABELLA",
+      "chainId": "CT_501",
+      "contractAddress": "4orPtYYCTpCZbmhLiNkQ1mcQG7hgpHynYCV3ppC7pump",
+      "logoUrl": "/images/web3-data/public/token/logos/E652F2AC5E6FD7E4A5C8A57AA802FF6B.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 78000,
+      "signalTriggerTime": 1786735094000,
+      "totalTokenValue": "1437.154580761883682913",
+      "alertPrice": "0.000054567139940537",
+      "alertMarketCap": "54104.527306967689196715",
+      "currentPrice": "0.000001836487349144004830710537510511",
+      "currentMarketCap": "1761.618558886615639314109776705381424097669785",
+      "highestPrice": "0.000062713000000000",
+      "highestPriceTime": 1786735095000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.1493",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44321,
+      "ticker": "NEMU",
+      "chainId": "CT_501",
+      "contractAddress": "DPxTMqAaLwf79HUAUBtcwadB1xYCWmybAdwhaG8Hpump",
+      "logoUrl": "/images/web3-data/public/token/logos/115CF53868312522E13E807C0FDA9213.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 655000,
+      "signalTriggerTime": 1786730243000,
+      "totalTokenValue": "3342.851706266460928061",
+      "alertPrice": "0.000057664499429927",
+      "alertMarketCap": "53914.426357725829033130",
+      "currentPrice": "0.0000075714",
+      "currentMarketCap": "7074.272538054117121000735244612753213003841888",
+      "highestPrice": "0.000145900000000000",
+      "highestPriceTime": 1786731691000,
+      "exitRate": 79,
+      "status": "outDecline",
+      "maxGain": "1.5302",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44307,
+      "ticker": "LOOKSMAX",
+      "chainId": "CT_501",
+      "contractAddress": "GPzpoXpD74E2C4CJNayuoyBqPQJEsPtdse3nhntrpump",
+      "logoUrl": "/images/web3-data/public/token/logos/E981F6AEA61EFC18397FA2C42D6FA628.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 90000,
+      "signalTriggerTime": 1786727457000,
+      "totalTokenValue": "13178.886610515066193122",
+      "alertPrice": "0.000402006634451726",
+      "alertMarketCap": "383953.719876693040454732",
+      "currentPrice": "0.0024647",
+      "currentMarketCap": "2354967.253568623398795999983086990200312604829310",
+      "highestPrice": "0.003298300000000000",
+      "highestPriceTime": 1786816657000,
+      "exitRate": 40,
+      "status": "timeout",
+      "maxGain": "17.868",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44306,
+      "ticker": "SUISEI",
+      "chainId": "CT_501",
+      "contractAddress": "8vtRhUm7mrU6jg9YG19Qc8UEhRbMwTXwNQ52xizpump",
+      "logoUrl": "/images/web3-data/public/token/logos/7B7FAF1F54A9507400067393A6E01965.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 133000,
+      "signalTriggerTime": 1786727037000,
+      "totalTokenValue": "6377.319031803969563463",
+      "alertPrice": "0.000493090426800282",
+      "alertMarketCap": "492775.409440166305748489",
+      "currentPrice": "0.00001302",
+      "currentMarketCap": "13021.28234401658784428022319039335624533114475",
+      "highestPrice": "0.000512480000000000",
+      "highestPriceTime": 1786727053000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0393",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44305,
+      "ticker": "JACKSEPTICEYE",
+      "chainId": "CT_501",
+      "contractAddress": "HYpXMNDKuqfcAW5wzVaN8VHqPhSYoKtSZF6hXVFapump",
+      "logoUrl": "/images/web3-data/public/token/logos/5755B4CF01619E945EFCFC8536E1EF7D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 87000,
+      "signalTriggerTime": 1786725200000,
+      "totalTokenValue": "1504.223411873684423980",
+      "alertPrice": "0.000131922254558949",
+      "alertMarketCap": "131506.145258081424220797",
+      "currentPrice": "0.0000040063",
+      "currentMarketCap": "3927.15598677591969151226729253227770191127974",
+      "highestPrice": "0.000131922254558949",
+      "highestPriceTime": null,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44298,
+      "ticker": "stork",
+      "chainId": "CT_501",
+      "contractAddress": "Aq5nfpuNR8aCHtUjmBwFEmPHZQC6LZmSeA9Tr9wNwxiF",
+      "logoUrl": "/images/web3-data/public/token/logos/E9543C740B04E32643091C4D0FFE7D72.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 11,
+      "direction": "buy",
+      "timeFrame": 742000,
+      "signalTriggerTime": 1786716905000,
+      "totalTokenValue": "15916.662753709351771266",
+      "alertPrice": "0.000174262744321023",
+      "alertMarketCap": "172589.379562539487670876",
+      "currentPrice": "0.0000053486",
+      "currentMarketCap": "5298.523869054639698003232721511447803247708310",
+      "highestPrice": "0.000177090000000000",
+      "highestPriceTime": 1786716906000,
+      "exitRate": 99,
+      "status": "exitRate",
+      "maxGain": "1.1103",
+      "signalCount": 5
+    },
+    {
+      "signalId": 44293,
+      "ticker": "FTR",
+      "chainId": "CT_501",
+      "contractAddress": "Dmkj4dB3Ngva9gWKkDgj8UMF39EC7ArpGf2rxLxDpump",
+      "logoUrl": "/images/web3-data/public/token/logos/C6E7DF3133539958159317E0DED7F7E9.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 811000,
+      "signalTriggerTime": 1786715106000,
+      "totalTokenValue": "5758.755436590982198045",
+      "alertPrice": "0.000352919473560104",
+      "alertMarketCap": "346135.839955189458626078",
+      "currentPrice": "0.00035044",
+      "currentMarketCap": "343527.580170737045108990556859897727521266191580",
+      "highestPrice": "0.001133900000000000",
+      "highestPriceTime": 1786727349000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "2.2129",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44281,
+      "ticker": "Megatron",
+      "chainId": "CT_501",
+      "contractAddress": "CVhRNUtxwvsaGzfQ5Z6kkPSkraK35ykFC456jbsPpump",
+      "logoUrl": "/images/web3-data/public/token/logos/476FE4FD7B340ED2D28C6EAB21943AEB.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 122000,
+      "signalTriggerTime": 1786705170000,
+      "totalTokenValue": "2536.593876340762892845",
+      "alertPrice": "0.000078544183568856",
+      "alertMarketCap": "76914.043581179663879154",
+      "currentPrice": "0.000020004",
+      "currentMarketCap": "19386.53216724302840851753205580247866376719272",
+      "highestPrice": "0.000355090000000000",
+      "highestPriceTime": 1786712581000,
+      "exitRate": 61,
+      "status": "timeout",
+      "maxGain": "3.5209",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44278,
+      "ticker": "ur mom",
+      "chainId": "CT_501",
+      "contractAddress": "dbx9JPiNV4QpJi1gvYsnqTrqmgELejEjWdwAMd2pump",
+      "logoUrl": "/images/web3-data/public/token/logos/8E5D96BDF0ACD06C8D43F24D9FA0A0A3.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 165000,
+      "signalTriggerTime": 1786699744000,
+      "totalTokenValue": "2014.865985437971599478",
+      "alertPrice": "0.000066751112187383",
+      "alertMarketCap": "65517.459125202058842222",
+      "currentPrice": "0.000018851",
+      "currentMarketCap": "18334.11103067372572611359283738419419402688479",
+      "highestPrice": "0.000207110000000000",
+      "highestPriceTime": 1786702195000,
+      "exitRate": 25,
+      "status": "timeout",
+      "maxGain": "2.1027",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44277,
+      "ticker": "PCA",
+      "chainId": "CT_501",
+      "contractAddress": "GwoaR1Sac7KGJKkgNjxKFZ9N2WMXF1k1YF2yS2xZpump",
+      "logoUrl": "/images/web3-data/public/token/logos/120C4054B0E3B8E564CC63D2CC630AAC.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 150000,
+      "signalTriggerTime": 1786695224000,
+      "totalTokenValue": "1771.910986639121404569",
+      "alertPrice": "0.000153754230229433",
+      "alertMarketCap": "143761.770265897026485069",
+      "currentPrice": "0.000011392",
+      "currentMarketCap": "10372.272404240348933013518539599615331599641142",
+      "highestPrice": "0.000233040000000000",
+      "highestPriceTime": 1786695307000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.5157",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44276,
+      "ticker": "PlaWan",
+      "chainId": "CT_501",
+      "contractAddress": "6Sjx1TTnHxQcmCSVBNRhRwLnBbLSMvgVP68fySsVpump",
+      "logoUrl": "/images/web3-data/public/token/logos/5BAD46356F8540AA8549E7E756EC8E0C.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 322000,
+      "signalTriggerTime": 1786694680000,
+      "totalTokenValue": "2680.520986328346879420",
+      "alertPrice": "0.000061458101452402",
+      "alertMarketCap": "59783.044868954121032514",
+      "currentPrice": "0.0000025713",
+      "currentMarketCap": "2499.950442148612339333417823143615347758846865",
+      "highestPrice": "0.000073957000000000",
+      "highestPriceTime": 1786694838000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.2034",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44275,
+      "ticker": "RATIO",
+      "chainId": "CT_501",
+      "contractAddress": "AzXuLSSRkj3kDCgSx8C3MvHMDSAk8TcUZcjhYciQpump",
+      "logoUrl": "/images/web3-data/public/token/logos/CDBC9188E9FA447C4EF5EDEFA4902324.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 710000,
+      "signalTriggerTime": 1786690751000,
+      "totalTokenValue": "2877.439535016429865652",
+      "alertPrice": "0.000073552513846178",
+      "alertMarketCap": "71580.656955124654392968",
+      "currentPrice": "0.0000069747",
+      "currentMarketCap": "6789.847800682245306844198506168320170787862354",
+      "highestPrice": "0.000220010000000000",
+      "highestPriceTime": 1786712950000,
+      "exitRate": 79,
+      "status": "timeout",
+      "maxGain": "1.9912",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44269,
+      "ticker": "DTG",
+      "chainId": "CT_501",
+      "contractAddress": "Bgvi4DPtuoPWr5PNj1di1Ci9Ap8qh9rSvj86Mxrcpump",
+      "logoUrl": "/images/web3-data/public/token/logos/2B0F057FEFAA3B3A1C7274915CC8A950.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 830000,
+      "signalTriggerTime": 1786681387000,
+      "totalTokenValue": "2506.667907161495960682",
+      "alertPrice": "0.000257437821601103",
+      "alertMarketCap": "250951.420306167609455978",
+      "currentPrice": "0.0000086571",
+      "currentMarketCap": "8442.309766652839739144236733465299072596674514",
+      "highestPrice": "0.000257437821601103",
+      "highestPriceTime": null,
+      "exitRate": 91,
+      "status": "timeout",
+      "maxGain": "2.6796",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44262,
+      "ticker": "Fartcoin",
+      "chainId": "CT_501",
+      "contractAddress": "vFsy4Kz5dBQwHgrQfLBw7hfJizrG2KC1HrQ698Hpump",
+      "logoUrl": "/images/web3-data/public/token/logos/0179ABF5DE0EB7F7412E4A4D8DC3D32E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 108000,
+      "signalTriggerTime": 1786678897000,
+      "totalTokenValue": "8766.324434185867590304",
+      "alertPrice": "0.000569824965941226",
+      "alertMarketCap": "556556.991740383117921674",
+      "currentPrice": "0.000014411",
+      "currentMarketCap": "14079.176091066190327031336086951317403233669186",
+      "highestPrice": "0.000631030000000000",
+      "highestPriceTime": 1786678989000,
+      "exitRate": 55,
+      "status": "timeout",
+      "maxGain": "0.1074",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44260,
+      "ticker": "Burpcoin",
+      "chainId": "CT_501",
+      "contractAddress": "FsLJrQRBT7gdDUXcdbww83itvh9LRusshFigpjswpump",
+      "logoUrl": "/images/web3-data/public/token/logos/8EC2350CD49C884DEBD3CEC25CAF6E9C.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 825000,
+      "signalTriggerTime": 1786666659000,
+      "totalTokenValue": "2601.603799637710226559",
+      "alertPrice": "0.000151229349834491",
+      "alertMarketCap": "144890.799441426261099761",
+      "currentPrice": "0.000024726",
+      "currentMarketCap": "23679.426247206089332486439222024973292666057472",
+      "highestPrice": "0.000565570000000000",
+      "highestPriceTime": 1786679251000,
+      "exitRate": 97,
+      "status": "timeout",
+      "maxGain": "2.7398",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44259,
+      "ticker": "Burpcoin",
+      "chainId": "CT_501",
+      "contractAddress": "J65MC8sdQ1ePSwmtNtsYgXfkiUAyJUqdwoPiKBgrpump",
+      "logoUrl": "/images/web3-data/public/token/logos/96EA37C16E8975920547B0E33A6F1E6E.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 268000,
+      "signalTriggerTime": 1786665905000,
+      "totalTokenValue": "1356.419076113139229085",
+      "alertPrice": "0.000160312961184451",
+      "alertMarketCap": "157220.976567729100722749",
+      "currentPrice": "0.0000020692",
+      "currentMarketCap": "2028.985101593104926843301395147751406973309012",
+      "highestPrice": "0.000178700000000000",
+      "highestPriceTime": 1786665924000,
+      "exitRate": 73,
+      "status": "outDecline",
+      "maxGain": "0.1147",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44258,
+      "ticker": "Burpcoin",
+      "chainId": "CT_501",
+      "contractAddress": "5Fybgp2ABH9MvrUpyzJ1eMDLuuP5QiD8CSJ8k9iipump",
+      "logoUrl": "/images/web3-data/public/token/logos/8C97A56B81B9F79D14ED2561B808BCCA.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 179000,
+      "signalTriggerTime": 1786665573000,
+      "totalTokenValue": "1348.721302406558872327",
+      "alertPrice": "0.000051747761094808",
+      "alertMarketCap": "50261.811666908732411345",
+      "currentPrice": null,
+      "currentMarketCap": "2122.662138641674177391525988",
+      "highestPrice": "0.000074031000000000",
+      "highestPriceTime": 1786665613000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.4306",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44231,
+      "ticker": "cc",
+      "chainId": "CT_501",
+      "contractAddress": "E3i7sTY5QYEBh3itepnomZQt7Eh5kzmHFk1vkm2pump",
+      "logoUrl": "/images/web3-data/public/token/logos/33F91C60C3FA5C26EF354B5D887A033E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Add Position",
+            "languageKey": "wmp-label-title-dev-add-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 892000,
+      "signalTriggerTime": 1786658944000,
+      "totalTokenValue": "10964.447695439961702080",
+      "alertPrice": "0.001258226764565670",
+      "alertMarketCap": "1209999.787700209016914493",
+      "currentPrice": "0.0003198",
+      "currentMarketCap": "310452.755017198167344263451991043630769531856350",
+      "highestPrice": "0.002248600000000000",
+      "highestPriceTime": 1786659094000,
+      "exitRate": 93,
+      "status": "timeout",
+      "maxGain": "0.7871",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44224,
+      "ticker": "honse",
+      "chainId": "CT_501",
+      "contractAddress": "46vV3ZpFNLZn1CDRYnAvqPsdW5ejEYn9GK9kPcZFpump",
+      "logoUrl": "/images/web3-data/public/token/logos/D4CE64CD410C9E23E32EF75A567347E6.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 511000,
+      "signalTriggerTime": 1786654386000,
+      "totalTokenValue": "2315.301741710597252057",
+      "alertPrice": "0.000095991597892172",
+      "alertMarketCap": "92862.694702528710590746",
+      "currentPrice": "0.0001009",
+      "currentMarketCap": "97633.099387937807920601020452353075068622213006",
+      "highestPrice": "0.000385640000000000",
+      "highestPriceTime": 1786733671000,
+      "exitRate": 22,
+      "status": "timeout",
+      "maxGain": "3.0174",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44222,
+      "ticker": "Momota",
+      "chainId": "CT_501",
+      "contractAddress": "CrJPSvj625TnPdWS42aG5ybMcHeFvnNqq5AExVespump",
+      "logoUrl": "/images/web3-data/public/token/logos/F74928ABBD6D60C9373A81F0270FF43B.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 807000,
+      "signalTriggerTime": 1786652642000,
+      "totalTokenValue": "10443.502034108529793720",
+      "alertPrice": "0.004606911350160723",
+      "alertMarketCap": "4600833.387356907448810172",
+      "currentPrice": "0.0019177",
+      "currentMarketCap": "1939035.502647399291146310266341242667319292111186",
+      "highestPrice": "0.005132200000000000",
+      "highestPriceTime": 1786667977000,
+      "exitRate": 38,
+      "status": "timeout",
+      "maxGain": "0.4064",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44214,
+      "ticker": "BUY",
+      "chainId": "CT_501",
+      "contractAddress": "DXs2kE8kPQQV4z5zYPauqdpWXDdTFti77KQXmnhrpump",
+      "logoUrl": "/images/web3-data/public/token/logos/80DBF3BEA65C5312AD533EDB0B57627E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 20000,
+      "signalTriggerTime": 1786651070000,
+      "totalTokenValue": "3832.536914065090936996",
+      "alertPrice": "0.000215827694702189",
+      "alertMarketCap": "215385.096768969087341876",
+      "currentPrice": "0.0000025142",
+      "currentMarketCap": "2464.41848287971992854558936586533097402032034",
+      "highestPrice": "0.000276360000000000",
+      "highestPriceTime": 1786651128000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.8965",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44195,
+      "ticker": "greg",
+      "chainId": "CT_501",
+      "contractAddress": "BwVcV7vYpA1aobyhG7XGAG1ow6FtZBAj3fSMFLgWpump",
+      "logoUrl": "/images/web3-data/public/token/logos/6AE53EBE227AAEFD5C1E80C4CE27D623.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 547000,
+      "signalTriggerTime": 1786648943000,
+      "totalTokenValue": "1454.020056345875981697",
+      "alertPrice": "0.000148532055998014",
+      "alertMarketCap": "138735.893105880666496315",
+      "currentPrice": "0.0000033956",
+      "currentMarketCap": "3170.332366408769764510548716958183352101890802",
+      "highestPrice": "0.000365420000000000",
+      "highestPriceTime": 1786649773000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.4602",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44184,
+      "ticker": "expensive",
+      "chainId": "CT_501",
+      "contractAddress": "6zjLjqd483pWwrowtKdyhie8tqEvkWwRcrR4btkVpump",
+      "logoUrl": "/images/web3-data/public/token/logos/B051B0BEAF39A1ECAFA84481F5D4A2B0.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Add Position",
+            "languageKey": "wmp-label-title-dev-add-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 2000,
+      "signalTriggerTime": 1786642969000,
+      "totalTokenValue": "2723.241933587984286022",
+      "alertPrice": "0.000132143263211633",
+      "alertMarketCap": "131936.132460763964675567",
+      "currentPrice": "0.000091468",
+      "currentMarketCap": "90096.132309912194495861575949811478036238310012",
+      "highestPrice": "0.000282800000000000",
+      "highestPriceTime": 1786644243000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.1401",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44182,
+      "ticker": "Grox",
+      "chainId": "CT_501",
+      "contractAddress": "2dFNRhBbeuQRSWbtAQ827YD5TXCMBZtJKnYAUPqfQfhS",
+      "logoUrl": "/images/web3-data/public/token/logos/CCD90639922869EFC931C938319D332C.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 39000,
+      "signalTriggerTime": 1786641950000,
+      "totalTokenValue": "1746.922320753229563039",
+      "alertPrice": "0.000158616297260923",
+      "alertMarketCap": "157522.233934780352527207",
+      "currentPrice": "0.0000024529",
+      "currentMarketCap": "2391.681243792398173817919143590714980241140208",
+      "highestPrice": "0.000170170000000000",
+      "highestPriceTime": 1786642122000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0728",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44181,
+      "ticker": "Gillis",
+      "chainId": "CT_501",
+      "contractAddress": "D3WreYVjPP5RXD9RZAPka8bwSqhyvCc4agawcSZxpump",
+      "logoUrl": "/images/web3-data/public/token/logos/9E995663746B6C76E6DAA0354A3917D8.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 706000,
+      "signalTriggerTime": 1786641694000,
+      "totalTokenValue": "1361.551398159613958432",
+      "alertPrice": "0.000461584976020589",
+      "alertMarketCap": "449787.000213658384207153",
+      "currentPrice": "0.0000036063",
+      "currentMarketCap": "3513.035151074396151349265457923706565148239998",
+      "highestPrice": "0.000478930000000000",
+      "highestPriceTime": 1786641696000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0376",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44177,
+      "ticker": "Sorajiro",
+      "chainId": "CT_501",
+      "contractAddress": "62LUfjwReSmUq9HC3nWTXFvg6rfyiqTg9mVrdsFjmjh3",
+      "logoUrl": "/images/web3-data/public/token/logos/A10BAE9279EF1CA662354727D94FA5B9.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 265000,
+      "signalTriggerTime": 1786638930000,
+      "totalTokenValue": "1393.922742064320158164",
+      "alertPrice": "0.000068508695169925",
+      "alertMarketCap": "67225.536416504591854527",
+      "currentPrice": "0.000015646",
+      "currentMarketCap": "15034.829991290801292501061418452365202464151240",
+      "highestPrice": "0.000126960000000000",
+      "highestPriceTime": 1786639078000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.8532",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44176,
+      "ticker": "BOB",
+      "chainId": "CT_501",
+      "contractAddress": "4CmYEygEusR76TpjxUbTjSLjyDbCMjxKhRKNozkrpump",
+      "logoUrl": "/images/web3-data/public/token/logos/3BCFE4479ABE77BED12EE08E5D6EDBAA.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 130000,
+      "signalTriggerTime": 1786638045000,
+      "totalTokenValue": "3634.394427662091434537",
+      "alertPrice": "0.000315645501146380",
+      "alertMarketCap": "309332.187879474749063809",
+      "currentPrice": "0.000044911",
+      "currentMarketCap": "44026.942198063961584474604503238052599767532976",
+      "highestPrice": "0.000812430000000000",
+      "highestPriceTime": 1786647063000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.5739",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44164,
+      "ticker": "LAYOOO",
+      "chainId": "CT_501",
+      "contractAddress": "9sfCHMLWSVy6MD6zr7pR1gD3qbT7C6K1E3dMf2ZBpump",
+      "logoUrl": "/images/web3-data/public/token/logos/89661E43AC6F6FBFA0FA343D962CA3D8.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 805000,
+      "signalTriggerTime": 1786634692000,
+      "totalTokenValue": "1962.800093176549148152",
+      "alertPrice": "0.000071414220210299",
+      "alertMarketCap": "67391.206229936153617752",
+      "currentPrice": "0.000059046",
+      "currentMarketCap": "55735.872443177912843511738287109336774173851324",
+      "highestPrice": "0.000118810000000000",
+      "highestPriceTime": 1786730073000,
+      "exitRate": 0,
+      "status": "timeout",
+      "maxGain": "0.6637",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44150,
+      "ticker": "Niles",
+      "chainId": "CT_501",
+      "contractAddress": "GDPtXowyiXHjsHXgkwM1erpFufPEeNvqK8iGq71Bpump",
+      "logoUrl": "/images/web3-data/public/token/logos/4DFF85811F92326D29419C81DAAD5BD1.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 893000,
+      "signalTriggerTime": 1786630904000,
+      "totalTokenValue": "1349.591907172370991802",
+      "alertPrice": "0.000182870921580966",
+      "alertMarketCap": "181333.812131389718176800",
+      "currentPrice": "0.000037991",
+      "currentMarketCap": "37652.144395990188933421732497833750270819431416",
+      "highestPrice": "0.000629870000000000",
+      "highestPriceTime": 1786634439000,
+      "exitRate": 79,
+      "status": "timeout",
+      "maxGain": "2.479",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44142,
+      "ticker": "RAPEDOG",
+      "chainId": "CT_501",
+      "contractAddress": "7V9tBTE75AoWrhy7dHqPRF42uFpxpnrvmqDxTES6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/8DEF6DBF7798D331ADE95C0F4DB51167.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 269000,
+      "signalTriggerTime": 1786627846000,
+      "totalTokenValue": "2651.183539587483447976",
+      "alertPrice": "0.000174707841211515",
+      "alertMarketCap": "171618.383258302972273818",
+      "currentPrice": "0.0000052828",
+      "currentMarketCap": "5254.607011627730110700035881",
+      "highestPrice": "0.000315700000000000",
+      "highestPriceTime": 1786628136000,
+      "exitRate": 54,
+      "status": "outDecline",
+      "maxGain": "2.4578",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44138,
+      "ticker": "Capy",
+      "chainId": "CT_501",
+      "contractAddress": "Cq3cMEzjPZ5NL7mrzHo2ns5CGBqDDMQN476utN49pump",
+      "logoUrl": "/images/web3-data/public/token/logos/4ADA5516962767B8B9C5D38589D21ABD.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 653000,
+      "signalTriggerTime": 1786616587000,
+      "totalTokenValue": "1378.769873750627039123",
+      "alertPrice": "0.000079416776237445",
+      "alertMarketCap": "74689.980966033337532804",
+      "currentPrice": "0.0000092715",
+      "currentMarketCap": "8723.535228240214724947791283447980902031891610",
+      "highestPrice": "0.000123480000000000",
+      "highestPriceTime": 1786617493000,
+      "exitRate": 46,
+      "status": "timeout",
+      "maxGain": "0.5548",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44129,
+      "ticker": "K-HOME",
+      "chainId": "CT_501",
+      "contractAddress": "EUB1eZBt4m3X4FbperWnKGJdvLsuLMu2YmJix5yjpump",
+      "logoUrl": "/images/web3-data/public/token/logos/98B3D0D60B2746DC00547BE68101AB86.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 697000,
+      "signalTriggerTime": 1786608939000,
+      "totalTokenValue": "6880.757715680887933545",
+      "alertPrice": "0.001809340872519155",
+      "alertMarketCap": "1727678.337151281288801905",
+      "currentPrice": "0.00034552",
+      "currentMarketCap": "330047.86498162976854265578025208867531864333823",
+      "highestPrice": "0.003168300000000000",
+      "highestPriceTime": 1786613866000,
+      "exitRate": 3,
+      "status": "timeout",
+      "maxGain": "10.2547",
+      "signalCount": 4
+    },
+    {
+      "signalId": 44123,
+      "ticker": "BOIÚNA",
+      "chainId": "CT_501",
+      "contractAddress": "GRehQKv9E3fVuNJGQTwAAjYpcixRCYKkzAXAb5kGpump",
+      "logoUrl": "/images/web3-data/public/token/logos/DB7A331B84FB50640F36B10899553167.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 880000,
+      "signalTriggerTime": 1786589697000,
+      "totalTokenValue": "11532.527838468184810537",
+      "alertPrice": "0.001028251903192501",
+      "alertMarketCap": "1025412.653005941605731096",
+      "currentPrice": "0.000042486",
+      "currentMarketCap": "42381.935158042198014158004926621463983912968708",
+      "highestPrice": "0.001206600000000000",
+      "highestPriceTime": 1786589809000,
+      "exitRate": 75,
+      "status": "timeout",
+      "maxGain": "3.2364",
+      "signalCount": 5
+    },
+    {
+      "signalId": 44122,
+      "ticker": "BOIÚNA",
+      "chainId": "CT_501",
+      "contractAddress": "94yadmf3NTixWsRYk5PtSyHECyqEDmi4yds8xFC6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/2C328E87A7E10825FDC9F3BFC28FAEB1.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 511000,
+      "signalTriggerTime": 1786589565000,
+      "totalTokenValue": "2439.876145120090979370",
+      "alertPrice": "0.000182160760013850",
+      "alertMarketCap": "176440.976516993599095144",
+      "currentPrice": "0.0000089122",
+      "currentMarketCap": "8634.595131252343408022378746968777257409991940",
+      "highestPrice": "0.000561290000000000",
+      "highestPriceTime": 1786625941000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "2.0813",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44114,
+      "ticker": "BOIÚNA",
+      "chainId": "CT_501",
+      "contractAddress": "6CcWWDyzeD38DfYVGsxCuZnBKBRLrFEgkNS68sXQpump",
+      "logoUrl": "/images/web3-data/public/token/logos/F6CF46F5C17442F96924E2B0DE91B6F5.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 444000,
+      "signalTriggerTime": 1786588018000,
+      "totalTokenValue": "8709.332611484691942991",
+      "alertPrice": "0.000084899137209209",
+      "alertMarketCap": "82481.677774179609329540",
+      "currentPrice": "0.0000021753",
+      "currentMarketCap": "2114.224961744538964735768812",
+      "highestPrice": "0.000207120000000000",
+      "highestPriceTime": 1786588308000,
+      "exitRate": 64,
+      "status": "outDecline",
+      "maxGain": "3.1048",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44108,
+      "ticker": "BOIÚNA",
+      "chainId": "CT_501",
+      "contractAddress": "D5283gnYe7WKqAJURGYbUkzKVogMfNBFgYTyGbk7UMiF",
+      "logoUrl": null,
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 23000,
+      "signalTriggerTime": 1786587504000,
+      "totalTokenValue": "4543.753466285635827020",
+      "alertPrice": "0.000218769809114232",
+      "alertMarketCap": "218645.076020473497171514",
+      "currentPrice": "0.0000029702",
+      "currentMarketCap": "2079.38686480862271280265327232412111767994256",
+      "highestPrice": "0.000218769809114232",
+      "highestPriceTime": null,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44107,
+      "ticker": "BOIÚNA",
+      "chainId": "CT_501",
+      "contractAddress": "9LhuK9W37eX2TvpVjpKqAd3ted3ujFTGzS6smbk6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/C8D6C795D7D30C7186DA233F95215BB6.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 11000,
+      "signalTriggerTime": 1786587443000,
+      "totalTokenValue": "4155.005206768304003562",
+      "alertPrice": "0.000135730355922463",
+      "alertMarketCap": "135536.133241083989471465",
+      "currentPrice": "0.0000037843",
+      "currentMarketCap": "3405.606884392627940255598451538729668750086339",
+      "highestPrice": "0.000143000000000000",
+      "highestPriceTime": 1786590412000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0536",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44104,
+      "ticker": "XST",
+      "chainId": "CT_501",
+      "contractAddress": "2vH4PcjCvu11UGsFGP52aY6zKrBYZmNo8TxPps4Ppump",
+      "logoUrl": "/images/web3-data/public/token/logos/93A8181BAD518C2CE09D0728A17EE5F4.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 256000,
+      "signalTriggerTime": 1786586598000,
+      "totalTokenValue": "1993.558649441397873924",
+      "alertPrice": "0.000074505060114132",
+      "alertMarketCap": "72612.207802941024588920",
+      "currentPrice": "0.0000056903",
+      "currentMarketCap": "5541.25253166109052739572391",
+      "highestPrice": "0.000110130000000000",
+      "highestPriceTime": 1786587052000,
+      "exitRate": 61,
+      "status": "outDecline",
+      "maxGain": "0.4782",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44098,
+      "ticker": "gaylordfuk",
+      "chainId": "CT_501",
+      "contractAddress": "GJaxyLPuZh5U2U4LgAVdGGC6KYRVXZp8t91P2vzaCHAM",
+      "logoUrl": "/images/web3-data/public/token/logos/6ADCE5F74DB69FBAF00C2AA9A0E74986.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 9,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Dynamic BC",
+            "languageKey": "wmp-label-title-alpha-dynamic-bc"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 434000,
+      "signalTriggerTime": 1786578857000,
+      "totalTokenValue": "1206.066513113979160371",
+      "alertPrice": "0.000221172684815328",
+      "alertMarketCap": "221139.382238461725196491",
+      "currentPrice": "0.000096335",
+      "currentMarketCap": "93587.006928493187983740845065447601427290564059328",
+      "highestPrice": "0.002582800000000000",
+      "highestPriceTime": 1786589008000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "10.6778",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44089,
+      "ticker": "QENIS",
+      "chainId": "CT_501",
+      "contractAddress": "AUojwMGu6eagD1U1pR7YbXoLQJ2Fhz1ZT5d7Tcr5pump",
+      "logoUrl": "/images/web3-data/public/token/logos/605844CBF1C93EC4E2BE1C4F90FDAE62.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 735000,
+      "signalTriggerTime": 1786573241000,
+      "totalTokenValue": "2613.967547949584174319",
+      "alertPrice": "0.000180068448339888",
+      "alertMarketCap": "173638.782961053797524255",
+      "currentPrice": "0.0000039216",
+      "currentMarketCap": "3783.054075213460816204023764905143729803867192",
+      "highestPrice": "0.000196370000000000",
+      "highestPriceTime": 1786575265000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0905",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44075,
+      "ticker": "AFP",
+      "chainId": "CT_501",
+      "contractAddress": "BhCZdxBF8NUjqA6Weqr4B8W7txvzEZ8cip448axXpump",
+      "logoUrl": "/images/web3-data/public/token/logos/E6CF702654153DF6EFFD6E21B78CBF94.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 77000,
+      "signalTriggerTime": 1786569978000,
+      "totalTokenValue": "1424.632831799004050476",
+      "alertPrice": "0.000054501332314745",
+      "alertMarketCap": "54403.511977346141003556",
+      "currentPrice": null,
+      "currentMarketCap": "1915.66097414140769022358232372514866670797629",
+      "highestPrice": "0.000132400000000000",
+      "highestPriceTime": 1786570297000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.4293",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44073,
+      "ticker": "OGARTH",
+      "chainId": "CT_501",
+      "contractAddress": "9S4dmRLq3SmonrBi6ybxV5LW7M2c68NcGfYb6iFepump",
+      "logoUrl": "/images/web3-data/public/token/logos/7E40166CB56C7E82E17B9DFEB3B70325.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 101000,
+      "signalTriggerTime": 1786569711000,
+      "totalTokenValue": "1014.640122184830289828",
+      "alertPrice": "0.000063460415863393",
+      "alertMarketCap": "62956.255134289223577367",
+      "currentPrice": "0.0000025526",
+      "currentMarketCap": "2469.833179699232633488481179307184463201825056",
+      "highestPrice": "0.000068294000000000",
+      "highestPriceTime": 1786569727000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0762",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44070,
+      "ticker": "VOL",
+      "chainId": "CT_501",
+      "contractAddress": "66ruWUv7KLXkLbHBTnj7PqzEgdue1oZjeA5Z3JMHpump",
+      "logoUrl": "/images/web3-data/public/token/logos/5FD15742E3E1BCFA141E27EC2797C276.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 48000,
+      "signalTriggerTime": 1786568265000,
+      "totalTokenValue": "1898.946281357032565555",
+      "alertPrice": "0.000086133846644177",
+      "alertMarketCap": "85706.958932770121869938",
+      "currentPrice": "0.0000023594",
+      "currentMarketCap": "2273.095520543657274851054119509877653831235835",
+      "highestPrice": "0.000110700000000000",
+      "highestPriceTime": 1786568289000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.2852",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44054,
+      "ticker": "CALLOOOR",
+      "chainId": "CT_501",
+      "contractAddress": "A48KeWUuiDSdRQBqAFssgyYATDuBv7cer54V2JSDpump",
+      "logoUrl": "/images/web3-data/public/token/logos/39D8BC5675BDB97FD8934D29A05A9C08.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 481000,
+      "signalTriggerTime": 1786565349000,
+      "totalTokenValue": "8811.480929853634855568",
+      "alertPrice": "0.000221486668211671",
+      "alertMarketCap": "216075.545855266316594790",
+      "currentPrice": "0.00016446",
+      "currentMarketCap": "160511.222455694194093583798803713353198614985654",
+      "highestPrice": "0.000652530000000000",
+      "highestPriceTime": 1786565604000,
+      "exitRate": 69,
+      "status": "outDecline",
+      "maxGain": "1.9461",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44052,
+      "ticker": "Max",
+      "chainId": "CT_501",
+      "contractAddress": "HPXDcoBE8KVB3efSwhpGxuXG486KuYzAu6xmnqRWpump",
+      "logoUrl": "/images/web3-data/public/token/logos/C9F6697A3B382350841AFD33F235CDCA.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 27000,
+      "signalTriggerTime": 1786565046000,
+      "totalTokenValue": "1911.216140075766449847",
+      "alertPrice": "0.000059077276661224",
+      "alertMarketCap": "58850.313607802427437988",
+      "currentPrice": "0.000002159618676608410033204912760243",
+      "currentMarketCap": "2110.423683208854439303432451640775303660877055",
+      "highestPrice": "0.000131270000000000",
+      "highestPriceTime": 1786565160000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.222",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44049,
+      "ticker": "Call",
+      "chainId": "CT_501",
+      "contractAddress": "45aD3sAFxvxAxBnYRN1Urto645PkSc6Sjz6NqpCypump",
+      "logoUrl": "/images/web3-data/public/token/logos/A51DEDBE626C36DDB17E2208A63CE901.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 733000,
+      "signalTriggerTime": 1786564148000,
+      "totalTokenValue": "2138.171716395055789023",
+      "alertPrice": "0.000051739313394627",
+      "alertMarketCap": "50625.629691774301834546",
+      "currentPrice": null,
+      "currentMarketCap": "1827.532456568733556968837088246056449253783696",
+      "highestPrice": "0.000061610000000000",
+      "highestPriceTime": 1786564165000,
+      "exitRate": 31,
+      "status": "outDecline",
+      "maxGain": "0.2685",
+      "signalCount": 2
+    },
+    {
+      "signalId": 44043,
+      "ticker": "RETA",
+      "chainId": "CT_501",
+      "contractAddress": "nx1KrSqcK98kgDuPvfoVr8WHFAdPKPQEd5BBy4ireta",
+      "logoUrl": "/images/web3-data/public/token/logos/76011F21196D8B92C5B60C2E5D69293E.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Dynamic BC",
+            "languageKey": "wmp-label-title-alpha-dynamic-bc"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 211000,
+      "signalTriggerTime": 1786562600000,
+      "totalTokenValue": "2394.360595829326744810",
+      "alertPrice": "0.000107586296952632",
+      "alertMarketCap": "107586.296952632040851252",
+      "currentPrice": "0.0000054319",
+      "currentMarketCap": "5208.186538359417329528687634257967991506940856",
+      "highestPrice": "0.000159950000000000",
+      "highestPriceTime": 1786562769000,
+      "exitRate": 65,
+      "status": "timeout",
+      "maxGain": "0.4867",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44036,
+      "ticker": "PITCOIN",
+      "chainId": "CT_501",
+      "contractAddress": "G1iBvjhZ9wpGUZdQcvhRSqjow3x6xetsnmEBBMm1pump",
+      "logoUrl": "/images/web3-data/public/token/logos/4C8B7E2D44C3644EFE834FBC5A320B31.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 788000,
+      "signalTriggerTime": 1786560223000,
+      "totalTokenValue": "1420.539959088250852226",
+      "alertPrice": "0.000409591460202818",
+      "alertMarketCap": "407941.347719467004567352",
+      "currentPrice": "0.00014989",
+      "currentMarketCap": "149342.116057530364576797342544051566695411923323",
+      "highestPrice": "0.000653690000000000",
+      "highestPriceTime": 1786560628000,
+      "exitRate": 72,
+      "status": "timeout",
+      "maxGain": "5.1645",
+      "signalCount": 6
+    },
+    {
+      "signalId": 44034,
+      "ticker": "BOB",
+      "chainId": "CT_501",
+      "contractAddress": "4Mt9rFRkHVz36wwEwncfGohcGRqazpaKcsErQLoFpump",
+      "logoUrl": "/images/web3-data/public/token/logos/8EBECAE53CC788B81312A0943EDD363F.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 894000,
+      "signalTriggerTime": 1786558769000,
+      "totalTokenValue": "2767.934563768342559933",
+      "alertPrice": "0.000082211161284899",
+      "alertMarketCap": "78548.883566779729350875",
+      "currentPrice": "0.0000029394",
+      "currentMarketCap": "2806.045404235376034475812614",
+      "highestPrice": "0.000143570000000000",
+      "highestPriceTime": 1786559013000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.7464",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44033,
+      "ticker": "MOONDENG",
+      "chainId": "CT_501",
+      "contractAddress": "CoYQjWayXqM7uSbkzj7Z8ZhUqdQEiwvzaX3zukJPpump",
+      "logoUrl": "/images/web3-data/public/token/logos/5BDE89624B36D0AE3A9F80CEDB9AD280.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 836000,
+      "signalTriggerTime": 1786558267000,
+      "totalTokenValue": "6122.134410802791596120",
+      "alertPrice": "0.000424743102549384",
+      "alertMarketCap": "421767.175944641734608291",
+      "currentPrice": "0.000018537",
+      "currentMarketCap": "18406.70228868418826887379551369527843321426736",
+      "highestPrice": "0.000727430000000000",
+      "highestPriceTime": 1786560031000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.7126",
+      "signalCount": 1
+    },
+    {
+      "signalId": 44024,
+      "ticker": "GTA",
+      "chainId": "CT_501",
+      "contractAddress": "BVEaDToN2Ufn8m1Jnqy8rtwwCiiMC7JcFtvmKPxTpump",
+      "logoUrl": "/images/web3-data/public/token/logos/32B5DB95C325A29EB062B7125B3C72D9.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 387000,
+      "signalTriggerTime": 1786554016000,
+      "totalTokenValue": "15370.923150082108584475",
+      "alertPrice": "0.001192915295819231",
+      "alertMarketCap": "1161687.915689977668957486",
+      "currentPrice": "0.000031918",
+      "currentMarketCap": "31061.55212424772252022034345339959254053120846",
+      "highestPrice": "0.001346400000000000",
+      "highestPriceTime": 1786554109000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "3.1101",
+      "signalCount": 3
+    },
+    {
+      "signalId": 44012,
+      "ticker": "STORM",
+      "chainId": "CT_501",
+      "contractAddress": "D6d7JssKYzqbzRSk9WpjCj8zLofVMeebfR6HLesKpump",
+      "logoUrl": "/images/web3-data/public/token/logos/046560EBFFA7F5526D1E63317BF6D9F2.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": null,
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 402000,
+      "signalTriggerTime": 1786550106000,
+      "totalTokenValue": "4093.391514810833446601",
+      "alertPrice": "0.000419336521056642",
+      "alertMarketCap": "416115.132749353667157634",
+      "currentPrice": "0.0000026566",
+      "currentMarketCap": "2634.21705341480516783364376887300869334012096",
+      "highestPrice": "0.000464750000000000",
+      "highestPriceTime": 1786550136000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "2.0159",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43993,
+      "ticker": "Odysseans",
+      "chainId": "CT_501",
+      "contractAddress": "F53XjDtdzJGQCEtspsidBkukQGkRCiRXAhW9KToHpump",
+      "logoUrl": "/images/web3-data/public/token/logos/2ACD21241B237D7F2B6509030E1FDC15.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 766000,
+      "signalTriggerTime": 1786542210000,
+      "totalTokenValue": "2307.200586997520834905",
+      "alertPrice": "0.000204368816349883",
+      "alertMarketCap": "195503.486390824120642137",
+      "currentPrice": "0.0000030278",
+      "currentMarketCap": "2885.08006466721692093453849810886510147284458",
+      "highestPrice": "0.000280910000000000",
+      "highestPriceTime": 1786542985000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.3745",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43963,
+      "ticker": "SAM",
+      "chainId": "CT_501",
+      "contractAddress": "uQoxYd6B4A3M6bWfz2Hy2vz8K5gKPG63tsdEWDphWBt",
+      "logoUrl": "/images/web3-data/public/token/logos/A4C165CE286B4518DB9BF123127A7851.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 8,
+      "direction": "buy",
+      "timeFrame": 175000,
+      "signalTriggerTime": 1786538780000,
+      "totalTokenValue": "5259.729557264421999207",
+      "alertPrice": "0.000195676093657712",
+      "alertMarketCap": "193960.328778117007465023",
+      "currentPrice": "0.0000020252",
+      "currentMarketCap": "1997.029238651046808673346107445150699994101978",
+      "highestPrice": "0.000220000000000000",
+      "highestPriceTime": 1786538787000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.2028",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43958,
+      "ticker": "MeiMei",
+      "chainId": "CT_501",
+      "contractAddress": "MsGDybWRSNdNXkdDZhEksgzugT5CbVWUG2wkhwgpump",
+      "logoUrl": "/images/web3-data/public/token/logos/D60328659C4F9298031AB31306406884.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 895000,
+      "signalTriggerTime": 1786534849000,
+      "totalTokenValue": "1000.157607829487979285",
+      "alertPrice": "0.002149166029322440",
+      "alertMarketCap": "2148811.545338995656798898",
+      "currentPrice": "0.00058789",
+      "currentMarketCap": "587521.460689323659031799823116912369727355965956",
+      "highestPrice": "0.003009900000000000",
+      "highestPriceTime": 1786535308000,
+      "exitRate": 30,
+      "status": "timeout",
+      "maxGain": "0.5918",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43957,
+      "ticker": "scoobert",
+      "chainId": "CT_501",
+      "contractAddress": "2XhQgEUDBSxEH3bQ4GBWLZtF4c9qCREVXxnitF1ppump",
+      "logoUrl": "/images/web3-data/public/token/logos/A0A54D0F613F7CAA356150AE72ED8870.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 526000,
+      "signalTriggerTime": 1786534326000,
+      "totalTokenValue": "1086.542666147688177237",
+      "alertPrice": "0.000052425505750579",
+      "alertMarketCap": "50015.732072940849266156",
+      "currentPrice": null,
+      "currentMarketCap": "1574.15306617057435954573127104878433184349396",
+      "highestPrice": "0.000064271000000000",
+      "highestPriceTime": 1786534536000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.2259",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43954,
+      "ticker": "Alisa",
+      "chainId": "CT_501",
+      "contractAddress": "4pdkRgjtxYaQPYUPBJGcVP453AgfhPSnPCfWa82Kpump",
+      "logoUrl": "/images/web3-data/public/token/logos/A57F310FE004FB40AFE5CCB237193A74.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 545000,
+      "signalTriggerTime": 1786531290000,
+      "totalTokenValue": "2932.019222143654316324",
+      "alertPrice": "0.000056813725277535",
+      "alertMarketCap": "55216.024202340217858224",
+      "currentPrice": null,
+      "currentMarketCap": "1966.266540872543348836697167820756619136533196",
+      "highestPrice": "0.000076974000000000",
+      "highestPriceTime": 1786531401000,
+      "exitRate": 49,
+      "status": "outDecline",
+      "maxGain": "0.3548",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43952,
+      "ticker": "Alisa",
+      "chainId": "CT_501",
+      "contractAddress": "5z7kV2emKJiARui4L9KmfpoRgszaVej3tRczmwCfpump",
+      "logoUrl": "/images/web3-data/public/token/logos/82B6FF4A0CA3726CAF5E325F5C605C62.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 7,
+      "direction": "buy",
+      "timeFrame": 830000,
+      "signalTriggerTime": 1786531081000,
+      "totalTokenValue": "4128.076912688823136204",
+      "alertPrice": "0.000054668737578632",
+      "alertMarketCap": "53065.914110526325538388",
+      "currentPrice": null,
+      "currentMarketCap": "2073.866829462096803425505342",
+      "highestPrice": "0.000080257000000000",
+      "highestPriceTime": 1786532740000,
+      "exitRate": 70,
+      "status": "timeout",
+      "maxGain": "0.5054",
+      "signalCount": 3
+    },
+    {
+      "signalId": 43946,
+      "ticker": "Mafia",
+      "chainId": "CT_501",
+      "contractAddress": "DcK63VSmkpFRdvNpBh1947QxF7hHud5TbMmhj4REpump",
+      "logoUrl": "/images/web3-data/public/token/logos/F90D6D3CDEBDB01FF3EAFAABB26BA97F.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 318000,
+      "signalTriggerTime": 1786513754000,
+      "totalTokenValue": "1886.643047252334991765",
+      "alertPrice": "0.000053541451938591",
+      "alertMarketCap": "51895.114174400847443514",
+      "currentPrice": "0.000023709",
+      "currentMarketCap": "22980.687791085095563111236588637957403553057152",
+      "highestPrice": "0.000115200000000000",
+      "highestPriceTime": 1786515550000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.1516",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43942,
+      "ticker": "MAUS",
+      "chainId": "CT_501",
+      "contractAddress": "BxUhj7NZQ3D8WwcS1x8CjKC6kSbfYf4tPxfjDstypump",
+      "logoUrl": "/images/web3-data/public/token/logos/C8CCBA818F92E5F8F4BEBD750FAA6E3E.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 845000,
+      "signalTriggerTime": 1786504333000,
+      "totalTokenValue": "1247.443096692348032308",
+      "alertPrice": "0.000132250276227050",
+      "alertMarketCap": "126248.816090411102092879",
+      "currentPrice": "0.0000048898",
+      "currentMarketCap": "4667.735705919557235196457434034010476938517884",
+      "highestPrice": "0.000228290000000000",
+      "highestPriceTime": 1786504447000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.7262",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43930,
+      "ticker": "Quo",
+      "chainId": "CT_501",
+      "contractAddress": "AhPfesNZyuR1b1iRoXGU8ZY755vmDcK6pdU1BNo6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/B49F4E43E38BDBF7A96F590A1A05C26A.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 256000,
+      "signalTriggerTime": 1786499697000,
+      "totalTokenValue": "1881.330950662023319015",
+      "alertPrice": "0.000110808771912936",
+      "alertMarketCap": "108798.583360386285918130",
+      "currentPrice": null,
+      "currentMarketCap": "1982.581800329115963146631496630656549119617536",
+      "highestPrice": "0.000129000000000000",
+      "highestPriceTime": 1786499707000,
+      "exitRate": 94,
+      "status": "outDecline",
+      "maxGain": "0.1642",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43929,
+      "ticker": "Plumber",
+      "chainId": "CT_501",
+      "contractAddress": "GCa9TZMK9Q3VUSkhZgX76YAQBjqQd1dPxkBnZojFpump",
+      "logoUrl": "/images/web3-data/public/token/logos/02A8D889A26B29AF2495D6BB73B2097B.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 110000,
+      "signalTriggerTime": 1786499403000,
+      "totalTokenValue": "17026.181375548640153567",
+      "alertPrice": "0.003995936994722418",
+      "alertMarketCap": "3818310.781465748037461146",
+      "currentPrice": "0.00043937",
+      "currentMarketCap": "419985.911507759872336657202723225479012849315374",
+      "highestPrice": "0.004791600000000000",
+      "highestPriceTime": 1786499485000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.2625",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43927,
+      "ticker": "PGUY",
+      "chainId": "CT_501",
+      "contractAddress": "DcRcBtM7XopjPnmBUTmp8eWMTztkhVJUkuXeEsqApump",
+      "logoUrl": "/images/web3-data/public/token/logos/2B06F8167F554FA3F397508680FCAD71.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 144000,
+      "signalTriggerTime": 1786496306000,
+      "totalTokenValue": "5314.185532743729129935",
+      "alertPrice": "0.000305428556715394",
+      "alertMarketCap": "304740.659388041938647637",
+      "currentPrice": "0.000039436",
+      "currentMarketCap": "39343.502777278978688322117877",
+      "highestPrice": "0.000485610000000000",
+      "highestPriceTime": 1786497856000,
+      "exitRate": 30,
+      "status": "timeout",
+      "maxGain": "3.9089",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43925,
+      "ticker": "Lenny ",
+      "chainId": "CT_501",
+      "contractAddress": "ApMrbYXQk1j3GV62HnQLR2BPiH8MzAi5ywaW2MYxpump",
+      "logoUrl": "/images/web3-data/public/token/logos/C4A09381882D2CF0F6C0D53618126962.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 187000,
+      "signalTriggerTime": 1786494902000,
+      "totalTokenValue": "7415.939251826150886604",
+      "alertPrice": "0.000645509571799728",
+      "alertMarketCap": "624904.756887991957342333",
+      "currentPrice": "0.0000070043",
+      "currentMarketCap": "6779.022888437952815574594140518609812324473874",
+      "highestPrice": "0.000645509571799728",
+      "highestPriceTime": null,
+      "exitRate": 50,
+      "status": "timeout",
+      "maxGain": "0",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43924,
+      "ticker": "CLICKING",
+      "chainId": "CT_501",
+      "contractAddress": "CqqED7VtRR2LEinPM2ocqkXAJCiT1quf8o9eth8FgLqY",
+      "logoUrl": "/images/web3-data/public/token/logos/FD7BDCD624EED8834E003ED546A78BAE.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 670000,
+      "signalTriggerTime": 1786494386000,
+      "totalTokenValue": "4645.164928215696295938",
+      "alertPrice": "0.000112143111355572",
+      "alertMarketCap": "110550.075353245370962555",
+      "currentPrice": "0.0000050231",
+      "currentMarketCap": "4946.182162830772585624260078",
+      "highestPrice": "0.000233270000000000",
+      "highestPriceTime": 1786499629000,
+      "exitRate": 6,
+      "status": "timeout",
+      "maxGain": "1.0801",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43910,
+      "ticker": "MOS",
+      "chainId": "CT_501",
+      "contractAddress": "4ChT49V1iazP2XUGtycGkEsS6pRMqvGfUbqvRC9Z91ZT",
+      "logoUrl": "/images/web3-data/public/token/logos/15259DEE8396AC8886BCDC13BC927008.svg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 9,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Dynamic BC",
+            "languageKey": "wmp-label-title-alpha-dynamic-bc"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 801000,
+      "signalTriggerTime": 1786489887000,
+      "totalTokenValue": "4655.791374380000111641",
+      "alertPrice": "0.000232116580965759",
+      "alertMarketCap": "232116.498844946377998340",
+      "currentPrice": "0.00055192",
+      "currentMarketCap": "539155.07140529161822931351176258208036481005302886",
+      "highestPrice": "0.001368800000000000",
+      "highestPriceTime": 1786554681000,
+      "exitRate": 41,
+      "status": "timeout",
+      "maxGain": "4.897",
+      "signalCount": 3
+    },
+    {
+      "signalId": 43903,
+      "ticker": "MIM",
+      "chainId": "CT_501",
+      "contractAddress": "86KR6eG2VuNntLBi23SAYFW1cXkiYcwxGJd746rqcUAG",
+      "logoUrl": "/images/web3-data/public/token/logos/0C149DF411E825C53CC7EF3AAB02DA5D.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 874000,
+      "signalTriggerTime": 1786481423000,
+      "totalTokenValue": "5280.512595087105762119",
+      "alertPrice": "0.001043499859624862",
+      "alertMarketCap": "1042914.515073147507966884",
+      "currentPrice": "0.000047995",
+      "currentMarketCap": "47977.979369955943937038241162189253212845253452",
+      "highestPrice": "0.001099400000000000",
+      "highestPriceTime": 1786481527000,
+      "exitRate": 66,
+      "status": "timeout",
+      "maxGain": "7.9341",
+      "signalCount": 7
+    },
+    {
+      "signalId": 43895,
+      "ticker": "MIM",
+      "chainId": "CT_501",
+      "contractAddress": "53DM4mikdxyaxeuQDGPBfUaUjiUQW9Nd7XEo8HcSpump",
+      "logoUrl": "/images/web3-data/public/token/logos/5A74AB1797F9AE2FDC626324CD1269C6.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 422000,
+      "signalTriggerTime": 1786478795000,
+      "totalTokenValue": "2852.260581476884042269",
+      "alertPrice": "0.000223456923530534",
+      "alertMarketCap": "219144.156818112723852609",
+      "currentPrice": "0.0000024206",
+      "currentMarketCap": "2371.13881382719932975782949929365923938541306",
+      "highestPrice": "0.000509110000000000",
+      "highestPriceTime": 1786478938000,
+      "exitRate": 76,
+      "status": "outDecline",
+      "maxGain": "1.2783",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43891,
+      "ticker": "MARIO64",
+      "chainId": "CT_501",
+      "contractAddress": "CX2v7JSHJQDcNooubzzvZG8TPaDwbaPgfzcXRSWJpump",
+      "logoUrl": "/images/web3-data/public/token/logos/B2B51E0CEEFD5EAD6A36CF3862D5608D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 226000,
+      "signalTriggerTime": 1786472852000,
+      "totalTokenValue": "9464.365924734320202275",
+      "alertPrice": "0.001673817845299165",
+      "alertMarketCap": "1610985.414891254764781304",
+      "currentPrice": "0.00025771",
+      "currentMarketCap": "248097.151078789713328186043937015790352035150256",
+      "highestPrice": "0.002787300000000000",
+      "highestPriceTime": 1786488462000,
+      "exitRate": 2,
+      "status": "timeout",
+      "maxGain": "0.6652",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43886,
+      "ticker": "BOT",
+      "chainId": "CT_501",
+      "contractAddress": "HukaK2eHhbTyiuUwuKMntjPJP4aGdD4VwiExsNmyT8WJ",
+      "logoUrl": "/images/web3-data/public/token/logos/6EF897FC0F95396DEFCB2F3EB590E009.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 559000,
+      "signalTriggerTime": 1786471427000,
+      "totalTokenValue": "3012.359156249589694860",
+      "alertPrice": "0.002406998551096866",
+      "alertMarketCap": "2394766.544536160385316389",
+      "currentPrice": "0.00019299",
+      "currentMarketCap": "191910.420685697125867758238217218002261426609792",
+      "highestPrice": "0.002639100000000000",
+      "highestPriceTime": 1786476901000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "31.4303",
+      "signalCount": 10
+    },
+    {
+      "signalId": 43885,
+      "ticker": "CBT",
+      "chainId": "CT_501",
+      "contractAddress": "6gUWuPNiquxgF5Kmojzft6VoXoSWBLHWZbERQeWaKeP5",
+      "logoUrl": "/images/web3-data/public/token/logos/5C9DB1B3EB89146120BEA10DE8229176.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 681000,
+      "signalTriggerTime": 1786470621000,
+      "totalTokenValue": "6127.787208532667441282",
+      "alertPrice": "0.000171079269991497",
+      "alertMarketCap": "158169.511636566840634977",
+      "currentPrice": "0.0000025533",
+      "currentMarketCap": "2358.309728907603139767566464",
+      "highestPrice": "0.000179030000000000",
+      "highestPriceTime": 1786470642000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.0465",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43877,
+      "ticker": "BOT",
+      "chainId": "CT_501",
+      "contractAddress": "HVG45JNn4wugvYfTNoggTtVps7Gc7YEjw6nVDRPd7LJ9",
+      "logoUrl": "/images/web3-data/public/token/logos/91D11BB486C0D61D366341DA7845D89F.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 9,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": "risk",
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 333000,
+      "signalTriggerTime": 1786467465000,
+      "totalTokenValue": "3643.155944254911634610",
+      "alertPrice": "0.000199775616795676",
+      "alertMarketCap": "199775.616795676158854897",
+      "currentPrice": "0.0000075637",
+      "currentMarketCap": "7883.565243854793391597811515875",
+      "highestPrice": "0.000285190000000000",
+      "highestPriceTime": 1786467601000,
+      "exitRate": 86,
+      "status": "outDecline",
+      "maxGain": "0.4276",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43842,
+      "ticker": "BYND",
+      "chainId": "CT_501",
+      "contractAddress": "3W7hrBSruVN7pYtjtWJzc3L8EmqE5ZuTTCJTTHLEktJ2",
+      "logoUrl": "/images/web3-data/public/token/logos/993D8D85F3EE982EEE51B474C39660EA.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 705000,
+      "signalTriggerTime": 1786457496000,
+      "totalTokenValue": "1949.096400816513204478",
+      "alertPrice": "0.000063130486202266",
+      "alertMarketCap": "60076.118965841452745365",
+      "currentPrice": "0.000010748",
+      "currentMarketCap": "9960.8925883738515830139104050986552695414775",
+      "highestPrice": "0.000072051000000000",
+      "highestPriceTime": 1786457583000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.1413",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43837,
+      "ticker": "1%",
+      "chainId": "CT_501",
+      "contractAddress": "J7o48eA9qftqHpod2CsUbBH4q1Tzq3doTRXFDA4wpump",
+      "logoUrl": "/images/web3-data/public/token/logos/9A8931E3760B2335E0539D7D4CDE2BB4.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 536000,
+      "signalTriggerTime": 1786456723000,
+      "totalTokenValue": "3453.044705107246836578",
+      "alertPrice": "0.000156011012084977",
+      "alertMarketCap": "151897.993384732709527751",
+      "currentPrice": "0.0000073129",
+      "currentMarketCap": "7119.038205588584835628243891513010855033707227",
+      "highestPrice": "0.000205720000000000",
+      "highestPriceTime": 1786456780000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.0037",
+      "signalCount": 4
+    },
+    {
+      "signalId": 43831,
+      "ticker": "SplashDog",
+      "chainId": "CT_501",
+      "contractAddress": "2CQPWcLvfHWCFVKNKGPHHcUUwY6gR6ZXReuKAKb3pump",
+      "logoUrl": "/images/web3-data/public/token/logos/57FCDBF2A2B7AAB1847B8C1ADB9B72C4.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 575000,
+      "signalTriggerTime": 1786445504000,
+      "totalTokenValue": "4589.129288180332082663",
+      "alertPrice": "0.000084793319582469",
+      "alertMarketCap": "82942.865757772362365096",
+      "currentPrice": null,
+      "currentMarketCap": "1943.45135309313099487217404996120973791810407",
+      "highestPrice": "0.000142170000000000",
+      "highestPriceTime": 1786446279000,
+      "exitRate": 88,
+      "status": "outDecline",
+      "maxGain": "1.6021",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43814,
+      "ticker": "sami",
+      "chainId": "CT_501",
+      "contractAddress": "DLHkGNQQsCz5ANzjUSNrctBJhjvbyaF6kxFzJPm2pump",
+      "logoUrl": "/images/web3-data/public/token/logos/5F26067DF20498CC931ACF8E3D09ADD2.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 54000,
+      "signalTriggerTime": 1786431920000,
+      "totalTokenValue": "3343.894592827743960498",
+      "alertPrice": "0.000069385986633426",
+      "alertMarketCap": "59465.786584933448679242",
+      "currentPrice": "0.000002616",
+      "currentMarketCap": "2240.04927837980624494158984007327930897190186",
+      "highestPrice": "0.000088185000000000",
+      "highestPriceTime": 1786432377000,
+      "exitRate": 82,
+      "status": "timeout",
+      "maxGain": "0.2709",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43813,
+      "ticker": "sami",
+      "chainId": "CT_501",
+      "contractAddress": "4LHBp4xYs3suKjkCuo1qaNaxufWd4Bdp6QYsBJZNpump",
+      "logoUrl": "/images/web3-data/public/token/logos/7DA497C17CBF87CE058E73BDCC2CFAE7.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 769000,
+      "signalTriggerTime": 1786431783000,
+      "totalTokenValue": "2959.425164410159622327",
+      "alertPrice": "0.000588823745910642",
+      "alertMarketCap": "573676.594810234548168189",
+      "currentPrice": "0.000044848",
+      "currentMarketCap": "43632.849981539415598891221012065555373909635690",
+      "highestPrice": "0.000666700000000000",
+      "highestPriceTime": 1786435867000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "11.2303",
+      "signalCount": 5
+    },
+    {
+      "signalId": 43808,
+      "ticker": "se",
+      "chainId": "CT_501",
+      "contractAddress": "6mLmo53cpNy8PkSXt1XTVTF8CvJj466ea3bbhZqMpump",
+      "logoUrl": "/images/web3-data/public/token/logos/E323F13AFA9456A0D6C3B21C3DC6424A.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 679000,
+      "signalTriggerTime": 1786423837000,
+      "totalTokenValue": "1336.866892154685029596",
+      "alertPrice": "0.000224271856881206",
+      "alertMarketCap": "219821.874247408052684952",
+      "currentPrice": "0.00025325",
+      "currentMarketCap": "248116.517064044686461691533161741505478567459270",
+      "highestPrice": "0.000816370000000000",
+      "highestPriceTime": 1786563048000,
+      "exitRate": 46,
+      "status": "timeout",
+      "maxGain": "2.6401",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43807,
+      "ticker": "ALON",
+      "chainId": "CT_501",
+      "contractAddress": "8XtRWb4uAAJFMP4QQhoYYCWR6XXb7ybcCdiqPwz9s5WS",
+      "logoUrl": "/images/web3-data/public/token/logos/ab27910504a249ec8b6fddec868ef3ab.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 802000,
+      "signalTriggerTime": 1786423207000,
+      "totalTokenValue": "18126.273258305828520090",
+      "alertPrice": "0.005361262372468583",
+      "alertMarketCap": "5349675.739013741521244706",
+      "currentPrice": "0.0034479",
+      "currentMarketCap": "3441764.278690804735192264048922827098691013398605",
+      "highestPrice": "0.010070000000000000",
+      "highestPriceTime": 1786478767000,
+      "exitRate": 1,
+      "status": "timeout",
+      "maxGain": "0.8783",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43805,
+      "ticker": "GENTLE",
+      "chainId": "CT_501",
+      "contractAddress": "Gepjas79VptWRYEVM4cUvET9RAyEEFrF4XhukZakpump",
+      "logoUrl": "/images/web3-data/public/token/logos/49A2417B27E8ABDD1B0A4E927DB1BE92.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_MONEY",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 17000,
+      "signalTriggerTime": 1786421311000,
+      "totalTokenValue": "2481.149706921802798310",
+      "alertPrice": "0.002198281646308437",
+      "alertMarketCap": "2190472.862883937083656808",
+      "currentPrice": "0.00027546",
+      "currentMarketCap": "277587.963886313543416429567986085054141667182998",
+      "highestPrice": "0.005489500000000000",
+      "highestPriceTime": 1786473037000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "12.4036",
+      "signalCount": 6
+    },
+    {
+      "signalId": 43803,
+      "ticker": "STABLE",
+      "chainId": "CT_501",
+      "contractAddress": "CY7N5pmzqrKw7Y968yzqkSeiTddcM7ZK4gYA3u2mpump",
+      "logoUrl": "/images/web3-data/public/token/logos/32AEB8D287CABED4036D94FFAAC9EA5D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 138000,
+      "signalTriggerTime": 1786419201000,
+      "totalTokenValue": "3785.239848357600460060",
+      "alertPrice": "0.000070149801791973",
+      "alertMarketCap": "69501.285436798645209930",
+      "currentPrice": "0.0000043568",
+      "currentMarketCap": "4252.175236645598441327356473384676456496644421",
+      "highestPrice": "0.000558590000000000",
+      "highestPriceTime": 1786419889000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "6.9628",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43796,
+      "ticker": "Dude",
+      "chainId": "CT_501",
+      "contractAddress": "9mBGKrFV4WBrbU6MtVWa8knMxCYwFSJPkAjBLkywpump",
+      "logoUrl": "/images/web3-data/public/token/logos/2988E68FDB17A7331F05AFBED52CC525.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 876000,
+      "signalTriggerTime": 1786416136000,
+      "totalTokenValue": "6173.378999044733794578",
+      "alertPrice": "0.000115837869908187",
+      "alertMarketCap": "110570.581781600050122806",
+      "currentPrice": "0.0000028881",
+      "currentMarketCap": "2756.975654173658708984397606990109625766582493",
+      "highestPrice": "0.000129880000000000",
+      "highestPriceTime": 1786416234000,
+      "exitRate": 98,
+      "status": "outDecline",
+      "maxGain": "0.6589",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43789,
+      "ticker": "Iphigenia",
+      "chainId": "CT_501",
+      "contractAddress": "FGo18AEJogkAqdw5otqs5UN2u9k8bFBB54jNB3r7pump",
+      "logoUrl": "/images/web3-data/public/token/logos/8A85E652789D4A2F3086959D3DDCF8E4.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 5,
+      "direction": "buy",
+      "timeFrame": 276000,
+      "signalTriggerTime": 1786410775000,
+      "totalTokenValue": "4697.467130591165927420",
+      "alertPrice": "0.000086623812655766",
+      "alertMarketCap": "84830.007683323821700664",
+      "currentPrice": "0.0000024069",
+      "currentMarketCap": "2354.284658431851139030477014",
+      "highestPrice": "0.000190580000000000",
+      "highestPriceTime": 1786411836000,
+      "exitRate": 76,
+      "status": "outDecline",
+      "maxGain": "1.8691",
+      "signalCount": 2
+    },
+    {
+      "signalId": 43787,
+      "ticker": "SeAlon",
+      "chainId": "CT_501",
+      "contractAddress": "72uv3iPKjbpWcyTD3ua1UcP6YVdQAsCTkpo2siv6pump",
+      "logoUrl": "/images/web3-data/public/token/logos/D95E4140809D10012525EFB9B6EDB425.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 571000,
+      "signalTriggerTime": 1786408416000,
+      "totalTokenValue": "1165.542980433662529594",
+      "alertPrice": "0.000137003196371532",
+      "alertMarketCap": "134661.205841374316274061",
+      "currentPrice": "0.0000032349",
+      "currentMarketCap": "3176.001280268807386029995085960552998085878010",
+      "highestPrice": "0.000192270000000000",
+      "highestPriceTime": 1786410221000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.9614",
+      "signalCount": 3
+    },
+    {
+      "signalId": 43753,
+      "ticker": "Pill",
+      "chainId": "CT_501",
+      "contractAddress": "L49SyNwK7fugezzrjfCsY1vsujbcvWdPkfTzEwwpump",
+      "logoUrl": "/images/web3-data/public/token/logos/A076E58045E70A17595A3117691D7224.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 294000,
+      "signalTriggerTime": 1786389889000,
+      "totalTokenValue": "1018.176288277764409094",
+      "alertPrice": "0.000070591846802467",
+      "alertMarketCap": "69360.995781497757838495",
+      "currentPrice": null,
+      "currentMarketCap": "1848.428239673885178853597015771507662882293581",
+      "highestPrice": "0.000161330000000000",
+      "highestPriceTime": 1786391008000,
+      "exitRate": 49,
+      "status": "outDecline",
+      "maxGain": "1.2854",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43746,
+      "ticker": "HOPE",
+      "chainId": "CT_501",
+      "contractAddress": "GoShowKzM1NtiEVFrFYqVctUSNde71Und2TA3eN7pump",
+      "logoUrl": "/images/web3-data/public/token/logos/0A86D126AF34DD5FF5A15552222EBD1B.jpg",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 858000,
+      "signalTriggerTime": 1786387285000,
+      "totalTokenValue": "1502.116717185443735569",
+      "alertPrice": "0.000168399870781633",
+      "alertMarketCap": "164798.915552962548313176",
+      "currentPrice": "0.0000026152",
+      "currentMarketCap": "2559.8843910035024850292029173691917464554993",
+      "highestPrice": "0.000271640000000000",
+      "highestPriceTime": 1786388523000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "0.6131",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43743,
+      "ticker": "DCN",
+      "chainId": "CT_501",
+      "contractAddress": "CUTFq2j7HXCMZzMxFgQpVuaCiH6Got3gzdZt7VyJpump",
+      "logoUrl": "/images/web3-data/public/token/logos/FAD39727DD9C1EA9609613AB96E6AB87.png",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": null,
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 3,
+      "direction": "buy",
+      "timeFrame": 428000,
+      "signalTriggerTime": 1786385562000,
+      "totalTokenValue": "4180.633762268240747602",
+      "alertPrice": "0.000192111493160807",
+      "alertMarketCap": "187276.316240417277122424",
+      "currentPrice": "0.0000040958",
+      "currentMarketCap": "3988.930753339820419235587349894257553363954568",
+      "highestPrice": "0.000464990000000000",
+      "highestPriceTime": 1786387182000,
+      "exitRate": 55,
+      "status": "timeout",
+      "maxGain": "1.4204",
+      "signalCount": 1
+    },
+    {
+      "signalId": 43742,
+      "ticker": "DentaCoin",
+      "chainId": "CT_501",
+      "contractAddress": "CFwQHHrAGKoHLziHp8QsKRtCKU5YQr29dYM8TZK24XNL",
+      "logoUrl": "/images/web3-data/public/token/logos/7B81215A8FEBC626B56D20337CD5120D.webp",
+      "chainLogoUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250303/42065e0a-3808-400e-b589-61c2dbfc0eac.png",
+      "tokenDecimals": 6,
+      "isAlpha": false,
+      "launchPlatform": "Pumpfun",
+      "mark": null,
+      "isExclusiveLaunchpad": false,
+      "alphaPoint": null,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ],
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      },
+      "smartSignalType": "SMART_KOL",
+      "smartMoneyCount": 4,
+      "direction": "buy",
+      "timeFrame": 875000,
+      "signalTriggerTime": 1786384318000,
+      "totalTokenValue": "2533.436015345995933951",
+      "alertPrice": "0.000111855954054306",
+      "alertMarketCap": "108273.647632808134776931",
+      "currentPrice": null,
+      "currentMarketCap": "1871.176057683804258729862403176403580769714419",
+      "highestPrice": "0.000117850000000000",
+      "highestPriceTime": 1786384479000,
+      "exitRate": 100,
+      "status": "exitRate",
+      "maxGain": "1.1529",
+      "signalCount": 3
+    }
+  ],
+  "success": true
+}

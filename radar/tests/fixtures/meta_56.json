@@ -1,0 +1,65 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "tokenId": "49082E53D0A96D0366690AD15A0F281B",
+    "name": "Suits On Hood",
+    "symbol": "SUITS",
+    "chainId": "56",
+    "chainIconUrl": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20250228/d0216ce4-a3e9-4bda-8937-4a6aa943ccf2.png",
+    "chainName": "BSC",
+    "contractAddress": "0x722a629dc167356f0aea54216719d28d452a7777",
+    "decimals": 18,
+    "icon": "/images/web3-data/public/token/logos/49082E53D0A96D0366690AD15A0F281B.jpg",
+    "nativeAddressFlag": false,
+    "lsdFlag": 0,
+    "aiNarrativeFlag": 0,
+    "links": [
+      {
+        "label": "website",
+        "link": "https://dex.coinmarketcap.com/token/bsc/0x722A629dc167356F0aEa54216719D28D452A7777"
+      },
+      {
+        "label": "x",
+        "link": "https://x.com/SuitsOnHood"
+      },
+      {
+        "label": "telegram",
+        "link": "https://t.me/#0x722A629dc167356F0aEa54216719D28D452A7777"
+      }
+    ],
+    "previewLink": {
+      "website": [
+        "https://dex.coinmarketcap.com/token/bsc/0x722A629dc167356F0aEa54216719D28D452A7777"
+      ],
+      "x": [
+        "https://x.com/SuitsOnHood"
+      ],
+      "tg": [
+        "https://t.me/#0x722A629dc167356F0aEa54216719D28D452A7777"
+      ]
+    },
+    "tokenAddresses": [
+      {
+        "chainId": "56",
+        "contractAddress": "0x722a629dc167356f0aea54216719d28d452a7777",
+        "nativeAddressFlag": false,
+        "lsdFlag": 0,
+        "decimals": 18
+      }
+    ],
+    "createTime": 1786819447650,
+    "creatorAddress": "0x0c9c8363d1d3937be930ed5d74e8f6d3b337fbe1",
+    "auditInfo": {
+      "iconSensitiveLabels": [],
+      "nameSensitiveLabels": [],
+      "symbolSensitiveLabels": [],
+      "isBlacklist": false,
+      "isWhitelist": false
+    },
+    "description": "Suits IP, Free Mint Meme, On-Hood Aspiration",
+    "rwaType": 0
+  },
+  "success": true
+}

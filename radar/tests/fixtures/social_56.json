@@ -1,0 +1,1683 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "leaderBoardList": [
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/400175920710EC009C8A9605944E3F56.png",
+          "symbol": "BTC",
+          "chainId": "56",
+          "contractAddress": "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",
+          "tokenAge": 1599043687000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 4113100814.5269346,
+          "priceChange": -0.09
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "200",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 752562,
+          "socialHypeEn": 733610,
+          "socialHypeCn": 18952,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Bitcoin Mining Milestone, $126M BTC Short Near Liquidation, UAE Sovereign Funds Invest in Bitcoin ETF",
+          "socialSummaryBriefTranslated": "比特币挖矿里程碑，1.26亿美元BTC空头接近清算，阿联酋主权基金投资比特币ETF",
+          "socialSummaryDetail": "Bitcoin surpasses 20.07 million coins mined, leaving just 4.4% of the total supply. A massive $126.3 million BTC short with 40x leverage was opened, nearing liquidation. UAE's sovereign wealth funds report a $763.7 million investment in BlackRock’s Bitcoin ETF. These events reflect a mix of market dynamics and significant institutional interest.",
+          "socialSummaryDetailTranslated": "比特币挖矿数量超过2007万枚，仅剩4.4%的总供应量。一笔价值1.263亿美元、40倍杠杆的BTC空头仓位被建立，接近清算。阿联酋主权财富基金报告对贝莱德比特币ETF投资7.637亿美元。这些事件反映了市场动态和重要机构兴趣的结合。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2041696316451909632/7K4xEnRE_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2086558453846155264/4amLxJF8_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1485632175932383235/8t0DGo6V_normal.jpg"
+          ],
+          "kolCount": 49,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786734000000,
+              "socialHype": 1166703.0
+            },
+            {
+              "time": 1786737600000,
+              "socialHype": 1206345.0
+            },
+            {
+              "time": 1786741200000,
+              "socialHype": 1210398.0
+            },
+            {
+              "time": 1786744800000,
+              "socialHype": 1079458.0
+            },
+            {
+              "time": 1786748400000,
+              "socialHype": 1049958.0
+            },
+            {
+              "time": 1786752000000,
+              "socialHype": 1076853.0
+            },
+            {
+              "time": 1786755600000,
+              "socialHype": 1089100.0
+            },
+            {
+              "time": 1786759200000,
+              "socialHype": 1040858.0
+            },
+            {
+              "time": 1786762800000,
+              "socialHype": 1043540.0
+            },
+            {
+              "time": 1786766400000,
+              "socialHype": 1017312.0
+            },
+            {
+              "time": 1786770000000,
+              "socialHype": 1008506.0
+            },
+            {
+              "time": 1786773600000,
+              "socialHype": 1025602.0
+            },
+            {
+              "time": 1786777200000,
+              "socialHype": 1050220.0
+            },
+            {
+              "time": 1786780800000,
+              "socialHype": 1072111.0
+            },
+            {
+              "time": 1786784400000,
+              "socialHype": 954587.0
+            },
+            {
+              "time": 1786788000000,
+              "socialHype": 888569.0
+            },
+            {
+              "time": 1786791600000,
+              "socialHype": 915935.0
+            },
+            {
+              "time": 1786795200000,
+              "socialHype": 927451.0
+            },
+            {
+              "time": 1786798800000,
+              "socialHype": 981689.0
+            },
+            {
+              "time": 1786802400000,
+              "socialHype": 795552.0
+            },
+            {
+              "time": 1786806000000,
+              "socialHype": 777712.0
+            },
+            {
+              "time": 1786809600000,
+              "socialHype": 764006.0
+            },
+            {
+              "time": 1786813200000,
+              "socialHype": 707013.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 751353.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/e8a46f41b6e34ee384baf9ed732c44d8.png",
+          "symbol": "ETH",
+          "chainId": "56",
+          "contractAddress": "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+          "tokenAge": 1599649873000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 950741955.9410934,
+          "priceChange": -0.06
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "200",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 215423,
+          "socialHypeEn": 215092,
+          "socialHypeCn": 331,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "ETH Active Addresses Surpass Bitcoin, Bank Leumi to Offer ETH Trading, Ethereum Foundation Enhances Security",
+          "socialSummaryBriefTranslated": "以太坊活跃地址数量超过比特币，Leumi银行将提供以太坊交易服务，以太坊基金会加强安全性",
+          "socialSummaryDetail": "The Ethereum network has seen a surge in active addresses, surpassing Bitcoin for the first time, indicating growing network activity. Bank Leumi in Israel is set to offer ETH trading services to over 2.5 million clients, marking a significant step in mainstream adoption. Additionally, the Ethereum Foundation is enhancing security with new cryptography to counter future quantum threats. These developments suggest a strengthening position for ETH in the market.",
+          "socialSummaryDetailTranslated": "以太坊网络的活跃地址数量激增，首次超过比特币，显示出网络活动的增长。以色列的Leumi银行将向超过250万客户提供以太坊交易服务，标志着主流采用的重要一步。此外，以太坊基金会正在通过新的加密技术增强安全性，以应对未来的量子威胁。这些发展表明以太坊在市场中的地位正在加强。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1891433835675475969/J-TloTb6_normal.png",
+            "https://pbs.twimg.com/profile_images/1724383779307843584/YiFv8ORd_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2004505315866443776/QWE_EXv9_normal.jpg"
+          ],
+          "kolCount": 21,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786734000000,
+              "socialHype": 271200.0
+            },
+            {
+              "time": 1786737600000,
+              "socialHype": 294239.0
+            },
+            {
+              "time": 1786741200000,
+              "socialHype": 313862.0
+            },
+            {
+              "time": 1786744800000,
+              "socialHype": 326795.0
+            },
+            {
+              "time": 1786748400000,
+              "socialHype": 336023.0
+            },
+            {
+              "time": 1786752000000,
+              "socialHype": 342499.0
+            },
+            {
+              "time": 1786755600000,
+              "socialHype": 286965.0
+            },
+            {
+              "time": 1786759200000,
+              "socialHype": 293411.0
+            },
+            {
+              "time": 1786762800000,
+              "socialHype": 299443.0
+            },
+            {
+              "time": 1786766400000,
+              "socialHype": 304650.0
+            },
+            {
+              "time": 1786770000000,
+              "socialHype": 312394.0
+            },
+            {
+              "time": 1786773600000,
+              "socialHype": 330421.0
+            },
+            {
+              "time": 1786777200000,
+              "socialHype": 329552.0
+            },
+            {
+              "time": 1786780800000,
+              "socialHype": 279219.0
+            },
+            {
+              "time": 1786784400000,
+              "socialHype": 282867.0
+            },
+            {
+              "time": 1786788000000,
+              "socialHype": 291273.0
+            },
+            {
+              "time": 1786791600000,
+              "socialHype": 300765.0
+            },
+            {
+              "time": 1786795200000,
+              "socialHype": 313482.0
+            },
+            {
+              "time": 1786798800000,
+              "socialHype": 315433.0
+            },
+            {
+              "time": 1786802400000,
+              "socialHype": 197419.0
+            },
+            {
+              "time": 1786806000000,
+              "socialHype": 207238.0
+            },
+            {
+              "time": 1786809600000,
+              "socialHype": 215797.0
+            },
+            {
+              "time": 1786813200000,
+              "socialHype": 224577.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 225207.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/945F21CCD5250BFE862DFF026620EC66.png",
+          "symbol": "MU",
+          "chainId": "56",
+          "contractAddress": "0x8b6acf6041a81567f012ff6a4c6d96d5818d74bf",
+          "tokenAge": 1760031234750,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 1098316769057,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Category": [
+            {
+              "tagName": "Top Tech Stocks",
+              "languageKey": "wmp-label-title-top-tech-stocks"
+            }
+          ],
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Compliance Related Token": [
+            {
+              "tagName": "Alpha Stock",
+              "languageKey": "wmp-label-alpha-stock"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Tokenized Stocks Info": [
+            {
+              "tagName": "人工智能、半导体、AI PC",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Artificial Intelligence, Semiconductors, AI PC",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Technology",
+              "languageKey": "wmp-label-stock-technology"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 120105,
+          "socialHypeEn": 120105,
+          "socialHypeCn": 0,
+          "sentiment": "Negative",
+          "socialSummaryBrief": "George Soros Capital Management Holds $43M in MU, Michael Burry Increases Shorts on MU, Leopold Aschenbrenner's Fund Faces Margin Calls on MU",
+          "socialSummaryBriefTranslated": "乔治·索罗斯资本管理持有4300万美元的美光科技（MU）股票，迈克尔·伯里增加了对MU的空头头寸，莱奥波德·阿申布伦纳的基金因MU面临追加保证金通知",
+          "socialSummaryDetail": "George Soros Capital Management reported holding $43M in Micron (MU) shares as of Q2. Meanwhile, Michael Burry expressed concerns about depreciation, reminiscent of the dot-com bubble, and increased his short positions in MU. Additionally, Leopold Aschenbrenner's fund, which heavily invested in MU, faced margin calls due to a significant loss. These events highlight mixed sentiments around MU's financial outlook.",
+          "socialSummaryDetailTranslated": "乔治·索罗斯资本管理报告称，截至第二季度持有4300万美元的美光科技（MU）股票。与此同时，迈克尔·伯里表达了对贬值的担忧，类似于互联网泡沫时期，并增加了对MU的空头头寸。此外，重仓MU的莱奥波德·阿申布伦纳基金因重大亏损面临追加保证金通知。这些事件凸显了市场对MU财务前景的复杂情绪。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1681725760472530964/g389A7bW_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1366208150211350534/GfAPwpyD_normal.jpg"
+          ],
+          "kolCount": 3,
+          "socialHypeSerialChart": [
+            {
+              "time": 1786734000000,
+              "socialHype": 87694.0
+            },
+            {
+              "time": 1786737600000,
+              "socialHype": 93011.0
+            },
+            {
+              "time": 1786741200000,
+              "socialHype": 96452.0
+            },
+            {
+              "time": 1786744800000,
+              "socialHype": 125389.0
+            },
+            {
+              "time": 1786748400000,
+              "socialHype": 133514.0
+            },
+            {
+              "time": 1786752000000,
+              "socialHype": 138619.0
+            },
+            {
+              "time": 1786755600000,
+              "socialHype": 142674.0
+            },
+            {
+              "time": 1786759200000,
+              "socialHype": 146978.0
+            },
+            {
+              "time": 1786762800000,
+              "socialHype": 151710.0
+            },
+            {
+              "time": 1786766400000,
+              "socialHype": 154915.0
+            },
+            {
+              "time": 1786770000000,
+              "socialHype": 157732.0
+            },
+            {
+              "time": 1786773600000,
+              "socialHype": 160561.0
+            },
+            {
+              "time": 1786777200000,
+              "socialHype": 163160.0
+            },
+            {
+              "time": 1786780800000,
+              "socialHype": 166506.0
+            },
+            {
+              "time": 1786784400000,
+              "socialHype": 168875.0
+            },
+            {
+              "time": 1786788000000,
+              "socialHype": 171382.0
+            },
+            {
+              "time": 1786791600000,
+              "socialHype": 173700.0
+            },
+            {
+              "time": 1786795200000,
+              "socialHype": 175882.0
+            },
+            {
+              "time": 1786798800000,
+              "socialHype": 66913.0
+            },
+            {
+              "time": 1786802400000,
+              "socialHype": 68141.0
+            },
+            {
+              "time": 1786806000000,
+              "socialHype": 69629.0
+            },
+            {
+              "time": 1786809600000,
+              "socialHype": 86063.0
+            },
+            {
+              "time": 1786813200000,
+              "socialHype": 107093.0
+            },
+            {
+              "time": 1786816800000,
+              "socialHype": 116724.0
+            }
+          ],
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/54C776D987C804415A443F0A5C0CB60D.png",
+          "symbol": "TSM",
+          "chainId": "56",
+          "contractAddress": "0xc37042a7a4fa510d8884a433762ab87257b91965",
+          "tokenAge": 1760031303000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 2211301818636,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Category": [
+            {
+              "tagName": "AI Stock",
+              "languageKey": "wmp-label-title-ai-stock"
+            },
+            {
+              "tagName": "China Concepts",
+              "languageKey": "wmp-label-title-china-concepts"
+            },
+            {
+              "tagName": "Duan Yongping Mentions",
+              "languageKey": "wmp-label-title-duanyongping-mentions"
+            },
+            {
+              "tagName": "Top Tech Stocks",
+              "languageKey": "wmp-label-title-top-tech-stocks"
+            }
+          ],
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Compliance Related Token": [
+            {
+              "tagName": "Alpha Stock",
+              "languageKey": "wmp-label-alpha-stock"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Tokenized Stocks Info": [
+            {
+              "tagName": "AI 芯片、人工智能、半导体",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "AI Chip, Artificial Intelligence, Semiconductors",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Technology",
+              "languageKey": "wmp-label-stock-technology"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Surging",
+              "languageKey": "wmp-label-title-volume-surging"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 67429,
+          "socialHypeEn": 64566,
+          "socialHypeCn": 2863,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "Druckenmiller Increases TSM Holdings, Gerstner's Altimeter Holds Strong Position, Softbank Cuts TSM Stake",
+          "socialSummaryBriefTranslated": "德鲁肯米勒增加了对台积电（TSM）的持股，格斯特纳的Altimeter保持强势持仓，软银削减了对台积电的持股",
+          "socialSummaryDetail": "Stanley Druckenmiller's Duquesne Capital has significantly increased its holdings in Taiwan Semiconductor (TSM), now valued at $281 million. Brad Gerstner's Altimeter Capital also holds a substantial position in TSM, with 1,429,355 shares worth $0.7 billion. Meanwhile, Softbank Group has cut its stake in TSM by 71.5% to 565,000 sponsored ADS as per an SEC filing. These movements highlight varied investor strategies and sentiment towards TSM.",
+          "socialSummaryDetailTranslated": "斯坦利·德鲁肯米勒的Duquesne Capital大幅增加了对台湾半导体（TSM）的持股，目前价值2.81亿美元。布拉德·格斯特纳的Altimeter Capital也持有大量TSM股份，持有1,429,355股，价值7亿美元。与此同时，根据美国证券交易委员会的文件，软银集团将其在TSM的持股减少了71.5%，至565,000股赞助的美国存托股票。这些动向反映了投资者对TSM的不同策略和情绪。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1714107328134516736/dLZGJPm7_normal.png",
+            "https://pbs.twimg.com/profile_images/1366208150211350534/GfAPwpyD_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/5f5885e78a834a059dc463c94114fb99.png",
+          "symbol": "SNDK",
+          "chainId": "56",
+          "contractAddress": "0x4fd67cb8cfedc718bac984b5936abe3330d0a2a4",
+          "tokenAge": 1773096049750,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 239659365000,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Plunging",
+              "languageKey": "wmp-label-title-volume-plunging"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 44161,
+          "socialHypeEn": 44124,
+          "socialHypeCn": 37,
+          "sentiment": "Negative",
+          "socialSummaryBrief": "Potential Price Movements, Leopold Aschenbrenner's Portfolio Impact, Huawei Speculation",
+          "socialSummaryBriefTranslated": "潜在的价格变动，Leopold Aschenbrenner的投资组合影响，华为猜测",
+          "socialSummaryDetail": "SNDK token is experiencing a significant price range from $1,212 to $1,667. Discussions revolve around potential price movements with speculations on a downtrend at $165 and possible upward momentum to $195. Leopold Aschenbrenner's portfolio includes a heavy investment in SNDK, leading to significant losses and margin calls. There's also market speculation about Huawei joining the HBF Open Compute Project, which could impact SNDK. Overall, sentiments towards SNDK appear mixed with cautious optimism and concerns about volatility.",
+          "socialSummaryDetailTranslated": "SNDK代币的价格区间在1212美元到1667美元之间波动。讨论围绕潜在的价格变动，猜测价格可能下跌至165美元，并可能上涨至195美元。Leopold Aschenbrenner的投资组合中大量投资于SNDK，导致重大亏损和追加保证金通知。市场上还有关于华为加入HBF开放计算项目的猜测，这可能会影响SNDK。总体来看，市场对SNDK的情绪呈现出谨慎乐观与对波动性的担忧交织的态势。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1905914965439238144/dDujHZ7j_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1648535580870078465/OtGyTOWY_normal.jpg"
+          ],
+          "kolCount": 4,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/15C5A29DDF3C430BD37A972D9ACD020F.png",
+          "symbol": "SKHY",
+          "chainId": "56",
+          "contractAddress": "0x4268f2bfb23a7496504aa5ed1ee325248586299f",
+          "tokenAge": 1783547308250,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 1181257690832,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Plunging",
+              "languageKey": "wmp-label-title-volume-plunging"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 40801,
+          "socialHypeEn": 40801,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "SK Hynix Gains 23%, KOLs Recommend SKHY, AI Demand Boosts SKHY, SKHYB Token Increase",
+          "socialSummaryBriefTranslated": "SK海力士上涨23%，关键意见领袖推荐SKHY，人工智能需求推动SKHY，SKHYB代币上涨",
+          "socialSummaryDetail": "SK Hynix (SKHY) experienced a notable 23% gain over the week, reflecting strong market performance. KOLs recommended buying SKHY below $130, resulting in over 30% profits within two weeks. Discussions also focused on SKHY's role in meeting AI demand, with SK Hynix, Micron, and Sandisk benefiting from a supply-demand gap. The tokenized SKHYB stock on Venus Protocol also saw a 1.40% increase, driven by an upcoming incentive deadline.",
+          "socialSummaryDetailTranslated": "SK海力士（SKHY）本周显著上涨23%，反映出强劲的市场表现。关键意见领袖建议在130美元以下买入SKHY，两周内获利超过30%。讨论还集中在SKHY满足人工智能需求的作用，SK海力士、美光和闪迪受益于供需缺口。Venus协议上的代币化SKHYB股票也上涨了1.40%，受即将到来的激励截止日期推动。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1765746894008102912/8X9HsTj8_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1607508389436837889/LqBCzyPz_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/C14E803A8C62C399A21D58BCFA03595C.png",
+          "symbol": "ARM",
+          "chainId": "56",
+          "contractAddress": "0x527c6436e1eaa4f2065cde4090f798cb5d031dd6",
+          "tokenAge": 1760031119250,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 298272525368,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Category": [
+            {
+              "tagName": "AI Stock",
+              "languageKey": "wmp-label-title-ai-stock"
+            },
+            {
+              "tagName": "Top Tech Stocks",
+              "languageKey": "wmp-label-title-top-tech-stocks"
+            }
+          ],
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Compliance Related Token": [
+            {
+              "tagName": "Alpha Stock",
+              "languageKey": "wmp-label-alpha-stock"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Tokenized Stocks Info": [
+            {
+              "tagName": "人工智能、AI PC、英伟达投资组合",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Artificial Intelligence, AI PC, NVIDIA Portfolio",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Technology",
+              "languageKey": "wmp-label-stock-technology"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 40801,
+          "socialHypeEn": 40801,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "ARM Ranks 10th Among Top Performers, ARM Stock Declines 39% From High, AI Adoption Boosts ARM Demand",
+          "socialSummaryBriefTranslated": "ARM在表现最佳者中排名第十，ARM股票从高点下跌39%，人工智能的采用推动了ARM的需求",
+          "socialSummaryDetail": "ARM's performance has been notable, ranking 10th among top performers with a 159% increase. Despite being 39% off its peak, ARM Holdings is gaining traction due to the rise in AI adoption and the growing demand for its chip architecture. This has led to discussions about potential investment opportunities, as some believe it might be an optimal time to buy ARM stock.",
+          "socialSummaryDetailTranslated": "ARM的表现值得关注，在表现最佳者中排名第十，涨幅达到159%。尽管较高点下跌了39%，由于人工智能的普及和对其芯片架构需求的增长，ARM Holdings正逐渐获得关注。这引发了关于潜在投资机会的讨论，一些人认为现在可能是购买ARM股票的最佳时机。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1409676471342407680/saijRXMv_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/B3FE793FE031951B96089FD592F6F476.png",
+          "symbol": "MRVL",
+          "chainId": "56",
+          "contractAddress": "0x1501ec83ffef405b4331cc4f73277a40fb0c627d",
+          "tokenAge": 1760031228000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 199371542681,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Category": [
+            {
+              "tagName": "Top Tech Stocks",
+              "languageKey": "wmp-label-title-top-tech-stocks"
+            }
+          ],
+          "Tokenized Stocks Trade Time": [
+            {
+              "tagName": "7*24",
+              "languageKey": "wmp-label-title-7-24"
+            }
+          ],
+          "Compliance Related Token": [
+            {
+              "tagName": "Alpha Stock",
+              "languageKey": "wmp-label-alpha-stock"
+            }
+          ],
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ],
+          "Tokenized Stocks Info": [
+            {
+              "tagName": "人工智能、半导体、5G",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Artificial Intelligence, Semiconductors, 5G",
+              "languageKey": "wmp-label-stock-concept"
+            },
+            {
+              "tagName": "Technology",
+              "languageKey": "wmp-label-stock-technology"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 40801,
+          "socialHypeEn": 40801,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Marvell Stock Rises in Premarket, Technical Rebound for MRVL, AI Market Positioning",
+          "socialSummaryBriefTranslated": "Marvell股票在盘前交易中上涨，MRVL技术性反弹，人工智能市场定位",
+          "socialSummaryDetail": "Marvell Technology ($MRVL) experienced a rise in premarket trading as investors anticipated the company's upcoming earnings report. The stock showed technical resilience, recovering past key moving averages, indicative of potential gains. Market interest in AI and custom silicon solutions positions Marvell well, despite competition from $AVGO. However, supply constraints may limit opportunities. The overall sentiment in the market is cautiously optimistic, with potential for positive performance amid mixed stock futures.",
+          "socialSummaryDetailTranslated": "Marvell Technology（$MRVL）在盘前交易中上涨，投资者期待公司即将发布的财报。该股显示出技术韧性，突破关键移动平均线，显示潜在涨势。市场对人工智能和定制硅解决方案的兴趣使Marvell处于有利位置，尽管面临$AVGO的竞争。然而，供应限制可能限制机会。整体市场情绪谨慎乐观，在股票期货表现参差不齐的情况下，存在积极表现的潜力。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1878129937737187328/DnEflT4L_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1652077879906414593/Y8cRI8vf_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1931058463112822784/g4-uWj8m_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/BBF3A73620EF6DF67C266BE80C84B3F2.png",
+          "symbol": "ZEC",
+          "chainId": "56",
+          "contractAddress": "0x1ba42e5193dfa8b03d15dd1b86a3113bbbef8eeb",
+          "tokenAge": 1600081651000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 107577774.6614712,
+          "priceChange": -0.08
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "75",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 35425,
+          "socialHypeEn": 28166,
+          "socialHypeCn": 7259,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "Cypherpunk Reports Loss, ZEC on Watchlists, Potential for Sharp Move Up",
+          "socialSummaryBriefTranslated": "Cypherpunk报告亏损，ZEC列入观察名单，可能出现急剧上涨",
+          "socialSummaryDetail": "ZCash ($ZEC) is currently experiencing mixed market sentiments. Cypherpunk, a treasury company supported by the Zcash ecosystem, reported a net loss of $37.8 million for the first half of the year, with only $7.6 million cash remaining, despite holding over 323,394 ZEC tokens. This has affected its market valuation, which Nasdaq estimates at $74 million. Meanwhile, ZEC remains on top watchlists for potential upward movements, indicating a possible positive outlook.",
+          "socialSummaryDetailTranslated": "ZCash（$ZEC）目前市场情绪复杂。由Zcash生态系统支持的国库公司Cypherpunk报告今年上半年净亏损3780万美元，现金仅剩760万美元，尽管持有超过323,394个ZEC代币。这影响了其市场估值，纳斯达克估计为7400万美元。与此同时，ZEC仍位列潜在上涨的重点观察名单，显示出可能的积极前景。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1692319430611517440/WwOa201h_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2087762305581039616/KPReFNJ-_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1954890217342582784/JJawC78r_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/NT_84.png",
+          "symbol": "XRP",
+          "chainId": "56",
+          "contractAddress": "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe",
+          "tokenAge": 1599651265000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 326473264.8405284,
+          "priceChange": -0.4
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "100",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 26979,
+          "socialHypeEn": 26979,
+          "socialHypeCn": 0,
+          "sentiment": "Negative",
+          "socialSummaryBrief": "Whale Accumulation, XRP Nears $1, Bridge Exploitation",
+          "socialSummaryBriefTranslated": "鲸鱼积累，XRP接近1美元，桥接被利用",
+          "socialSummaryDetail": "XRP sees significant whale accumulation with 72 million tokens acquired in 24 hours as it teeters near $1, marking its weakest daily close since November 2024. Despite this bearish sentiment, the XRP Ledger remains active with nearly 50,000 addresses. Meanwhile, an XRP bridge was exploited, leading to a loss of approximately 200,000 XRP, affecting the community's sentiment negatively.",
+          "socialSummaryDetailTranslated": "XRP在24小时内被鲸鱼大量收购7200万代币，价格接近1美元，创下自2024年11月以来最弱的日收盘价。尽管市场情绪偏空，XRP账本仍然活跃，拥有近5万个地址。与此同时，XRP桥接被利用，导致约20万XRP的损失，负面影响了社区情绪。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1986140626195222530/z-ZDNkyG_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1891433835675475969/J-TloTb6_normal.png",
+            "https://pbs.twimg.com/profile_images/1740337106512187392/o0KBpMEp_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/6321D3359432450D2D896F63D8B3A430.jpg",
+          "symbol": "CETS",
+          "chainId": "56",
+          "contractAddress": "0xb0c2ab5af4028461ace3f6e1c33a4ee1404e7777",
+          "tokenAge": 1785984986900,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 10735650.706243234,
+          "priceChange": -3.57
+        },
+        "tagInfoList": {
+          "Launch Platform": [
+            {
+              "tagName": "Flap",
+              "languageKey": "wmp-label-title-flap"
+            }
+          ],
+          "RWA Pair Token": [
+            {
+              "tagName": "xAUT",
+              "languageKey": "wmp-label-title-rwa-pair-token"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Insider Wash Trading",
+              "languageKey": "wmp-label-title-insider-wash-trading"
+            }
+          ],
+          "Sensitive Events": [
+            {
+              "tagName": "Smart Money Add Holdings",
+              "languageKey": "wmp-label-title-smart-money-add-position"
+            }
+          ],
+          "Token Fee": [
+            {
+              "tagName": "High Tax Token",
+              "languageKey": "wmp-label-high-tax-token"
+            }
+          ],
+          "Social Events": [
+            {
+              "tagName": "DEX Paid",
+              "languageKey": "wmp-label-update-dexscreener-social"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 26405,
+          "socialHypeEn": 18884,
+          "socialHypeCn": 7521,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "CETS Market Cap Surge, Tokenized Gold Distribution, Community Optimism",
+          "socialSummaryBriefTranslated": "CETS市值激增，代币化黄金分发，社区乐观情绪",
+          "socialSummaryDetail": "CETS, a trending coin on Binance Wallet, has seen significant activity. The market cap of CETS surged briefly over $15 million, increasing by 180%. Additionally, over $190,000 in tokenized gold has been distributed to holders, showing strong community support. The token is associated with BSC and offers passive gold earnings. Traders express optimism about its potential growth, with some predicting a run to $100 million.",
+          "socialSummaryDetailTranslated": "CETS是币安钱包上的热门币，近期活动显著。CETS市值短暂突破1500万美元，增长了180%。此外，持有者已分发了超过19万美元的代币化黄金，显示出强大的社区支持。该代币与BSC相关，提供被动黄金收益。交易者对其潜在增长表示乐观，有人预测市值将达到1亿美元。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2006851277851160576/L8vAUJOH_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2050938787648196608/OFI0MMCz_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2074331169907515392/iBtuBO2W_normal.jpg"
+          ],
+          "kolCount": 2,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/1B3ED2FF18DE837491EFD8DB523067C8.png",
+          "symbol": "FCX",
+          "chainId": "56",
+          "contractAddress": "0xe3b17e6d290a0f28bd32af4064637057627004d5",
+          "tokenAge": 1773095994850,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 93109837800,
+          "priceChange": null
+        },
+        "tagInfoList": {
+          "Tokenized Stocks Launch Platform": [
+            {
+              "tagName": "Ondo",
+              "languageKey": "wmp-label-title-ondo"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 22796,
+          "socialHypeEn": 22796,
+          "socialHypeCn": 0,
+          "sentiment": "Neutral",
+          "socialSummaryBrief": "Technical Analyst Monitors FCX Breakout, No Recent Significant Developments, Limited Holder Count",
+          "socialSummaryBriefTranslated": "技术分析师监控FCX突破，无近期重大进展，持有者数量有限",
+          "socialSummaryDetail": "A technical analyst is closely monitoring FCX for a potential breakout, indicating interest in the token's price movement. Despite the attention, no new significant events or developments have been reported for FCX in the past 24 hours. The token, linked to Freeport-McMoRan Inc., offers economic exposure to the stock and is backed by actual shares. Current data shows limited holder count and transfer volume.",
+          "socialSummaryDetailTranslated": "一位技术分析师正在密切关注FCX的潜在突破，显示出对该代币价格走势的兴趣。尽管受到关注，但过去24小时内FCX没有报告新的重大事件或进展。该代币与Freeport-McMoRan Inc.相关，提供对该股票的经济敞口，并由实际股票支持。当前数据显示持有者数量和转账量有限。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/846395449867194368/7p7s27O-_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/8281427b22444c8881ffcc3c4c56c2d3.png",
+          "symbol": "BNB",
+          "chainId": "56",
+          "contractAddress": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "tokenAge": 0,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 83147568926.35516,
+          "priceChange": -0.07
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "200",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 16478,
+          "socialHypeEn": 15520,
+          "socialHypeCn": 958,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Local Exchange Listing, Tokenized Properties on BNB Chain, Pasteur Hardfork Enhancements",
+          "socialSummaryBriefTranslated": "本地交易所上市，BNB链上的代币化资产，Pasteur硬分叉增强功能",
+          "socialSummaryDetail": "BNB's ecosystem is buzzing with new developments. The local exchange listing of BNB highlights its growing acceptance and potential in regulated spaces. Tokenized properties on BNB Chain showcase the platform's utility in real-world assets, providing monthly yields. Meanwhile, the Pasteur Hardfork aims to enhance BNB Smart Chain's security and efficiency, with significant upgrades like BEP-682 and BEP-695. Overall, these events suggest a strong positive outlook for BNB.",
+          "socialSummaryDetailTranslated": "BNB生态系统正因新发展而活跃。BNB在本地交易所的上市突显了其在受监管领域日益增长的接受度和潜力。BNB链上的代币化资产展示了该平台在现实资产中的应用，提供每月收益。与此同时，Pasteur硬分叉旨在提升BNB智能链的安全性和效率，带来了如BEP-682和BEP-695等重大升级。总体来看，这些事件表明BNB的前景非常乐观。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1891433835675475969/J-TloTb6_normal.png",
+            "https://pbs.twimg.com/profile_images/1950536042727223296/7a-jLd3__normal.jpg",
+            "https://pbs.twimg.com/profile_images/1971259590906966016/SufIFVg-_normal.jpg"
+          ],
+          "kolCount": 3,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/3D7D11A756FDFC47E20D45B282569CE9.png",
+          "symbol": "DBURN",
+          "chainId": "56",
+          "contractAddress": "0xdd2fee7fc438aea520e2678e9ddbebc5b7b63333",
+          "tokenAge": 1786081888800,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 1464594.4613887423,
+          "priceChange": 1.78
+        },
+        "tagInfoList": {},
+        "socialHypeInfo": {
+          "socialHype": 15737,
+          "socialHypeEn": 0,
+          "socialHypeCn": 15737,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "DBURN Launches Offline Marketing, On-Chain Mechanisms Active, Community Expansion Efforts",
+          "socialSummaryBriefTranslated": "DBURN启动线下营销，链上机制激活，社区扩展努力",
+          "socialSummaryDetail": "DBURN has initiated an offline marketing campaign, aiming to expand its market presence beyond its initial community. The project emphasizes the importance of attracting new participants and building consensus. DBURN's on-chain mechanisms include a 3% tax for liquidity, automatic burns, and buybacks, working alongside the new marketing efforts to solidify its growth strategy. Despite no major news, these developments highlight the project's forward-thinking approach.",
+          "socialSummaryDetailTranslated": "DBURN已启动线下营销活动，旨在将其市场影响力扩展到初始社区之外。该项目强调吸引新参与者和建立共识的重要性。DBURN的链上机制包括3%的流动性税、自动销毁和回购，这些机制与新的营销努力共同作用，巩固其增长战略。尽管没有重大新闻，这些发展凸显了项目的前瞻性思维。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1945895241225048064/FjgLHJl7_normal.png"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/385F0FF3A448F06D3D7B5589A95ADD12.png",
+          "symbol": "CAKE",
+          "chainId": "56",
+          "contractAddress": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+          "tokenAge": 1600753669000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 487547546.23696274,
+          "priceChange": 0.16
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "10",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Surging",
+              "languageKey": "wmp-label-title-volume-surging"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 15520,
+          "socialHypeEn": 15520,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "Tokenized Stocks Launch, GameStop Added, CAKE Burn",
+          "socialSummaryBriefTranslated": "代币化股票发布，GameStop加入，CAKE燃烧",
+          "socialSummaryDetail": "PancakeSwap has launched over 600 tokenized stocks and ETFs from Solana on its Stock Terminal, enhancing trading options for users. The addition of $GMEB, a tokenized version of GameStop, further diversifies offerings on the platform. A trading competition with a 266,666 $DOS prize pool is ongoing, and a new Syrup Pool allows users to stake CAKE to earn DOS. Additionally, a significant weekly burn of 600,000 CAKE tokens was recorded, indicating a deflationary trend.",
+          "socialSummaryDetailTranslated": "PancakeSwap在其股票终端上推出了600多种来自Solana的代币化股票和ETF，增强了用户的交易选择。$GMEB的加入，即GameStop的代币化版本，进一步丰富了平台的产品。正在进行一场奖金池为266,666 $DOS的交易竞赛，新的Syrup池允许用户质押CAKE以赚取DOS。此外，记录了一次重大每周燃烧，燃烧了600,000个CAKE代币，显示出通缩趋势。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2031513671374090242/SUAzJ6MI_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/bc5453521a494238ba23c4c47927dd08.png",
+          "symbol": "FLOKI",
+          "chainId": "56",
+          "contractAddress": "0xfb5b838b6cfeedc2873ab27866079ac55363d37e",
+          "tokenAge": 1642788204000,
+          "decimals": 9
+        },
+        "marketInfo": {
+          "marketCap": 84005761.65211867,
+          "priceChange": -0.52
+        },
+        "tagInfoList": {
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Surging",
+              "languageKey": "wmp-label-title-volume-surging"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Community Recognized",
+              "languageKey": "wmp-label-title-community-recognized"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 15520,
+          "socialHypeEn": 15520,
+          "socialHypeCn": 0,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "FLOKI Ecosystem Highlighted, High Holder Concentration, Stable Market Performance",
+          "socialSummaryBriefTranslated": "FLOKI生态系统亮点，高持有者集中度，市场表现稳定",
+          "socialSummaryDetail": "FLOKI, highlighted as one of the notable meme coins on the BNB Chain, is gaining attention due to its ecosystem, including the Valhalla game and FlokiFi DeFi tools. The token is also recognized among top Ethereum meme coins. Despite its vibrant ecosystem, FLOKI faces high holder concentration, with the top 100 wallets controlling over 90% of its supply. Market data shows stable price and volume without significant events impacting its market position.",
+          "socialSummaryDetailTranslated": "FLOKI作为BNB链上备受关注的知名表情包币之一，因其生态系统（包括Valhalla游戏和FlokiFi去中心化金融工具）而受到关注。该代币也被认为是以太坊顶级表情包币之一。尽管生态系统活跃，FLOKI面临高持有者集中度，前100个钱包控制了其供应量的90%以上。市场数据显示价格和交易量稳定，未有重大事件影响其市场地位。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/2031513671374090242/SUAzJ6MI_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1480599248198590469/4KnpeB3x_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2030422510924091392/gkFS5-Pv_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/9b0187198afd474495267ba22e619fa7.png",
+          "symbol": "CAP",
+          "chainId": "56",
+          "contractAddress": "0x99991c6aabba5a096f24f250b73580f5179b9999",
+          "tokenAge": 1782299579000,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 16151911.056160366,
+          "priceChange": 0.82
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "5",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 8321,
+          "socialHypeEn": 0,
+          "socialHypeCn": 8321,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "CAP Volatility on Binance Futures, CAP Gains on Coinbase Spot, CAP Hits All-Time High",
+          "socialSummaryBriefTranslated": "币安期货上的CAP波动，Coinbase现货上的CAP涨幅，CAP创历史新高",
+          "socialSummaryDetail": "CAP demonstrated volatility with a significant drop of 10.06% on Binance Futures, followed by a notable 28.21% gain on Coinbase Spot in the last 15 minutes. The token also saw a 13.56% increase on Bybit Spot, despite being listed among top losers on other platforms. CAP achieved an all-time high on August 14, 2026, and rose 92% over the week after its Upbit listing.",
+          "socialSummaryDetailTranslated": "CAP在币安期货上表现出波动，跌幅达10.06%，随后在Coinbase现货市场的15分钟内显著上涨28.21%。该代币在Bybit现货市场也上涨了13.56%，尽管在其他平台上被列为跌幅最大的代币之一。CAP于2026年8月14日创下历史新高，并在其在Upbit上市后一周内上涨了92%。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1879936670545371136/QpdoxF1N_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1927382723959689216/q2RzKfyN_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2006000957008584705/vhxsDSDU_normal.png"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/832200e1b3b84326b8c5612d932d5b98.png",
+          "symbol": "BTW",
+          "chainId": "56",
+          "contractAddress": "0x444045b0ee1ee319a660a5e3d604ca0ffa35acaa",
+          "tokenAge": 1766129982950,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 2774436923.774258,
+          "priceChange": 13.67
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "5",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 8321,
+          "socialHypeEn": 0,
+          "socialHypeCn": 8321,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "BTW Airdrop Value Soars, BTW Achieves 423% Surge, BTW Tops Market Gainers",
+          "socialSummaryBriefTranslated": "BTW 空投价值飙升，BTW 实现 423% 涨幅，BTW 成为市场涨幅榜首",
+          "socialSummaryDetail": "BTW has shown impressive growth, with its price surging by 423%. An airdrop to key opinion leaders (KOLs) could now sell for 568,617 RMB each. The token continues to defy expectations and achieved a 12% rise, making it the top gainer in the market. The sentiment surrounding BTW is positive, with investors expressing excitement over its performance.",
+          "socialSummaryDetailTranslated": "BTW 展现出令人印象深刻的增长，价格飙升了 423%。向关键意见领袖（KOL）空投的代币现在每个可卖到 568,617 人民币。该代币持续超出预期，实现了 12% 的上涨，成为市场涨幅最高的代币。围绕 BTW 的市场情绪积极，投资者对其表现表示兴奋。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1785898262219968512/0WUmQdbO_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1927382723959689216/q2RzKfyN_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1745401326992003072/zO6vHzd4_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/ecf2edf5d0e3420894226709c38f202f.png",
+          "symbol": "CYS",
+          "chainId": "56",
+          "contractAddress": "0x0c69199c1562233640e0db5ce2c399a88eb507c7",
+          "tokenAge": 1764852707650,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 626929375.4531991,
+          "priceChange": -11.54
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "10",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "Volume Trend": [
+            {
+              "tagName": "Token Volume Surging",
+              "languageKey": "wmp-label-title-volume-surging"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 8321,
+          "socialHypeEn": 0,
+          "socialHypeCn": 8321,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "CYS Price Surge, Community Airdrop Excitement, Analyst Praise",
+          "socialSummaryBriefTranslated": "CYS价格飙升，社区空投引发热情，分析师称赞",
+          "socialSummaryDetail": "CYS token has seen a significant price increase, with recent data showing a 42% rise in 24 hours and a trading volume of $93.85M. The community is buzzing about airdrops for early miners and NFT holders. Market figures indicate a new all-time high, and influential market analysts like @Global_future1 have praised the token's performance, suggesting potential trading opportunities.",
+          "socialSummaryDetailTranslated": "CYS代币价格显著上涨，最新数据显示24小时内上涨42%，交易量达9385万美元。社区对早期矿工和NFT持有者的空投活动热议不断。市场数据显示创下新高，知名市场分析师如@Global_future1称赞该代币表现，暗示潜在的交易机会。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1879936670545371136/QpdoxF1N_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1927382723959689216/q2RzKfyN_normal.jpg",
+            "https://pbs.twimg.com/profile_images/1830897759601168386/SWb90u2l_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      },
+      {
+        "metaInfo": {
+          "logo": "/images/web3-data/public/token/logos/9b1e9bbb3da046738dfbd9cf90580177.jpg",
+          "symbol": "AKE",
+          "chainId": "56",
+          "contractAddress": "0x2c3a8ee94ddd97244a93bc48298f97d2c412f7db",
+          "tokenAge": 1755378384250,
+          "decimals": 18
+        },
+        "marketInfo": {
+          "marketCap": 1027612745.6002046,
+          "priceChange": 13.23
+        },
+        "tagInfoList": {
+          "Perps Leverage": [
+            {
+              "tagName": "5",
+              "languageKey": "wmp-label-title-perps-leverage"
+            }
+          ],
+          "Wash Trading Behavior": [
+            {
+              "tagName": "Wash Trading",
+              "languageKey": "wmp-label-title-wash-trading"
+            }
+          ],
+          "AI Analysis": [
+            {
+              "tagName": "AI Widget",
+              "languageKey": "wmp-label-title-ai-widget"
+            }
+          ],
+          "Community Recognition Level": [
+            {
+              "tagName": "Alpha",
+              "languageKey": "wmp-label-title-alpha"
+            }
+          ]
+        },
+        "socialHypeInfo": {
+          "socialHype": 8321,
+          "socialHypeEn": 0,
+          "socialHypeCn": 8321,
+          "sentiment": "Positive",
+          "socialSummaryBrief": "AKE Surges 70x in Five Weeks, All-Time High on August 14, Gate Trading Promotion, Scheduled Token Unlock",
+          "socialSummaryBriefTranslated": "AKE在五周内上涨70倍，8月14日创历史新高，Gate交易促销，计划中的代币解锁",
+          "socialSummaryDetail": "AKE has seen a significant surge, with a 70x increase in value from $0.0001725 to a high near $0.0127878 over five weeks. Recent trading activity shows an all-time high near $0.015 on August 14, 2026, with a high trading volume of over $100 million. Gate launched a trading promotion for AKE, offering rewards for trading activity. A scheduled token unlock of approximately 2.13 billion AKE tokens is set for August 21, 2026, potentially impacting the market.",
+          "socialSummaryDetailTranslated": "AKE经历了显著的上涨，价值从0.0001725美元增长70倍，五周内达到接近0.0127878美元的高点。近期交易活动显示，2026年8月14日达到接近0.015美元的历史新高，交易量超过1亿美元。Gate为AKE推出了交易促销活动，提供交易奖励。计划于2026年8月21日解锁约21.3亿枚AKE代币，可能对市场产生影响。",
+          "top3kolLogoList": [
+            "https://pbs.twimg.com/profile_images/1927382723959689216/q2RzKfyN_normal.jpg",
+            "https://pbs.twimg.com/profile_images/2006000957008584705/vhxsDSDU_normal.png",
+            "https://pbs.twimg.com/profile_images/1550726221306429440/yC52znGs_normal.jpg"
+          ],
+          "kolCount": 1,
+          "socialHypeSerialChart": null,
+          "tweetList": null,
+          "socialHypeChangeByTimeRange": null,
+          "socialHypeEnChangeByTimeRange": null,
+          "socialHypeCnChangeByTimeRange": null,
+          "socialHypeChangePercentByTimeRange": null,
+          "socialHypeEnChangePercentByTimeRange": null,
+          "socialHypeCnChangePercentByTimeRange": null,
+          "chartByTimeRange": null
+        }
+      }
+    ]
+  },
+  "success": true
+}

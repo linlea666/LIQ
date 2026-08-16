@@ -29,12 +29,54 @@ services:
       retries: 5
       start_period: 300s
 
+  # 潜力币雷达：完全独立的进程与数据库，与主后端无任何共享状态。
+  # 刻意不声明 depends_on backend —— 两者的可用性必须彼此独立，
+  # 主后端重启不应该顺带打断雷达正在追踪的代币生命周期。
+  radar:
+    build:
+      context: ./radar
+      args:
+        APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-unknown}
+    container_name: liq-radar
+    restart: on-failure:5
+    # 停机时数据库最多排空 20 秒 + checkpoint。Docker 默认只给 10 秒宽限期，
+    # 到点直接 SIGKILL——每次重启都会静默丢掉队列里的警报与 Outcome，
+    # 而且不留任何日志。这里给足余量
+    stop_grace_period: 40s
+    ports:
+      - "8802:8000"
+    env_file:
+      - ./radar/.env
+    volumes:
+      # /app/data → SQLite 数据库、原始归档
+      # /app/logs → JSONL 运维日志
+      - ./radar/data:/app/data
+      - ./radar/logs:/app/logs
+    # 512MB 是经过内存核算的：注册表默认上限 4000 个代币视图，
+    # 加上写队列与 aiohttp 连接池，稳态约 150-250MB，留一倍余量。
+    # 与主后端的 2g 相加仍在 3.5GB 整机预算内
+    mem_limit: 512m
+    memswap_limit: 512m
+    # 采集是 IO 密集而非计算密集，半核足够；限制它是为了保证
+    # 主后端的行情计算在同一台机器上不会被采集高峰抢走 CPU
+    cpus: 0.5
+    healthcheck:
+      # /ready 在采集降级时返回 503：一个所有接口都在超时的雷达
+      # 在进程层面完全健康，但它已经不再是雷达了
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/radar/ready', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
   frontend:
     build:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_BASE: http://8.217.240.76:8800
         NEXT_PUBLIC_WS_URL: http://8.217.240.76:8800
+        NEXT_PUBLIC_RADAR_API_BASE: http://8.217.240.76:8802
     container_name: liq-frontend
     restart: always
     ports:

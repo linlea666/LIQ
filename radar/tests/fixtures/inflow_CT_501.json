@@ -1,0 +1,4449 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": [
+    {
+      "tokenName": "misterbis",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/1868AD9B4470CC7198E8E6497E66CBEE.jpg",
+      "protocol": 1001,
+      "launchTime": 1782903551000,
+      "ca": "h53m8BvAQK5r2upHRr791sHev24uMaDEGxChW5spump",
+      "price": "0.000007980975661395507787936738263704",
+      "marketCap": "7751.316812297418431300131853056728231409417856",
+      "volume": "7.90742307252840721867",
+      "priceChangeRate": "1.31",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.tiktok.com/@lozygfx/video/7654576310005632277"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/MisterbisSOL?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.tiktok.com/@lozygfx/video/7654576310005632277"
+        ],
+        "x": [
+          "https://x.com/MisterbisSOL?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "18364.40597021793507320829930478337017",
+      "holdersTop10Percent": "27.5346240518231046",
+      "holders": "210",
+      "kycHolders": "2",
+      "count": "3",
+      "countBuy": "1",
+      "countSell": "2",
+      "inflow": 4.896786432887466,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "REGOLITH",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/ED37A72246CB6E47FDFE95F6CAAE7A70.jpg",
+      "protocol": 1001,
+      "launchTime": 1786806716000,
+      "ca": "59freTMCVassLRDEgCYLDzM7sgTxWLAHiKKKxcbXpump",
+      "price": "0.000030918622258534745459167818305449",
+      "marketCap": "30379.066947801119866727514258422367294519982687",
+      "volume": "23576.94534025318582564104",
+      "priceChangeRate": "101.39",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://winchxyz.github.io/moon-rover/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/alonsintern/status/2088644710331974122"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://winchxyz.github.io/moon-rover/"
+        ],
+        "x": [
+          "https://x.com/alonsintern/status/2088644710331974122"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "24321.3831953632961355404833457050804",
+      "holdersTop10Percent": "21.8977772456271486",
+      "holders": "254",
+      "kycHolders": "1",
+      "count": "713",
+      "countBuy": "441",
+      "countSell": "272",
+      "inflow": 219.9556649332881,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "LOOKSMAX",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/E981F6AEA61EFC18397FA2C42D6FA628.webp",
+      "protocol": 1001,
+      "launchTime": 1786585205000,
+      "ca": "GPzpoXpD74E2C4CJNayuoyBqPQJEsPtdse3nhntrpump",
+      "price": "0.002483539389271238748432036035885637",
+      "marketCap": "2372009.679921126698659408104530967289070482591665",
+      "volume": "322853.64325150392758470694",
+      "priceChangeRate": "-5.82",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://looksmax.org"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/LooksmaxMe"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://looksmax.org"
+        ],
+        "x": [
+          "https://x.com/LooksmaxMe"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "379052.1258659941447131508217486144232",
+      "holdersTop10Percent": "24.9973264836281157",
+      "holders": "2919",
+      "kycHolders": "7",
+      "count": "2668",
+      "countBuy": "1264",
+      "countSell": "1404",
+      "inflow": 192.5618185007059,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "COIN",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/B0F5A84907AC2B0D9F8FD1BA4AE7E420.webp",
+      "protocol": 1001,
+      "launchTime": 1786816289000,
+      "ca": "69tJh32kgR7u6Vqyrw2xnwLoCsjY5AiG8PqNivM7pump",
+      "price": "0.000097665962431325527703602687114752",
+      "marketCap": "96011.124976621516289940204107934183274949749248",
+      "volume": "294367.67920908307009721798",
+      "priceChangeRate": "4445.43",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "34698.3678856506815528286517852574298",
+      "holdersTop10Percent": "12.9867109663223779",
+      "holders": "1137",
+      "kycHolders": "8",
+      "count": "7494",
+      "countBuy": "3437",
+      "countSell": "4057",
+      "inflow": 17.104776928668986,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Add Position",
+            "languageKey": "wmp-label-title-dev-add-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Poipoi",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/39F306BA4C65612990ADBBFB4854CB45.webp",
+      "protocol": 1001,
+      "launchTime": 1786533547000,
+      "ca": "7z8Q8E4dpequE3XcxoXrpiCPiw1yVHZ7cY8EwT7Tpump",
+      "price": "0.000174741493593406840470457986550122",
+      "marketCap": "171169.444018810244621702922075037955059940226492",
+      "volume": "12338.42946087971791833208",
+      "priceChangeRate": "0.41",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/Poipoihippo"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/poipoihippo/status/2087498794787033250?s=46"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/Poipoihippo"
+        ],
+        "x": [
+          "https://x.com/poipoihippo/status/2087498794787033250?s=46"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "43531.1953363440515496941179714476254",
+      "holdersTop10Percent": "23.2179099853755067",
+      "holders": "660",
+      "kycHolders": "6",
+      "count": "224",
+      "countBuy": "107",
+      "countSell": "117",
+      "inflow": -179.92381364011226,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "ユキ",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/7356061A5C6404B2AF8E078FAC1DA1B3.png",
+      "protocol": 1001,
+      "launchTime": 1786661132000,
+      "ca": "2ptr9a2FTxF675thSZRSXx3xrvpqBS5QDS7fe3DGpump",
+      "price": "0.000047467161071771348732905993473814",
+      "marketCap": "44640.351678081377751975159909546211765944936538",
+      "volume": "7519.51259070405062158779",
+      "priceChangeRate": "-11.8",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/xDanSanAx/status/2087782122773938591"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/devilsiopf/status/2088034097306235366"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/xDanSanAx/status/2087782122773938591"
+        ],
+        "x": [
+          "https://x.com/devilsiopf/status/2088034097306235366"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "28159.0627780159820683733359134177736",
+      "holdersTop10Percent": "24.0844456808740315",
+      "holders": "267",
+      "kycHolders": "2",
+      "count": "151",
+      "countBuy": "57",
+      "countSell": "94",
+      "inflow": 179.92381364011226,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Qenis",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/41738C7DAA3C871C9583D67235F35E6A.webp",
+      "protocol": 1001,
+      "launchTime": 1786589231000,
+      "ca": "EkcTa8n14fXcHdfvZqCg72cTCutJnnKb19vcHwKTpump",
+      "price": "0.0018559146359947073068401591959799",
+      "marketCap": "1790029.0504770315135859294541850810813204362415",
+      "volume": "160740.6839241517669792411",
+      "priceChangeRate": "-4.54",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "300204.132092082628068667890990078473",
+      "holdersTop10Percent": "25.0077367125337798",
+      "holders": "2481",
+      "kycHolders": "11",
+      "count": "1395",
+      "countBuy": "696",
+      "countSell": "699",
+      "inflow": 8995.187531380408,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "TripleP",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/BD8690B5A2BAEAF7240CEFAD3069242D.jpg",
+      "protocol": 1001,
+      "launchTime": 1786814329000,
+      "ca": "DQpEV34nrmbWAaWB292AHxBFr91SvwiXqqmqdvVopump",
+      "price": "0.000004566232891264682594739334045981",
+      "marketCap": "4566.193376262023733515545582004818814751947434",
+      "volume": "10561.15080984114853613124",
+      "priceChangeRate": "-37.8",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": -1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.tiktok.com/@christintina/video/7672957826569866516?_r=1&_t=ZN-98uNRT5028k"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/genyrational/status/2088676748296696217"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.tiktok.com/@christintina/video/7672957826569866516?_r=1&_t=ZN-98uNRT5028k"
+        ],
+        "x": [
+          "https://x.com/genyrational/status/2088676748296696217"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "2106.3835152207824105905368",
+      "holdersTop10Percent": "84.9310759551034881",
+      "holders": "78",
+      "kycHolders": null,
+      "count": "344",
+      "countBuy": "169",
+      "countSell": "175",
+      "inflow": 89.4218189319958,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "MONEYMAX",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/223BFC99F1E5AFA839D5D7465A9F6FFF.webp",
+      "protocol": 1001,
+      "launchTime": 1786818288000,
+      "ca": "htswYxYNkQcms7e3Jns5YPybBG3WsY4b8idXgjMpump",
+      "price": "0.000026530612502347390416501764560035",
+      "marketCap": "25344.987863640181866814712148661705342515357270",
+      "volume": "65629.14941790722948366657",
+      "priceChangeRate": "1030.25",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/M0neyMaxxing"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/M0neyMaxxing"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 0,
+      "liquidity": "23401.6599319231203788070573651848752",
+      "holdersTop10Percent": "26.8301966372536956",
+      "holders": "252",
+      "kycHolders": "1",
+      "count": "1466",
+      "countBuy": "771",
+      "countSell": "695",
+      "inflow": -108.79649999745538,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "𒐪𒐪𒐪",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/9FFDDF9185D8FBA8C726F2AA85AA8739.webp",
+      "protocol": 1001,
+      "launchTime": 1786806924000,
+      "ca": "8tBs2pjzC9Wz1oALGXE6yJcjxZACP3xRVDRKm94Fpump",
+      "price": "0.000008926404609610749827106665419696",
+      "marketCap": "8487.976096487772343265279247185543585307885712",
+      "volume": "28621.06941997625268459802",
+      "priceChangeRate": "26.43",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 2,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/mark_k/status/2088645584143937768"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/mark_k/status/2088645584143937768"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "18453.76001270948893479517350963201684",
+      "holdersTop10Percent": "22.4190807807519888",
+      "holders": "216",
+      "kycHolders": "0",
+      "count": "653",
+      "countBuy": "343",
+      "countSell": "310",
+      "inflow": -1.52548944663448,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "TRUCKER",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/17217AD5348703FC71A4C05D61884041.webp",
+      "protocol": 1001,
+      "launchTime": 1785708242000,
+      "ca": "5hc1WKYnozPbpC51CxEXsnJT1U4TdxiWrLHJDmJ2pump",
+      "price": "0.000107751420933869918818010970602721",
+      "marketCap": "104544.550276165834688345289788233432143308730348",
+      "volume": "2493.73163212678313848911",
+      "priceChangeRate": "3.91",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/i/communities/1964415799239545260"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/rachidsworld/status/2084037334434037997"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/i/communities/1964415799239545260"
+        ],
+        "x": [
+          "https://x.com/rachidsworld/status/2084037334434037997"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "38953.4920815183953803268170769648838",
+      "holdersTop10Percent": "32.6753406114093656",
+      "holders": "569",
+      "kycHolders": "2",
+      "count": "46",
+      "countBuy": "30",
+      "countSell": "16",
+      "inflow": -31.561458384760474,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Retardmaxx",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/4BB72E8B09E4970ED5ADD9D416BD1B64.jpg",
+      "protocol": 1001,
+      "launchTime": 1750312001000,
+      "ca": "3Y7uP2UhEE68dpyAmWfXc7biSQmQqQonCiyDp6KYpump",
+      "price": "0.000086631661714673682271250372797574",
+      "marketCap": "86596.645301638173868096902507356400836215593648",
+      "volume": "11725.15218429236816640261",
+      "priceChangeRate": "38.29",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.youtube.com/watch?v=UA_AW-eyzbQ"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/itszore/status/1935529196450623895"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.youtube.com/watch?v=UA_AW-eyzbQ"
+        ],
+        "x": [
+          "https://x.com/itszore/status/1935529196450623895"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "37934.7966853737828769013152782522137",
+      "holdersTop10Percent": "18.9908912215245533",
+      "holders": "1817",
+      "kycHolders": "6",
+      "count": "241",
+      "countBuy": "94",
+      "countSell": "147",
+      "inflow": 98.49489689840951,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "ZHN",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/81D977493ED910EE5C3FABBA995AD1ED.jpg",
+      "protocol": 1001,
+      "launchTime": 1780592603000,
+      "ca": "DecBThKjPiZyiaQ8Yvr2t6u9Jky9mF2shqXry7m5pump",
+      "price": "0.000109857055915354401211312796055856",
+      "marketCap": "109856.881753913859310719460001199997355183667248",
+      "volume": "912.81758727508060287535",
+      "priceChangeRate": "3.06",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://zenithprotocol.top/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/ZenithOrbital"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/ZenithHorizon1"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://zenithprotocol.top/"
+        ],
+        "x": [
+          "https://x.com/ZenithOrbital"
+        ],
+        "telegram": [
+          "https://t.me/ZenithHorizon1"
+        ]
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "25395.5980326580512513645857329964947",
+      "holdersTop10Percent": "38.7566469730199731",
+      "holders": "233",
+      "kycHolders": "38",
+      "count": "6",
+      "countBuy": "5",
+      "countSell": "1",
+      "inflow": 400.1504104400054,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "MOLLIE",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/7CFBAFD80F8283E60681AD0AA9ACAEF0.webp",
+      "protocol": 1001,
+      "launchTime": 1786397766000,
+      "ca": "GJPtJfWsHK5jooT2feabr41eTmiutuAmT7zmyirCpump",
+      "price": "0.000068327799702428522982956713815757",
+      "marketCap": "65802.931091088105240407355915486736030307411555",
+      "volume": "12009.63259964842093562022",
+      "priceChangeRate": "-6.77",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.cbc.ca/player/play/video/9.7301398"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/devvo_sol/status/2086929302348575127"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.cbc.ca/player/play/video/9.7301398"
+        ],
+        "x": [
+          "https://x.com/devvo_sol/status/2086929302348575127"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "34490.9456749425665495371560507786223",
+      "holdersTop10Percent": "24.7922921404043705",
+      "holders": "918",
+      "kycHolders": "11",
+      "count": "290",
+      "countBuy": "130",
+      "countSell": "160",
+      "inflow": 363.5373980369897,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "TOAD",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8786139BA88635813AF0D34D382411E6.webp",
+      "protocol": 1001,
+      "launchTime": 1786197553000,
+      "ca": "A13oRB9FFaiUjfi6LdCg6p9ka1u8SfGkUFs4SKvPpump",
+      "price": "0.008679123914929393448561877676875505",
+      "marketCap": "8336905.976846621820852458266787077730098576342245",
+      "volume": "106859.01908889249389213464",
+      "priceChangeRate": "4.06",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://elreinoinfantil.fandom.com/wiki/El_Sapo_Pepe"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://elreinoinfantil.fandom.com/wiki/El_Sapo_Pepe"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1116347.55387018118515727552674891479254",
+      "holdersTop10Percent": "29.3693245306660888",
+      "holders": "21415",
+      "kycHolders": "329",
+      "count": "747",
+      "countBuy": "310",
+      "countSell": "437",
+      "inflow": 497.51823126770114,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "bottom",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/B8E72239C67F299B46FCF106FFD2819A.webp",
+      "protocol": 1001,
+      "launchTime": 1786748831000,
+      "ca": "6Fjp4SHuPkjJusTxgm2ft6dpyYeGedkBUm7GHzPbpump",
+      "price": "0.000108421691688905994354668131174729",
+      "marketCap": "106173.732247857156835994212476362530126218119343",
+      "volume": "15834.47704365676850869338",
+      "priceChangeRate": "-29.01",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 2,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "23593.8622599211929297370160165626178",
+      "holdersTop10Percent": "15.1314366352388119",
+      "holders": "1347",
+      "kycHolders": "3",
+      "count": "525",
+      "countBuy": "339",
+      "countSell": "186",
+      "inflow": -24.03771129586244,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Living Token": [
+          {
+            "tagName": "Pumpfun Living",
+            "languageKey": "wmp-label-title-pumpfun-living"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛来",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/FFC7FB27917D27A27EB51A3D3361E9C3.jpg",
+      "protocol": 1001,
+      "launchTime": 1786696047000,
+      "ca": "Ezft93o4o9vbhn6tf1QXYjR8C7tvto3YKahXPZR8pump",
+      "price": "0.000146330245568346925769021645332663",
+      "marketCap": "141955.457678979194484611342879062404674544586307",
+      "volume": "44720.77778407766595843313",
+      "priceChangeRate": "-5.52",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/M_M_GA/status/2088180627237716330?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/M_M_GA/status/2088180627237716330?s=20"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "42294.904980407964694259115470997162",
+      "holdersTop10Percent": "24.5032102258627474",
+      "holders": "786",
+      "kycHolders": "36",
+      "count": "766",
+      "countBuy": "384",
+      "countSell": "382",
+      "inflow": 435.64895646847793,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Money",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/CDE5531DDBD864ACEB5E9344F0FBEB68.jpg",
+      "protocol": 1001,
+      "launchTime": 1771182191000,
+      "ca": "HHrJPaNEhfsPmjCCsdDHkkcvaxYrAZvDS8JgPwDHpump",
+      "price": "0.00002275413438253422841201439967211",
+      "marketCap": "22587.30854177207741183099519861821190867409622",
+      "volume": "5158.02903467519959069478",
+      "priceChangeRate": "-10.42",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/poorgoat_/status/2023110816648540620?s=46&t=JQmNFn94sEXRJU2hkHIuDQ"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/poorgoat_/status/2023110816648540620?s=46&t=JQmNFn94sEXRJU2hkHIuDQ"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "12037.533494494311873028675663434779",
+      "holdersTop10Percent": "25.1375247654133876",
+      "holders": "488",
+      "kycHolders": "7",
+      "count": "72",
+      "countBuy": "38",
+      "countSell": "34",
+      "inflow": 98.99841064794819,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CHIC",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/3AE3F27CCCF7096FCF5339970CD14304.webp",
+      "protocol": 1001,
+      "launchTime": 1786139759000,
+      "ca": "HWzUC1x4WAyHjvKM9XtAxmd9PwNwjySgt4PXDN7opump",
+      "price": "0.000225694661401272470458677548908849",
+      "marketCap": "211538.226557956384829784185774882573005143982432",
+      "volume": "51245.48814992817933293429",
+      "priceChangeRate": "30.83",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.instagram.com/explore/search/keyword/?q=kinda%20chic"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/heishimmy/status/2085847305966739503?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.instagram.com/explore/search/keyword/?q=kinda%20chic"
+        ],
+        "x": [
+          "https://x.com/heishimmy/status/2085847305966739503?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "50595.1507891499511127962015677328638",
+      "holdersTop10Percent": "22.4837928957410117",
+      "holders": "748",
+      "kycHolders": "6",
+      "count": "492",
+      "countBuy": "259",
+      "countSell": "233",
+      "inflow": 258.36921202028475,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "ANSEM",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5796FD103D107E3909ECAF644E3AEC89.jpg",
+      "protocol": 1001,
+      "launchTime": 1781643948000,
+      "ca": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+      "price": "0.239919291250661527975793737698805231",
+      "marketCap": "239875098.607219278267575437337994749283997928884549",
+      "volume": "284742.15218176491160515234",
+      "priceChangeRate": "0.52",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Donnieonchain/status/2066990360115683402"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Donnieonchain/status/2066990360115683402"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "4609016.6511174193189678508575008587282",
+      "holdersTop10Percent": "62.6101250586447286",
+      "holders": "144557",
+      "kycHolders": "873",
+      "count": "1842",
+      "countBuy": "822",
+      "countSell": "1020",
+      "inflow": -1453.088606157076,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "FROG",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/F56E1AF5CE01E410F77F30996E54861E.webp",
+      "protocol": 1001,
+      "launchTime": 1786814622000,
+      "ca": "6WS1NsTCjB1VFvVL8CjqUkB4VtK4fQ3sMPrN5e7rpump",
+      "price": "0.000051649415413376561921315374911818",
+      "marketCap": "49510.031452154401108894260375953653870638859832",
+      "volume": "176881.22462448327021628894",
+      "priceChangeRate": "60.08",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 2,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.hltv.org/coach/26381/jab-jabich"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/jabjabichfrog"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.hltv.org/coach/26381/jab-jabich"
+        ],
+        "x": [
+          "https://x.com/jabjabichfrog"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "28427.3824859769680934332529406317633",
+      "holdersTop10Percent": "22.6440048874981997",
+      "holders": "367",
+      "kycHolders": "0",
+      "count": "2945",
+      "countBuy": "1641",
+      "countSell": "1304",
+      "inflow": 57.66404558883484,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Lopunny",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/AAFABF3B992AC2BD698B2C49D7680EB3.webp",
+      "protocol": 1001,
+      "launchTime": 1786806666000,
+      "ca": "3EJnCDWV29PisxfrpRbjS1kUXFR5SnaPUMC9zynkpump",
+      "price": "0.000021672786445650997068704128543296",
+      "marketCap": "20764.315584577020562722801612437488279720500672",
+      "volume": "74517.96094478340858352562",
+      "priceChangeRate": "-79.34",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/CSEbnb/status/2088644034323460475?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/CSEbnb/status/2088644034323460475?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "22877.2152289549154001443089176547614",
+      "holdersTop10Percent": "20.2420296672213356",
+      "holders": "665",
+      "kycHolders": "11",
+      "count": "2311",
+      "countBuy": "1239",
+      "countSell": "1072",
+      "inflow": -132.92009655740682,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          },
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "neet",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5F1F526E6D415241046E956882139636.jpg",
+      "protocol": 1001,
+      "launchTime": 1745713919000,
+      "ca": "Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+      "price": "0.025365689270517425728725128873262479",
+      "marketCap": "25359692.051524664909706276618177877577576149191026",
+      "volume": "34921.0138988455506329192",
+      "priceChangeRate": "-4.16",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "2020093.8805718807226429618521750959004",
+      "holdersTop10Percent": "16.4761354777461112",
+      "holders": "20776",
+      "kycHolders": "113",
+      "count": "540",
+      "countBuy": "354",
+      "countSell": "186",
+      "inflow": -5.529626378291071,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "FOMO",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8BEE6CF545FD226431537515CFB6EB5F.jpg",
+      "protocol": null,
+      "launchTime": 1786757951000,
+      "ca": "H3f4jYE3tEY8JWve2tRJYzqZpAHEHPihJkGQA5BCqqkn",
+      "price": "0.00039579601567021653416000207550865",
+      "marketCap": "395686.63801343409456338616124708535821074287933415",
+      "volume": "6435.8499028764596443024",
+      "priceChangeRate": "-20.24",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 2,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "wash_trade",
+        "new_created_token"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/FOMOpumpSolana"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/FOMOpumpSolana"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/FOMOpumpSolana"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "10563.21858821756514901497481012260808",
+      "holdersTop10Percent": "43.2281536240823958",
+      "holders": "2238",
+      "kycHolders": "5",
+      "count": "146",
+      "countBuy": "53",
+      "countSell": "93",
+      "inflow": -2563.879309433648,
+      "traders": 1,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Buttcoin",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/306CE8FE1119ED21F0EB10E6FCF4EA54.jpg",
+      "protocol": 1001,
+      "launchTime": 1767964561000,
+      "ca": "Cm6fNnMk7NfzStP9CZpsQA2v3jjzbcYGAxdJySmHpump",
+      "price": "0.01043723520498790855181541258971124",
+      "marketCap": "10436652.02561619116935004301219190963123473205512",
+      "volume": "39078.46932259931455177491",
+      "priceChangeRate": "6.78",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://web.archive.org/web/20110608015104/http://buttcoin.org/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/2009440403682914712"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://web.archive.org/web/20110608015104/http://buttcoin.org/"
+        ],
+        "x": [
+          "https://x.com/i/communities/2009440403682914712"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "998069.8432524187758434575144190273744",
+      "holdersTop10Percent": "14.1686590482333797",
+      "holders": "19116",
+      "kycHolders": "135",
+      "count": "381",
+      "countBuy": "98",
+      "countSell": "283",
+      "inflow": 20721.55790858148,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Drilly",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/44772F04B70DDCB78515AD69FF1F38A9.jpg",
+      "protocol": 1001,
+      "launchTime": 1774895556000,
+      "ca": "B2e4WDCHTBUN8VFDAzDf4RybMvtV65oMVGEKjmpspump",
+      "price": "0.000002115027514863305266466088725416",
+      "marketCap": "2115.026348946820129620879679741174448970461552",
+      "volume": "1171.78452040141039497457",
+      "priceChangeRate": "-10.41",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Limfork/status/2038685775152214113?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Limfork/status/2038685775152214113?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1.2986348250538307565953",
+      "holdersTop10Percent": "0.0237592438048681",
+      "holders": "3",
+      "kycHolders": null,
+      "count": "9",
+      "countBuy": "4",
+      "countSell": "5",
+      "inflow": 246.1836802522644,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Chiikawa",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/0273EE37F403E90C020309B7A256F15E.jpg",
+      "protocol": 1001,
+      "launchTime": 1775489529000,
+      "ca": "2c1KjiyQow66QfsnCtoyuqfo3AuxgpBMEoAq5oiiXqdu",
+      "price": "0.001559267211711442734426490572495938",
+      "marketCap": "1558551.98601717733392885019728292305953644146924",
+      "volume": "34130.63954280171980754467",
+      "priceChangeRate": "-8.91",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/thewaterdeploy/status/2041177133054095716"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/thewaterdeploy/status/2041177133054095716"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "224753.5002543009966303539315583903372",
+      "holdersTop10Percent": "14.3382925123520056",
+      "holders": "4380",
+      "kycHolders": "26",
+      "count": "269",
+      "countBuy": "166",
+      "countSell": "103",
+      "inflow": -6642.605877035534,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CALICO",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/3B2D18C926C1CCFBF5330458E29AEFB2.png",
+      "protocol": 1001,
+      "launchTime": 1786797420000,
+      "ca": "BAQPhMtf6UaXMdEwZLu1BVTSxRz9AYZkkb8FQXncpump",
+      "price": "0.000075609290545587998119853424247881",
+      "marketCap": "73953.061118756328684554078057371973760352938831",
+      "volume": "70757.31808946652713559658",
+      "priceChangeRate": "-0.62",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.youtube.com/watch?v=bi9q35haorE"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Polinkaii/status/2088605862185029641"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.youtube.com/watch?v=bi9q35haorE"
+        ],
+        "x": [
+          "https://x.com/Polinkaii/status/2088605862185029641"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "46106.5985880294071770130595777729882",
+      "holdersTop10Percent": "14.7790958496105655",
+      "holders": "2146",
+      "kycHolders": "54",
+      "count": "2346",
+      "countBuy": "1194",
+      "countSell": "1152",
+      "inflow": -144.3247122351049,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Momota",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/F74928ABBD6D60C9373A81F0270FF43B.jpg",
+      "protocol": 1001,
+      "launchTime": 1775806637000,
+      "ca": "CrJPSvj625TnPdWS42aG5ybMcHeFvnNqq5AExVespump",
+      "price": "0.001938592259830535273432586739639765",
+      "marketCap": "1936033.440915765148817641358463053113803583192270",
+      "volume": "97416.31383678591727632748",
+      "priceChangeRate": "-4.65",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.gao-aqua.jp/event/49859.html"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/sussydevs67/status/2042506923673817445"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.gao-aqua.jp/event/49859.html"
+        ],
+        "x": [
+          "https://x.com/sussydevs67/status/2042506923673817445"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "411317.4722820242968428561005089273755",
+      "holdersTop10Percent": "17.5925932506478189",
+      "holders": "4146",
+      "kycHolders": "35",
+      "count": "500",
+      "countBuy": "259",
+      "countSell": "241",
+      "inflow": 99.78988893958224,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "LUNA",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/690EA0F9AEA8EF12EF714528E25FAF53.webp",
+      "protocol": 1001,
+      "launchTime": 1786797808000,
+      "ca": "3dNkp3EsN5NGgDuRgSK2v7bRSzgQpcjLueN6cZjDpump",
+      "price": "0.000047360635172600409083217012640782",
+      "marketCap": "46080.122006778729820511429804126799363824837670",
+      "volume": "160984.36125691241072508408",
+      "priceChangeRate": "-80.33",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.instagram.com/p/DH53sm2Bg4q/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Devorskiiii/status/2088607389524152456"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.instagram.com/p/DH53sm2Bg4q/"
+        ],
+        "x": [
+          "https://x.com/Devorskiiii/status/2088607389524152456"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "30238.8000803204301365930157071345123",
+      "holdersTop10Percent": "17.4771480250582189",
+      "holders": "1181",
+      "kycHolders": "23",
+      "count": "3186",
+      "countBuy": "1737",
+      "countSell": "1449",
+      "inflow": -194.12697775518356,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Milly",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/29C70CF1DCAB248F22CBF32849869BF6.webp",
+      "protocol": 1001,
+      "launchTime": 1786814968000,
+      "ca": "D9VNee1A4epkcHS561U12tGWHQ3rDnWFx9W45o3spump",
+      "price": "0.000032636350101103991389402674766349",
+      "marketCap": "31615.787062778731268244535093940961893259851089",
+      "volume": "275579.14257630462483080173",
+      "priceChangeRate": "306.16",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/search?q=This%20is%20Milly&src=typeahead_click&f=live"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Strawberriiisa/status/2088677143865627054?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/search?q=This%20is%20Milly&src=typeahead_click&f=live"
+        ],
+        "x": [
+          "https://x.com/Strawberriiisa/status/2088677143865627054?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "25015.4724523173654369300421541113999",
+      "holdersTop10Percent": "16.742652537233006",
+      "holders": "549",
+      "kycHolders": "3",
+      "count": "6599",
+      "countBuy": "3685",
+      "countSell": "2914",
+      "inflow": 913.444852073986,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          },
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Remus",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D2ABBDD30558B5219B052BA76847AF6F.webp",
+      "protocol": 1001,
+      "launchTime": 1786285680000,
+      "ca": "23e4CNuJxvBQ7RjNLc8Bh3yN3pQq6jeiTbyzJGXYPgme",
+      "price": "0.000191814889318464700626429828269663",
+      "marketCap": "182823.38869607384734290501689422329326132129919",
+      "volume": "5318.66819597894064992451",
+      "priceChangeRate": "-2.49",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/i/communities/2037605233841287505"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/status/2086459486617657384"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/i/communities/2037605233841287505"
+        ],
+        "x": [
+          "https://x.com/i/status/2086459486617657384"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "67346.43610171723668982533618658547013",
+      "holdersTop10Percent": "15.4513203454983647",
+      "holders": "3643",
+      "kycHolders": "69",
+      "count": "109",
+      "countBuy": "46",
+      "countSell": "63",
+      "inflow": -371.33692232253554,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "John",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/64C67A68CA66092684EBE29E9C99C6DA.webp",
+      "protocol": 1001,
+      "launchTime": 1786817693000,
+      "ca": "7bHZ8MVzQ5SBEVssbVvPVSB82H12e1nsyRWT5rwgpump",
+      "price": "0.000058882137189005128552131467323098",
+      "marketCap": "56172.097889629536412360462710251795106041376804",
+      "volume": "239457.04455924201814273215",
+      "priceChangeRate": "2289.14",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.tiktok.com/@giotate0/video/7638341506809613576"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/PurpleBull100x/status/2088690783381488059?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.tiktok.com/@giotate0/video/7638341506809613576"
+        ],
+        "x": [
+          "https://x.com/PurpleBull100x/status/2088690783381488059?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "29433.3309296787034422267092475818645",
+      "holdersTop10Percent": "26.804463846820788",
+      "holders": "556",
+      "kycHolders": "3",
+      "count": "8275",
+      "countBuy": "4442",
+      "countSell": "3833",
+      "inflow": -121.89286492506808,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "FTR",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/C6E7DF3133539958159317E0DED7F7E9.webp",
+      "protocol": 1001,
+      "launchTime": 1786712964000,
+      "ca": "Dmkj4dB3Ngva9gWKkDgj8UMF39EC7ArpGf2rxLxDpump",
+      "price": "0.000350277767899181590710410740724388",
+      "marketCap": "343527.580170737045108990556859897727521266191580",
+      "volume": "84995.95599006205079295704",
+      "priceChangeRate": "-11.19",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://coincommunities.org/communities/6H7nxX1bSSUu537LLinS95gLBrQUzBDMiv3SiuH1pump"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/zerohedge/status/2088251202056176024"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://coincommunities.org/communities/6H7nxX1bSSUu537LLinS95gLBrQUzBDMiv3SiuH1pump"
+        ],
+        "x": [
+          "https://x.com/zerohedge/status/2088251202056176024"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "90990.1697623829378001607518516371107",
+      "holdersTop10Percent": "20.4235079329809",
+      "holders": "2553",
+      "kycHolders": "46",
+      "count": "1085",
+      "countBuy": "539",
+      "countSell": "546",
+      "inflow": -948.794124288939,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "STONK",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/639132BA5E2666352588E0B42B8B5301.png",
+      "protocol": null,
+      "launchTime": 1784833616000,
+      "ca": "6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx",
+      "price": "0.008884084153178585343563311092158323",
+      "marketCap": "8282519.451544684718929323155045961456235056068564711",
+      "volume": "30894.00010386079760344449",
+      "priceChangeRate": "-2.11",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.stonkfun.xyz/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/stonkfun"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.stonkfun.xyz/"
+        ],
+        "x": [
+          "https://x.com/stonkfun"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "842570.85459769653914097904195293905722",
+      "holdersTop10Percent": "14.9065342603680354",
+      "holders": "10338",
+      "kycHolders": "52",
+      "count": "389",
+      "countBuy": "209",
+      "countSell": "180",
+      "inflow": 87.29078980905425,
+      "traders": 4,
+      "tokenTag": {
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Gen0",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/1F9947C3C088314C710AEB7DB024311F.webp",
+      "protocol": 1001,
+      "launchTime": 1786817352000,
+      "ca": "73YcBd9GXUxHv6ZuAsVASTdccPCqnntNShVNN9qppump",
+      "price": "0.000029236741806660872180430647989504",
+      "marketCap": "28000.287087184336486050689577230065672384660736",
+      "volume": "199081.00367875333687027501",
+      "priceChangeRate": "1147.81",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://fortnite.fandom.com/wiki/Geno"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://fortnite.fandom.com/wiki/Geno"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "24132.2611884725968454406388379554017",
+      "holdersTop10Percent": "25.8162417885908266",
+      "holders": "316",
+      "kycHolders": "2",
+      "count": "4604",
+      "countBuy": "2421",
+      "countSell": "2183",
+      "inflow": 567.877809930526,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Shadow",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/37518A02845D093ACE25158078843BA8.jpg",
+      "protocol": 1001,
+      "launchTime": 1786743881000,
+      "ca": "2webJ6GKQnawNHW73AGeJrQxqqmoPRTfdYQGNKWUpump",
+      "price": "0.000148176653987010322214016868930426",
+      "marketCap": "144399.11365427286681549635282069236506059721754",
+      "volume": "23956.41506959802507643761",
+      "priceChangeRate": "-31.28",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/AxTrades32/status/2088381229447963010?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/AxTrades32/status/2088381229447963010?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "43007.5747747619249020493016720440826",
+      "holdersTop10Percent": "16.2286172951600668",
+      "holders": "1043",
+      "kycHolders": "17",
+      "count": "402",
+      "countBuy": "250",
+      "countSell": "152",
+      "inflow": -417.6783098307103,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "nub",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/571A93DACD2E01935D46B4F3FE4BFDD9.png",
+      "protocol": null,
+      "launchTime": 1711328480000,
+      "ca": "GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn",
+      "price": "0.002212913205966014595120127260239501",
+      "marketCap": "2212721.081787742458647113453403768755900213613813219",
+      "volume": "21892.88349794779896474808",
+      "priceChangeRate": "4.81",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://nubcat.xyz"
+        },
+        {
+          "label": "x",
+          "link": "https://twitter.com/sillynubcat"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://nubcat.xyz"
+        ],
+        "x": [
+          "https://twitter.com/sillynubcat"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "592705.156697131671622525222169458116",
+      "holdersTop10Percent": "30.5393202352124773",
+      "holders": "22591",
+      "kycHolders": "152",
+      "count": "148",
+      "countBuy": "31",
+      "countSell": "117",
+      "inflow": 54.100997016686,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Saxophones",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/31B559E2632EE647D9265CDC97029782.jpg",
+      "protocol": 1001,
+      "launchTime": 1772579282000,
+      "ca": "EW7i3dR2uhsVHw2n196dDmZTDk8URSgoeZVCwac4pump",
+      "price": "0.000042922577857692583753270467435782",
+      "marketCap": "42915.847433941621086581252783700739956529831894",
+      "volume": "992.39465381333749969546",
+      "priceChangeRate": "9.88",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.tiktok.com/search?q=saxophone%20getting%20louder&t=1772578013162"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/2028967506262802890"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.tiktok.com/search?q=saxophone%20getting%20louder&t=1772578013162"
+        ],
+        "x": [
+          "https://x.com/i/communities/2028967506262802890"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "19585.8767191391898374054335689507077",
+      "holdersTop10Percent": "22.2935245485903272",
+      "holders": "445",
+      "kycHolders": "3",
+      "count": "4",
+      "countBuy": "3",
+      "countSell": "1",
+      "inflow": 36.991807980067385,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "NYAN",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/72F353733F1F53DD3E8E0F7B4E0978CF.png",
+      "protocol": 1001,
+      "launchTime": 1764213575000,
+      "ca": "9BVn3Y8tPghbnGuuuxoj2mGekqgSQV1M7nALF7brpump",
+      "price": "0.00109851441053864349615627847134242",
+      "marketCap": "975300.7713187752209548980463532938374429934530",
+      "volume": "2726.57857507279689547947",
+      "priceChangeRate": "0",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/loadingstillx/status/1993882314258911326"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/loadingstillx/status/1993882314258911326"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/loadingstillx/status/1993882314258911326"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "123316.37106855171923788883147220844605",
+      "holdersTop10Percent": "20.434337087591183",
+      "holders": "2207",
+      "kycHolders": "24",
+      "count": "51",
+      "countBuy": "29",
+      "countSell": "22",
+      "inflow": 14.9297579233452,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "PFCC",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/38C5545285FCF4B456F352612DFF8026.png",
+      "protocol": null,
+      "launchTime": 1715345998000,
+      "ca": "HFju3ohuEieDmFSpRRj1SZpizLQc8HayHgJDqwBWYtkN",
+      "price": "0.000021272777818149534715175768850998",
+      "marketCap": "21224.274315143279446698429309923061335866176082",
+      "volume": "113.220819213018285",
+      "priceChangeRate": "1.07",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": {
+        "website": [],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "21328.8542677088731682217683459258565",
+      "holdersTop10Percent": "72.0049252537879912",
+      "holders": "1493",
+      "kycHolders": "5",
+      "count": "2",
+      "countBuy": "2",
+      "countSell": "0",
+      "inflow": 113.22081921301829,
+      "traders": 1,
+      "tokenTag": null
+    },
+    {
+      "tokenName": "Bear",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/2BCD2BD4F0D18FA28BF162D7FAC314F2.webp",
+      "protocol": 1001,
+      "launchTime": 1786795188000,
+      "ca": "HXbqtbkRbmwdbSNv3c2CbeS1NYVEigp4BTwBKXJvpump",
+      "price": "0.000094087893685265685894257079784121",
+      "marketCap": "91237.10329392157452812185975627960179028350943",
+      "volume": "147156.73424878896504151549",
+      "priceChangeRate": "-52.95",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://unwall.app/www.theage.com.au/culture/movies/love-watching-neil-the-seal-this-doco-unearths-the-truth-about-nuisance-animals-20260811-p60nb6.html"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/DarthMiaul/status/2088596506487976159"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://unwall.app/www.theage.com.au/culture/movies/love-watching-neil-the-seal-this-doco-unearths-the-truth-about-nuisance-animals-20260811-p60nb6.html"
+        ],
+        "x": [
+          "https://x.com/DarthMiaul/status/2088596506487976159"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "35942.524754831258293166120754427695",
+      "holdersTop10Percent": "17.6647656698466878",
+      "holders": "857",
+      "kycHolders": "9",
+      "count": "3067",
+      "countBuy": "1630",
+      "countSell": "1437",
+      "inflow": -5512.680459701433,
+      "traders": 6,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "GOY",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/20BCE5E6767624B1228A874B86E37A84.jpg",
+      "protocol": 1001,
+      "launchTime": 1763684115000,
+      "ca": "FYtP5AiiB4eUjVA88EeZS73PDpi7RPLusdqtXizYpump",
+      "price": "0.000208221055156469355502249096580383",
+      "marketCap": "208086.612032834342552064007819395424259521898033",
+      "volume": "2604.16581900722807657619",
+      "priceChangeRate": "19.63",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/goyonsolana"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/goyonsolana"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "46171.3702270908355820833225310182468",
+      "holdersTop10Percent": "32.4892412914976982",
+      "holders": "713",
+      "kycHolders": "6",
+      "count": "12",
+      "countBuy": "8",
+      "countSell": "4",
+      "inflow": 891.5323143410191,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "lickingcat",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D56228551F96ECB4C89AEBF56FD0DC66.webp",
+      "protocol": 1001,
+      "launchTime": 1786189452000,
+      "ca": "EjD5Y9NVhXmtEqU7wYvAyZvDWZFQeEuHXFatJmTbpump",
+      "price": "0.00073112801474950467873436336551526",
+      "marketCap": "692462.47873340555654084495095117056229534784604",
+      "volume": "151187.61437308281193638081",
+      "priceChangeRate": "-27.64",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/VorosTwins/status/2085904884084478151?s=20"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Infinitidigits/status/2086055768852222206?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/VorosTwins/status/2085904884084478151?s=20"
+        ],
+        "x": [
+          "https://x.com/Infinitidigits/status/2086055768852222206?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "221542.49925323953302292082144282123485",
+      "holdersTop10Percent": "13.3526187223432317",
+      "holders": "3467",
+      "kycHolders": "28",
+      "count": "1316",
+      "countBuy": "829",
+      "countSell": "487",
+      "inflow": -7851.717076440922,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "WETH",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/3CA6C6A583C68A7061758449743BBEBD.png",
+      "protocol": null,
+      "launchTime": 1631701083000,
+      "ca": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+      "price": "1880.72977340065433581872336371609258",
+      "marketCap": "88571209.4514223836397277478439481002806109694296",
+      "volume": "108689.5967527230739770041",
+      "priceChangeRate": "0",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "metadata_mutable"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://weth.io/"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://weth.io/"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "6532161.5287738826265286577235812065085",
+      "holdersTop10Percent": "78.4341822154346636",
+      "holders": "76552",
+      "kycHolders": "115",
+      "count": "640",
+      "countBuy": "308",
+      "countSell": "332",
+      "inflow": -227.7572004179137,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Celebrity",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/DE6B38CDB749B8D5ACCC84C5264FBEE6.jpg",
+      "protocol": 1001,
+      "launchTime": 1786747774000,
+      "ca": "EdcxwKREZNJvFMQPyqXj2LkN5EuXMoJYX7JcJ159pump",
+      "price": "0.000014514854532813241452838052621907",
+      "marketCap": "14069.530253350225767479143638913951425578927166",
+      "volume": "3946.14538835473454462245",
+      "priceChangeRate": "11.55",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://tmsearch.uspto.gov/search/search-results/99698316"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/RF_CRUZ/status/2088397648164196435"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://tmsearch.uspto.gov/search/search-results/99698316"
+        ],
+        "x": [
+          "https://x.com/RF_CRUZ/status/2088397648164196435"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "20495.86455477742554431462608157325519",
+      "holdersTop10Percent": "27.3637077704941923",
+      "holders": "226",
+      "kycHolders": "1",
+      "count": "94",
+      "countBuy": "55",
+      "countSell": "39",
+      "inflow": 9.645434577044027,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Plunging",
+            "languageKey": "wmp-label-title-volume-plunging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Forums",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/4C7C0ADDF055ADFC0730145069F6764A.webp",
+      "protocol": 1001,
+      "launchTime": 1786652610000,
+      "ca": "2MkTVDTgdF7847ypDML8tp9ccWPf7dsBsCEJEb2xpump",
+      "price": "0.000040997289425143130794018318621236",
+      "marketCap": "37783.004050303429223005057070577190552545413472",
+      "volume": "9852.84855476430985055533",
+      "priceChangeRate": "-9.73",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.pumpforums.fun/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/pumpforums"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.pumpforums.fun/"
+        ],
+        "x": [
+          "https://x.com/pumpforums"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "26895.9191014086833527186558539338861",
+      "holdersTop10Percent": "25.6760800861833756",
+      "holders": "345",
+      "kycHolders": "2",
+      "count": "189",
+      "countBuy": "111",
+      "countSell": "78",
+      "inflow": 149.6877458393611,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "WOFL",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/0CCAD149C69165770D65E9276F218C5F.png",
+      "protocol": 1001,
+      "launchTime": 1786789358000,
+      "ca": "DTGWeDVPAvr7TdY7sdbfjz2bi4QihVMMn9KhyKH1pump",
+      "price": "0.000280114905856755674644424193345736",
+      "marketCap": "271885.524022576118758807341012426466192760951584",
+      "volume": "467733.86764940788584099097",
+      "priceChangeRate": "68.5",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://knowyourmeme.com/memes/wofl"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/frizza101x/status/2088571922044932510?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://knowyourmeme.com/memes/wofl"
+        ],
+        "x": [
+          "https://x.com/frizza101x/status/2088571922044932510?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "85387.0709922928245057483043143543636",
+      "holdersTop10Percent": "18.8962641298226569",
+      "holders": "1390",
+      "kycHolders": "25",
+      "count": "6107",
+      "countBuy": "3255",
+      "countSell": "2852",
+      "inflow": -480.3969104735509,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "BUTTHOLE",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/A672CF0BA041A224C7451154EA568519.png",
+      "protocol": null,
+      "launchTime": 1785966291000,
+      "ca": "7ssJZGFT3twGqeYA1kvpoMWwZYvMZvrMEbjRaWgg46BL",
+      "price": "0.000998403978757040032950835720423944",
+      "marketCap": "995522.395297308523827114717466063811723616832291656",
+      "volume": "16372.75777297594121730982",
+      "priceChangeRate": "-6.25",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.stonkfun.xyz/"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.stonkfun.xyz/"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "89195.9836748171773776892091497805682",
+      "holdersTop10Percent": "27.5658675153299912",
+      "holders": "4154",
+      "kycHolders": "8",
+      "count": "130",
+      "countBuy": "85",
+      "countSell": "45",
+      "inflow": -918.0616121920414,
+      "traders": 2,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "PCAT",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/20D9B4BCBF20BB35FDC4A4A6FA28039C.jpg",
+      "protocol": null,
+      "launchTime": 1711924253000,
+      "ca": "3dejiWxvpL6QH63rBE38fSrVbna8pVrKbmbPPDke7wuH",
+      "price": "0.000033596548834542103782426762612805",
+      "marketCap": "33562.852338345956139529895731329537956811551290",
+      "volume": "1616.05972376999498457093",
+      "priceChangeRate": "17.95",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://twitter.com/elonmusk/status/1597280496525844481"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://twitter.com/elonmusk/status/1597280496525844481"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "17682.831349379658954753239256430145",
+      "holdersTop10Percent": "26.9165815258999209",
+      "holders": "891",
+      "kycHolders": "20",
+      "count": "34",
+      "countBuy": "20",
+      "countSell": "14",
+      "inflow": 110.99913554382688,
+      "traders": 1,
+      "tokenTag": {
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "JINNY",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/FD4933C5C74A5A5210FF7D9E055FCE8D.jpg",
+      "protocol": 1001,
+      "launchTime": 1786679667000,
+      "ca": "DL2X8PLQf7g993zThyVzZHoYbbUkojsWv1U3wtKVpump",
+      "price": "0.000024025716329032099005278878456987",
+      "marketCap": "22477.119242334584157227633870250396326784014763",
+      "volume": "15377.75128205934058252253",
+      "priceChangeRate": "-13.12",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.facebook.com/Sonoma.MarinAgAssociation/posts/meet-jinny-lu-a-little-pug-with-a-huge-personality-and-an-even-bigger-mission-ji/1728927825447263/"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.facebook.com/Sonoma.MarinAgAssociation/posts/meet-jinny-lu-a-little-pug-with-a-huge-personality-and-an-even-bigger-mission-ji/1728927825447263/"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "22843.8416281365251495252146270412201",
+      "holdersTop10Percent": "28.6696943778749724",
+      "holders": "133",
+      "kycHolders": "1",
+      "count": "266",
+      "countBuy": "115",
+      "countSell": "151",
+      "inflow": -411.7760532477953,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "BEL",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/68C6AA907627C41E2196D16B7B8B4390.jpg",
+      "protocol": 1001,
+      "launchTime": 1762821722000,
+      "ca": "9LbBjxBiinbq76oJF9PRFyaPWGnggPyJcTARuiGEZZh9",
+      "price": "0.000005195385150381589692281745877363",
+      "marketCap": "5191.834270641383464531099074489669500092195399",
+      "volume": "262.34697734261900864726",
+      "priceChangeRate": "4.9",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/BillyM2k/status/408815850615869440"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/1984982759321034817"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/BillyM2k/status/408815850615869440"
+        ],
+        "x": [
+          "https://x.com/i/communities/1984982759321034817"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "5461.33529059183604461094891340139275",
+      "holdersTop10Percent": "27.5542748165051603",
+      "holders": "146",
+      "kycHolders": "0",
+      "count": "19",
+      "countBuy": "10",
+      "countSell": "9",
+      "inflow": 147.0450667593669,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "TBB",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/06A65C0E6E3B230591600848E5D9A272.jpg",
+      "protocol": 1001,
+      "launchTime": 1782777991000,
+      "ca": "42cXQvAAr7hcPBPWAS4ocVtDyeJ4Fa6gRR2uG4gppump",
+      "price": "0.013796154354481245719084948407897714",
+      "marketCap": "13796129.541783376584523794337382966356177868972794",
+      "volume": "4302.70582160835853895156",
+      "priceChangeRate": "-3.43",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://bitcoinhard.money"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/GoingParabolic"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://bitcoinhard.money"
+        ],
+        "x": [
+          "https://x.com/GoingParabolic"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "346104.7250091072973025969897088281208",
+      "holdersTop10Percent": "76.6350630571091783",
+      "holders": "3769",
+      "kycHolders": "15",
+      "count": "100",
+      "countBuy": "70",
+      "countSell": "30",
+      "inflow": 113.14867011828737,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "ましろ",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D152104651DE7B3B5D141F4056C06EB7.jpg",
+      "protocol": 1001,
+      "launchTime": 1768649087000,
+      "ca": "8GpEzPrfr8jdRZzGuW3edbWJGoCRDMQRGNqbi3Xpump",
+      "price": "0.000001407666056401383275026407771343",
+      "marketCap": "1406.778204193639942498566869964955914597694004",
+      "volume": "44.38372515917604080043",
+      "priceChangeRate": "0",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/trmrmeer/status/2011743454641213899?s=46"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/2012483767856677369"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/trmrmeer/status/2011743454641213899?s=46"
+        ],
+        "x": [
+          "https://x.com/i/communities/2012483767856677369"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "2744.58354851421049798784116859856521",
+      "holdersTop10Percent": "3.6713958073061616",
+      "holders": "87",
+      "kycHolders": "0",
+      "count": "1",
+      "countBuy": "1",
+      "countSell": "0",
+      "inflow": 44.38372515917604,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "SPCXx",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/35c44bda4b884e39a25f0c67a888bb08.jpg",
+      "protocol": null,
+      "launchTime": 1780322268000,
+      "ca": "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",
+      "price": "139.414657024607328914",
+      "marketCap": "78071984.3205471648435747360276410",
+      "volume": "4958.843811322147799203",
+      "priceChangeRate": "-0.2",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": {
+        "website": [],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 0,
+      "liquidity": "1209593.100242940145508336",
+      "holdersTop10Percent": "92.6541159501089757",
+      "holders": "10672",
+      "kycHolders": "87",
+      "count": "49",
+      "countBuy": "10",
+      "countSell": "39",
+      "inflow": -4.618579582312314,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Tokenized Stocks Launch Platform": [
+          {
+            "tagName": "Xstock",
+            "languageKey": "wmp-label-title-xstock"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "KRYVEX",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/F5FB886FBF81ACA66E28850E7ADEF7DE.webp",
+      "protocol": 1001,
+      "launchTime": 1786445266000,
+      "ca": "PrkyDdnE9A99ghintXqgoynRahwz4oevixigZg3pump",
+      "price": "0.00006808167739600295701286782784376",
+      "marketCap": "65002.28517846685381257212257757417126587879320",
+      "volume": "2410.77753187122935814089",
+      "priceChangeRate": "-6.81",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://kryvexsol.com/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/KRYVEXsol"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://kryvexsol.com/"
+        ],
+        "x": [
+          "https://x.com/KRYVEXsol"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "30919.4682661278653608803176307497032",
+      "holdersTop10Percent": "27.2649535759168934",
+      "holders": "201",
+      "kycHolders": "1",
+      "count": "27",
+      "countBuy": "16",
+      "countSell": "11",
+      "inflow": -502.8390032823372,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "ZTH",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8B61FB018D851695950507889A6D7597.jpg",
+      "protocol": 1001,
+      "launchTime": 1778428342000,
+      "ca": "CfXwEn55uXAzx9qV1p7fa83opqRkbRKrMJuqQ8Rspump",
+      "price": "0.002804330747367590684979357",
+      "marketCap": "2720182.219924151384017895549369217056283",
+      "volume": "513.08874610026446409109",
+      "priceChangeRate": "-0.83",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://zenithprotocol.top"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/ZenithOrbital"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/Zenith_Protocol"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://zenithprotocol.top"
+        ],
+        "x": [
+          "https://x.com/ZenithOrbital"
+        ],
+        "telegram": [
+          "https://t.me/Zenith_Protocol"
+        ]
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "132911.258113643246727356089684823415",
+      "holdersTop10Percent": "29.0783019944950284",
+      "holders": "661",
+      "kycHolders": "126",
+      "count": "9",
+      "countBuy": "7",
+      "countSell": "2",
+      "inflow": 49.39045985186556,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "NBIS",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786312108000,
+      "ca": "NBiSF3UaVUFtRzHwAfxyHsBCAZWGEKnMpewAE4oh7BG",
+      "price": "278.018520455695819080172270995527579878",
+      "marketCap": "522134.71465720406415995500960245154869648680818",
+      "volume": "935.83606414321685858316",
+      "priceChangeRate": "1.1",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 4,
+      "tokenCautionNum": 2,
+      "tokenRiskNum": 2,
+      "tokenRiskCodes": [
+        "wash_trade",
+        "freezable",
+        "metadata_mutable",
+        "balance_modifable",
+        "threat_intelligence"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "291005.302501840948686571217368626801",
+      "holdersTop10Percent": "96.5354415622172893",
+      "holders": "669",
+      "kycHolders": "3",
+      "count": "25",
+      "countBuy": "14",
+      "countSell": "11",
+      "inflow": -6.555370385650546,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CARDS",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/E0EECD4F535B6ED2144675FD8415A31A.jpg",
+      "protocol": null,
+      "launchTime": 1756252301000,
+      "ca": "CARDSccUMFKoPRZxt5vt3ksUbxEFEcnZ3H2pd3dKxYjp",
+      "price": "0.182268171508994231757846168254732702",
+      "marketCap": "364482666.168608668654281152534113367859048593759416",
+      "volume": "156453.49899644585321442507",
+      "priceChangeRate": "1.83",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "metadata_mutable"
+      ],
+      "link": null,
+      "previewLink": {
+        "website": [],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "3939153.46580064342963267031745241041137",
+      "holdersTop10Percent": "82.9138496752013142",
+      "holders": "18886",
+      "kycHolders": "240",
+      "count": "658",
+      "countBuy": "383",
+      "countSell": "275",
+      "inflow": -6.806642534254568,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          },
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "FOMO",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/42DCBAE3D35581E365501EE2A7C5D33A.jpg",
+      "protocol": 1001,
+      "launchTime": 1782666553000,
+      "ca": "BDdzUjksj1J4bSnMveQ5tV9Up8A9c6YS1tHrxNw3pump",
+      "price": "0.000213825550508740842053504447104265",
+      "marketCap": "213739.942221964910125254551684779925360313459945",
+      "volume": "896.11500579802449087612",
+      "priceChangeRate": "-3.57",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/seyong"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/BoltricksDev/status/2071279753961562327"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/seyong"
+        ],
+        "x": [
+          "https://x.com/BoltricksDev/status/2071279753961562327"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "72449.4511900840292381578222993187973",
+      "holdersTop10Percent": "20.7203544851570981",
+      "holders": "3067",
+      "kycHolders": "20",
+      "count": "13",
+      "countBuy": "3",
+      "countSell": "10",
+      "inflow": -13.163672751809282,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "SPYx",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D942BB689F5E8BE24A2E08AF4A7D1CD8.png",
+      "protocol": null,
+      "launchTime": 1749634911000,
+      "ca": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "price": "780.339829673278456910928958613339605916",
+      "marketCap": "74315617.85869084634285243737140330824457901115041888",
+      "volume": "19289.6331011913720643398",
+      "priceChangeRate": "0.01",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://xstocks.com/"
+        },
+        {
+          "label": "whitepaper",
+          "link": "https://documents.backed.fi/backed-assets-factsheet-SPYx.pdf"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://xstocks.com/"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "3694283.6530785262249509327214192915632",
+      "holdersTop10Percent": "39.4034453679010844",
+      "holders": "27934",
+      "kycHolders": "204",
+      "count": "100",
+      "countBuy": "48",
+      "countSell": "52",
+      "inflow": -0.003115945725,
+      "traders": 1,
+      "tokenTag": {
+        "Tokenized Stocks Category": [
+          {
+            "tagName": "ETF",
+            "languageKey": "wmp-label-title-etf"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Tokenized Stocks Launch Platform": [
+          {
+            "tagName": "Xstock",
+            "languageKey": "wmp-label-title-xstock"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "MENSA",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/069903E28A03B8B1B48DC1A8DCF7E4ED.png",
+      "protocol": null,
+      "launchTime": 1785969305000,
+      "ca": "FU4T1cAkNnR1op4kBsQvdf5AeWWJPa2KKHrkQ1s8EkNA",
+      "price": "0.000082115694971898",
+      "marketCap": "82115.503476055609762577785092984",
+      "volume": "0",
+      "priceChangeRate": "0",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 3,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "wash_trade",
+        "low_liquidity"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.stonkfun.xyz/"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.stonkfun.xyz/"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 0,
+      "liquidity": "23.30376117387175001009294",
+      "holdersTop10Percent": "80.796333485935871",
+      "holders": "115",
+      "kycHolders": "1",
+      "count": "0",
+      "countBuy": "0",
+      "countSell": "0",
+      "inflow": -412.10516556951563,
+      "traders": 1,
+      "tokenTag": {
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Fartcoin",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/02f33b5f003848d4b069147d90e19ef4.png",
+      "protocol": 1001,
+      "launchTime": 1729231505000,
+      "ca": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+      "price": "0.141135227474850782477917888841352601",
+      "marketCap": "141131669.86774833860242954563136590310216751347506",
+      "volume": "14170.50559643537943362044",
+      "priceChangeRate": "-0.02",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.infinitebackrooms.com/dreams/conversation-1721540624-scenario-terminal-of-truths-txt"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/FartCoinOfSOL"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.infinitebackrooms.com/dreams/conversation-1721540624-scenario-terminal-of-truths-txt"
+        ],
+        "x": [
+          "https://x.com/FartCoinOfSOL"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "7723908.5137423572771171009534986652451",
+      "holdersTop10Percent": "33.8784975170757385",
+      "holders": "162761",
+      "kycHolders": "1611",
+      "count": "260",
+      "countBuy": "109",
+      "countSell": "151",
+      "inflow": -11.94231193199749,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Alpha",
+            "languageKey": "wmp-label-title-alpha"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Haggis",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/E009B739B0704A55940836C9A52A7508.png",
+      "protocol": 1001,
+      "launchTime": 1786348989000,
+      "ca": "AkyVXqKQ6V6qpqNo7RBfGzyRCKp42fWgCtgeR4s2pump",
+      "price": "0.000242305265583029504385217359414907",
+      "marketCap": "233415.33966972737360057587179492157923701622637",
+      "volume": "36372.25899872066571260699",
+      "priceChangeRate": "-0.89",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.tiktok.com/@haggiswildlifefoundation/video/7671789270260141334?_r=1&_t=ZN-98kNI3c1elS"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/slndr3000/status/2086724999109288134?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.tiktok.com/@haggiswildlifefoundation/video/7671789270260141334?_r=1&_t=ZN-98kNI3c1elS"
+        ],
+        "x": [
+          "https://x.com/slndr3000/status/2086724999109288134?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "49585.0060783277459978900260338431314",
+      "holdersTop10Percent": "25.7776124200594654",
+      "holders": "390",
+      "kycHolders": "3",
+      "count": "407",
+      "countBuy": "174",
+      "countSell": "233",
+      "inflow": 1645.2072087139204,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "BABYANSEM",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786010378000,
+      "ca": "9p9PWaoc7tG8EuTFnHFEYbrAqui8pCfg6Xf9RsELTC3d",
+      "price": "0.00000349081410694488235468869776774",
+      "marketCap": "3490.80825723162849924403422269549924631030644728",
+      "volume": "0",
+      "priceChangeRate": "0",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 2,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "low_liquidity"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "0.34941296475731332005028",
+      "holdersTop10Percent": "80.873532741394706",
+      "holders": "106",
+      "kycHolders": "1",
+      "count": "0",
+      "countBuy": "0",
+      "countSell": "0",
+      "inflow": -306.6394263366894,
+      "traders": 1,
+      "tokenTag": {
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "JLP",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/3380CA8380D7A0F9160EF3496258DD89.png",
+      "protocol": null,
+      "launchTime": 1699637183000,
+      "ca": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+      "price": "3.62444234709351900818806674671856238",
+      "marketCap": "771503048.2270075845795438517235040995562284368846",
+      "volume": "19376.93256430276859363343",
+      "priceChangeRate": "-0.02",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 1,
+      "tokenRiskCodes": [
+        "freezable",
+        "metadata_mutable"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://jup.ag/"
+        },
+        {
+          "label": "x",
+          "link": "https://twitter.com/JupiterExchange"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://jup.ag/"
+        ],
+        "x": [
+          "https://twitter.com/JupiterExchange"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "5564224.781193129420683556534676749112",
+      "holdersTop10Percent": "78.584011961412713",
+      "holders": "63475",
+      "kycHolders": "192",
+      "count": "164",
+      "countBuy": "60",
+      "countSell": "104",
+      "inflow": 2.1120421757733476,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "KERMIT",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/365072F3BE1194A22861A148643B0F0B.jpg",
+      "protocol": 1001,
+      "launchTime": 1773755120000,
+      "ca": "2giC2MXhhENo4jkbRjfAgNAZboTJtXZTsSFbMZKwpump",
+      "price": "0.001192176901637673580889249934715945",
+      "marketCap": "1192162.446652198461221825407025166415684936791585",
+      "volume": "487.96283908045932517922",
+      "priceChangeRate": "-2.23",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "140541.9430549517421920190038238767846",
+      "holdersTop10Percent": "16.4381810316502527",
+      "holders": "1120",
+      "kycHolders": "4",
+      "count": "4",
+      "countBuy": "3",
+      "countSell": "1",
+      "inflow": -478.96645568888465,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "cbBTC",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/09B9EA8F6332373C28031F0F3CAA892B.jpg",
+      "protocol": null,
+      "launchTime": 1728406445000,
+      "ca": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+      "price": "62965.1323983616388728095704559925552",
+      "marketCap": "213852001.657588218467985507105532798568071458960",
+      "volume": "95771.72930172002472713796",
+      "priceChangeRate": "-0.11",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 1,
+      "tokenRiskCodes": [
+        "freezable",
+        "metadata_mutable"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "15579790.2469039967933203599664643539103",
+      "holdersTop10Percent": "63.311241530605032",
+      "holders": "71321",
+      "kycHolders": "94",
+      "count": "448",
+      "countBuy": "291",
+      "countSell": "157",
+      "inflow": 43.709021892408444,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Community Recognized",
+            "languageKey": "wmp-label-title-community-recognized"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "WOFL",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D6A3519D49B24CB73B6603FA8D30F230.jpg",
+      "protocol": 1001,
+      "launchTime": 1710581236000,
+      "ca": "6NbNGVT2R1v7KXJhz3Ne9fbvk2DuLSFg3XzW4wZEaWid",
+      "price": "0.000059976066926299860854692498830698",
+      "marketCap": "58531.416861329088045338150129537506184155418070",
+      "volume": "103345.91729762724831929639",
+      "priceChangeRate": "173.95",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "36724.1942503629968268832899669991652",
+      "holdersTop10Percent": "21.8725791025214355",
+      "holders": "544",
+      "kycHolders": "6",
+      "count": "1830",
+      "countBuy": "1018",
+      "countSell": "812",
+      "inflow": -232.27571174911662,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "LUNA",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/3DDAE6E45482EF4E15171C94AE4288D6.png",
+      "protocol": null,
+      "launchTime": 1786807764000,
+      "ca": "Ly9HT1a87xyXfSxrQCG7BxMLonK6ot8T2wRnb8jdoge",
+      "price": "0.000002343462884919812557450577866737",
+      "marketCap": "2343.462884919812557450577866737000000000",
+      "volume": "252.80077379203189537155",
+      "priceChangeRate": "-9.58",
+      "tokenDecimals": 9,
+      "tokenRiskLevel": 4,
+      "tokenCautionNum": 3,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "low_liquidity",
+        "same_symbol",
+        "new_created_token",
+        "metadata_mutable"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://anoncoin.it/Ly9HT1a87xyXfSxrQCG7BxMLonK6ot8T2wRnb8jdoge"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://anoncoin.it/Ly9HT1a87xyXfSxrQCG7BxMLonK6ot8T2wRnb8jdoge"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "40.36693156544574806830848",
+      "holdersTop10Percent": "0",
+      "holders": "1",
+      "kycHolders": null,
+      "count": "2",
+      "countBuy": "0",
+      "countSell": "2",
+      "inflow": -132.49993175617868,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Dynamic BC",
+            "languageKey": "wmp-label-title-alpha-dynamic-bc"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Magpie",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/51EE253434F02FF34D4EA7D9E3F57AC9.jpg",
+      "protocol": 1001,
+      "launchTime": 1780366220000,
+      "ca": "9UuLsJ3jf8ViBNeRcwXD53re5G3ypgfKK3s2EiMMpump",
+      "price": "0.000385094447681861478573809797257641",
+      "marketCap": "380890.484502707452943443139671425941417688439823",
+      "volume": "2333.04543179029740405734",
+      "priceChangeRate": "2.89",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.magpie.capital/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/magpieloans"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/magpie_capital_bot"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.magpie.capital/"
+        ],
+        "x": [
+          "https://x.com/magpieloans"
+        ],
+        "telegram": [
+          "https://t.me/magpie_capital_bot"
+        ]
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "66660.2853949779930280368929417655228",
+      "holdersTop10Percent": "30.3715097996980196",
+      "holders": "2122",
+      "kycHolders": "37",
+      "count": "42",
+      "countBuy": "12",
+      "countSell": "30",
+      "inflow": 198.1730451401363,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Jimothy",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/95A78596DDEE2E63E64106A639321349.webp",
+      "protocol": 1001,
+      "launchTime": 1784176657000,
+      "ca": "Ge87EtsjwRQbHaqQmKRno69RFTwh9bfSsm99XNxTpump",
+      "price": "0.008286192588014318537758807160818975",
+      "marketCap": "8285671.622529488405408732081359917768801122655775",
+      "volume": "80505.8484274023073420244",
+      "priceChangeRate": "9.54",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.instagram.com/p/DayHOfryG7Z/?hl=en"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/X444X777X/status/2077613557550879110?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.instagram.com/p/DayHOfryG7Z/?hl=en"
+        ],
+        "x": [
+          "https://x.com/X444X777X/status/2077613557550879110?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1035237.10232521299307691449181050308772",
+      "holdersTop10Percent": "14.7496794546504453",
+      "holders": "30407",
+      "kycHolders": "279",
+      "count": "1008",
+      "countBuy": "428",
+      "countSell": "580",
+      "inflow": 75.45471857047966,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "UP",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/FF30EAC6618A8B88D534F04987A8DEA1.jpg",
+      "protocol": 1001,
+      "launchTime": null,
+      "ca": "FM981XJ3XXFiECB25KieNh2t9sKpVoTTsoKUfuL8pt5r",
+      "price": "0.000036135899036773710012002872257423",
+      "marketCap": "36011.144325088285686279395166590898590507232945",
+      "volume": "5820.45499955790365030797",
+      "priceChangeRate": "31.62",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "13841.60294420726769343024796",
+      "holdersTop10Percent": "29.8599231686227348",
+      "holders": "130",
+      "kycHolders": "0",
+      "count": "147",
+      "countBuy": "101",
+      "countSell": "46",
+      "inflow": 9.899053412826273,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "MARIO64",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/B2B51E0CEEFD5EAD6A36CF3862D5608D.webp",
+      "protocol": 1001,
+      "launchTime": 1786440573000,
+      "ca": "CX2v7JSHJQDcNooubzzvZG8TPaDwbaPgfzcXRSWJpump",
+      "price": "0.000257819215183502200996743856302223",
+      "marketCap": "248097.151078789713328186043937015790352035150256",
+      "volume": "28658.89635607344244203907",
+      "priceChangeRate": "16.47",
+      "tokenDecimals": 6,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/mario64wot/status/2087108706521514042"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/mario64wot/status/2087108706521514042"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "66786.54759250387778478324590334588439",
+      "holdersTop10Percent": "21.4235913259957575",
+      "holders": "4082",
+      "kycHolders": "65",
+      "count": "401",
+      "countBuy": "208",
+      "countSell": "193",
+      "inflow": 1494.6881654898243,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Pumpfun",
+            "languageKey": "wmp-label-title-pumpfun"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    }
+  ],
+  "success": true
+}

@@ -1,0 +1,3913 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": [
+    {
+      "tokenName": "牛来",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/DEEF9019CAD0F7E8808A068FF3409986.webp",
+      "protocol": null,
+      "launchTime": 1786593570700,
+      "ca": "0xbeea1d618e533a387d941f58a7d4c9b7bd377777",
+      "price": "0.016862870098170861285151573940818065",
+      "marketCap": "16862870.098170833297913583704341394047218985996291334421310115",
+      "volume": "1155257.42533752750801487699",
+      "priceChangeRate": "0.99",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Stephannysummer/status/2087748841923899585?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Stephannysummer/status/2087748841923899585?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1050577.71770733366000367140106488460513",
+      "holdersTop10Percent": "14.0611021399424269",
+      "holders": "9793",
+      "kycHolders": "2433",
+      "count": "5806",
+      "countBuy": "3290",
+      "countSell": "2516",
+      "inflow": 13667.046095913054,
+      "traders": 5,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "MarsCoin",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/48A4FF23E0BD635D9685D80171D074CC.webp",
+      "protocol": null,
+      "launchTime": 1785158558150,
+      "ca": "0xfe189e97832da1573e4e4ff034f4ffc3a15c7777",
+      "price": "0.044831114607204191782051828896939111",
+      "marketCap": "44831043.746909451988571763871206668958133501357237569791358444",
+      "volume": "220127.45503683463153111553",
+      "priceChangeRate": "-4",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/cz_binance/status/1361548986889347072?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/cz_binance/status/1361548986889347072?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1382742.5753007183674927316647908920435154",
+      "holdersTop10Percent": "25.3341279051767753",
+      "holders": "30835",
+      "kycHolders": "2217",
+      "count": "625",
+      "countBuy": "285",
+      "countSell": "340",
+      "inflow": -56373.484850894136,
+      "traders": 4,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Perps Leverage": [
+          {
+            "tagName": "5",
+            "languageKey": "wmp-label-title-perps-leverage"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPCXB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Alpha",
+            "languageKey": "wmp-label-title-alpha"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "企飞",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/552DE9F74CF1A06E4C4F4A552415D0B5.webp",
+      "protocol": null,
+      "launchTime": 1786812723400,
+      "ca": "0xc6e0b4f3ac69c7459495f44e90c756fda6627777",
+      "price": "0.000048070380657379716215384408094893",
+      "marketCap": "48070.380657379716215384408094893000000000",
+      "volume": "168381.27371418039960060614",
+      "priceChangeRate": "44.82",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "20794.5197580626211901394528129403413",
+      "holdersTop10Percent": "36.5108284856592371",
+      "holders": "422",
+      "kycHolders": "54",
+      "count": "2391",
+      "countBuy": "1293",
+      "countSell": "1098",
+      "inflow": 17.51186562254854,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "GIVE",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1708990594000,
+      "ca": "0x95669a6589a81a6704bab1020722d0c405841885",
+      "price": "0.02268710743060421660228013215042467",
+      "marketCap": "49585282.30694003486919249102995041512205000",
+      "volume": "0",
+      "priceChangeRate": "0",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 3,
+      "tokenCautionNum": 2,
+      "tokenRiskNum": 1,
+      "tokenRiskCodes": [
+        "low_liquidity",
+        "contract_not_renounced",
+        "mintable"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "6.813287531957158263779948134416",
+      "holdersTop10Percent": "54.5561728422699523",
+      "holders": "4251",
+      "kycHolders": "1",
+      "count": "0",
+      "countBuy": "0",
+      "countSell": "0",
+      "inflow": 1293.3663886323295,
+      "traders": 3,
+      "tokenTag": {
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "GREEN",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1776293908000,
+      "ca": "0xb2089a7069861c8d90c8da3aacab8e9188c0c531",
+      "price": null,
+      "marketCap": null,
+      "volume": null,
+      "priceChangeRate": null,
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 4,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 1,
+      "tokenRiskCodes": [
+        "contract_not_renounced",
+        "mintable"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "1477074.25699884802631813788828976699",
+      "holdersTop10Percent": "60.2576326573950326",
+      "holders": "3871",
+      "kycHolders": "1",
+      "count": null,
+      "countBuy": null,
+      "countSell": null,
+      "inflow": 27.647697833442873,
+      "traders": 3,
+      "tokenTag": {
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "OPTIMUS",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/FD9180A675C1615F0FC70B8DF09C8EF2.webp",
+      "protocol": null,
+      "launchTime": 1786818982350,
+      "ca": "0x1d0a9b3040ab2ae88933e0b29cb2f154c6197777",
+      "price": "0.000311807212743672759258574256790974",
+      "marketCap": "311807.212743672759258574256790974000000000",
+      "volume": "108059.05628531943770844774",
+      "priceChangeRate": "415.51",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://OptimusBNB.com"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/OptimusonBNB"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/OptimusonBNB"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://OptimusBNB.com"
+        ],
+        "x": [
+          "https://x.com/OptimusonBNB"
+        ],
+        "telegram": [
+          "https://t.me/OptimusonBNB"
+        ]
+      },
+      "aiNarrativeFlag": 0,
+      "liquidity": "53593.1409689908626435591808987998581",
+      "holdersTop10Percent": "27.8322250012115875",
+      "holders": "143",
+      "kycHolders": "4",
+      "count": "472",
+      "countBuy": "250",
+      "countSell": "222",
+      "inflow": 32.65755394657729,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "TSLAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "豹拉",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8126393A7BDC301EA12B4F1CC6F3B0D8.jpg",
+      "protocol": null,
+      "launchTime": 1786761456350,
+      "ca": "0xbb469d64e89c8b2fe0221052220a96a7f1c67777",
+      "price": "0.000448958447722638387864618682604462",
+      "marketCap": "448958.447722638387864618682604462000000000",
+      "volume": "106738.32549003055053793521",
+      "priceChangeRate": "4.1",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "74038.43604676790983577966250504812714",
+      "holdersTop10Percent": "19.4980345838813735",
+      "holders": "2288",
+      "kycHolders": "688",
+      "count": "1149",
+      "countBuy": "637",
+      "countSell": "512",
+      "inflow": -3334.163553545905,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          },
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "utility",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/CA7AC7A93D808E26CFCB580A8B5C6C00.webp",
+      "protocol": null,
+      "launchTime": 1786539166600,
+      "ca": "0xede00776439f9c49c592e43eee34777a51847777",
+      "price": "0.003620560946257964227509614489332827",
+      "marketCap": "3620560.946257822800227703024500072766087133333145797402612023",
+      "volume": "71553.81467917260217882853",
+      "priceChangeRate": "-5.74",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/cz_binance/status/1355395314845278209"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/cz_binance/status/1355395314845278209"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "298334.95331310034746935786649889735191",
+      "holdersTop10Percent": "19.2392220244645101",
+      "holders": "6302",
+      "kycHolders": "568",
+      "count": "373",
+      "countBuy": "192",
+      "countSell": "181",
+      "inflow": -1738.8559715562758,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "FLAPPY",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/761505B87CB71CFF179AC9C82AE4E545.jpg",
+      "protocol": null,
+      "launchTime": 1767140784600,
+      "ca": "0x2ac4169b21b1cbb2b9fa30cdb4fe1a71b8087777",
+      "price": "0.000034511204969735069756575970527253",
+      "marketCap": "34511.204969735069756575970527253000000000",
+      "volume": "17077.7127775712774726581",
+      "priceChangeRate": "-8.56",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://flappy.sh"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Flap_Mascot"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/Flap_Mascot_Portal"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://flappy.sh"
+        ],
+        "x": [
+          "https://x.com/Flap_Mascot"
+        ],
+        "telegram": [
+          "https://t.me/Flap_Mascot_Portal"
+        ]
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "18374.9734687193797640200185607284494",
+      "holdersTop10Percent": "25.2388925109338949",
+      "holders": "1456",
+      "kycHolders": "569",
+      "count": "119",
+      "countBuy": "55",
+      "countSell": "64",
+      "inflow": -602.5487024716772,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Z",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5C6A63747F1EA666EFEDBE7132B00DE0.png",
+      "protocol": 2001,
+      "launchTime": 1786704248000,
+      "ca": "0x9adc3d87e053eee18e3544a0274141bb4969ffff",
+      "price": "0.00088258469115470125112630627257763",
+      "marketCap": "529550.81469282075067578376354657800000000",
+      "volume": "15614.78799456049895011304",
+      "priceChangeRate": "-18.29",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://www.binance.com/research/analysis/onboarding-the-next-generation"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/binance/status/2080718069622591632?s=46"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://www.binance.com/research/analysis/onboarding-the-next-generation"
+        ],
+        "x": [
+          "https://x.com/binance/status/2080718069622591632?s=46"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "111892.24870923101019298836706311289964",
+      "holdersTop10Percent": "17.2861391264252773",
+      "holders": "2180",
+      "kycHolders": "240",
+      "count": "189",
+      "countBuy": "95",
+      "countSell": "94",
+      "inflow": 455.22664002616125,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "NVDAB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛生",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5ADEFD2C262F10C0ACC8937C60924547.png",
+      "protocol": null,
+      "launchTime": 1786777296150,
+      "ca": "0x27c3dcd665e181723cf05d4e627e091846d77777",
+      "price": "0.000037684060648191364216740757885446",
+      "marketCap": "37684.060648191364216740757885446000000000",
+      "volume": "40213.77530775417139991676",
+      "priceChangeRate": "180.16",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/MGGA_BSC/status/2088521447790747909"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/MGGA_BSC/status/2088521447790747909"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "18143.2624928356987326585170625548672",
+      "holdersTop10Percent": "47.0932630583056648",
+      "holders": "253",
+      "kycHolders": "31",
+      "count": "646",
+      "countBuy": "409",
+      "countSell": "237",
+      "inflow": -270.3713870301466,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "海狸",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/7D61ACBCAE570FDD36B59F4EFF8B99C4.webp",
+      "protocol": null,
+      "launchTime": 1786809917200,
+      "ca": "0x82f2e0546bc6723e436efe17a4615a6fe2047777",
+      "price": "0.000043399216878823300880842718985462",
+      "marketCap": "43399.216878823300880842718985462000000000",
+      "volume": "23772.55772724589926097516",
+      "priceChangeRate": "-25.61",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "19816.6208671037711799457077192009356",
+      "holdersTop10Percent": "40.9519583770315165",
+      "holders": "286",
+      "kycHolders": "7",
+      "count": "299",
+      "countBuy": "157",
+      "countSell": "142",
+      "inflow": -402.38242169185173,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CZ",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/683506377BC3513E3FB81D5F8231C2B6.webp",
+      "protocol": null,
+      "launchTime": 1786808064600,
+      "ca": "0xc68b9defd172a4e7d5d27c870a4a017f66a27777",
+      "price": "0.000004880694320158920830663898789907",
+      "marketCap": "4880.694320158920830663898789907000000000",
+      "volume": "424.97062682310686825178",
+      "priceChangeRate": "15.39",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/shitshitppl/status/2088650325427401194"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/shitshitppl/status/2088650325427401194"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1113.4605342168383801228981907205512",
+      "holdersTop10Percent": "100",
+      "holders": "6",
+      "kycHolders": "1",
+      "count": "3",
+      "countBuy": "3",
+      "countSell": "0",
+      "inflow": 194.24355285579594,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CDXR",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1780681688000,
+      "ca": "0x40aaf75454036bed56f3266ccf18f6b7befd6aca",
+      "price": "0.000041818363023024743819917485809314",
+      "marketCap": "69836.699703141740599057257235543027451200",
+      "volume": "0",
+      "priceChangeRate": "0",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 1,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "low_liquidity"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "7.4419328525344565704661998360595448",
+      "holdersTop10Percent": "35.7848523805656795",
+      "holders": "4426",
+      "kycHolders": "1",
+      "count": "0",
+      "countBuy": "0",
+      "countSell": "0",
+      "inflow": 1.8868291963713872,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "长牛",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/1C8ECB4D695A1EA62207AFE0FAEBFCB2.webp",
+      "protocol": null,
+      "launchTime": 1786809406450,
+      "ca": "0xe60d7b7d92102ea280699e996ec8b26449a77777",
+      "price": "0.000004405995960963173215809190583386",
+      "marketCap": "4405.995960963173215809190583386000000000",
+      "volume": "412.69634769191730098825",
+      "priceChangeRate": "9.72",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "808.8741616247460945518291260433942",
+      "holdersTop10Percent": "100",
+      "holders": "3",
+      "kycHolders": null,
+      "count": "2",
+      "countBuy": "2",
+      "countSell": "0",
+      "inflow": 200.28520223776172,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "赵长牛",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/514312EA4DFBABFCB345342E7F2D8A8C.webp",
+      "protocol": null,
+      "launchTime": 1786807408600,
+      "ca": "0x79497d1e21d2654667994b67e130eac3651c7777",
+      "price": "0.000004947370102641102149263382991596",
+      "marketCap": "4947.370102641102149263382991596000000000",
+      "volume": "720.32707251395245341039",
+      "priceChangeRate": "22.97",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/cz_binance/status/1350821063584747521"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/cz_binance/status/1350821063584747521"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1481.6176716430000317476929192655656",
+      "holdersTop10Percent": "100",
+      "holders": "6",
+      "kycHolders": "0",
+      "count": "3",
+      "countBuy": "3",
+      "countSell": "0",
+      "inflow": 194.20364472616544,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "4",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D1DE5B2F3C32E673185E78119A0C107D.jpg",
+      "protocol": 2001,
+      "launchTime": 1759942294250,
+      "ca": "0x9c2b0a49905ea8cacad8a2ed8f0f6f8244b74444",
+      "price": "0.000006458984344292784942845292829896",
+      "marketCap": "6458.984344292784942845292829896000000000",
+      "volume": "23396.59559273284541174245",
+      "priceChangeRate": "-37.54",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://x.com/cz_binance/status/1602891251598168071"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/RptPedro/status/1975967080743829668"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://x.com/cz_binance/status/1602891251598168071"
+        ],
+        "x": [
+          "https://x.com/RptPedro/status/1975967080743829668"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "7808.57400738562743293547238098357372",
+      "holdersTop10Percent": "19.2983445028653742",
+      "holders": "130",
+      "kycHolders": "6",
+      "count": "105",
+      "countBuy": "45",
+      "countSell": "60",
+      "inflow": -149.13613957332873,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Fourmeme",
+            "languageKey": "wmp-label-title-fourmeme"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛二",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/38D99B0B99F7FCB3A44C5FA180917400.png",
+      "protocol": null,
+      "launchTime": 1786776837150,
+      "ca": "0x75c67bb7f30af01a6899dede14b7281f54c87777",
+      "price": "0.00010825559295201621505052197347917",
+      "marketCap": "108255.59295201621505052197347917000000000",
+      "volume": "300004.95971700118333427116",
+      "priceChangeRate": "32.36",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/king1883560/status/2088519487809306672?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/king1883560/status/2088519487809306672?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "32167.8139220755326329049457723943722",
+      "holdersTop10Percent": "29.7478069153199647",
+      "holders": "730",
+      "kycHolders": "79",
+      "count": "3347",
+      "countBuy": "1864",
+      "countSell": "1483",
+      "inflow": 330.0168140210422,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛屎",
+      "tokenIconUrl": null,
+      "protocol": null,
+      "launchTime": 1786780123300,
+      "ca": "0x92ef5e9e7f80c071ac871691af1d4059dd4d7777",
+      "price": "0.000028847342949957800867402716334414",
+      "marketCap": "28847.342949957800867402716334414000000000",
+      "volume": "11698.6020906566185373665",
+      "priceChangeRate": "-29.21",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "16972.6342707830060208614127505764815",
+      "holdersTop10Percent": "45.6447530581027489",
+      "holders": "378",
+      "kycHolders": "31",
+      "count": "156",
+      "countBuy": "80",
+      "countSell": "76",
+      "inflow": -176.4588053134942,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "xAUT",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "雨后清风有香",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786794176350,
+      "ca": "0xabf9b4ca0c699585a62965ecc1e434aeb9c57777",
+      "price": "0.000008600324958756541677046478408179",
+      "marketCap": "8433.470179620975971632237241644696379578997899263827981913",
+      "volume": "22013.36226858755610448187",
+      "priceChangeRate": "118.02",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/MGGA_BSC/status/2088592237613772806"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/MGGA_BSC/status/2088592237613772806"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "4318.517166057465672765145082263554",
+      "holdersTop10Percent": "81.4407951111642716",
+      "holders": "42",
+      "kycHolders": "0",
+      "count": "331",
+      "countBuy": "216",
+      "countSell": "115",
+      "inflow": -2.94190190242774,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "蟒蛇",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/AAFFADD8535907768C70EA98CBFF1D3A.png",
+      "protocol": null,
+      "launchTime": 1786802932550,
+      "ca": "0xb1ff4b48c51784c2803be93117a924b5fefa7777",
+      "price": "0.000004095013645025373483870202291097",
+      "marketCap": "4095.013645025373483870202291097000000000",
+      "volume": "189.7648164729929026376",
+      "priceChangeRate": "-6.95",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/404BSC/status/2088628945138974728"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/404BSC/status/2088628945138974728"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "368.3260426007333693923181848097168",
+      "holdersTop10Percent": "100",
+      "holders": "6",
+      "kycHolders": "2",
+      "count": "3",
+      "countBuy": "1",
+      "countSell": "2",
+      "inflow": -83.0219105574722,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "绊倒体",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/A2A7FA7152F297D5775EBCB1369825EF.png",
+      "protocol": null,
+      "launchTime": 1786763958150,
+      "ca": "0x4e30bec5a31878fb47285b778fecbc1c4bd77777",
+      "price": "0.000071324454133622597265603824143895",
+      "marketCap": "71324.454133622597265603824143895000000000",
+      "volume": "10860.43001680190007316577",
+      "priceChangeRate": "-2.46",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/tamara_giglio/status/2088465249959833678"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/tamara_giglio/status/2088465249959833678"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "26488.9802838766394497185697091050546",
+      "holdersTop10Percent": "13.4915797092533694",
+      "holders": "565",
+      "kycHolders": "110",
+      "count": "148",
+      "countBuy": "78",
+      "countSell": "70",
+      "inflow": -14.73028457310744,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SKHYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "币有",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/9FEE2CF91C3DB1A2AE54995DE8FA31E2.webp",
+      "protocol": null,
+      "launchTime": 1785248823400,
+      "ca": "0xe9337dde3dd9e97f1f45a56412767ce5098e7777",
+      "price": "0.005114133388756797910000648822227874",
+      "marketCap": "5114133.388433181120719426057638959531803134643071623862639904",
+      "volume": "251180.98151851356027948577",
+      "priceChangeRate": "7.97",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://bscscan.com/token/0xd0bc8ab397851ecfa58009d03bbc1a41fc764444#code"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/i/status/2059925780747178413"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://bscscan.com/token/0xd0bc8ab397851ecfa58009d03bbc1a41fc764444#code"
+        ],
+        "x": [
+          "https://x.com/i/status/2059925780747178413"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "150714.94954489393277801288123661912529",
+      "holdersTop10Percent": "12.5592640945448913",
+      "holders": "7242",
+      "kycHolders": "1478",
+      "count": "928",
+      "countBuy": "496",
+      "countSell": "432",
+      "inflow": 10380.142634302449,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "GMEB",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/b8b568c477304420a6bffa211478aa0e.png",
+      "protocol": null,
+      "launchTime": 1785920844650,
+      "ca": "0x46ceefda28dd7207059ed19b0acdc026955bb15c",
+      "price": "18.80000000",
+      "marketCap": "8372578856.00",
+      "volume": "10002560.901655500217297341",
+      "priceChangeRate": "-41.41",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": {
+        "website": [],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "1053601.790553825182859962",
+      "holdersTop10Percent": "72.9127188888933989",
+      "holders": "15945",
+      "kycHolders": "932",
+      "count": "59407",
+      "countBuy": "30954",
+      "countSell": "28453",
+      "inflow": -49.79615892027139,
+      "traders": 2,
+      "tokenTag": {
+        "Tokenized Stocks Trade Time": [
+          {
+            "tagName": "7*24",
+            "languageKey": "wmp-label-title-7-24"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Compliance Related Token": [
+          {
+            "tagName": "Alpha Stock",
+            "languageKey": "wmp-label-alpha-stock"
+          }
+        ],
+        "Tokenized Stocks Launch Platform": [
+          {
+            "tagName": "BStocks.finance",
+            "languageKey": "wmp-label-title-bstocks-finance"
+          }
+        ],
+        "AI Analysis": [
+          {
+            "tagName": "AI Widget",
+            "languageKey": "wmp-label-title-ai-widget"
+          }
+        ],
+        "Community Recognition Level": [
+          {
+            "tagName": "Alpha",
+            "languageKey": "wmp-label-title-alpha"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "UtilityRWANFT",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8E28BFCDB1EECBEA401BD2C71722E5E2.webp",
+      "protocol": null,
+      "launchTime": 1786790507950,
+      "ca": "0x318f72b71f9e8a69be6653982faa0811b7c47777",
+      "price": "0.000020290659718943688303575051747619",
+      "marketCap": "18043.281263705501947287108634360444229358196654869514166436",
+      "volume": "1357.53659385602858128813",
+      "priceChangeRate": "14.95",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "12432.5893178599762901354876411402077",
+      "holdersTop10Percent": "22.0176852030943827",
+      "holders": "269",
+      "kycHolders": "35",
+      "count": "30",
+      "countBuy": "16",
+      "countSell": "14",
+      "inflow": -34.07384009591799,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "猴子币",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/8A862391FA67EACA99A74A672A7147DD.jpg",
+      "protocol": null,
+      "launchTime": 1786809529300,
+      "ca": "0x0d5de709615e645ada40dc2b20e67db873c27777",
+      "price": "0.000032621423193422883326249288592296",
+      "marketCap": "32621.423193422883326249288592296000000000",
+      "volume": "70419.27973161358350069929",
+      "priceChangeRate": "7.97",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/search?q=猴子币&src=typed_query"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/search?q=猴子币&src=typed_query"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "17029.3525368064629326664553458546231",
+      "holdersTop10Percent": "21.7322428738939032",
+      "holders": "128",
+      "kycHolders": "2",
+      "count": "648",
+      "countBuy": "335",
+      "countSell": "313",
+      "inflow": -222.07928322600876,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Babydog",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/13E2DF5F559FE4131448A68BC8E153D9.jpg",
+      "protocol": null,
+      "launchTime": 1782651962950,
+      "ca": "0x6c228dbc67d5bb73aae1522d54afb74778047777",
+      "price": "0.002945780046101010373122262015350436",
+      "marketCap": "1252111.618384450900400861835595574275468270801579764220626500",
+      "volume": "4457.81026489396481622318",
+      "priceChangeRate": "-7.09",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://babydog.app"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/Babydog_onbsc"
+        },
+        {
+          "label": "telegram",
+          "link": "https://t.me/babydog_bnb"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://babydog.app"
+        ],
+        "x": [
+          "https://x.com/Babydog_onbsc"
+        ],
+        "telegram": [
+          "https://t.me/babydog_bnb"
+        ]
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "228326.318378335929282853635460044243",
+      "holdersTop10Percent": "11.8658061012998378",
+      "holders": "2679",
+      "kycHolders": "32",
+      "count": "7",
+      "countBuy": "1",
+      "countSell": "6",
+      "inflow": -2940.590726231916,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "金蟾",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/FFDDE2B85FF84B3B66881C3FCE8E9CDB.jpg",
+      "protocol": null,
+      "launchTime": 1786812548350,
+      "ca": "0x5ba76547848be15854cd0d6fc6d5988d98fa7777",
+      "price": "0.00001081919485859154495583931009535",
+      "marketCap": "10819.19485859154495583931009535000000000",
+      "volume": "39561.61651264905736012759",
+      "priceChangeRate": "-81.57",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://en.wikipedia.org/wiki/Jin_Chan"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/JinChan_on_BNB"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://en.wikipedia.org/wiki/Jin_Chan"
+        ],
+        "x": [
+          "https://x.com/JinChan_on_BNB"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "9369.21775679279500982631576146291558",
+      "holdersTop10Percent": "20.6718813839642063",
+      "holders": "199",
+      "kycHolders": "20",
+      "count": "719",
+      "countBuy": "326",
+      "countSell": "393",
+      "inflow": 89.77994196962247,
+      "traders": 4,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "RALLY",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1762469582250,
+      "ca": "0x19640000000ba88d36206beb10d0e86011c8d08c",
+      "price": null,
+      "marketCap": null,
+      "volume": null,
+      "priceChangeRate": null,
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 3,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "972205.098489418266228395889961375941",
+      "holdersTop10Percent": "52.0009374365035346",
+      "holders": "4116",
+      "kycHolders": "1",
+      "count": null,
+      "countBuy": null,
+      "countSell": null,
+      "inflow": 26.611424932472918,
+      "traders": 2,
+      "tokenTag": {
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "金牛化工",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/00085D91352056D9F2720AEC01E4B448.webp",
+      "protocol": null,
+      "launchTime": 1786813280350,
+      "ca": "0xca1ad5c22b82577bbb66db7e8e97700e4ac87777",
+      "price": "0.000017948134234337429052848653677496",
+      "marketCap": "17948.134234337429052848653677496000000000",
+      "volume": "10234.641985599144439957",
+      "priceChangeRate": "27.28",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://guba.eastmoney.com/list,600722.html"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://guba.eastmoney.com/list,600722.html"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "9702.181329947171851316",
+      "holdersTop10Percent": "59.2016918045087813",
+      "holders": "101",
+      "kycHolders": "17",
+      "count": "173",
+      "countBuy": "107",
+      "countSell": "66",
+      "inflow": 120.78780454592406,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "xAUT",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "BBROKERS",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/6697B5083FE4FCEAB4007DD8AE4AAEC0.webp",
+      "protocol": null,
+      "launchTime": 1786677395100,
+      "ca": "0xfe59283fd13e15608d2fa627e6d238e47ff17777",
+      "price": "0.000157448579554431436422434859896871",
+      "marketCap": "97788.193154252355515682366297127324597889344886257381364943",
+      "volume": "22899.10559819228581154294",
+      "priceChangeRate": "1.73",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://binancebrokers.cash"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/binancebrokers"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://binancebrokers.cash"
+        ],
+        "x": [
+          "https://x.com/binancebrokers"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "34865.9908913642108791749691586913512",
+      "holdersTop10Percent": "29.9752746453331203",
+      "holders": "937",
+      "kycHolders": "124",
+      "count": "133",
+      "countBuy": "78",
+      "countSell": "55",
+      "inflow": 604.242241085533,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "GMEB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "NAILONG",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/151EAC9C42B7A8368792F93BC41AA666.webp",
+      "protocol": null,
+      "launchTime": 1786196281450,
+      "ca": "0x8eb4ecec4f08f3507cfff557acb6a184c5cc7777",
+      "price": "0.000175268077898541202808120048517667",
+      "marketCap": "175268.077898541202808120048517667000000000",
+      "volume": "98545.22185342654142136337",
+      "priceChangeRate": "103.27",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/jazzquant/status/2084918210604777856"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/jazzquant/status/2084918210604777856"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "41830.3978654974597679165223002503381",
+      "holdersTop10Percent": "35.044660395833994",
+      "holders": "600",
+      "kycHolders": "29",
+      "count": "757",
+      "countBuy": "405",
+      "countSell": "352",
+      "inflow": 1147.8999681001017,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "哞名其妙",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786817357400,
+      "ca": "0xac1e1423ea52000b1d4f21d057c46b3a3b197777",
+      "price": "0.00000946668966413689378261340470281",
+      "marketCap": "9466.68966413689378261340470281000000000",
+      "volume": "49461.07406249974562153666",
+      "priceChangeRate": "133.41",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "4970.5263422852106752627299333747484",
+      "holdersTop10Percent": "76.0154206501056857",
+      "holders": "98",
+      "kycHolders": "4",
+      "count": "899",
+      "countBuy": "557",
+      "countSell": "342",
+      "inflow": 65.42032311178102,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "2439788",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786816901550,
+      "ca": "0x3a166bdd74941b26e39dcfdbb63ca658ca7d7777",
+      "price": "0.000004302080688415242596156610251697",
+      "marketCap": "4302.080688415242596156610251697000000000",
+      "volume": "21165.37488294136314048812",
+      "priceChangeRate": "9.33",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/status/2088687319242977393"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/status/2088687319242977393"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "671.7843124240983939685653681028856",
+      "holdersTop10Percent": "99.7371472731007906",
+      "holders": "20",
+      "kycHolders": "3",
+      "count": "453",
+      "countBuy": "244",
+      "countSell": "209",
+      "inflow": -168.33674377446934,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          },
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛逼",
+      "tokenIconUrl": null,
+      "protocol": null,
+      "launchTime": 1786806651850,
+      "ca": "0x555abf93cb422eca68cd7f191db5a03b70f97777",
+      "price": "0.000033735483251564429938862766420135",
+      "marketCap": "33735.483251564429938862766420135000000000",
+      "volume": "9799.52231231433427566508",
+      "priceChangeRate": "12.13",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/web/status/2088644531302646232"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/web/status/2088644531302646232"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "17877.8487271363816274180552678123406",
+      "holdersTop10Percent": "44.8944612724436447",
+      "holders": "331",
+      "kycHolders": "29",
+      "count": "137",
+      "countBuy": "72",
+      "countSell": "65",
+      "inflow": 120.84923595351403,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "哈屎奇",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D9DDEB54E170B6FE2556505DA8644C06.png",
+      "protocol": null,
+      "launchTime": 1786762046550,
+      "ca": "0x9cc3d9f0fcc7dd01d2dd0040c846d89456b77777",
+      "price": "0.000015287905473224186117144254733912",
+      "marketCap": "15287.905473224186117144254733912000000000",
+      "volume": "16871.1126485979301728028",
+      "priceChangeRate": "29.14",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "11676.7403464633319749946798933284122",
+      "holdersTop10Percent": "59.4035245341322078",
+      "holders": "174",
+      "kycHolders": "15",
+      "count": "313",
+      "countBuy": "168",
+      "countSell": "145",
+      "inflow": -136.21493894272237,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "哞名其妙",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/AFEFB01AA92F7624E74F37969E289599.png",
+      "protocol": null,
+      "launchTime": 1786817203050,
+      "ca": "0xd3046aa5fe7a5c64ee84171cbf9fece913557777",
+      "price": "0.000006918016734452562220129182452804",
+      "marketCap": "6918.016734452562220129182452804000000000",
+      "volume": "49320.96278084527435315592",
+      "priceChangeRate": "85.49",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "2971.8991899688671205443471553667378",
+      "holdersTop10Percent": "90.7686334339090513",
+      "holders": "57",
+      "kycHolders": "7",
+      "count": "935",
+      "countBuy": "547",
+      "countSell": "388",
+      "inflow": -30.44883622794519,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "SPYB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "主升狼",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786768601050,
+      "ca": "0x7a7ee5eb563dce81dc0148dfef3281e19b797777",
+      "price": "0.000018024092265398318905394902202362",
+      "marketCap": "18024.092265398318905394902202362000000000",
+      "volume": "29972.6821339070062761401",
+      "priceChangeRate": "101.59",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/shitshitppl/status/2088484951599792546"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/shitshitppl/status/2088484951599792546"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "9767.215446459989151886118635705638",
+      "holdersTop10Percent": "55.4677640385929003",
+      "holders": "130",
+      "kycHolders": "12",
+      "count": "448",
+      "countBuy": "281",
+      "countSell": "167",
+      "inflow": 439.653687938491,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛妈",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/30D7CE46FD0D7026D73551D3BF48C8D6.png",
+      "protocol": null,
+      "launchTime": 1786779400800,
+      "ca": "0x92766e72c6b1fb6b8ef3c161b1daa3fe14997777",
+      "price": "0.000017351314309031569036453403501512",
+      "marketCap": "17351.314309031569036453403501512000000000",
+      "volume": "10711.0985069191729115912",
+      "priceChangeRate": "51.32",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/shitshitppl/status/2088528778108760569"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/shitshitppl/status/2088528778108760569"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "9396.3720005424622333798360568683232",
+      "holdersTop10Percent": "64.5036615194502712",
+      "holders": "96",
+      "kycHolders": "10",
+      "count": "138",
+      "countBuy": "94",
+      "countSell": "44",
+      "inflow": 302.0569522430995,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "奶蛙",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/9FB074187A10B61C7A8A79FC2BDC0B89.webp",
+      "protocol": null,
+      "launchTime": 1785940873700,
+      "ca": "0xe712465234e69b6fac568ed2b65e2b06e4e07777",
+      "price": "0.000106360121160097973333240135129183",
+      "marketCap": "106360.121160097973333240135129183000000000",
+      "volume": "4448.87446589447496077814",
+      "priceChangeRate": "-7.34",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "33379.0185428494962123748555217347084",
+      "holdersTop10Percent": "19.7546798679336505",
+      "holders": "492",
+      "kycHolders": "44",
+      "count": "35",
+      "countBuy": "16",
+      "countSell": "19",
+      "inflow": 262.3905733937229,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Chinamaxxing",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/87E5A988823A79DDBC490CB58E4A22A7.webp",
+      "protocol": null,
+      "launchTime": 1786766186800,
+      "ca": "0x7c117f5a0cf52ee0e403b47038e230f658117777",
+      "price": "0.00011129581697781971956862610030427",
+      "marketCap": "111295.81697781971956862610030427000000000",
+      "volume": "11935.54627777883167294082",
+      "priceChangeRate": "4.5",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Tiancaidevpzp/status/2088473058206265379?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Tiancaidevpzp/status/2088473058206265379?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "31840.0833744259331289605052715803919",
+      "holdersTop10Percent": "19.6972552309359994",
+      "holders": "644",
+      "kycHolders": "84",
+      "count": "117",
+      "countBuy": "65",
+      "countSell": "52",
+      "inflow": 517.6133794278842,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "熊走",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/317E8C4C01DF66BCE6A08CA9EACA2B41.webp",
+      "protocol": null,
+      "launchTime": 1786727789800,
+      "ca": "0xe1de7d4aeb271226319a5e4472de72353f507777",
+      "price": "0.000138294277550772673830018580031809",
+      "marketCap": "138294.277550772673830018580031809000000000",
+      "volume": "30334.98815349801856495443",
+      "priceChangeRate": "-11.78",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Stephannysummer/status/2088313580248871366?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Stephannysummer/status/2088313580248871366?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "35962.0927407874683533468307104057142",
+      "holdersTop10Percent": "29.3925508602172796",
+      "holders": "758",
+      "kycHolders": "148",
+      "count": "441",
+      "countBuy": "306",
+      "countSell": "135",
+      "inflow": 302.054662716268,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛来",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786814545800,
+      "ca": "0xdd21193addc36495b0f43f2cce759e4d5e05ea7c",
+      "price": "0.000000000891962474378385365367951336",
+      "marketCap": "0.891516493141196172685267360332000000",
+      "volume": "21757138.85571722928649523267",
+      "priceChangeRate": "-100",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 4,
+      "tokenCautionNum": 2,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "wash_trade",
+        "threat_intelligence",
+        "unverified_contract",
+        "abnormal_airdrop"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "0.0077686788780941079632476611276552",
+      "holdersTop10Percent": "0.5",
+      "holders": "1389",
+      "kycHolders": "2",
+      "count": "1396",
+      "countBuy": "735",
+      "countSell": "661",
+      "inflow": -13571.891772884786,
+      "traders": 1,
+      "tokenTag": {
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "信雨萌",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/4B37CD468FEB49EE6117AA48AF480AD5.png",
+      "protocol": null,
+      "launchTime": 1786724796250,
+      "ca": "0xa337d1ac067353a349046ff4cb77789851687777",
+      "price": "0.000030877007247421822629674180839753",
+      "marketCap": "30877.007247421822629674180839753000000000",
+      "volume": "30435.3760779725495714316",
+      "priceChangeRate": "-11.07",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/Stephannysummer/status/2087748841923899585"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/Stephannysummer/status/2087748841923899585"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "16481.6968425868303395002394711540633",
+      "holdersTop10Percent": "47.9850791389838668",
+      "holders": "248",
+      "kycHolders": "44",
+      "count": "595",
+      "countBuy": "356",
+      "countSell": "239",
+      "inflow": 957.8113860556655,
+      "traders": 3,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Binancians",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5D640627A1AC3DFBDB54A5A5F7754A29.webp",
+      "protocol": null,
+      "launchTime": 1785662145300,
+      "ca": "0x5917fb9b811aaad3cc31b943295cc13e7f127777",
+      "price": "0.000032693636172803212789618957453199",
+      "marketCap": "32615.372604993306692802601041959642237301769709131739392541",
+      "volume": "141.16649720788983007232",
+      "priceChangeRate": "0.09",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "18238.7243417908030514508063093773448",
+      "holdersTop10Percent": "19.2966883147220502",
+      "holders": "1169",
+      "kycHolders": "71",
+      "count": "5",
+      "countBuy": "3",
+      "countSell": "2",
+      "inflow": 61.02004865769093,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "Monkey",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/37323beaf84b499b82b592c83ee19354.jpg",
+      "protocol": null,
+      "launchTime": 1785841718450,
+      "ca": "0x684a1768c8d0098811017b7812c23978dd58c276",
+      "price": "0.000000000000000000000000572197310477",
+      "marketCap": "3950695.435224791661314199040094618321615825",
+      "volume": "26335.68196769215069804854",
+      "priceChangeRate": "3.49",
+      "tokenDecimals": 0,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 1,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "risk_report"
+      ],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://bscscan.com/token/0x684a1768c8d0098811017b7812c23978dd58c276"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://bscscan.com/token/0x684a1768c8d0098811017b7812c23978dd58c276"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "441680.05409736117995625594977282663856",
+      "holdersTop10Percent": "0",
+      "holders": "61759",
+      "kycHolders": "1348",
+      "count": "246",
+      "countBuy": "124",
+      "countSell": "122",
+      "inflow": 1805.8842923188358,
+      "traders": 1,
+      "tokenTag": {
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "月薪喵",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/2728C5B0E713D0BC684C7FB066BF425F.webp",
+      "protocol": null,
+      "launchTime": 1786007625700,
+      "ca": "0xc73e1b136c576d1429cb84522a8c35c81d9d7777",
+      "price": "0.000435056397208204460495297552664879",
+      "marketCap": "435056.017883559945058766869610551734995125507731260765498349",
+      "volume": "53086.35425379016201961733",
+      "priceChangeRate": "37.89",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://mp.weixin.qq.com/s/Q6FwykZ3a9hmYqODp7bsuA"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/xxlb888/status/2058478160115851723"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://mp.weixin.qq.com/s/Q6FwykZ3a9hmYqODp7bsuA"
+        ],
+        "x": [
+          "https://x.com/xxlb888/status/2058478160115851723"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "83176.7302302335114919163512357920729",
+      "holdersTop10Percent": "25.9368047999328307",
+      "holders": "1793",
+      "kycHolders": "239",
+      "count": "359",
+      "countBuy": "184",
+      "countSell": "175",
+      "inflow": 3378.2884170422913,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "CRYPTO",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1786816881750,
+      "ca": "0xbb10cdbc1f2a7ab3f8130786c562fd488ca77777",
+      "price": "0.000003685204210550548837685679935571",
+      "marketCap": "3685.204210550548837685679935571000000000",
+      "volume": "5681.29469836355658361957",
+      "priceChangeRate": "-20.29",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/status/2088687319242977393"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/status/2088687319242977393"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "0",
+      "holdersTop10Percent": "100",
+      "holders": "1",
+      "kycHolders": null,
+      "count": "68",
+      "countBuy": "42",
+      "countSell": "26",
+      "inflow": 3.77026383195157,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "不怪",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/F55A0B336BFB715C4713D09D493C93C6.webp",
+      "protocol": null,
+      "launchTime": 1786799753000,
+      "ca": "0xc4945e54740b727e2c5536eb2920113478787777",
+      "price": "0.000078571107876023228537179545716604",
+      "marketCap": "78571.107876023228537179545716604000000000",
+      "volume": "89835.28564301272188171252",
+      "priceChangeRate": "38.43",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://v.douyin.com/F7ygoExtFVo/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/coinbas96449356/status/2088614651554898009?s=46"
+        },
+        {
+          "label": "telegram",
+          "link": "https://v.douyin.com/F7ygoExtFVo/"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://v.douyin.com/F7ygoExtFVo/"
+        ],
+        "x": [
+          "https://x.com/coinbas96449356/status/2088614651554898009?s=46"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "26963.9176948962960716304268353468047",
+      "holdersTop10Percent": "31.0856674791549697",
+      "holders": "560",
+      "kycHolders": "93",
+      "count": "962",
+      "countBuy": "555",
+      "countSell": "407",
+      "inflow": 553.5501935855884,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "云雀",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D644A3623B7FA6F5C38069B5E6178439.webp",
+      "protocol": null,
+      "launchTime": 1786725482200,
+      "ca": "0xafb4904ac4107ab7e8bef8d84788c408c3737777",
+      "price": "0.000030220935324228657745473893472696",
+      "marketCap": "30220.935324228657745473893472696000000000",
+      "volume": "62159.12747620859890915512",
+      "priceChangeRate": "28.33",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://v.douyin.com/7gQ_3oq_f8o/ 1@0.com :1pm"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/cindyho99641384/status/2088303380477391067?s=46"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://v.douyin.com/7gQ_3oq_f8o/ 1@0.com :1pm"
+        ],
+        "x": [
+          "https://x.com/cindyho99641384/status/2088303380477391067?s=46"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "16304.3892203037602823117543276432471",
+      "holdersTop10Percent": "49.0896263028820165",
+      "holders": "221",
+      "kycHolders": "42",
+      "count": "913",
+      "countBuy": "508",
+      "countSell": "405",
+      "inflow": 103.5115721488077,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "金蟾",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/874B6EE486C3EE241C761A7F144ADD0A.jpg",
+      "protocol": null,
+      "launchTime": 1786813975600,
+      "ca": "0xe21c3af774b1488c975856f9562e4579a3597777",
+      "price": "0.000006243216906439488472853763538338",
+      "marketCap": "6243.216906439488472853763538338000000000",
+      "volume": "22910.6079576848468985145",
+      "priceChangeRate": "-34.69",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://t.co/AXEpXrSVqT"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://t.co/AXEpXrSVqT"
+        ],
+        "x": [],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "2303.172100074084482232",
+      "holdersTop10Percent": "94.0323366711077687",
+      "holders": "31",
+      "kycHolders": "0",
+      "count": "238",
+      "countBuy": "136",
+      "countSell": "102",
+      "inflow": 21.17748699856915,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "xAUT",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "草地牛",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/CC586CCBB6A417FDA25BBBEA753995F4.webp",
+      "protocol": null,
+      "launchTime": 1786009171800,
+      "ca": "0x7acf089ab30cc85fc14b783c067d725126397777",
+      "price": "0.000033274267687158812377766787832886",
+      "marketCap": "33274.267687158812377766787832886000000000",
+      "volume": "7547.78953634264553058993",
+      "priceChangeRate": "19.7",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/2005265424922145153"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/communities/2005265424922145153"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "17689.8921341177263808243201237587464",
+      "holdersTop10Percent": "45.1251163818570892",
+      "holders": "221",
+      "kycHolders": "29",
+      "count": "77",
+      "countBuy": "45",
+      "countSell": "32",
+      "inflow": 604.1165652112511,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "哞哞",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/D2B3B31F724D89398BFEC74BD4C8C11D.png",
+      "protocol": null,
+      "launchTime": 1786807915650,
+      "ca": "0x9551718a0fbbd1de045cc3d6a1fddf9cea247777",
+      "price": "0.000009341727666196137010780343539598",
+      "marketCap": "9341.727666196137010780343539598000000000",
+      "volume": "5022.32168867977986591379",
+      "priceChangeRate": "10.62",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/rainbow_DEV_1/status/2088649870303457443?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/rainbow_DEV_1/status/2088649870303457443?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "9164.10915420199958137081934502497579",
+      "holdersTop10Percent": "67.6633279580003717",
+      "holders": "143",
+      "kycHolders": "13",
+      "count": "73",
+      "countBuy": "39",
+      "countSell": "34",
+      "inflow": 181.2302927022597,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "GULD",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/67FE8099647805B0B8D18EBF2D0B7F13.jpg",
+      "protocol": null,
+      "launchTime": 1775152125500,
+      "ca": "0x14d6c649292c5c9790c5196d1a9ea039307947a1",
+      "price": "0.000251882628249433985863363163499757",
+      "marketCap": "340046.787295403469142446228678472744945600",
+      "volume": "0.10606888522159060416",
+      "priceChangeRate": "-0.27",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 4,
+      "tokenCautionNum": 3,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [
+        "low_liquidity",
+        "threat_intelligence",
+        "risk_report"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "459.1789467710732096936968450411475832",
+      "holdersTop10Percent": "13.3915358930001234",
+      "holders": "4290",
+      "kycHolders": "1",
+      "count": "1",
+      "countBuy": "0",
+      "countSell": "1",
+      "inflow": -1358.6908779614114,
+      "traders": 1,
+      "tokenTag": {
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Wash Trading",
+            "languageKey": "wmp-label-title-wash-trading"
+          }
+        ],
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "羊高",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/51DD69D1A1ADA4180AF59E989C5990CE.webp",
+      "protocol": null,
+      "launchTime": 1786783960100,
+      "ca": "0x5be32814baef3fb1df1e9b4ddafb72cef1eb7777",
+      "price": "0.000336205979128571057956975835901637",
+      "marketCap": "336205.979128571057956975835901637000000000",
+      "volume": "250316.52753085832429443307",
+      "priceChangeRate": "-26.98",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "website",
+          "link": "https://v.douyin.com/C5aTDjOv1ok/"
+        },
+        {
+          "label": "x",
+          "link": "https://x.com/BARBIE_BSC/status/2088549140368359735?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [
+          "https://v.douyin.com/C5aTDjOv1ok/"
+        ],
+        "x": [
+          "https://x.com/BARBIE_BSC/status/2088549140368359735?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "59192.146416307030349119693038856079875",
+      "holdersTop10Percent": "24.4048856166026145",
+      "holders": "1570",
+      "kycHolders": "386",
+      "count": "2774",
+      "countBuy": "1651",
+      "countSell": "1123",
+      "inflow": -450.44745819170635,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Add Holdings",
+            "languageKey": "wmp-label-title-smart-money-add-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "波子",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/57BCD26F99BE3DAAE00DF3D448BED70B.webp",
+      "protocol": null,
+      "launchTime": 1786811372500,
+      "ca": "0xbd768961b6e3b61570b05260679c83b485c67777",
+      "price": "0.000143253810952641592053225560167191",
+      "marketCap": "143253.810952641592053225560167191000000000",
+      "volume": "430962.16109401190397081045",
+      "priceChangeRate": "-52.69",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/complainatt/status/2088664309538672663?s=61"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/complainatt/status/2088664309538672663?s=61"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "36810.2160751002459472233188614409621",
+      "holdersTop10Percent": "30.9041731123117666",
+      "holders": "656",
+      "kycHolders": "27",
+      "count": "4595",
+      "countBuy": "2646",
+      "countSell": "1949",
+      "inflow": -496.0241474720748,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "DEV Close Position",
+            "languageKey": "wmp-label-title-dev-close-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "牛股",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/2CCDD240C40434E5FA1ED2AE1BBE7125.webp",
+      "protocol": null,
+      "launchTime": 1786810389250,
+      "ca": "0xdbd9aa1f23ba10b95df75cc5123df16615227777",
+      "price": "0.000010109842284222108353566081148489",
+      "marketCap": "10109.842284222108353566081148489000000000",
+      "volume": "4978.54718685866288475766",
+      "priceChangeRate": "-36.55",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/aura_fable58626/status/2088648964929433978?s=20"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/aura_fable58626/status/2088648964929433978?s=20"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "5429.7742592033817586536009707842296",
+      "holdersTop10Percent": "69.9629736569125667",
+      "holders": "96",
+      "kycHolders": "13",
+      "count": "87",
+      "countBuy": "41",
+      "countSell": "46",
+      "inflow": 61.03337205531683,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "豹啦",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5786852A6509EFBF412B7C4973AFA28B.jpg",
+      "protocol": null,
+      "launchTime": 1786762192800,
+      "ca": "0x1768a0b0ac501a227ae13ae21faac74099007777",
+      "price": "0.000043537038102080516282480808386397",
+      "marketCap": "43537.038102080516282480808386397000000000",
+      "volume": "57955.78708013143136949275",
+      "priceChangeRate": "-33.2",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 1,
+      "liquidity": "19971.5921033165048782471307483477815",
+      "holdersTop10Percent": "20.9135505448789597",
+      "holders": "479",
+      "kycHolders": "69",
+      "count": "944",
+      "countBuy": "505",
+      "countSell": "439",
+      "inflow": -205.46450816538646,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "QQQB",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Wash Trading Behavior": [
+          {
+            "tagName": "Insider Wash Trading",
+            "languageKey": "wmp-label-title-insider-wash-trading"
+          }
+        ],
+        "Sensitive Events": [
+          {
+            "tagName": "Smart Money Remove Holdings",
+            "languageKey": "wmp-label-title-smart-money-reduce-position"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "DTC",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/272cc146ce6346278cd69424869b921f.png",
+      "protocol": null,
+      "launchTime": 1786783112450,
+      "ca": "0x40e8a453afca8ede2f48dacfe913e03209257777",
+      "price": "0.000316340222962433641390160231875687",
+      "marketCap": "278617.912520787444691907717925196169680477722326660750784279",
+      "volume": "40645.42663739287696708661",
+      "priceChangeRate": "-1.1",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/cz_binance/status/2088545438328836149"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/cz_binance/status/2088545438328836149"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "59266.90250709834591696437208758857309",
+      "holdersTop10Percent": "11.6462811939871867",
+      "holders": "2077",
+      "kycHolders": "293",
+      "count": "564",
+      "countBuy": "352",
+      "countSell": "212",
+      "inflow": -343.2370334858956,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Social Events": [
+          {
+            "tagName": "DEX Paid",
+            "languageKey": "wmp-label-update-dexscreener-social"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "奶龙",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/5140379A766F55B524E94BB150E8B1D8.webp",
+      "protocol": null,
+      "launchTime": 1785583639850,
+      "ca": "0x809a28d0edd5fa42824141d08f5c4235d5277777",
+      "price": "0.000016056899182797740390351632029505",
+      "marketCap": "16056.899182797740390351632029505000000000",
+      "volume": "90144.00980203863369198",
+      "priceChangeRate": "314.66",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/communities/1976992356466671836"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/communities/1976992356466671836"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "11875.899766876826761608670325730338",
+      "holdersTop10Percent": "56.9827044083994815",
+      "holders": "141",
+      "kycHolders": "14",
+      "count": "1160",
+      "countBuy": "656",
+      "countSell": "504",
+      "inflow": -2788.7541050071004,
+      "traders": 2,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "RWA Pair Token": [
+          {
+            "tagName": "xAUT",
+            "languageKey": "wmp-label-title-rwa-pair-token"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ],
+        "Volume Trend": [
+          {
+            "tagName": "Token Volume Surging",
+            "languageKey": "wmp-label-title-volume-surging"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "SWITCH",
+      "tokenIconUrl": "",
+      "protocol": null,
+      "launchTime": 1700243125000,
+      "ca": "0xb10cc888cb2cce7036f4c7ecad8a57da16161338",
+      "price": "0.015266657557550082176490607539611408",
+      "marketCap": "30533350.228412546718170221007620157106238400",
+      "volume": "0",
+      "priceChangeRate": "0",
+      "tokenDecimals": 8,
+      "tokenRiskLevel": 3,
+      "tokenCautionNum": 3,
+      "tokenRiskNum": 1,
+      "tokenRiskCodes": [
+        "low_liquidity",
+        "contract_not_renounced",
+        "threat_intelligence",
+        "mintable"
+      ],
+      "link": null,
+      "previewLink": null,
+      "aiNarrativeFlag": 0,
+      "liquidity": "2.4969396658493262849368826053383936",
+      "holdersTop10Percent": "52.172223047384378",
+      "holders": "3700",
+      "kycHolders": "1",
+      "count": "0",
+      "countBuy": "0",
+      "countSell": "0",
+      "inflow": 9.178537366794659,
+      "traders": 1,
+      "tokenTag": {
+        "Token Profile": [
+          {
+            "tagName": "Low Liquidity",
+            "languageKey": "wmp-label-title-low-liquidity"
+          }
+        ]
+      }
+    },
+    {
+      "tokenName": "***",
+      "tokenIconUrl": "/images/web3-data/public/token/logos/011592E730466D90DED6E89C1FEDEE72.webp",
+      "protocol": null,
+      "launchTime": 1786809255700,
+      "ca": "0xf86f93d7bafe8fca1f5386abd9fbdbf4eb407777",
+      "price": "0.000027848089565836450635963734269844",
+      "marketCap": "27848.089565836450635963734269844000000000",
+      "volume": "5417.30420454625649754111",
+      "priceChangeRate": "11.55",
+      "tokenDecimals": 18,
+      "tokenRiskLevel": 0,
+      "tokenCautionNum": 0,
+      "tokenRiskNum": 0,
+      "tokenRiskCodes": [],
+      "link": [
+        {
+          "label": "x",
+          "link": "https://x.com/i/status/2053160569096872206"
+        }
+      ],
+      "previewLink": {
+        "website": [],
+        "x": [
+          "https://x.com/i/status/2053160569096872206"
+        ],
+        "telegram": []
+      },
+      "aiNarrativeFlag": 1,
+      "liquidity": "13622.6098701339152405282049548446174",
+      "holdersTop10Percent": "46.604469526380272",
+      "holders": "165",
+      "kycHolders": "10",
+      "count": "227",
+      "countBuy": "190",
+      "countSell": "37",
+      "inflow": 744.9394750643042,
+      "traders": 1,
+      "tokenTag": {
+        "Launch Platform": [
+          {
+            "tagName": "Flap",
+            "languageKey": "wmp-label-title-flap"
+          }
+        ],
+        "Token Fee": [
+          {
+            "tagName": "High Tax Token",
+            "languageKey": "wmp-label-high-tax-token"
+          }
+        ]
+      }
+    }
+  ],
+  "success": true
+}
