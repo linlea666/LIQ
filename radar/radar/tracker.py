@@ -862,12 +862,10 @@ class TrackerService:
                  config: Mapping[str, Any]) -> None:
         self._tracker = tracker
         self._kpi = kpi
-        self._kpi_hour = int((config.get("email", {}) or {})
-                             .get("daily_kpi_hour_local", 9))
         self._tz = timezone(timedelta(
             hours=int((config.get("service", {}) or {}).get("tz_offset_hours", 8))
         ))
-        self._last_kpi_date = ""
+        self._last_kpi_hour = ""
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -897,17 +895,24 @@ class TrackerService:
                 await asyncio.sleep(1)
 
     async def _maybe_build_kpi(self) -> None:
+        """每小时增量重算当日 KPI。
+
+        旧实现每天只在 9 点后跑一次，之后成熟的警报永远进不了当日
+        KPI（实盘一整天 11 条警报成熟后 kpi_daily 仍是 0 行）。
+        kpi_daily 的 UNIQUE(stat_date, strategy_version, alert_kind, horizon)
+        + upsert 天然幂等，每小时重算只会覆盖当日行，不会产生重复。
+        """
         local = datetime.fromtimestamp(now_ms() / 1000, self._tz)
-        today = local.strftime("%Y-%m-%d")
-        if local.hour < self._kpi_hour or self._last_kpi_date == today:
+        hour_key = local.strftime("%Y-%m-%d %H")
+        if self._last_kpi_hour == hour_key:
             return
-        self._last_kpi_date = today
+        self._last_kpi_hour = hour_key
         results = await self._kpi.build()
         bus.emit(
             EventType.KPI_GENERATED,
             module="tracker",
-            summary=f"生成 {today} 的 KPI，共 {len(results)} 组",
-            payload={"groups": len(results)},
+            summary=f"重算 {local.strftime('%Y-%m-%d')} 的 KPI，共 {len(results)} 组",
+            payload={"groups": len(results), "hour": local.hour},
         )
 
 
