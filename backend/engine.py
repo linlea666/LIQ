@@ -608,6 +608,7 @@ class Engine:
             asyncio.create_task(self._cache_persist_loop()),
             asyncio.create_task(self._source_observe_loop()),
             asyncio.create_task(self._binance_ticker_ws_loop()),
+            asyncio.create_task(self._binance_trades_ws_loop()),
             asyncio.create_task(self._orderflow_stats_loop()),
         ]
 
@@ -1009,6 +1010,14 @@ class Engine:
 
     async def stop(self):
         self._running = False
+        try:
+            from sources.binance_trades_ws import get_trades_ws
+            ws = get_trades_ws()
+            if ws is not None:
+                ws.stop()
+                await ws.close()
+        except Exception:
+            logger.debug("trades_ws stop failed", exc_info=True)
         await self.trend_service.stop()
         try:
             await self.bottom_model_service.stop()
@@ -1113,6 +1122,39 @@ class Engine:
                 self._cg.save_cache_to_disk()
             except Exception:
                 logger.error("Cache persist failed", exc_info=True)
+
+    async def _binance_trades_ws_loop(self):
+        """P3：Binance aggTrade 六流（合约+现货 × BTC/ETH/SOL）。
+
+        接线激活 processors.orderbook 的 whale_threshold_* 死配置；
+        whale 累计进 orderflow 小时桶，大额事件供交易大脑事件流拉取。
+        重连逻辑在 BinanceTradesWS.run 内部（复用 binance_futures 模式）。
+        """
+        bn_cfg = self._settings.binance
+        if not bn_cfg.ws_enabled:
+            logger.info("[trades_ws] disabled | binance.ws_enabled=false")
+            return
+        try:
+            ob_cfg = self._settings.processors.orderbook or {}
+            coin_symbols = {
+                ccy: self._settings.get_coin(ccy).symbol_cg_pair
+                for ccy in self._settings.supported_coins
+            }
+            qty_thr: dict[str, float] = {}
+            for ccy in coin_symbols:
+                raw = ob_cfg.get(f"whale_threshold_{ccy.lower()}")
+                if raw:
+                    qty_thr[ccy] = float(raw)
+            from sources.binance_trades_ws import init_trades_ws
+            ws = init_trades_ws(
+                coin_symbols=coin_symbols,
+                whale_threshold_usd=float(ob_cfg.get("whale_threshold_usd", 500_000)),
+                whale_threshold_qty=qty_thr,
+            )
+        except Exception:
+            logger.error("[trades_ws] init failed, loop disabled", exc_info=True)
+            return
+        await ws.run()
 
     async def _orderflow_stats_loop(self):
         """P2：每 5 分钟把内存态订单流数据聚合进 SQLite 小时/日桶。

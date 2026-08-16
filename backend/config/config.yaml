@@ -234,6 +234,9 @@ processors:
     #   orderbook_pressure: 90
     # freshness_decay_factor: 0.85  # 主源 stale 时 final_score × 0.85（不改 tier）
   orderbook:
+    # ── whale 阈值（P3 已接线：sources/binance_trades_ws.py aggTrade 大额成交检测）──
+    # 判定：单笔聚合成交 usd ≥ whale_threshold_usd 或 数量 ≥ whale_threshold_{coin}
+    # whale 累计进 orderflow 小时桶；单笔 ≥5M USD 进交易大脑事件流
     whale_threshold_btc: 10
     whale_threshold_eth: 100
     whale_threshold_sol: 1000

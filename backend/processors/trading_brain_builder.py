@@ -589,23 +589,42 @@ def _build_events(
     *,
     now_sec: int,
     wall_layer: str = "futures",
+    coin: str = "",
 ) -> list[BrainEvent]:
-    if not op or not op.wall_events:
-        return []
     out: list[BrainEvent] = []
-    for ev in op.wall_events:
-        ts = int(ev.ts_sec or 0)
-        if ts <= 0 or now_sec - ts > 1800:
-            continue
-        layer: Any = "spot" if wall_layer == "spot" else "futures"
-        out.append(BrainEvent(
-            ts=ts,
-            layer=layer,
-            price_mid=float(ev.price_mid),
-            zone_id=str(ev.wall_zone_id or ""),
-            message=_wall_event_message(ev),
-            source="liquidity_wall_engine",
-        ))
+    if op and op.wall_events:
+        for ev in op.wall_events:
+            ts = int(ev.ts_sec or 0)
+            if ts <= 0 or now_sec - ts > 1800:
+                continue
+            layer: Any = "spot" if wall_layer == "spot" else "futures"
+            out.append(BrainEvent(
+                ts=ts,
+                layer=layer,
+                price_mid=float(ev.price_mid),
+                zone_id=str(ev.wall_zone_id or ""),
+                message=_wall_event_message(ev),
+                source="liquidity_wall_engine",
+            ))
+    # P3：Binance aggTrade 大额主动成交事件（单笔 ≥5M USD，近 30min）。
+    # 只读拉取 trades_ws 单例，未初始化/WS 关闭时静默跳过（大脑只读铁律）。
+    if coin:
+        try:
+            from sources.binance_trades_ws import get_trades_ws
+            ws = get_trades_ws()
+            if ws is not None:
+                for bt in ws.big_trade_events(coin, within_sec=1800):
+                    side_txt = "主动买入" if bt["side"] == "buy" else "主动卖出"
+                    mkt_txt = "现货" if bt["market"] == "spot" else "合约"
+                    out.append(BrainEvent(
+                        ts=int(bt["ts"]),
+                        layer=bt["market"],
+                        price_mid=float(bt["price"]),
+                        message=f"{mkt_txt}大额{side_txt} ${bt['usd'] / 1e6:.1f}M",
+                        source="binance_aggtrade",
+                    ))
+        except Exception:
+            pass
     out.sort(key=lambda e: e.ts, reverse=True)
     return out[:40]
 
@@ -1025,7 +1044,7 @@ def build_trading_brain_snapshot(
     )
 
     rankings = _rankings(zones)
-    events = _build_events(op, now_sec=now_sec)
+    events = _build_events(op, now_sec=now_sec, coin=coin)
 
     # 数据质量
     dq_notes: list[str] = []
