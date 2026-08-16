@@ -68,7 +68,8 @@ def make_view(*, price: float = 0.001, market_cap: float = 100_000.0,
 def move(view: TokenView, *, price: float | None = None,
          market_cap: float | None = None, volume_5m: float | None = None,
          interval_high: float | None = None,
-         interval_low: float | None = None) -> TokenView:
+         interval_low: float | None = None,
+         interval_seen_at: int = 0) -> TokenView:
     if price is not None:
         view.values["price"] = price
     if market_cap is not None:
@@ -77,6 +78,8 @@ def move(view: TokenView, *, price: float | None = None,
         view.values["volume_5m"] = volume_5m
     view.values["interval_high"] = interval_high
     view.values["interval_low"] = interval_low
+    if interval_seen_at:
+        view.interval_seen_at = interval_seen_at
     return view
 
 
@@ -196,21 +199,74 @@ async def test_mfe_and_mae_are_tracked_incrementally(env):
 
 @pytest.mark.asyncio
 async def test_interval_extremes_fill_polling_gaps(env):
-    """30 秒采样下，3 分钟内暴涨又暴跌的币只能靠区间极值抓到。"""
+    """30 秒采样下，短时间内暴涨又暴跌的币只能靠区间极值抓到。
+
+    极值窗口必须完全落在信号之后（seen_at - 回看窗口 >= signal_at），
+    因此把观测放在信号后 5 分钟。
+    """
     tracker, db = env
     view = make_view(price=0.001)
     alert_id = await seed_alert(db, view)
     tracker.track(alert_id=alert_id, alert_kind="S1", view=view, at_ms=NOW)
 
+    at = NOW + 300_000
     tracker.on_observation(
-        move(view, price=0.0011, interval_high=0.009, interval_low=0.0009),
-        NOW + 60_000,
+        move(view, price=0.0011, interval_high=0.009, interval_low=0.0009,
+             interval_seen_at=at),
+        at,
     )
     await db.drain()
 
     row = (await db.fetch_all("SELECT * FROM outcomes"))[0]
     assert row["raw_ath_price"] == 0.009, "轮询瞬间的价格远低于区间最高价"
     assert row["min_price"] == 0.0009
+
+
+@pytest.mark.asyncio
+async def test_pre_signal_interval_extremes_are_ignored(env):
+    """信号之前留下的区间极值绝不能算进信号之后的收益。
+
+    实盘事故：合并视图永久携带崩盘前的 interval_high（拉盘顶），
+    追踪器把它当作当前观测，伪造出 30204 倍的假 MOON。
+    """
+    tracker, db = env
+    view = make_view(price=0.001)
+    # 崩盘前的旧极值：seen_at 早于信号
+    view.values["interval_high"] = 0.03
+    view.values["interval_low"] = 0.0005
+    view.interval_seen_at = NOW - 60_000
+
+    alert_id = await seed_alert(db, view)
+    tracker.track(alert_id=alert_id, alert_kind="S1", view=view, at_ms=NOW)
+
+    # 之后的观测没有新极值，但视图仍带着旧值
+    view.values["price"] = 0.0012
+    tracker.on_observation(view, NOW + 60_000)
+    await db.drain()
+
+    row = (await db.fetch_all("SELECT * FROM outcomes"))[0]
+    assert row["raw_ath_price"] == pytest.approx(0.0012), \
+        "信号前的拉盘顶被算成了信号后的收益"
+
+
+@pytest.mark.asyncio
+async def test_interval_extremes_too_close_to_signal_are_ignored(env):
+    """信号后立刻到达的极值窗口仍盖住信号之前，必须等窗口完全越过信号。"""
+    tracker, db = env
+    view = make_view(price=0.001)
+    alert_id = await seed_alert(db, view)
+    tracker.track(alert_id=alert_id, alert_kind="S1", view=view, at_ms=NOW)
+
+    # 信号后 60 秒：回看 180 秒的窗口仍包含信号前 120 秒
+    tracker.on_observation(
+        move(view, price=0.0011, interval_high=0.05,
+             interval_seen_at=NOW + 60_000),
+        NOW + 60_000,
+    )
+    await db.drain()
+
+    row = (await db.fetch_all("SELECT * FROM outcomes"))[0]
+    assert row["raw_ath_price"] == pytest.approx(0.0011)
 
 
 @pytest.mark.asyncio

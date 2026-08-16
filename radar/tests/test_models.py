@@ -126,6 +126,25 @@ def test_apply_marks_only_touched_groups_fresh():
     assert view.group_age_sec(FieldGroup.MARKET, NOW) == 0.0
 
 
+def test_apply_stamps_interval_seen_at_only_on_real_refresh():
+    """合并视图会永久携带最后一次非空极值，时间戳是唯一能区分
+    "刚看到的极值"和"崩盘前旧极值"的依据。"""
+    view = make_view()
+    view.apply(TokenObservation(
+        chain_id="56", contract_address="0xabc", endpoint="trending",
+        observed_at=NOW - 60_000, interval_high=0.01, interval_low=0.002,
+    ))
+    assert view.interval_seen_at == NOW - 60_000
+
+    # 后续观测没有区间极值：值被保留，但时间戳绝不能被推进
+    view.apply(TokenObservation(
+        chain_id="56", contract_address="0xabc", endpoint="trending",
+        observed_at=NOW, price=0.005,
+    ))
+    assert view.getf("interval_high") == 0.01
+    assert view.interval_seen_at == NOW - 60_000
+
+
 def test_zero_is_preserved_and_distinct_from_unknown():
     """0% dev 持仓 与 未知 dev 持仓 是完全不同的两件事。"""
     view = make_view()

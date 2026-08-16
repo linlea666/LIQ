@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
-from .domain.models import TokenView
+from .domain.models import INTERVAL_LOOKBACK_MS, TokenView
 from .obs.events import EventType, bus
 from .obs.logging_setup import now_ms
 from .storage import repo
@@ -279,10 +279,11 @@ class OutcomeTracker:
 
         price = view.getf("price")
         market_cap = view.getf("market_cap")
-        # 区间极值来自详情接口的一分钟价格序列，用来填补轮询间隙。
+        # 区间极值来自榜单接口的一分钟价格序列，用来填补轮询间隙。
         # 没有它，一个 3 分钟内暴涨又暴跌的币在 30 秒采样下会被完全漏掉
         interval_high = view.getf("interval_high")
         interval_low = view.getf("interval_low")
+        interval_seen_at = view.interval_seen_at
         volume_proxy = view.getf("volume_5m") or 0.0
 
         for alert_id in list(alert_ids):
@@ -291,12 +292,13 @@ class OutcomeTracker:
                 alert_ids.discard(alert_id)
                 continue
             self._update_one(tracked, view, at_ms, price, market_cap,
-                             interval_high, interval_low, volume_proxy)
+                             interval_high, interval_low, interval_seen_at,
+                             volume_proxy)
 
     def _update_one(self, tracked: TrackedOutcome, view: TokenView, at_ms: int,
                     price: float | None, market_cap: float | None,
                     interval_high: float | None, interval_low: float | None,
-                    volume_proxy: float) -> None:
+                    interval_seen_at: int, volume_proxy: float) -> None:
         if at_ms < tracked.signal_at:
             return
         elapsed_ms = at_ms - tracked.signal_at
@@ -311,7 +313,20 @@ class OutcomeTracker:
                 position.update(price)
 
         # 区间极值只用于极值统计，不参与可持续 ATH 与纸面成交：
-        # 我们只知道这一分钟内到过那个价，不知道它停留了多久
+        # 我们只知道这一分钟内到过那个价，不知道它停留了多久。
+        # 且必须保证极值窗口**完全落在信号之后**才可采信：
+        #   - 合并视图会永久携带最后一次非空极值，崩盘后仍是旧高点；
+        #   - 极值本身回看 INTERVAL_LOOKBACK_MS，观测刚好在信号后到达时
+        #     窗口仍可能盖住信号之前的拉盘顶。
+        # 两者任何一个漏掉，都会把"警报前的顶"算成"警报后的收益"，
+        # 伪造出数百倍的假 MOON——这正是 V1 实盘发生过的事故。
+        interval_usable = (
+            interval_seen_at > 0
+            and interval_seen_at - INTERVAL_LOOKBACK_MS >= tracked.signal_at
+        )
+        if not interval_usable:
+            interval_high = interval_low = None
+
         if interval_high is not None and interval_high > 0:
             self._update_extremes(tracked, interval_high, None, at_ms, price_only=True)
         if interval_low is not None and interval_low > 0:

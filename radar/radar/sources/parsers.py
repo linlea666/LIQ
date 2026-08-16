@@ -22,7 +22,7 @@ import json
 import logging
 from typing import Any, Iterable
 
-from ..domain.models import TokenObservation
+from ..domain.models import INTERVAL_LOOKBACK_MS, TokenObservation
 from ..domain.tags import BOOL_TAG_FIELDS, RAW_TAG_MAP
 from .coerce import (
     first_not_none,
@@ -43,7 +43,7 @@ logger = logging.getLogger("radar.parsers")
 
 # 与解析规则绑定的版本号：字段映射有任何改动都必须递增，
 # 否则历史快照无法追溯到"当时用哪套规则解析的"。
-PARSER_VERSION = "p1.0.0"
+PARSER_VERSION = "p1.1.0"  # chart1h 极值按 INTERVAL_LOOKBACK_MS 裁剪
 
 SUCCESS_CODE = "000000"
 
@@ -167,7 +167,9 @@ def _parse_inline_audit(row: dict[str, Any]) -> tuple[int | None, tuple[str, ...
     return level, codes
 
 
-def parse_chart_extremes(raw: Any) -> tuple[float | None, float | None, float | None]:
+def parse_chart_extremes(
+    raw: Any, *, observed_at: int | None = None,
+) -> tuple[float | None, float | None, float | None]:
     """解析 trending 的 chart1h（JSON 字符串，含 60 个一分钟点）。
 
     返回 (区间最高价, 区间最低价, 区间成交额)。
@@ -176,6 +178,12 @@ def parse_chart_extremes(raw: Any) -> tuple[float | None, float | None, float | 
     如果只记录轮询瞬间的价格，一个 3 分钟内拉升 5 倍又砸回的币
     会被完全漏掉，导致 Outcome 严重低估。
     原始序列提取极值后立即丢弃，不入库（否则体积不可控）。
+
+    序列覆盖过去 60 分钟，但本次轮询真正的"间隙"只有最近一两分钟——
+    传入 observed_at 时只保留 INTERVAL_LOOKBACK_MS 内的点（键为毫秒时间戳）。
+    不裁剪的后果已被实盘证实：警报之前的拉盘顶会被灌进警报之后的 MFE，
+    伪造出数百倍的假收益。时间戳无法解析的点直接丢弃（诚实的少算，
+    优先于把来历不明的价格算进极值）。
     """
     if not raw:
         return None, None, None
@@ -188,19 +196,32 @@ def parse_chart_extremes(raw: Any) -> tuple[float | None, float | None, float | 
     if not isinstance(obj, dict):
         return None, None, None
 
-    prices = obj.get("p")
+    cutoff = None if observed_at is None else observed_at - INTERVAL_LOOKBACK_MS
+
+    def recent_values(series: Any) -> list[Any]:
+        if not isinstance(series, dict) or not series:
+            return []
+        if cutoff is None:
+            return list(series.values())
+        kept = []
+        for key, value in series.items():
+            ts = to_int(key)
+            if ts is None or ts < cutoff:
+                continue
+            kept.append(value)
+        return kept
+
     high = low = None
-    if isinstance(prices, dict) and prices:
-        values = [v for v in (to_positive_float(p) for p in prices.values()) if v is not None]
-        if values:
-            high, low = max(values), min(values)
+    values = [v for v in (to_positive_float(p) for p in recent_values(obj.get("p")))
+              if v is not None]
+    if values:
+        high, low = max(values), min(values)
 
     volume = None
-    volumes = obj.get("v")
-    if isinstance(volumes, dict) and volumes:
-        values = [v for v in (to_non_negative_float(x) for x in volumes.values()) if v is not None]
-        if values:
-            volume = sum(values)
+    vol_values = [v for v in (to_non_negative_float(x) for x in recent_values(obj.get("v")))
+                  if v is not None]
+    if vol_values:
+        volume = sum(vol_values)
 
     return high, low, volume
 
@@ -222,7 +243,9 @@ def parse_trending_row(chain_id: str, row: dict[str, Any], observed_at: int) -> 
         return None
 
     meta = row.get("metaInfo") if isinstance(row.get("metaInfo"), dict) else {}
-    high, low, chart_volume = parse_chart_extremes(row.get("chart1h"))
+    high, low, chart_volume = parse_chart_extremes(
+        row.get("chart1h"), observed_at=observed_at,
+    )
     audit_level, audit_codes = _parse_inline_audit(row)
 
     return TokenObservation(

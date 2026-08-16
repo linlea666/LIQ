@@ -115,6 +115,35 @@ def test_chart_extremes_tolerates_garbage():
     assert P.parse_chart_extremes(json.dumps({"p": {}})) == (None, None, None)
 
 
+def test_chart_extremes_clip_to_recent_window():
+    """序列覆盖 60 分钟，但只有最近轮询间隙内的点可信。
+
+    不裁剪的后果：警报之前的拉盘顶会被灌进警报之后的 MFE，
+    伪造出数百倍的假收益（实盘发生过 30204 倍）。
+    """
+    now = 1786816020000
+    raw = json.dumps({
+        # 40 分钟前的拉盘顶 0.09；最近 2 分钟只有 0.002~0.003
+        "p": {str(now - 2_400_000): "0.09",
+              str(now - 120_000): "0.002",
+              str(now - 60_000): "0.003"},
+        "v": {str(now - 2_400_000): "9999",
+              str(now - 60_000): "50"},
+    })
+    high, low, volume = P.parse_chart_extremes(raw, observed_at=now)
+    assert high == pytest.approx(0.003), "40 分钟前的高点不应进入区间极值"
+    assert low == pytest.approx(0.002)
+    assert volume == pytest.approx(50.0)
+
+
+def test_chart_extremes_drop_points_with_unparseable_timestamps():
+    """时间戳无法解析时宁可丢点，也不能把来历不明的价格算进极值。"""
+    raw = json.dumps({"p": {"garbage": "0.09", "1786816000000": "0.002"}})
+    high, low, _ = P.parse_chart_extremes(raw, observed_at=1786816020000)
+    assert high == pytest.approx(0.002)
+    assert low == pytest.approx(0.002)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 列表端点解析
 # ─────────────────────────────────────────────────────────────────────────

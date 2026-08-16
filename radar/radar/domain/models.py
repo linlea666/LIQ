@@ -258,6 +258,15 @@ _IDENTITY_FIELDS: tuple[str, ...] = (
 # 稀疏历史序列的最小采样间隔：28 个点 × 5 分钟 ≈ 覆盖 2.3 小时
 COARSE_HISTORY_SPACING_MS = 300_000
 
+# 区间极值（interval_high/low）允许的最大回看窗口（毫秒）。
+# 这是解析层与追踪层共同遵守的契约：
+#   - 解析层只从 chart 序列中保留最近这段时间内的点（原始序列覆盖 60 分钟，
+#     其中绝大部分早于本次轮询间隙，直接取全序列极值会把"警报之前的拉盘顶"
+#     灌进警报之后的 MFE，伪造出数百倍的假收益）；
+#   - 追踪层只有当 interval_seen_at - INTERVAL_LOOKBACK_MS >= signal_at 时
+#     才把区间极值计入 Outcome，保证极值窗口完全落在信号之后。
+INTERVAL_LOOKBACK_MS = 180_000
+
 
 @dataclass(slots=True)
 class HistoryPoint:
@@ -334,6 +343,10 @@ class TokenView:
     gate_blocked: bool = False
     gate_reasons: tuple[str, ...] = ()
 
+    # 区间极值最近一次被真实观测刷新的时刻。
+    # values 里的 interval_high/low 是合并视图，会永久携带最后一次非空值；
+    # 没有这个时间戳，追踪器无法区分"刚看到的极值"和"崩盘前留下的旧极值"
+    interval_seen_at: int = 0
     # 数据质量是否处于降级状态。只在状态翻转时发事件，避免每轮重复告警
     quality_degraded: bool = False
     # 审计缓存时间，避免重复消耗配额
@@ -416,6 +429,9 @@ class TokenView:
 
         for group_name in touched:
             self.group_updated_at[group_name] = obs.observed_at
+
+        if obs.interval_high is not None or obs.interval_low is not None:
+            self.interval_seen_at = obs.observed_at
 
         if obs.tags:
             self.tags.update(obs.tags)
