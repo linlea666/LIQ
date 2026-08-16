@@ -6,8 +6,10 @@ services:
         APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
         APP_BUILD_TIME: ${APP_BUILD_TIME:-unknown}
     container_name: liq-backend
-    # 整机仅 3.5GB：内存触顶时有限重试并保留现场，不允许无限重启拖垮宿主机。
-    restart: on-failure:5
+    # 2026-08 OOM 事故复盘：on-failure:5 达上限后容器永久停机 8 小时无人拉起。
+    # 行情服务可用性优先——unless-stopped + mem_limit 已足够保护宿主机
+    # （OOM kill 发生在容器内，Docker 重启自带指数退避，不会拖垮整机）。
+    restart: unless-stopped
     ports:
       - "8800:8000"
     env_file:
