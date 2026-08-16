@@ -246,3 +246,46 @@ class TestActiveAttackStaleDownweight:
         )
         # sell_ratio=0.8 → 0.40 × 1.0 = 0.40（线性 0.5→0, 0.6→1.0，>0.6 cap 1.0）
         assert score == pytest.approx(0.40, abs=0.01)
+
+
+# ─────────────────────────────────────────────────────────────────
+# 4. CVD 枚举断裂回归（2026-08 修复）
+#    生产端 processors/cvd._calc_trend 输出 rising/declining/flat，
+#    旧代码只认 up/down/strong_* → CVD 因子（0.30 权重）永不触发。
+# ─────────────────────────────────────────────────────────────────
+
+class TestCvdEnumRegression:
+    def test_declining_triggers_bid_side_attack(self):
+        """生产枚举 declining（=down）对 bid 墙同向 → 贡献 0.30。"""
+        zone = _make_zone(side="bid")
+        cvd = SimpleNamespace(trend_1h="declining")
+        score = _compute_active_attack_score(zone, None, cvd, ENGINE_DEFAULTS)
+        assert score == pytest.approx(0.30, abs=0.01)
+
+    def test_rising_triggers_ask_side_attack(self):
+        """生产枚举 rising（=up）对 ask 墙同向 → 贡献 0.30。"""
+        zone = _make_zone(side="ask")
+        cvd = SimpleNamespace(trend_1h="rising")
+        score = _compute_active_attack_score(zone, None, cvd, ENGINE_DEFAULTS)
+        assert score == pytest.approx(0.30, abs=0.01)
+
+    def test_rising_does_not_trigger_bid_side(self):
+        """rising 对 bid 墙是反向 → 不贡献。"""
+        zone = _make_zone(side="bid")
+        cvd = SimpleNamespace(trend_1h="rising")
+        score = _compute_active_attack_score(zone, None, cvd, ENGINE_DEFAULTS)
+        assert score == 0.0
+
+    def test_normalize_trend_aliases(self):
+        from processors.cvd import normalize_trend
+        assert normalize_trend("rising") == "up"
+        assert normalize_trend("strong_up") == "up"
+        assert normalize_trend("bullish") == "up"
+        assert normalize_trend("declining") == "down"
+        assert normalize_trend("falling") == "down"
+        assert normalize_trend("strong_down") == "down"
+        assert normalize_trend("flat") == "flat"
+        assert normalize_trend("balanced") == "flat"
+        assert normalize_trend("") == ""
+        assert normalize_trend(None) == ""
+        assert normalize_trend("garbage") == ""

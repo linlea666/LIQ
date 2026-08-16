@@ -79,6 +79,20 @@ class LiquidationMap(BaseModel):
     by_exchange: Optional[dict[str, dict[str, float]]] = None
 
 
+def pick_primary_liq_map(liq_maps: Optional[dict]) -> Optional["LiquidationMap"]:
+    """统一的清算地图降级链：1d → 7d → 30d（2026-08 P1 统一）。
+
+    历史遗留：engine 多处写 `liq_maps.get("1d") or liq_maps.get("24h")`，
+    但写入侧只存 1d/7d/30d 三个键（见 polls/liquidation.poll_liquidation_map
+    与 poll_liq_history），"24h" 分支是死代码——导致 1d 缺失时 REST 路径
+    （1d→7d→30d）与 Strategic 装配路径（1d→24h=None）降级行为不一致。
+    所有消费点统一走本函数。
+    """
+    if not liq_maps:
+        return None
+    return liq_maps.get("1d") or liq_maps.get("7d") or liq_maps.get("30d")
+
+
 class LiquidationEvent(BaseModel):
     """单笔爆仓事件"""
     coin: str

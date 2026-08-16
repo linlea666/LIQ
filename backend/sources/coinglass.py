@@ -867,10 +867,13 @@ class CoinglassSource(DataSource):
         """现货大单（holding 中）。
         用途：判定 zone 价区是否有"真买卖家"——区分现货真支撑 vs 合约清算磁铁。
         probe 验证：BTC 返回 ~190 条 holding，量级与合约大单接近且位置互补。
+        缓存：非 fast-path，实际 TTL 被 _request_once 钳制到 ≥300s
+        （与 poll_intervals.spot_large_orders=240s 配合 → 有效刷新约 300s 一次）。
+        注：2026-08 清理——本方法曾在类内被重复定义（后者覆盖前者），已去重。
         """
         return await self._request("/api/spot/orderbook/large-limit-order", {
             "exchange": exchange, "symbol": symbol,
-        }, cache_ttl=60)
+        })
 
     async def fetch_spot_large_orders_history(self, exchange: str, symbol: str,
                                               start_time: str = "",
@@ -1037,11 +1040,6 @@ class CoinglassSource(DataSource):
     ) -> Optional[list]:
         """直接复用原Footprint请求和缓存，避免趋势模块改变旧页面刷新语义。"""
         return await self.fetch_futures_footprint_history(exchange, symbol, interval, limit)
-
-    async def fetch_spot_large_orders(self, exchange: str, symbol: str) -> Optional[list]:
-        return await self._request("/api/spot/orderbook/large-limit-order", {
-            "exchange": exchange, "symbol": symbol,
-        })
 
     async def fetch_spot_orderbook_heatmap(self, exchange: str, symbol: str,
                                            interval: str = "5m",

@@ -6,9 +6,15 @@
 
 设计要点（与既有 processors/snapshot_archiver.py 范式对齐）：
     - 同步 IO + threading.RLock，主路径用 run_in_executor 推到 thread pool
-    - 不 gzip：纯 JSONL，便于 `jq / rg / pandas.read_json(lines=True)` 直读
-    - 按币/按天分文件：data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl
-    - 默认 14 天 GC（可用 LIQUIDITY_WALL_KEEP_DAYS 调整；后验脚本所需的 1-2 周观察期已足够覆盖）
+    - 当日文件为纯 JSONL，便于 `jq / rg / pandas.read_json(lines=True)` 直读；
+      历史日文件在 GC 时 gzip 压缩为 .jsonl.gz（读取方需兼容两种后缀）
+    - 按币/按天分文件：data/liquidity_wall_history/{COIN}/{YYYYMMDD}.jsonl[.gz]
+    - 写入节流（2026-08 P0 瘦身）：engine._recompute 每次重算都会调用 append
+      （生产实测 ~6.5s/次 → 244MB/天/币）。改为按币最小写入间隔 60s +
+      内容哈希去重（状态未变时最长 300s 心跳一帧），预期 <30MB/天/币，
+      gzip 后 <5MB/天/币
+    - 默认 30 天 GC（可用 LIQUIDITY_WALL_KEEP_DAYS 调整；压缩后 30 天成本低，
+      且 W4 后验需要 2-4 周样本窗口）
     - 磁盘水位保护：> 80% 跳过落盘 + 日志告警，30s 抑制再检测
     - 写入失败全部 best-effort（吞异常），绝不影响主轮询
 
@@ -35,6 +41,8 @@
 """
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 import logging
 import os
@@ -88,9 +96,14 @@ def _env_float(name: str, default: float, min_value: float, max_value: float) ->
     return max(min_value, min(max_value, value))
 
 
-_KEEP_DAYS = _env_int("LIQUIDITY_WALL_KEEP_DAYS", 14, 3, 90)
+_KEEP_DAYS = _env_int("LIQUIDITY_WALL_KEEP_DAYS", 30, 3, 90)
 _DISK_HIGH_WATERMARK = _env_float("LIQUIDITY_WALL_DISK_HIGH_WATERMARK", 0.80, 0.50, 0.98)
 _DISK_CHECK_INTERVAL_SEC = 30         # 高水位后 30s 内不再检测
+
+# 写入节流：最小写入间隔（同币两次落盘的最短间隔）与去重心跳
+# （内容哈希未变时最长隔多久仍强制写一帧，保证时间轴连续性供后验使用）
+_MIN_WRITE_INTERVAL_SEC = _env_int("LIQUIDITY_WALL_MIN_WRITE_INTERVAL_SEC", 60, 0, 600)
+_DEDUP_HEARTBEAT_SEC = _env_int("LIQUIDITY_WALL_DEDUP_HEARTBEAT_SEC", 300, 60, 3600)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -115,10 +128,20 @@ class LiquidityWallArchiver:
       await loop.run_in_executor(None, archiver.append, snapshot, source_age)
     """
 
-    def __init__(self, root: str = _DEFAULT_ROOT, keep_days: int = _KEEP_DAYS) -> None:
+    def __init__(
+        self,
+        root: str = _DEFAULT_ROOT,
+        keep_days: int = _KEEP_DAYS,
+        min_write_interval_sec: int = _MIN_WRITE_INTERVAL_SEC,
+        dedup_heartbeat_sec: int = _DEDUP_HEARTBEAT_SEC,
+    ) -> None:
         self._lock = threading.RLock()
         self._root = root
         self._keep_days = keep_days
+        self._min_write_interval_sec = max(0, int(min_write_interval_sec))
+        self._dedup_heartbeat_sec = max(
+            self._min_write_interval_sec, int(dedup_heartbeat_sec),
+        )
         os.makedirs(self._root, exist_ok=True)
         self._last_gc_ts = 0
         # 磁盘水位状态
@@ -126,6 +149,10 @@ class LiquidityWallArchiver:
         self._dropped_count: int = 0               # 高水位 + queue 满计数（运维用）
         self._success_count: int = 0
         self._error_count: int = 0
+        # 写入节流状态（按币）：上次落盘墙钟秒 / 上次内容哈希
+        self._last_write_ts: dict[str, float] = {}
+        self._last_content_hash: dict[str, str] = {}
+        self._throttled_count: int = 0             # 因间隔/去重被跳过的帧数（运维用）
 
     # ── 写入 ───────────────────────────────────────────────────────────
 
@@ -155,13 +182,34 @@ class LiquidityWallArchiver:
             row = self._build_row(snapshot, source_age or {})
             if row is None:
                 return False
-            day_key = _day_key(int(row["ts"]))
-            path = self._path_for(row["coin"], day_key)
+            coin = str(row["coin"])
+            now = time.time()
 
             with self._lock:
+                # ── 写入节流（P0 瘦身）─────────────────────────────
+                # 1) 最小间隔：同币两次落盘间隔 < min_interval → 直接跳过
+                # 2) 去重：间隔够了但内容哈希未变 → 仍跳过，
+                #    直到超过 heartbeat 强制写一帧（保证时间轴连续）
+                last_ts = self._last_write_ts.get(coin, 0.0)
+                elapsed = now - last_ts
+                if elapsed < self._min_write_interval_sec:
+                    self._throttled_count += 1
+                    return False
+                content_hash = _content_hash(row)
+                if (
+                    content_hash == self._last_content_hash.get(coin)
+                    and elapsed < self._dedup_heartbeat_sec
+                ):
+                    self._throttled_count += 1
+                    return False
+
+                day_key = _day_key(int(row["ts"]))
+                path = self._path_for(coin, day_key)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                self._last_write_ts[coin] = now
+                self._last_content_hash[coin] = content_hash
                 self._success_count += 1
             self._gc_if_due()
             return True
@@ -183,8 +231,9 @@ class LiquidityWallArchiver:
                 d = os.path.join(self._root, coin.upper())
                 if os.path.isdir(d):
                     for f in os.listdir(d):
-                        if f.endswith(".jsonl"):
-                            days.add(f[:-len(".jsonl")])
+                        key = _day_key_from_filename(f)
+                        if key:
+                            days.add(key)
             else:
                 if not os.path.isdir(self._root):
                     return []
@@ -193,8 +242,9 @@ class LiquidityWallArchiver:
                     if not os.path.isdir(sub):
                         continue
                     for f in os.listdir(sub):
-                        if f.endswith(".jsonl"):
-                            days.add(f[:-len(".jsonl")])
+                        key = _day_key_from_filename(f)
+                        if key:
+                            days.add(key)
         except OSError:
             return []
         return sorted(days)
@@ -206,8 +256,11 @@ class LiquidityWallArchiver:
                 "success_count": self._success_count,
                 "error_count": self._error_count,
                 "dropped_count": self._dropped_count,
+                "throttled_count": self._throttled_count,
                 "disk_high_until_ts": int(self._disk_full_until_ts),
                 "keep_days": self._keep_days,
+                "min_write_interval_sec": self._min_write_interval_sec,
+                "dedup_heartbeat_sec": self._dedup_heartbeat_sec,
                 "disk_high_watermark": _DISK_HIGH_WATERMARK,
                 "root": self._root,
             }
@@ -233,6 +286,9 @@ class LiquidityWallArchiver:
             self._dropped_count = 0
             self._success_count = 0
             self._error_count = 0
+            self._throttled_count = 0
+            self._last_write_ts.clear()
+            self._last_content_hash.clear()
 
     # ── 内部 ───────────────────────────────────────────────────────────
 
@@ -261,12 +317,13 @@ class LiquidityWallArchiver:
         return False
 
     def _gc_if_due(self, force: bool = False) -> None:
-        """每小时检查一次，删除 > keep_days 的日文件。"""
+        """每小时检查一次：1) 压缩历史日 .jsonl → .jsonl.gz；2) 删除超期文件。"""
         now = int(time.time())
         if not force and now - self._last_gc_ts < 3600:
             return
         self._last_gc_ts = now
         try:
+            today_key = datetime.now(_TZ_CN).strftime("%Y%m%d")
             cutoff_dt = datetime.now(_TZ_CN) - timedelta(days=self._keep_days)
             cutoff_key = cutoff_dt.strftime("%Y%m%d")
             for c in os.listdir(self._root):
@@ -274,20 +331,53 @@ class LiquidityWallArchiver:
                 if not os.path.isdir(sub):
                     continue
                 for f in os.listdir(sub):
-                    if not f.endswith(".jsonl"):
+                    day_key = _day_key_from_filename(f)
+                    if not day_key:
                         continue
-                    day_key = f[:-len(".jsonl")]
+                    path = os.path.join(sub, f)
                     if day_key < cutoff_key:
                         try:
-                            os.remove(os.path.join(sub, f))
+                            os.remove(path)
                             logger.info(
                                 "[liquidity_wall_archiver] rotated out | coin=%s day=%s",
                                 c, day_key,
                             )
                         except OSError:
                             pass
+                        continue
+                    # 历史日的未压缩文件 → gzip（当日文件保持明文可 jq/rg 直读）
+                    if f.endswith(".jsonl") and day_key < today_key:
+                        self._compress_day_file(path)
         except Exception:
             logger.debug("[liquidity_wall_archiver] gc failed", exc_info=True)
+
+    def _compress_day_file(self, path: str) -> None:
+        """把历史日 .jsonl 压缩为 .jsonl.gz（追加 gzip member，兼容既有 gz）。
+
+        gzip 格式允许多 member 串接，Python gzip 读取时自动拼接——因此若
+        午夜边界竞态导致 gz 已存在后又出现同日 .jsonl，追加写入依然安全。
+        持有 self._lock，避免与 append 并发写同一文件。
+        """
+        gz_path = path + ".gz"
+        try:
+            with self._lock:
+                if not os.path.isfile(path):
+                    return
+                with open(path, "rb") as src:
+                    data = src.read()
+                with open(gz_path, "ab") as dst:
+                    dst.write(gzip.compress(data))
+                os.remove(path)
+            logger.info(
+                "[liquidity_wall_archiver] compressed | %s (%.1f MB → %.1f MB)",
+                os.path.basename(path),
+                len(data) / 1048576,
+                os.path.getsize(gz_path) / 1048576,
+            )
+        except Exception:
+            logger.debug(
+                "[liquidity_wall_archiver] compress failed: %s", path, exc_info=True,
+            )
 
     def _build_row(self, snapshot: Any, source_age: dict[str, int]) -> Optional[dict]:
         """提炼 OrderbookPressureSnapshot → 落盘 dict（轻量 schema）。"""
@@ -434,6 +524,28 @@ def _day_key(ts: int) -> str:
     return dt.strftime("%Y%m%d")
 
 
+def _day_key_from_filename(name: str) -> Optional[str]:
+    """从归档文件名提取 YYYYMMDD；非归档文件返回 None。"""
+    if name.endswith(".jsonl.gz"):
+        key = name[: -len(".jsonl.gz")]
+    elif name.endswith(".jsonl"):
+        key = name[: -len(".jsonl")]
+    else:
+        return None
+    return key if len(key) == 8 and key.isdigit() else None
+
+
+# 内容去重时忽略的顶层字段：每帧必变（时间戳/源龄）或与墙状态无关的行情噪声。
+_HASH_EXCLUDE_KEYS = frozenset({"ts", "source_age", "last_price", "atr"})
+
+
+def _content_hash(row: dict) -> str:
+    """对落盘行做稳定哈希（排除必变字段），用于「状态未变不重复写」判定。"""
+    payload = {k: v for k, v in row.items() if k not in _HASH_EXCLUDE_KEYS}
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Process-level singleton
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -450,6 +562,19 @@ def get_archiver() -> LiquidityWallArchiver:
             if _instance is None:
                 _instance = LiquidityWallArchiver()
     return _instance
+
+
+def configure_archiver(keep_days: Optional[int] = None) -> LiquidityWallArchiver:
+    """启动时按配置调整全局实例（engine.start 调用一次）。
+
+    优先级：环境变量 LIQUIDITY_WALL_KEEP_DAYS > yaml retention.liquidity_wall_days。
+    env 未设置且传入 keep_days 时以后者生效（clamp 3-90，与 env 口径一致）。
+    """
+    archiver = get_archiver()
+    if keep_days is not None and not os.getenv("LIQUIDITY_WALL_KEEP_DAYS"):
+        with archiver._lock:
+            archiver._keep_days = max(3, min(90, int(keep_days)))
+    return archiver
 
 
 def reset_archiver_for_test(

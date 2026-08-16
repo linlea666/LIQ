@@ -1695,12 +1695,12 @@ def _compute_active_attack_score(
             score += 0.40 * taker_factor * tw
 
     # 2) cvd_spot 同向趋势 × stale 降权
+    # 枚举经 normalize_trend 归一（生产端输出 rising/declining，旧代码只认
+    # up/down 导致该因子永不触发——2026-08 枚举断裂修复）
     if cvd_spot is not None:
-        trend = getattr(cvd_spot, "trend_1h", None)
-        if zone.side == "bid":
-            same_trend = trend in ("down", "strong_down")
-        else:
-            same_trend = trend in ("up", "strong_up")
+        from processors.cvd import normalize_trend
+        trend = normalize_trend(getattr(cvd_spot, "trend_1h", None))
+        same_trend = (trend == "down") if zone.side == "bid" else (trend == "up")
         if same_trend:
             cw = 1.0
             if now_sec is not None:

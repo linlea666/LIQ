@@ -604,10 +604,8 @@ async def get_trading_brain(
     atr = float(state.atr or 0.0)
     kl = state.key_level_snapshot_v2
     op = state.orderbook_pressure_snapshot
-    liq = None
-    maps = getattr(state, "liq_maps", None) or {}
-    if maps:
-        liq = maps.get("1d") or maps.get("7d") or maps.get("30d")
+    from models.liquidation import pick_primary_liq_map
+    liq = pick_primary_liq_map(getattr(state, "liq_maps", None))
 
     from processors.market_read import build_market_read_from_state
 

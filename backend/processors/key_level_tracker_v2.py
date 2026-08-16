@@ -654,11 +654,10 @@ def _cvd_trend_value(cvd: CVDData | None) -> str:
     """拿 CVD 1h 趋势，简化为 'up' / 'down' / 'flat' / 'unknown'。"""
     if not cvd:
         return "unknown"
-    trend = (cvd.trend_1h or "").strip().lower()
-    if trend in {"up", "rising", "positive", "bullish"}:
-        return "up"
-    if trend in {"down", "falling", "negative", "bearish"}:
-        return "down"
+    from processors.cvd import normalize_trend
+    trend = normalize_trend(cvd.trend_1h)
+    if trend in ("up", "down"):
+        return trend
     # 没有显式 trend 就用 delta_1h 兜底
     delta = cvd.delta_1h or 0
     if delta > 0:

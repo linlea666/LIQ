@@ -30,7 +30,7 @@ from models.key_level import KeyLevelSnapshotV2
 from models.market_structure import MarketStructure
 from models.liquidation import (
     HeatmapData, LiqHistoryData, LiqMaxPainData, LiqMaxPainItem,
-    LiquidationMap, LiquidationStats,
+    LiquidationMap, LiquidationStats, pick_primary_liq_map,
 )
 from models.macro import (
     CoinbasePremiumData, NewsData, StablecoinMcapData,
@@ -582,6 +582,13 @@ class Engine:
             "Engine starting (Coinglass) | coins=%s default=%s",
             self._settings.supported_coins, self._default_coin,
         )
+        # ── P0 · 墙归档保留天数接线（yaml retention 段；env 优先）──
+        try:
+            from processors.liquidity_wall_archiver import configure_archiver
+            configure_archiver(keep_days=self._settings.retention.liquidity_wall_days)
+        except Exception:
+            logger.debug("[OP] configure_archiver failed", exc_info=True)
+
         # ── 滚仓模块启动：从磁盘加载 positions + plans + events + settings ──
         try:
             self.roll_service.bootstrap()
@@ -1193,7 +1200,7 @@ class Engine:
                     ready.append({
                         "coin": ccy,
                         "ticker": bool(st.ticker),
-                        "liq_1d": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
+                        "liq_1d": bool(pick_primary_liq_map(st.liq_maps)),
                         "kline_1h": bool(st.candles_1h),
                         "kline_15m": bool(st.candles_15m),
                         "indicators": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
@@ -1620,7 +1627,7 @@ class Engine:
             return
 
         _recompute_t0 = time.time()
-        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_map = pick_primary_liq_map(state.liq_maps)
 
         state.temperature, _factor_scores = calc_market_temperature(
             coin=ccy, funding=state.funding, oi=state.oi,
@@ -1827,7 +1834,7 @@ class Engine:
             for lv in snapshot_v2.levels:
                 lv.distance_pct = round(abs(lv.price - price) / price * 100, 4) if price else 0
 
-        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_map = pick_primary_liq_map(state.liq_maps)
         cutoff = int(now) - 3600
         recent_sweeps = [
             e for e in state.liq_sweep_events if e.get("ts", 0) > cutoff
@@ -1872,7 +1879,7 @@ class Engine:
         from processors.confluence_scoring import score_and_build_snapshot
 
         state = self._states[ccy]
-        liq_map = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_map = pick_primary_liq_map(state.liq_maps)
         liq_map_7d = state.liq_maps.get("7d")
         liq_map_30d = state.liq_maps.get("30d")
         vwap = state.vp.vwap if state.vp else 0
@@ -1934,10 +1941,11 @@ class Engine:
         cvd_div_dir = ""
         cvd_obj = state.cvd_contract or state.cvd_spot
         if cvd_obj and cvd_obj.has_divergence:
-            tr = (cvd_obj.trend_1h or "").lower()
-            if tr in ("up", "rising", "bullish"):
+            from processors.cvd import normalize_trend
+            tr = normalize_trend(cvd_obj.trend_1h)
+            if tr == "up":
                 cvd_div_dir = "bullish"
-            elif tr in ("down", "falling", "bearish"):
+            elif tr == "down":
                 cvd_div_dir = "bearish"
 
         # M2: 提取 funding 极值（取 OKX/Binance 中绝对值最大者）
@@ -2106,7 +2114,7 @@ class Engine:
             result["ticker"] = state.ticker.model_dump()
         if state.temperature:
             result["temperature"] = state.temperature.model_dump()
-        liq = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq = pick_primary_liq_map(state.liq_maps)
         if liq:
             result["liquidation_1d"] = liq.model_dump()
         return result
@@ -2168,7 +2176,7 @@ class Engine:
             return False
         if state.rsi_14 is None:
             return False
-        if not state.liq_maps.get("1d") and not state.liq_maps.get("24h"):
+        if pick_primary_liq_map(state.liq_maps) is None:
             return False
         if state.oi is None:
             return False
@@ -2645,7 +2653,7 @@ class Engine:
         #   oi_delta_1h_pct: Optional[float]
         #   funding_interpretation: str
         # 注：state.cvd_contract/cvd_spot/oi/funding 是富对象，需要先抽出标量字段。
-        liq_for_brain = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_for_brain = pick_primary_liq_map(state.liq_maps)
         cvd_c_trend = (
             state.cvd_contract.trend_1h if state.cvd_contract else ""
         ) or ""
@@ -2680,7 +2688,7 @@ class Engine:
                 ccy, exc_info=True,
             )
 
-        liq_1d = state.liq_maps.get("1d") or state.liq_maps.get("24h")
+        liq_1d = pick_primary_liq_map(state.liq_maps)
         liq_7d = state.liq_maps.get("7d")
         liq_30d = state.liq_maps.get("30d")
         pain_block = state.liq_max_pain.get("24h") or state.liq_max_pain.get("1d")
@@ -3079,7 +3087,7 @@ class Engine:
                 {
                     "coin": ccy,
                     "ticker_ready": bool(st.ticker),
-                    "liquidation_ready": bool(st.liq_maps.get("1d") or st.liq_maps.get("24h")),
+                    "liquidation_ready": bool(pick_primary_liq_map(st.liq_maps)),
                     "kline_1h_ready": bool(st.candles_1h),
                     "indicators_ready": st.rsi_14 is not None and bool(st.macd_data) and bool(st.boll_data),
                     "market_structure_ready": st.market_structure is not None,

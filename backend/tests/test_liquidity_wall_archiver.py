@@ -5,10 +5,14 @@
   - 按 coin/day 切片（多币 / 跨日）
   - 写入失败 best-effort（snapshot=None / 缺字段）
   - 磁盘高水位时跳过 + dropped_count 计数
-  - 30 天 GC 删除超期文件
+  - GC 删除超期文件 + 历史日文件 gzip 压缩
+  - 写入节流：最小间隔 + 内容哈希去重 + 心跳强制写
   - 字段向前兼容（没有 wall_zone_id / raw_trust_score 等新字段时默认值兼容）
   - reset_for_testing 清空目录
   - global singleton
+
+注：多数用例传 min_write_interval_sec=0, dedup_heartbeat_sec=0 关闭节流，
+只在 TestWriteThrottle 中显式验证节流行为。
 """
 from __future__ import annotations
 
@@ -137,13 +141,20 @@ def _make_snapshot(
     )
 
 
+def _archiver(tmp_path, **kwargs) -> LiquidityWallArchiver:
+    """默认关闭写入节流的 archiver 工厂（节流行为在 TestWriteThrottle 单测）。"""
+    kwargs.setdefault("min_write_interval_sec", 0)
+    kwargs.setdefault("dedup_heartbeat_sec", 0)
+    return LiquidityWallArchiver(root=str(tmp_path), **kwargs)
+
+
 # ─────────────────────────────────────────────────────────────────
 # 1. 落盘往返一致
 # ─────────────────────────────────────────────────────────────────
 
 class TestRoundTrip:
     def test_basic_append_and_read(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         snap = _make_snapshot(walls_above=[_make_zone()])
         ok = archiver.append(snap, source_age={"orderbook": 12, "spot": 35})
         assert ok is True
@@ -168,7 +179,7 @@ class TestRoundTrip:
         assert row["source_age"] == {"orderbook": 12, "spot": 35}
 
     def test_multiple_appends_same_day(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         for i in range(3):
             snap = _make_snapshot(walls_above=[_make_zone(price_mid=76000 + i * 100)])
             assert archiver.append(snap) is True
@@ -178,7 +189,7 @@ class TestRoundTrip:
         assert len(rows) == 3
 
     def test_crowding_global_serialized(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         snap = _make_snapshot()
         archiver.append(snap)
         day = datetime.now(_TZ_CN).strftime("%Y%m%d")
@@ -195,7 +206,7 @@ class TestRoundTrip:
 
 class TestPartitioning:
     def test_per_coin_isolation(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         archiver.append(_make_snapshot(coin="BTC"))
         archiver.append(_make_snapshot(coin="ETH"))
         archiver.append(_make_snapshot(coin="SOL"))
@@ -204,17 +215,25 @@ class TestPartitioning:
             assert (tmp_path / c / f"{day}.jsonl").exists()
 
     def test_cross_day_partitioning(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         # 日期必须相对当天取，写死日期会随时间推移落到 keep_days 之外被保留策略清掉。
         day1 = datetime.now(_TZ_CN).replace(hour=12) - timedelta(days=2)
         day2 = day1 + timedelta(days=1)
         archiver.append(_make_snapshot(ts_sec=int(day1.timestamp())))
         archiver.append(_make_snapshot(ts_sec=int(day2.timestamp())))
-        assert (tmp_path / "BTC" / f"{day1.strftime('%Y%m%d')}.jsonl").exists()
-        assert (tmp_path / "BTC" / f"{day2.strftime('%Y%m%d')}.jsonl").exists()
+
+        def _day_exists(key: str) -> bool:
+            # GC 可能已把历史日明文压缩为 .jsonl.gz，两种形态都算存在
+            return (
+                (tmp_path / "BTC" / f"{key}.jsonl").exists()
+                or (tmp_path / "BTC" / f"{key}.jsonl.gz").exists()
+            )
+
+        assert _day_exists(day1.strftime("%Y%m%d"))
+        assert _day_exists(day2.strftime("%Y%m%d"))
 
     def test_list_days(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=90)
+        archiver = _archiver(tmp_path, keep_days=90)
         day1 = datetime.now(_TZ_CN).replace(hour=12) - timedelta(days=2)
         day2 = day1 + timedelta(days=1)
         key1, key2 = day1.strftime("%Y%m%d"), day2.strftime("%Y%m%d")
@@ -232,17 +251,17 @@ class TestPartitioning:
 
 class TestBestEffort:
     def test_none_snapshot_returns_false(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = _archiver(tmp_path)
         assert archiver.append(None) is False
 
     def test_missing_coin_or_ts_skipped(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = _archiver(tmp_path)
         assert archiver.append(_make_snapshot(coin="")) is False
         assert archiver.append(_make_snapshot(ts_sec=-1)) is False
 
     def test_zone_without_extended_fields_default_zero(self, tmp_path):
         """W1-T4/W2-T1 字段未填充时默认 0/空，不抛异常。"""
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = _archiver(tmp_path)
         # 完全裸的 zone（没有任何属性）
         bare_zone = SimpleNamespace(
             side="bid", source="futures_only", dual_source=False,
@@ -276,7 +295,7 @@ class TestBestEffort:
 
 class TestDiskWatermark:
     def test_high_disk_skips_and_counts_dropped(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = _archiver(tmp_path)
         snap = _make_snapshot()
 
         # 模拟 95% 使用率
@@ -295,7 +314,7 @@ class TestDiskWatermark:
 
     def test_disk_check_failure_does_not_block(self, tmp_path):
         """shutil.disk_usage 抛异常时落盘退化为不保护，仍继续写入。"""
-        archiver = LiquidityWallArchiver(root=str(tmp_path))
+        archiver = _archiver(tmp_path)
         snap = _make_snapshot()
 
         with patch("shutil.disk_usage", side_effect=OSError("simulated")):
@@ -309,7 +328,7 @@ class TestDiskWatermark:
 
 class TestGarbageCollection:
     def test_old_files_removed(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=30)
+        archiver = _archiver(tmp_path, keep_days=30)
 
         # 先手动放一个 60 天前的文件
         old_day = (datetime.now(_TZ_CN) - timedelta(days=60)).strftime("%Y%m%d")
@@ -323,8 +342,11 @@ class TestGarbageCollection:
 
         assert not old_file.exists(), "60 天前文件应被 GC 删除"
 
-    def test_recent_files_preserved(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=30)
+    def test_recent_files_preserved_and_compressed(self, tmp_path):
+        """15 天前文件（< keep_days）应被保留，且历史日 .jsonl 被压缩为 .jsonl.gz。"""
+        import gzip as _gzip
+
+        archiver = _archiver(tmp_path, keep_days=30)
         recent_day = (datetime.now(_TZ_CN) - timedelta(days=15)).strftime("%Y%m%d")
         recent_file = tmp_path / "BTC" / f"{recent_day}.jsonl"
         recent_file.parent.mkdir(parents=True, exist_ok=True)
@@ -333,7 +355,44 @@ class TestGarbageCollection:
         archiver._last_gc_ts = 0
         archiver.append(_make_snapshot())
 
-        assert recent_file.exists(), "15 天前文件应被保留（< 30 天）"
+        gz_file = tmp_path / "BTC" / f"{recent_day}.jsonl.gz"
+        assert not recent_file.exists(), "历史日明文文件应被压缩后删除"
+        assert gz_file.exists(), "应生成 .jsonl.gz"
+        with _gzip.open(gz_file, "rt", encoding="utf-8") as f:
+            rows = [json.loads(line) for line in f.read().splitlines()]
+        assert rows == [{"ts": 1, "coin": "BTC"}]
+
+    def test_gz_files_also_rotated_out(self, tmp_path):
+        """超期的 .jsonl.gz 同样被 GC 删除。"""
+        archiver = _archiver(tmp_path, keep_days=30)
+        old_day = (datetime.now(_TZ_CN) - timedelta(days=60)).strftime("%Y%m%d")
+        old_gz = tmp_path / "BTC" / f"{old_day}.jsonl.gz"
+        old_gz.parent.mkdir(parents=True, exist_ok=True)
+        old_gz.write_bytes(b"\x1f\x8b\x08\x00dummy")
+
+        archiver._last_gc_ts = 0
+        archiver.append(_make_snapshot())
+
+        assert not old_gz.exists(), "60 天前 gz 文件应被 GC 删除"
+
+    def test_compress_appends_gzip_member_when_gz_exists(self, tmp_path):
+        """午夜边界竞态：gz 已存在后又出现同日 jsonl → 追加 gzip member，数据不丢。"""
+        import gzip as _gzip
+
+        archiver = _archiver(tmp_path, keep_days=30)
+        day = (datetime.now(_TZ_CN) - timedelta(days=2)).strftime("%Y%m%d")
+        d = tmp_path / "BTC"
+        d.mkdir(parents=True, exist_ok=True)
+        gz_path = d / f"{day}.jsonl.gz"
+        gz_path.write_bytes(_gzip.compress(b'{"ts": 1}\n'))
+        (d / f"{day}.jsonl").write_text('{"ts": 2}\n')
+
+        archiver._compress_day_file(str(d / f"{day}.jsonl"))
+
+        with _gzip.open(gz_path, "rt", encoding="utf-8") as f:
+            rows = [json.loads(line) for line in f.read().splitlines()]
+        assert rows == [{"ts": 1}, {"ts": 2}], "多 member gzip 应拼接读出全部行"
+        assert not (d / f"{day}.jsonl").exists()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -367,12 +426,57 @@ class TestSingleton:
 
 
 # ─────────────────────────────────────────────────────────────────
+# 6.5 写入节流（P0 瘦身）
+# ─────────────────────────────────────────────────────────────────
+
+class TestWriteThrottle:
+    def test_min_interval_throttles_same_coin(self, tmp_path):
+        """同币 60s 内的第二帧被跳过；不同币互不影响。"""
+        archiver = LiquidityWallArchiver(
+            root=str(tmp_path), min_write_interval_sec=60, dedup_heartbeat_sec=300,
+        )
+        assert archiver.append(_make_snapshot(coin="BTC")) is True
+        assert archiver.append(_make_snapshot(coin="BTC")) is False, "间隔内应被节流"
+        assert archiver.append(_make_snapshot(coin="ETH")) is True, "不同币不受影响"
+        assert archiver.stats()["throttled_count"] == 1
+
+    def test_dedup_skips_unchanged_content(self, tmp_path):
+        """间隔已够但内容未变 → 心跳期内跳过。"""
+        archiver = LiquidityWallArchiver(
+            root=str(tmp_path), min_write_interval_sec=0, dedup_heartbeat_sec=300,
+        )
+        snap = _make_snapshot(walls_above=[_make_zone()])
+        assert archiver.append(snap) is True
+        # 内容相同（ts/last_price 变化不参与哈希）
+        snap2 = _make_snapshot(walls_above=[_make_zone()], ts_sec=snap.ts_sec + 30)
+        snap2.last_price = 76500.0
+        assert archiver.append(snap2) is False, "内容未变应被去重"
+        # 内容变化（墙价位不同）→ 立即写
+        snap3 = _make_snapshot(
+            walls_above=[_make_zone(price_mid=77000.0)], ts_sec=snap.ts_sec + 40,
+        )
+        assert archiver.append(snap3) is True
+
+    def test_heartbeat_forces_write_after_long_unchanged(self, tmp_path):
+        """内容一直未变，但超过心跳窗口后强制写一帧。"""
+        archiver = LiquidityWallArchiver(
+            root=str(tmp_path), min_write_interval_sec=0, dedup_heartbeat_sec=300,
+        )
+        snap = _make_snapshot(walls_above=[_make_zone()])
+        assert archiver.append(snap) is True
+        # 手动把上次写入时间拨回 301 秒前
+        archiver._last_write_ts["BTC"] -= 301
+        snap2 = _make_snapshot(walls_above=[_make_zone()], ts_sec=snap.ts_sec + 301)
+        assert archiver.append(snap2) is True, "超过心跳应强制写"
+
+
+# ─────────────────────────────────────────────────────────────────
 # 7. stats 暴露
 # ─────────────────────────────────────────────────────────────────
 
 class TestStats:
     def test_stats_basic(self, tmp_path):
-        archiver = LiquidityWallArchiver(root=str(tmp_path), keep_days=60)
+        archiver = _archiver(tmp_path, keep_days=60)
         archiver.append(_make_snapshot())
         archiver.append(_make_snapshot(coin="ETH"))
         archiver.append(None)  # 应被拒绝但不算 error（snapshot None 提前 return）

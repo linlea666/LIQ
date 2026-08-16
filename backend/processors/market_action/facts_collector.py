@@ -675,13 +675,8 @@ def collect(state: "CoinState") -> MarketActionFacts:
             or state.liq_heatmaps.get("7d")
             or next(iter(state.liq_heatmaps.values()))
         )
-    liq_map = None
-    if getattr(state, "liq_maps", None):
-        liq_map = (
-            state.liq_maps.get("1d")
-            or state.liq_maps.get("7d")
-            or next(iter(state.liq_maps.values()))
-        )
+    from models.liquidation import pick_primary_liq_map
+    liq_map = pick_primary_liq_map(getattr(state, "liq_maps", None))
     facts.liq_map_clusters = build_cluster_snapshot(
         heatmap,
         state.ticker.last if state.ticker else None,

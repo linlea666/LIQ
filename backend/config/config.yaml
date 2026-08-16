@@ -278,6 +278,18 @@ processors:
       ETH: 2000000      # 2M
       SOL: 800000       # 800K（低市值，阈值过高会一个墙都没有）
 
+# ── 数据保留策略（P0 · 统一配置入口）──────────────────────────────────
+# 只集中"部署者需要调整"的保留天数。各模块内部固定策略登记如下（改动需进代码）：
+#   - sweep_watch trace          : 7 天（processors/sweep_watch_archiver）
+#   - spot_accumulation raw 事实 : 48h 滚动（compact 90d / daily 400d 兜底长期）
+#   - trend 快照                 : 400 天（trend_monitor.snapshot_retention_days）
+#   - bottom_model 快照          : 800 天（bottom_model.snapshot_retention_days）
+# 环境变量 LIQUIDITY_WALL_KEEP_DAYS 优先于本节（运维应急杆）。
+retention:
+  liquidity_wall_days: 30       # 墙归档明细（gzip 压缩后 ~5MB/天/币）
+  orderflow_hourly_days: 180    # 订单流小时桶（P2 新增，体积极小）
+  orderflow_daily_days: 400     # 订单流日桶（跨年回测窗口）
+
 engine:
   inactive_poll_sec: 120
   grace_period_sec: 60

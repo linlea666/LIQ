@@ -135,21 +135,28 @@ def load_jsonl_files(
     snapshots: list[dict] = []
     files_read = 0
     for day in days:
-        path = coin_dir / f"{day}.jsonl"
-        if not path.is_file():
-            continue
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                lines = f.readlines()
-            parsed = parse_archived_snapshots(lines)
-            files_read += 1
-            for p in parsed:
-                ts = int(p.get("ts", 0) or 0)
-                if start_ts <= ts <= end_ts:
-                    snapshots.append(p)
-        except OSError:
-            logger.exception("failed to read %s", path)
-            continue
+        # 同一天可能同时存在 .jsonl.gz（历史压缩）与 .jsonl（边界补写），都读
+        candidates = [coin_dir / f"{day}.jsonl.gz", coin_dir / f"{day}.jsonl"]
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                if path.suffix == ".gz":
+                    import gzip
+                    with gzip.open(path, "rt", encoding="utf-8") as f:
+                        lines = f.readlines()
+                else:
+                    with path.open("r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                parsed = parse_archived_snapshots(lines)
+                files_read += 1
+                for p in parsed:
+                    ts = int(p.get("ts", 0) or 0)
+                    if start_ts <= ts <= end_ts:
+                        snapshots.append(p)
+            except OSError:
+                logger.exception("failed to read %s", path)
+                continue
     logger.info("loaded %d snapshots from %d file(s) under %s",
                 len(snapshots), files_read, coin_dir)
     return snapshots

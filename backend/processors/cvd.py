@@ -114,6 +114,35 @@ def compute_cvd_price_divergence(
     return CVDPriceDivergence()
 
 
+# ── CVD 趋势枚举归一化（2026-08 枚举断裂修复）─────────────────────────
+# 生产端 _calc_trend 输出 rising/declining/flat；历史上各消费端自定义了
+# up/down/bullish/falling 等别名并各自漏配，导致墙引擎攻击分 CVD 因子、
+# direction_vote 偏空票、engine CVD 顶背离等多处静默失效。
+# 所有消费点统一走 normalize_trend，避免枚举再次漂移。
+
+_TREND_UP_ALIASES = frozenset({
+    "up", "strong_up", "rising", "positive", "bullish", "long",
+})
+_TREND_DOWN_ALIASES = frozenset({
+    "down", "strong_down", "declining", "falling", "negative", "bearish", "short",
+})
+_TREND_FLAT_ALIASES = frozenset({"flat", "balanced", "neutral"})
+
+
+def normalize_trend(trend: str | None) -> str:
+    """归一化 CVD 趋势字符串 → 'up' / 'down' / 'flat' / ''（未知）。"""
+    t = (trend or "").strip().lower()
+    if not t:
+        return ""
+    if t in _TREND_UP_ALIASES:
+        return "up"
+    if t in _TREND_DOWN_ALIASES:
+        return "down"
+    if t in _TREND_FLAT_ALIASES:
+        return "flat"
+    return ""
+
+
 def _calc_trend(points: list[CVDPoint], lookback_points: int = 12) -> tuple[str, float]:
     """计算最近 lookback_points 个数据点的 CVD 趋势"""
     if len(points) < 2:

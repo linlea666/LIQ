@@ -246,12 +246,13 @@ def _vote_flow(state) -> DirectionVote:
     score = 0.0
     parts: list[str] = []
     if cvd is not None:
-        trend = (getattr(cvd, "trend_1h", "") or "").lower()
+        from processors.cvd import normalize_trend
+        trend = normalize_trend(getattr(cvd, "trend_1h", ""))
         delta = float(getattr(cvd, "delta_1h", 0.0) or 0.0)
-        if trend in ("rising", "bullish", "up"):
+        if trend == "up":
             score += 0.5
             parts.append(f"合约 CVD↑({delta:+.2g})")
-        elif trend in ("falling", "bearish", "down"):
+        elif trend == "down":
             score -= 0.5
             parts.append(f"合约 CVD↓({delta:+.2g})")
         else:

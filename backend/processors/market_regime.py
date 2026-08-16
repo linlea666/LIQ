@@ -262,11 +262,12 @@ def _extract_features(
         # CVD 方向持续性：优先读 MAA facts（PR-5 AISnapshot 已移除顶层 cvd_*）
         fcc = getattr(snapshot, "facts_cvd_contract", None)
         if fcc is not None:
-            trend = (getattr(fcc, "trend_1h", "") or "").lower()
+            from processors.cvd import normalize_trend
+            trend = normalize_trend(getattr(fcc, "trend_1h", ""))
             delta = float(getattr(fcc, "delta_1h", None) or 0)
-            if trend in ("bullish", "up", "long"):
+            if trend == "up":
                 feat.cvd_persistence = 1.0 if delta > 0 else 0.5
-            elif trend in ("bearish", "down", "short"):
+            elif trend == "down":
                 feat.cvd_persistence = 1.0 if delta < 0 else 0.5
             else:
                 feat.cvd_persistence = 0.3

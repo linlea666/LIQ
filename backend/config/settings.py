@@ -380,6 +380,20 @@ class TrendMonitorConfig:
 
 
 @dataclass(frozen=True)
+class RetentionConfig:
+    """数据保留策略（P0 · 统一配置入口）。
+
+    只集中"部署者需要调整"的保留天数；各模块内部固定策略
+    （sweep_watch 7d、facts_raw 48h、trend/bottom_model 400/800d 等）
+    仍由模块自治，登记见 config.yaml retention 段注释。
+    环境变量 LIQUIDITY_WALL_KEEP_DAYS 优先于 yaml（运维应急杆）。
+    """
+    liquidity_wall_days: int = 30
+    orderflow_hourly_days: int = 180
+    orderflow_daily_days: int = 400
+
+
+@dataclass(frozen=True)
 class Settings:
     coins: dict[str, CoinConfig]
     coinglass: CoinglassSourceConfig
@@ -402,6 +416,7 @@ class Settings:
     bgeometrics: BGeometricsSourceConfig = field(default_factory=BGeometricsSourceConfig)
     yahoo_cme: YahooCMESourceConfig = field(default_factory=YahooCMESourceConfig)
     bottom_model: BottomModelConfig = field(default_factory=BottomModelConfig)
+    retention: RetentionConfig = field(default_factory=RetentionConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -764,6 +779,13 @@ def _build_settings(raw: dict) -> Settings:
         snapshot_retention_days=max(90, int(bottom_raw.get("snapshot_retention_days", 800))),
     )
 
+    retention_raw = raw.get("retention", {}) or {}
+    retention_cfg = RetentionConfig(
+        liquidity_wall_days=max(3, min(90, int(retention_raw.get("liquidity_wall_days", 30)))),
+        orderflow_hourly_days=max(7, min(3650, int(retention_raw.get("orderflow_hourly_days", 180)))),
+        orderflow_daily_days=max(30, min(3650, int(retention_raw.get("orderflow_daily_days", 400)))),
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -785,6 +807,7 @@ def _build_settings(raw: dict) -> Settings:
         strategic=strat_cfg,
         scalp_signal=scalp_cfg,
         trend_monitor=trend_cfg,
+        retention=retention_cfg,
         default_coin=default_coin,
     )
 

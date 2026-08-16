@@ -102,10 +102,10 @@ def collect_extras(state: "CoinState") -> Optional[dict]:
         except Exception:
             pass
 
-        # ── Liquidation Map（1d 周期优先，24h 兜底） ──
+        # ── Liquidation Map（统一降级链 1d→7d→30d） ──
         try:
-            liq_maps = getattr(state, "liq_maps", None) or {}
-            liq_map = liq_maps.get("1d") or liq_maps.get("24h")
+            from models.liquidation import pick_primary_liq_map
+            liq_map = pick_primary_liq_map(getattr(state, "liq_maps", None))
             if liq_map:
                 extras["liq_map_1d"] = liq_map.model_dump()
         except Exception:

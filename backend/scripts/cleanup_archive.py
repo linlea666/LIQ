@@ -22,6 +22,10 @@
     # 自定义保留天数（覆盖默认）
     python3 backend/scripts/cleanup_archive.py --apply --wall-days 14 --sweep-days 3
 
+    # 存量一次性压缩：把非当日的 .jsonl 压缩为 .jsonl.gz（archiver 上线
+    # 压缩逻辑前积累的大文件用这个清一次；引擎读取方已兼容 gz）
+    python3 backend/scripts/cleanup_archive.py --apply --compress
+
 不进 cron 的原因：archiver 内置 _gc_if_due() 每小时 GC，运行中进程已自动维护。
 本脚本针对的是"长期累积 / 进程未运行 / 手动一次性大清理"场景。
 """
@@ -71,7 +75,7 @@ class CleanupResult:
 
 
 def _iter_dated_jsonl(root: str) -> Iterable[tuple[str, str]]:
-    """枚举 root/{COIN}/{YYYYMMDD}.jsonl，产出 (full_path, day_key)。"""
+    """枚举 root/{COIN}/{YYYYMMDD}.jsonl[.gz]，产出 (full_path, day_key)。"""
     if not os.path.isdir(root):
         return
     for coin in sorted(os.listdir(root)):
@@ -79,9 +83,12 @@ def _iter_dated_jsonl(root: str) -> Iterable[tuple[str, str]]:
         if not os.path.isdir(sub):
             continue
         for name in sorted(os.listdir(sub)):
-            if not name.endswith(".jsonl"):
+            if name.endswith(".jsonl.gz"):
+                day_key = name[: -len(".jsonl.gz")]
+            elif name.endswith(".jsonl"):
+                day_key = name[: -len(".jsonl")]
+            else:
                 continue
-            day_key = name[: -len(".jsonl")]
             if len(day_key) != 8 or not day_key.isdigit():
                 continue
             yield os.path.join(sub, name), day_key
@@ -117,6 +124,45 @@ def _cleanup_dir(target: str, keep_days: int, apply: bool) -> CleanupResult:
     )
 
 
+def _compress_dir(target: str, apply: bool) -> CleanupResult:
+    """把非当日的 .jsonl 压缩为 .jsonl.gz（gz 已存在时追加 gzip member）。"""
+    import gzip
+
+    today_key = datetime.now(tz=_TZ_CN).strftime("%Y%m%d")
+    scanned = 0
+    rotated = 0
+    rotated_bytes = 0
+    for path, day_key in _iter_dated_jsonl(target):
+        if not path.endswith(".jsonl"):
+            continue
+        scanned += 1
+        if day_key >= today_key:
+            continue  # 当日文件保持明文（引擎仍在追加写）
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        if apply:
+            try:
+                with open(path, "rb") as src:
+                    data = src.read()
+                with open(path + ".gz", "ab") as dst:
+                    dst.write(gzip.compress(data))
+                os.remove(path)
+            except OSError as e:
+                print(f"  [WARN] 无法压缩 {path}: {e}", file=sys.stderr)
+                continue
+        rotated += 1
+        rotated_bytes += size
+    return CleanupResult(
+        target=target,
+        keep_days=0,
+        scanned_files=scanned,
+        rotated_files=rotated,
+        rotated_bytes=rotated_bytes,
+    )
+
+
 def _print_result(r: CleanupResult, apply: bool) -> None:
     verb = "已删除" if apply else "将删除"
     rel = os.path.relpath(r.target, _REPO_ROOT)
@@ -142,6 +188,10 @@ def main() -> int:
         "--data-root", default=_DATA_ROOT,
         help=f"data 根路径（默认 {_DATA_ROOT}）",
     )
+    parser.add_argument(
+        "--compress", action="store_true",
+        help="附加动作：把非当日的 .jsonl 压缩为 .jsonl.gz（存量一次性瘦身）",
+    )
     args = parser.parse_args()
 
     targets = [
@@ -160,6 +210,18 @@ def main() -> int:
         _print_result(r, apply=args.apply)
         total_files += r.rotated_files
         total_bytes += r.rotated_bytes
+
+    if args.compress:
+        verb = "已压缩" if args.apply else "将压缩"
+        print(f"\n[{mode}] 存量压缩（非当日 .jsonl → .jsonl.gz）")
+        print("─" * 80)
+        for target, _ in targets:
+            r = _compress_dir(target, apply=args.apply)
+            rel = os.path.relpath(r.target, _REPO_ROOT)
+            print(
+                f"  {rel:<40s} 扫描 {r.scanned_files:5d} 个  "
+                f"{verb} {r.rotated_files:5d} 个 ({r.rotated_mb:8.2f} MB 原始)"
+            )
 
     print("─" * 80)
     total_mb = total_bytes / (1024 * 1024)
