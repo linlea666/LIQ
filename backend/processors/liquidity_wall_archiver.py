@@ -442,6 +442,8 @@ def _summarize_wall(z: Any) -> dict:
         "active_attack_score": _round(getattr(z, "active_attack_score", 0), 3),
         "wall_removal_risk": _round(getattr(z, "wall_removal_risk", 0), 3),
         "wall_consumed_confidence": _round(getattr(z, "wall_consumed_confidence", 0), 3),
+        # P4：重挂指纹（后验脚本统计"反复撤挂"型 zone 的兑现率）
+        "reappeared_count": int(getattr(z, "reappeared_count", 0) or 0),
         "persistence_score": _round(getattr(z, "persistence_score", 0), 3),
         "persistence_min": _round(getattr(z, "visible_minutes", 0), 1),
         "exchange_count": int(getattr(z, "exchange_count", 0) or 0),
@@ -472,6 +474,9 @@ def _summarize_event(e: Any) -> dict:
         "size_after_usd": _opt_round(getattr(e, "size_after_usd", None), 0),
         "executed_usd_value": _opt_round(getattr(e, "executed_usd_value", None), 0),
         "confidence": _round(getattr(e, "confidence", 0), 3),
+        # P4：撤单情境（wall_removed 才有值；近距撤单 = 钓鱼单嫌疑）
+        "price_distance_at_removal":
+            _opt_round(getattr(e, "price_distance_at_removal", None), 3),
     }
 
 

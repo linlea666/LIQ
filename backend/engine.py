@@ -610,6 +610,7 @@ class Engine:
             asyncio.create_task(self._binance_ticker_ws_loop()),
             asyncio.create_task(self._binance_trades_ws_loop()),
             asyncio.create_task(self._orderflow_stats_loop()),
+            asyncio.create_task(self._wall_profile_loop()),
         ]
 
         # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
@@ -1183,6 +1184,27 @@ class Engine:
                 except Exception:
                     logger.debug(
                         "[orderflow_stats] flush dispatch failed | coin=%s",
+                        ccy, exc_info=True,
+                    )
+
+    async def _wall_profile_loop(self):
+        """P4：每 6h 从墙归档重算天级画像（history_presence_7d 等）。
+
+        读盘 + 解析放 thread pool；失败只影响画像字段（保持 None），
+        不影响墙快照主链路。启动 5 分钟后先跑一次，让画像尽快可用。
+        """
+        from processors.wall_history_profile import refresh_profile
+        loop = asyncio.get_running_loop()
+        first = True
+        while self._running:
+            await asyncio.sleep(300 if first else 6 * 3600)
+            first = False
+            for ccy in self._settings.supported_coins:
+                try:
+                    await loop.run_in_executor(None, refresh_profile, ccy)
+                except Exception:
+                    logger.debug(
+                        "[wall_history_profile] refresh failed | coin=%s",
                         ccy, exc_info=True,
                     )
 

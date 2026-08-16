@@ -155,6 +155,32 @@ class DominantRoleStat:
 
 
 @dataclass
+class ZoneBandProfile:
+    """P4：每价位带（wall_zone_id 桶）的历史画像。
+
+    - presence_ratio：窗口内出现小时占比（0-1）
+    - avg_lifetime_min：按 episode（帧间断 >30min 视为新一段）的平均寿命
+    - consumed_ratio：consumed/(consumed+removed)，同类事件按 10min 桶去重
+    - sr_hold_rate：作为支撑/阻力被"测试"（价格触及价区）后守住的比率；
+      未被触及的 episode 不计入测试
+    """
+    wall_zone_id: str
+    side: str
+    price_mid: float
+    frames_seen: int = 0
+    hours_present: int = 0
+    presence_ratio: float = 0.0
+    episode_count: int = 0
+    avg_lifetime_min: float = 0.0
+    consumed_events: int = 0
+    removed_events: int = 0
+    consumed_ratio: Optional[float] = None
+    sr_tests: int = 0
+    sr_holds: int = 0
+    sr_hold_rate: Optional[float] = None
+
+
+@dataclass
 class PostmortemReport:
     """完整后验报告（机器可读）。"""
     coin: str
@@ -180,6 +206,9 @@ class PostmortemReport:
     high_sa_hit_rate: HitRateStats = field(
         default_factory=lambda: HitRateStats(0.6, 0, 0, 0, 0, 0, 0)
     )
+
+    # P4：每价位带画像
+    zone_band_profiles: list["ZoneBandProfile"] = field(default_factory=list)
 
     # 数据质量
     insufficient_kline_zones: int = 0
@@ -615,6 +644,111 @@ def compute_dominant_role_stats(
     return out
 
 
+def compute_zone_band_profiles(
+    zone_records: list[ZoneRecord],
+    event_records: list[EventRecord],
+    klines: list[KlinePoint],
+    *,
+    episode_gap_sec: int = 1800,
+    sr_window_sec: int = 2 * 3600,
+    event_dedup_bucket_sec: int = 600,
+    window_hours: Optional[float] = None,
+    now_ts: Optional[int] = None,
+) -> list[ZoneBandProfile]:
+    """P4：按 wall_zone_id 聚合每价位带画像（出现率/寿命/兑现率/SR 测试成功率）。
+
+    纯函数；klines 为空时 sr_tests/sr_holds 保持 0（sr_hold_rate=None）。
+    window_hours 不传时用观测窗口（首尾帧跨度）；运行时画像（7 天固定窗口）
+    由调用方显式传入 window_days*24，避免"归档只有 2 天却按 2 天算满勤"。
+    """
+    by_zone: dict[str, list[ZoneRecord]] = {}
+    for r in zone_records:
+        if r.wall_zone_id:
+            by_zone.setdefault(r.wall_zone_id, []).append(r)
+    if not by_zone:
+        return []
+
+    ts_min = min(r.ts for r in zone_records)
+    ts_max = max(r.ts for r in zone_records)
+    if window_hours is None:
+        window_hours = max((ts_max - ts_min) / 3600.0, 1.0)
+    window_hours = max(float(window_hours), 1.0)
+
+    # 事件按 (zone_id, event_type, 10min 桶) 去重 —— 引擎在条件持续期间
+    # 每帧都会重复发同一事件，直接计数会导致兑现率虚高
+    consumed_by_zone: dict[str, set[int]] = {}
+    removed_by_zone: dict[str, set[int]] = {}
+    for ev in event_records:
+        if not ev.wall_zone_id:
+            continue
+        bucket = ev.ts // max(event_dedup_bucket_sec, 1)
+        if ev.event_type in ("wall_consumed", "wall_consumed_and_removed"):
+            consumed_by_zone.setdefault(ev.wall_zone_id, set()).add(bucket)
+        if ev.event_type in ("wall_removed", "wall_consumed_and_removed"):
+            removed_by_zone.setdefault(ev.wall_zone_id, set()).add(bucket)
+
+    out: list[ZoneBandProfile] = []
+    for zid, recs in by_zone.items():
+        recs.sort(key=lambda r: r.ts)
+        hours_present = len({r.ts // 3600 for r in recs})
+
+        # episode 切分：相邻帧间隔 > episode_gap_sec 视为新一段
+        episodes: list[tuple[ZoneRecord, ZoneRecord]] = []   # (first, last)
+        ep_first = recs[0]
+        prev = recs[0]
+        for r in recs[1:]:
+            if r.ts - prev.ts > episode_gap_sec:
+                episodes.append((ep_first, prev))
+                ep_first = r
+            prev = r
+        episodes.append((ep_first, prev))
+        lifetimes_min = [(last.ts - first.ts) / 60.0 for first, last in episodes]
+
+        consumed_n = len(consumed_by_zone.get(zid, ()))
+        removed_n = len(removed_by_zone.get(zid, ()))
+        consumed_ratio = (
+            round(consumed_n / (consumed_n + removed_n), 3)
+            if (consumed_n + removed_n) > 0 else None
+        )
+
+        # SR 测试：每个 episode 用首帧判定 —— partial=触及但收盘守住（成功），
+        # hit=收盘破区（失败），miss=从未触及（不算测试）
+        sr_tests = 0
+        sr_holds = 0
+        if klines:
+            for first, _last in episodes:
+                o = _judge_breakout_in_window(
+                    first, klines, window_sec=sr_window_sec, now_ts=now_ts,
+                )
+                if o.outcome == "partial":
+                    sr_tests += 1
+                    sr_holds += 1
+                elif o.outcome == "hit":
+                    sr_tests += 1
+
+        mid_prices = sorted(r.price_mid for r in recs)
+        out.append(ZoneBandProfile(
+            wall_zone_id=zid,
+            side=recs[0].side,
+            price_mid=round(mid_prices[len(mid_prices) // 2], 4),
+            frames_seen=len(recs),
+            hours_present=hours_present,
+            presence_ratio=round(min(hours_present / window_hours, 1.0), 3),
+            episode_count=len(episodes),
+            avg_lifetime_min=round(statistics.mean(lifetimes_min), 1)
+                if lifetimes_min else 0.0,
+            consumed_events=consumed_n,
+            removed_events=removed_n,
+            consumed_ratio=consumed_ratio,
+            sr_tests=sr_tests,
+            sr_holds=sr_holds,
+            sr_hold_rate=round(sr_holds / sr_tests, 3) if sr_tests > 0 else None,
+        ))
+
+    out.sort(key=lambda p: -p.presence_ratio)
+    return out
+
+
 def deduplicate_zones_by_first_high_score(
     records: list[ZoneRecord],
     *,
@@ -739,6 +873,11 @@ def build_report(
     ]
     sa_stats = aggregate_outcomes(sa_outcomes, threshold=0.6)
 
+    # —— 7. P4 每价位带画像 ——
+    band_profiles = compute_zone_band_profiles(
+        zone_records, event_records, klines, now_ts=now_ts,
+    )
+
     # —— 数据质量 ——
     insuf = sum(1 for o in (consumed_outcomes + bt_outcomes)
                 if o.outcome == "insufficient_data")
@@ -780,6 +919,7 @@ def build_report(
         dominant_role_stats=role_stats,
         high_sr_hit_rate=sr_stats,
         high_sa_hit_rate=sa_stats,
+        zone_band_profiles=band_profiles,
         insufficient_kline_zones=insuf,
         notes=notes,
     )
@@ -837,6 +977,25 @@ def report_to_dict(rep: PostmortemReport) -> dict:
                 "median_persistence_min": d.median_persistence_min,
             }
             for d in rep.dominant_role_stats
+        ],
+        "zone_band_profiles": [
+            {
+                "wall_zone_id": p.wall_zone_id,
+                "side": p.side,
+                "price_mid": p.price_mid,
+                "frames_seen": p.frames_seen,
+                "hours_present": p.hours_present,
+                "presence_ratio": p.presence_ratio,
+                "episode_count": p.episode_count,
+                "avg_lifetime_min": p.avg_lifetime_min,
+                "consumed_events": p.consumed_events,
+                "removed_events": p.removed_events,
+                "consumed_ratio": p.consumed_ratio,
+                "sr_tests": p.sr_tests,
+                "sr_holds": p.sr_holds,
+                "sr_hold_rate": p.sr_hold_rate,
+            }
+            for p in rep.zone_band_profiles
         ],
         "insufficient_kline_zones": rep.insufficient_kline_zones,
         "notes": list(rep.notes),
@@ -958,6 +1117,24 @@ def report_to_markdown(rep: PostmortemReport) -> str:
         rep.high_sa_hit_rate,
         hint="SA 高 → 应作为清算磁铁吸引价格；hit=价格在 2h 内触及磁铁",
     ))
+    out.append("")
+
+    out.append("## 7. 每价位带画像（P4，按出现率降序 Top 15）")
+    if rep.zone_band_profiles:
+        out.append("| 价位 | 侧 | 出现率 | 平均寿命(min) | consumed | removed | "
+                   "吃单兑现率 | SR测试 | 守住率 |")
+        out.append("|---:|---|---:|---:|---:|---:|---:|---:|---:|")
+        for p in rep.zone_band_profiles[:15]:
+            cr = f"{p.consumed_ratio:.0%}" if p.consumed_ratio is not None else "—"
+            hr = f"{p.sr_hold_rate:.0%}" if p.sr_hold_rate is not None else "—"
+            out.append(
+                f"| {p.price_mid} | {'卖' if p.side == 'ask' else '买'} | "
+                f"{p.presence_ratio:.0%} | {p.avg_lifetime_min} | "
+                f"{p.consumed_events} | {p.removed_events} | {cr} | "
+                f"{p.sr_tests} | {hr} |"
+            )
+    else:
+        out.append("- 无带 wall_zone_id 的记录，无法生成画像。")
     out.append("")
 
     out.append("---")

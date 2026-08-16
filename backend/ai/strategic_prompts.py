@@ -667,6 +667,14 @@ def build_user_prompt(
         side_zh = "卖墙" if getattr(w, "side", "") == "ask" else "买墙"
         cb = "·CB双源" if getattr(w, "coinbase_spot_confluence", False) else ""
         ds = "·双源" if getattr(w, "dual_source", False) else ""
+        # P4：天级画像（归档反哺；缓存未就绪时为 None → 不输出，避免噪声）
+        hist = ""
+        presence = getattr(w, "history_presence_7d", None)
+        if presence is not None:
+            hist = f" | 7d出现率={presence:.0%}"
+            ratio = getattr(w, "history_consumed_ratio", None)
+            if ratio is not None:
+                hist += f"·吃单兑现={ratio:.0%}"
         return (
             f"  - {_fmt_price(getattr(w, 'price_mid', 0))} ({_fmt_pct(getattr(w, 'distance_pct', 0))}) | "
             f"`{side_zh}`{cb}{ds} | "
@@ -675,6 +683,7 @@ def build_user_prompt(
             f"trust={_fmt(getattr(w, 'trust_score', 0), nd=2)} | "
             f"persist={_fmt(getattr(w, 'visible_minutes', 0), nd=1)}min | "
             f"break_risk={_fmt(getattr(w, 'break_through_risk', 0), nd=2)}"
+            f"{hist}"
         )
 
     def _fmt_wall_breakdown(w) -> Optional[str]:

@@ -121,6 +121,13 @@ ENGINE_DEFAULTS: dict[str, Any] = {
     "reload_window_seconds": 60,           # consume 后 60s 内同价位重挂 = reloaded
     "reload_price_tol_pct": 0.0010,        # 同价位 ±0.10%
 
+    # P4：撤单情境标记 + 重挂指纹
+    "removal_near_distance_pct": 1.0,      # 撤单时价格距墙 < 1% 算"近距撤单"
+    "removal_near_bonus": 0.15,            # 近距无成交撤单 → removal_risk 新增加分档
+    "reappear_window_seconds": 900,        # zone 消失后 15min 内重现才计 reappear
+    "reappear_min_gap_seconds": 60,        # 消失 ≥ 60s 才算一次真"消失"（防帧级噪声）
+    "reappear_trust_penalty": 0.05,        # reappear ≥2 次起，每次 trust 扣 0.05（封顶 3 次）
+
     # M2：consumed_confidence 加权（GPT 公式）
     "consumed_lo_weight": 0.50,
     "consumed_taker_weight": 0.25,
@@ -335,6 +342,82 @@ def _build_wall_zone_id(
     bucket_idx = int(peak // bucket_size)
     raw = f"{coin_norm}|{side_norm}|{bucket_idx}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# P4：重挂指纹注册表（进程内跨帧状态，key = coin → wall_zone_id）
+#
+# 针对"反复撤挂"型假单：同价位带（wall_zone_id 桶）内墙消失又重现。
+# persistence 由滚动 depth 窗口自然计算（短暂消失不清零，无需干预）；
+# 本注册表只负责累计 reappeared_count，供 trust 打折 + 前端/后验展示。
+#
+# 条目在 zone 连续 2h 未出现后回收；进程重启即清空（可接受：指纹是
+# 短周期行为特征，跨重启延续意义不大）。
+# ──────────────────────────────────────────────────────────────────────
+_REAPPEAR_REGISTRY: dict[str, dict[str, dict]] = {}
+_REAPPEAR_GC_SECONDS = 7200
+
+
+def _track_zone_reappearance(
+    coin: str,
+    zones: list[WallZone],
+    now: int,
+    cfg: dict,
+) -> None:
+    """更新 coin 的 zone 出现/消失注册表，并把 reappeared_count 写回 zone。
+
+    判定规则：
+      - zone 首次出现：登记，count=0
+      - zone 缺席（本帧无该 wall_zone_id）：记 missing_since（只记第一帧）
+      - zone 重现：gap = now - missing_since
+          * gap ∈ [min_gap, window]：count += 1（真"消失又重现"）
+          * gap > window：视为新墙，count 清零（旧指纹过期）
+          * gap < min_gap：帧级噪声（bin 抖动/合并阈值边缘），不计数
+    """
+    window = cfg.get("reappear_window_seconds",
+                     ENGINE_DEFAULTS["reappear_window_seconds"])
+    min_gap = cfg.get("reappear_min_gap_seconds",
+                      ENGINE_DEFAULTS["reappear_min_gap_seconds"])
+    reg = _REAPPEAR_REGISTRY.setdefault(coin, {})
+    current_ids: set[str] = set()
+
+    for z in zones:
+        zid = z.wall_zone_id
+        if not zid:
+            continue
+        current_ids.add(zid)
+        entry = reg.get(zid)
+        if entry is None:
+            reg[zid] = {"last_seen": now, "missing_since": None,
+                        "reappeared_count": 0}
+            continue
+        missing_since = entry.get("missing_since")
+        if missing_since is not None:
+            gap = now - missing_since
+            if min_gap <= gap <= window:
+                entry["reappeared_count"] = int(entry.get("reappeared_count", 0)) + 1
+            elif gap > window:
+                entry["reappeared_count"] = 0
+            entry["missing_since"] = None
+        entry["last_seen"] = now
+        z.reappeared_count = int(entry.get("reappeared_count", 0))
+
+    # 本帧缺席的 zone：标记 missing_since（只记第一帧）；过老条目回收
+    stale: list[str] = []
+    for zid, entry in reg.items():
+        if zid in current_ids:
+            continue
+        if entry.get("missing_since") is None:
+            entry["missing_since"] = now
+        if now - int(entry.get("last_seen", 0)) > _REAPPEAR_GC_SECONDS:
+            stale.append(zid)
+    for zid in stale:
+        reg.pop(zid, None)
+
+
+def reset_reappearance_registry_for_test() -> None:
+    """测试隔离用：清空跨帧重挂指纹注册表。"""
+    _REAPPEAR_REGISTRY.clear()
 
 
 def _estimate_bin_step(bins: Sequence[Any]) -> float:
@@ -1066,6 +1149,15 @@ def _compute_trust_breakdown(zone: WallZone, cfg: dict) -> tuple[float, dict[str
                         ENGINE_DEFAULTS["trust_bonus_persistent"])
         score += bonus
         components["persistent"] = round(bonus, 3)
+    # P4：重挂指纹打折 —— 同价位带反复消失重现（≥2 次才扣，单次波动不误伤）。
+    # 每次扣 reappear_trust_penalty（默认 0.05），封顶 3 次（-0.15）。
+    reappear = int(getattr(zone, "reappeared_count", 0) or 0)
+    if reappear >= 2:
+        penalty_unit = cfg.get("reappear_trust_penalty",
+                               ENGINE_DEFAULTS["reappear_trust_penalty"])
+        deduction = penalty_unit * min(reappear, 3)
+        score -= deduction
+        components["reappear_penalty"] = round(-deduction, 3)
     final = round(max(0.0, min(1.0, score)), 3)
     components["total"] = final
     return final, components
@@ -1915,6 +2007,7 @@ def _compute_wall_removal_risk(
       - persistence < 0.2：                                            +0.30
       - current_usd / max_usd < 0.4（厚度大幅下滑）：                    +0.20
       - holding 时间均值 < 5min（快闪挂单）：                            +0.10
+      - P4 近距撤单：存在无成交撤单且价格距墙 < 1%（钓鱼单 footprint）：  +0.15
     """
     score = 0.0
     if lifecycles_in_zone:
@@ -1928,6 +2021,15 @@ def _compute_wall_removal_risk(
                       max(len(lifecycles_in_zone), 1)
         if avg_holding < 300:
             score += 0.10
+        # P4：近距无成交撤单 —— 价格已逼近墙（< removal_near_distance_pct）
+        # 却在无成交的情况下撤单：真实防守单会等待成交或部分成交，
+        # 逼近即撤是典型"钓鱼/引导"footprint
+        if ended_no_exec > 0:
+            near_pct = cfg.get("removal_near_distance_pct",
+                               ENGINE_DEFAULTS["removal_near_distance_pct"])
+            if abs(zone.distance_pct) < near_pct:
+                score += cfg.get("removal_near_bonus",
+                                 ENGINE_DEFAULTS["removal_near_bonus"])
     if zone.persistence_score < 0.2:
         score += 0.30
     if zone.max_usd_1h > 0 and zone.current_usd / zone.max_usd_1h < 0.4:
@@ -2016,14 +2118,26 @@ def _detect_zone_lifecycle_events(
 
         # removed
         if ended_no_exec:
+            # P4：撤单情境标记 —— 记录撤单帧价格与墙的距离（%），近距撤单单独提示
+            dist_pct: Optional[float] = None
+            near_removal = False
+            if last_price > 0:
+                dist_pct = round(abs(z.price_mid - last_price) / last_price * 100, 3)
+                near_pct = cfg.get("removal_near_distance_pct",
+                                   ENGINE_DEFAULTS["removal_near_distance_pct"])
+                near_removal = dist_pct < near_pct
+            explain = f"{len(ended_no_exec)} 笔大单未成交结束(撤单风险)"
+            if near_removal:
+                explain += f"｜距墙仅 {dist_pct:.2f}% 无成交即撤（钓鱼单嫌疑）"
             events.append(WallEvent(
                 ts_sec=now, side=z.side, price_mid=z.price_mid,
                 event_type="wall_removed",
                 size_before_usd=z.max_usd_1h,
                 size_after_usd=z.current_usd,
-                confidence=0.7,
-                explain=f"{len(ended_no_exec)} 笔大单未成交结束(撤单风险)",
+                confidence=0.75 if near_removal else 0.7,
+                explain=explain,
                 wall_zone_id=zid,
+                price_distance_at_removal=dist_pct,
             ))
 
         # W2-T5：第 7 类复合事件 — 同帧既消耗又撤单（试盘 + 撤退 footprint）
@@ -2224,6 +2338,18 @@ def build_liquidity_wall_outputs(
     for z in walls_below:
         z.wall_zone_id = _build_wall_zone_id(coin, "bid", z.peak_price, atr)
 
+    # P4：重挂指纹追踪（必须在 wall_zone_id 赋值之后、trust 计算之前，
+    # 否则 reappeared_count 无法参与 trust 打折）
+    _track_zone_reappearance(coin, walls_above + walls_below, now, cfg)
+
+    # P4：天级画像附加（纯内存查表；缓存未就绪时字段保持 None，不进评分）
+    try:
+        from processors.wall_history_profile import attach_history_profile
+        attach_history_profile(coin, walls_above + walls_below)
+    except Exception:  # noqa: BLE001 — 画像失败不能影响主快照
+        logger.debug("attach_history_profile failed | coin=%s", coin,
+                     exc_info=True)
+
     # M2.5：trust_score（必须在 spot augment + tier 之后；用 has_spot_confluence /
     # exchange_count / persistence_score 综合）
     # W2-T1：用 _compute_trust_breakdown 同时拿 components；写入 raw_trust_score
@@ -2344,6 +2470,9 @@ def build_liquidity_wall_outputs(
             chips.append({"consumed": "已被吃",
                            "removed": "已撤",
                            "reloaded": "重挂"}[z.status])
+        # 4) P4：反复撤挂指纹（≥2 次才展示，与 trust 打折阈值一致）
+        if z.reappeared_count >= 2:
+            chips.append(f"反复撤挂×{z.reappeared_count}")
         z.explain_chips = chips[:3]
 
     # 距离升序：above 由近及远（升序），below 由近及远（降序）

@@ -334,6 +334,10 @@ class WallEvent(BaseModel):
     explain: str = ""                           # 前端 chip 文字
     # W1-T4：关联的 wall_zone_id（同 ID 同一物理墙；后验脚本据此串联事件链）
     wall_zone_id: str = ""
+    # P4：撤单情境标记 —— wall_removed 时价格距墙的距离（%绝对值）。
+    # 近距离（< removal_near_distance_pct）无成交撤单 = 价格逼近墙却撤 =
+    # 典型"钓鱼单"footprint；后验脚本据此统计近距撤单占比。
+    price_distance_at_removal: Optional[float] = None
 
 
 class WallZone(BaseModel):
@@ -428,6 +432,14 @@ class WallZone(BaseModel):
     status: WallZoneStatus = "active"
     wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）
     wall_removal_risk: float = 0.0              # 0-1（不写"假单"）
+    # P4：重挂指纹 —— 同价位带（wall_zone_id 桶）内墙消失后又重现的累计次数。
+    # 针对"反复撤挂"型假单：persistence 由滚动窗口自然衰减（不清零），
+    # 但 reappeared_count ≥ 2 时 trust 打折（见 _compute_trust_breakdown）。
+    reappeared_count: int = 0
+    # P4：天级画像（归档反哺，wall_history_profile 后台每 6h 刷新）。
+    # 只读展示字段 + AI prompt 输入；首版不进任何主评分公式。
+    history_presence_7d: Optional[float] = None      # 近 7 天该价位带出现小时占比（0-1）
+    history_consumed_ratio: Optional[float] = None   # consumed/(consumed+removed)；无事件 None
 
     # ── W2-T1：trust_score 拆分（透明化 + 维度独立）──
     # raw_trust_score：原始多因子加权（与 trust_score 等价；显式命名供后验脚本/AI 引用）

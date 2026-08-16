@@ -324,6 +324,13 @@ def _build_zone_from_cluster(
                 f"[{layer}] 厚度约 {_fmt_usd_short(w.current_usd)} USD · "
                 f"信任评分 {w.trust_score:.2f} · 打穿风险评分 {w.break_through_risk:.2f}"
             )
+            # P4：天级画像（只读展示，不进任何评分；缓存未就绪时为 None 不输出）
+            presence = getattr(w, "history_presence_7d", None)
+            if presence is not None:
+                ev += f" · 近7天出现率 {presence:.0%}"
+                ratio = getattr(w, "history_consumed_ratio", None)
+                if ratio is not None:
+                    ev += f"（吃单兑现 {ratio:.0%}）"
             evidence.append(ev)
 
             if w.side == "bid":
