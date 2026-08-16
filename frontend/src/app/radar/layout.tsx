@@ -23,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/radar/alerts", label: "警报" },
   { href: "/radar/research", label: "研究" },
   { href: "/radar/ops", label: "运维" },
+  { href: "/radar/config", label: "配置" },
 ];
 
 export default function RadarLayout({ children }: { children: React.ReactNode }) {

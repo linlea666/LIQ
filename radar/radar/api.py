@@ -14,15 +14,24 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import secrets
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+import yaml
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
+from . import config_schema
 from .domain.models import TokenState
+from .obs.events import EventType, bus
 from .obs.logging_setup import now_ms
 from .service import RadarService
+from .settings import OVERRIDES_FILENAME
+from .storage import repo
 
 logger = logging.getLogger("radar.api")
 
@@ -96,6 +105,225 @@ async def config_fingerprint() -> dict[str, Any]:
             for name, t in service.settings.tiers.items()
         },
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 管理接口：运行时配置（写入 overrides.yaml，重启后生效）
+#
+# 与只读接口不同，这三个路由必须鉴权：能访问 8802 端口不等于
+# 有权修改调度参数或把警报邮件改发给别人。令牌配置在 radar/.env
+# （RADAR_ADMIN_TOKEN），未配置时管理接口整体禁用——不安全的默认
+# 开启比少一个功能危险得多。
+# ═════════════════════════════════════════════════════════════════════════
+
+ADMIN_TOKEN_ENV = "RADAR_ADMIN_TOKEN"
+
+
+def _admin_guard(
+    x_radar_admin_token: str | None = Header(default=None),
+) -> None:
+    expected = os.getenv(ADMIN_TOKEN_ENV, "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail=f"管理接口未启用：请在 radar/.env 配置 {ADMIN_TOKEN_ENV} 后重启容器",
+        )
+    supplied = (x_radar_admin_token or "").strip()
+    # compare_digest 防时序侧信道；对这个场景更重要的是它顺带
+    # 处理了长度不等的情况
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="管理令牌缺失或错误")
+
+
+class ConfigUpdatePayload(BaseModel):
+    """changes: 参数路径 → 新值；remove: 要恢复出厂默认的参数路径。"""
+
+    changes: dict[str, Any] = Field(default_factory=dict)
+    remove: list[str] = Field(default_factory=list)
+
+
+def _config_paths(service: RadarService) -> tuple[Path, Path]:
+    return (
+        Path(service.settings.service_root) / "config.yaml",
+        service.settings.data_dir / OVERRIDES_FILENAME,
+    )
+
+
+def _read_config_state(
+    service: RadarService,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """读取出厂默认与已保存的覆盖层（均为磁盘上的最新状态，
+    而不是运行中的旧值——两者的差异正是"待重启生效"的判据）。"""
+    defaults_path, overrides_path = _config_paths(service)
+    defaults = yaml.safe_load(defaults_path.read_bytes()) or {}
+    overrides: dict[str, Any] = {}
+    if overrides_path.exists():
+        try:
+            tree = yaml.safe_load(overrides_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            logger.exception("覆盖配置损坏，按空处理")
+            tree = None
+        overrides, errors = config_schema.check_overrides(tree)
+        for bad_path, reason in errors.items():
+            logger.error("覆盖配置条目非法 %s: %s", bad_path, reason)
+    return defaults, overrides
+
+
+def _saved_state(
+    defaults: dict[str, Any], overrides: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    effective = (
+        config_schema.deep_merge(defaults, overrides) if overrides else defaults
+    )
+    return effective, config_schema.effective_hash(effective)
+
+
+@router.get("/admin/config")
+async def admin_get_config(_: None = Depends(_admin_guard)) -> dict[str, Any]:
+    service = get_service()
+    defaults, overrides = _read_config_state(service)
+    _, saved_hash = _saved_state(defaults, overrides)
+    return {
+        "running": service.settings.fingerprint(),
+        "saved_config_hash": saved_hash,
+        # 已保存但尚未重启生效时为 True，前端据此显示"待重启"横幅
+        "restart_pending": saved_hash != service.settings.config_hash,
+        "override_count": len(config_schema.iter_leaves(overrides)),
+        "groups": config_schema.describe(defaults, overrides),
+    }
+
+
+@router.put("/admin/config")
+async def admin_put_config(
+    payload: ConfigUpdatePayload, _: None = Depends(_admin_guard)
+) -> dict[str, Any]:
+    """保存配置修改。
+
+    校验分两层且都在写盘之前：单值（类型/范围）与组合（滞回、
+    新鲜期<过期线等）。任何一层不通过都整体拒绝——半套配置落盘后
+    重启，服务会带着用户没见过的参数组合运行。
+    """
+    service = get_service()
+    defaults, overrides = _read_config_state(service)
+    prev_effective, _ = _saved_state(defaults, overrides)
+
+    errors: dict[str, str] = {}
+    changed: dict[str, dict[str, Any]] = {}
+    removed: list[str] = []
+    sentinel = object()
+
+    for path in payload.remove:
+        if path not in config_schema.PARAMS_BY_PATH:
+            errors[path] = "未知参数路径"
+            continue
+        if config_schema.get_path(overrides, path, sentinel) is not sentinel:
+            config_schema.remove_path(overrides, path)
+            removed.append(path)
+
+    for path, value in payload.changes.items():
+        param = config_schema.PARAMS_BY_PATH.get(path)
+        if param is None:
+            errors[path] = "未知或不可配置的参数路径"
+            continue
+        coerced, err = config_schema.validate_value(param, value)
+        if err:
+            errors[path] = err
+            continue
+        old_value = config_schema.get_path(prev_effective, path)
+        if coerced == config_schema.get_path(defaults, path):
+            # 改回出厂默认 = 删除覆盖项，保持覆盖层最小化，
+            # 界面上"已覆盖"标记才始终真实
+            if config_schema.get_path(overrides, path, sentinel) is not sentinel:
+                config_schema.remove_path(overrides, path)
+                if path not in removed:
+                    removed.append(path)
+            continue
+        if coerced == old_value:
+            continue
+        config_schema.set_path(overrides, path, coerced)
+        changed[path] = {"old": old_value, "new": coerced}
+
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    new_effective, new_hash = _saved_state(defaults, overrides)
+    conflicts = config_schema.cross_validate(new_effective)
+    if conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail={"errors": {"组合校验": "；".join(conflicts)}},
+        )
+
+    if not changed and not removed:
+        return {
+            "saved": False,
+            "reason": "没有实际变化",
+            "saved_config_hash": new_hash,
+            "restart_pending": new_hash != service.settings.config_hash,
+        }
+
+    _write_overrides(service, overrides)
+    fingerprint = dict(service.settings.fingerprint())
+    fingerprint["config_hash"] = new_hash
+    await repo.record_config_audit(
+        service.db,
+        recorded_at=now_ms(),
+        fingerprint=fingerprint,
+        config_snapshot=yaml.safe_dump(
+            new_effective, allow_unicode=True, sort_keys=True
+        ),
+        changes={"changed": changed, "removed": removed},
+        operator="admin_api",
+    )
+    bus.emit(
+        EventType.CONFIG_CHANGED,
+        module="api",
+        summary=(
+            f"配置修改 {len(changed)} 项、恢复默认 {len(removed)} 项"
+            "（重启后生效）"
+        ),
+        payload={
+            "changed": changed,
+            "removed": removed,
+            "new_config_hash": new_hash,
+        },
+    )
+    await service.db.drain()
+    return {
+        "saved": True,
+        "changed": changed,
+        "removed": removed,
+        "saved_config_hash": new_hash,
+        "restart_pending": new_hash != service.settings.config_hash,
+        "restart_required": True,
+    }
+
+
+def _write_overrides(service: RadarService, overrides: dict[str, Any]) -> None:
+    """原子写覆盖文件；覆盖层清空时直接删文件，让状态自解释。"""
+    _, path = _config_paths(service)
+    if not overrides:
+        path.unlink(missing_ok=True)
+        return
+    text = (
+        "# 本文件由雷达配置页生成，请勿手工编辑。\n"
+        "# 生效方式：与 config.yaml 出厂默认深合并，重启服务后生效。\n"
+        + yaml.safe_dump(overrides, allow_unicode=True, sort_keys=True)
+    )
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+@router.post("/admin/restart")
+async def admin_restart(_: None = Depends(_admin_guard)) -> dict[str, Any]:
+    """优雅重启：排空写队列后以非零码退出，由容器编排拉起。
+
+    响应先于停机返回（延迟触发），否则前端永远收不到确认。
+    """
+    service = get_service()
+    service.request_restart()
+    return {"restarting": True, "expected_downtime_sec": 20}
 
 
 # ═════════════════════════════════════════════════════════════════════════

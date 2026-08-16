@@ -1,21 +1,32 @@
 """配置加载与版本指纹。
 
 设计要点：
-  - 配置只在进程启动时加载一次（单例），修改 config.yaml 需重启生效。
-  - config_hash 由文件原始字节计算：任何阈值调整都会改变指纹，
-    使得历史警报可以精确追溯到"当时是哪一套参数"。
+  - 配置只在进程启动时加载一次（单例），修改需重启生效。
+  - 生效配置 = config.yaml（出厂默认，随代码演进）+ data/overrides.yaml
+    （配置页写入的覆盖层，存于挂载卷，镜像重建后保留）。
+  - config_hash 对**合并后的生效配置**计算：任何阈值调整——无论改的是
+    yaml 还是覆盖层——都会改变指纹，历史警报可精确追溯"当时是哪套参数"。
+  - 覆盖文件里的非法条目在启动时被丢弃并告警；若合并结果通不过
+    跨字段一致性校验，则整个覆盖层弃用、回退出厂默认——
+    带着自相矛盾的阈值运行比丢弃用户改动更危险。
   - 凭据只从环境变量读取，永不写入 config.yaml，也永不进入日志。
 """
 
 from __future__ import annotations
 
-import hashlib
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from . import config_schema
+
+logger = logging.getLogger("radar.settings")
+
+OVERRIDES_FILENAME = "overrides.yaml"
 
 _SERVICE_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_FILE = _SERVICE_ROOT / "config.yaml"
@@ -182,12 +193,38 @@ class Settings:
         }
 
 
-def _build(raw: dict[str, Any], config_bytes: bytes) -> Settings:
+def _data_dir_from(raw: dict[str, Any]) -> Path:
     service = raw.get("service", {}) or {}
-    data_dir_raw = str(service.get("data_dir", "data"))
-    data_dir = Path(data_dir_raw)
+    data_dir = Path(str(service.get("data_dir", "data")))
     if not data_dir.is_absolute():
         data_dir = _SERVICE_ROOT / data_dir
+    return data_dir
+
+
+def load_overrides(data_dir: Path) -> dict[str, Any]:
+    """读取并校验覆盖层。
+
+    失败模式的处理原则是"宁可回退默认，不可带病运行"：
+      - 文件损坏 / 非字典 → 整个覆盖层弃用；
+      - 单条非法（写接口上线前的手工编辑、或默认值演进后越界）→ 丢该条；
+    每种丢弃都打 error 日志——静默丢弃会让用户以为自己已经改了配置。
+    """
+    path = data_dir / OVERRIDES_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        tree = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        logger.exception("覆盖配置 %s 无法解析，本次启动回退出厂默认", path)
+        return {}
+    clean, errors = config_schema.check_overrides(tree)
+    for bad_path, reason in errors.items():
+        logger.error("覆盖配置条目被丢弃 %s: %s", bad_path, reason)
+    return clean
+
+
+def _build(raw: dict[str, Any]) -> Settings:
+    data_dir = _data_dir_from(raw)
 
     chains = tuple(
         ChainConfig(
@@ -229,7 +266,7 @@ def _build(raw: dict[str, Any], config_bytes: bytes) -> Settings:
     scoring = raw.get("scoring", {}) or {}
     return Settings(
         raw=raw,
-        config_hash=hashlib.sha256(config_bytes).hexdigest()[:16],
+        config_hash=config_schema.effective_hash(raw),
         code_commit=os.getenv("APP_GIT_SHA", "unknown")[:12],
         build_time=os.getenv("APP_BUILD_TIME", "unknown"),
         strategy_version=str(scoring.get("strategy_version", "v0")),
@@ -257,9 +294,25 @@ def load_settings(config_file: Path | None = None) -> Settings:
         return _instance
     _load_env_file(_ENV_FILE)
     path = config_file or _CONFIG_FILE
-    config_bytes = path.read_bytes()
-    raw = yaml.safe_load(config_bytes) or {}
-    _instance = _build(raw, config_bytes)
+    defaults = yaml.safe_load(path.read_bytes()) or {}
+
+    overrides = load_overrides(_data_dir_from(defaults))
+    effective = defaults
+    if overrides:
+        merged = config_schema.deep_merge(defaults, overrides)
+        conflicts = config_schema.cross_validate(merged)
+        if conflicts:
+            # 单条参数各自合法但组合矛盾（如进入阈值 ≤ 退出阈值）时，
+            # 整个覆盖层弃用：带着自相矛盾的滞回参数运行，
+            # 状态机会抖动出成片的假信号，比丢改动伤害大得多
+            logger.error("覆盖配置组合校验失败，回退出厂默认: %s",
+                         "; ".join(conflicts))
+        else:
+            effective = merged
+            logger.info("已应用配置覆盖 %d 项",
+                        len(config_schema.iter_leaves(overrides)))
+
+    _instance = _build(effective)
     return _instance
 
 

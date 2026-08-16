@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 import time
-from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .alerts import AlertManager, EmailOutboxWorker
 from .collectors import CollectorService
@@ -50,6 +53,10 @@ class RadarService:
         self.started_at_ms = 0
         self._running = False
         self._maintenance_task: asyncio.Task[None] | None = None
+        # 配置页"保存并重启"置位；main.py 据此以非零码退出，
+        # 交由 docker on-failure 策略拉起新进程
+        self.restart_requested = False
+        self._restart_task: asyncio.Task[None] | None = None
 
         storage_cfg = self.settings.storage
         data_dir = self.settings.data_dir
@@ -106,8 +113,10 @@ class RadarService:
         setup_logging(
             log_dir=self.settings.data_dir.parent / "logs",
             level=str(obs.get("log_level", "INFO")),
-            max_mb=int(obs.get("log_max_mb", 64)),
-            backup_count=int(obs.get("log_backup_count", 10)),
+            # 键名与 config.yaml 保持一致（log_file_*）。此前读的是
+            # log_max_mb / log_backup_count，恰好与默认值相同才没暴露
+            max_mb=int(obs.get("log_file_max_mb", 64)),
+            backup_count=int(obs.get("log_file_backup_count", 10)),
             tz_offset_hours=self.settings.tz_offset_hours,
         )
         bus.configure_fingerprint(self.settings.fingerprint())
@@ -196,6 +205,34 @@ class RadarService:
         # db.stop 放最后并且必须执行：它会排空写队列再 checkpoint。
         # compose 里给了 40 秒宽限期，够它跑完
         await self.db.stop()
+
+    # ═════════════════════════════════════════════════════════════════════
+    # 管理端重启
+    # ═════════════════════════════════════════════════════════════════════
+
+    def request_restart(self, delay_sec: float = 0.8) -> None:
+        """延迟触发优雅停机，让 HTTP 响应先送达前端。
+
+        实现方式是给自己发 SIGTERM：uvicorn 的信号处理会走完整的
+        lifespan 收尾（排空写队列、checkpoint），与容器 stop 完全同路，
+        不需要单独维护第二条停机路径。
+        """
+        if self.restart_requested:
+            return
+        self.restart_requested = True
+        logger.warning("收到管理端重启请求，%.1f 秒后开始优雅停机", delay_sec)
+
+        async def _fire() -> None:
+            await asyncio.sleep(delay_sec)
+            self._terminate()
+
+        self._restart_task = asyncio.get_running_loop().create_task(
+            _fire(), name="admin-restart"
+        )
+
+    def _terminate(self) -> None:
+        """独立成方法以便测试替换，不在测试进程里真发信号。"""
+        os.kill(os.getpid(), signal.SIGTERM)
 
     # ═════════════════════════════════════════════════════════════════════
     # 周期性维护
@@ -359,8 +396,12 @@ def _rss_mb() -> float | None:
 
 
 def _read_config_text(settings: Settings) -> str:
-    path = Path(settings.service_root) / "config.yaml"
+    """审计快照存**生效配置**（默认值 + 覆盖层合并结果）。
+
+    存 config.yaml 原文的话，覆盖层的改动就在审计里隐形了——
+    半年后复盘时会以为当时跑的是出厂参数。
+    """
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
+        return yaml.safe_dump(settings.raw, allow_unicode=True, sort_keys=True)
+    except yaml.YAMLError:
         return ""

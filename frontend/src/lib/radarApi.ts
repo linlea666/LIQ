@@ -9,6 +9,8 @@
 
 import { RADAR_API_BASE } from "./constants";
 import type {
+  AdminConfigResponse,
+  AdminSaveResponse,
   RadarAlert,
   RadarDiagnostics,
   RadarEvent,
@@ -135,3 +137,30 @@ export const listEvents = (query: {
 
 export const exportUrl = (dataset: string, sinceHours = 168) =>
   `${RADAR_API_BASE}/api/radar/export/${dataset}${qs({ since_hours: sinceHours })}`;
+
+// ── 管理接口：运行时配置 ──────────────────────────────────────────────────
+// 令牌来自 radar/.env 的 RADAR_ADMIN_TOKEN，由用户在配置页输入后存
+// localStorage，随请求头发送。绝不能进 NEXT_PUBLIC 构建变量——
+// 那会把令牌烧进对外公开的 JS 文件。
+
+const adminHeaders = (token: string) => ({ "X-Radar-Admin-Token": token });
+
+export const getAdminConfig = (token: string) =>
+  request<AdminConfigResponse>("/admin/config", { headers: adminHeaders(token) });
+
+export const saveAdminConfig = (
+  token: string,
+  changes: Record<string, unknown>,
+  remove: string[],
+) =>
+  request<AdminSaveResponse>("/admin/config", {
+    method: "PUT",
+    headers: adminHeaders(token),
+    body: JSON.stringify({ changes, remove }),
+  });
+
+export const requestAdminRestart = (token: string) =>
+  request<{ restarting: boolean; expected_downtime_sec: number }>(
+    "/admin/restart",
+    { method: "POST", headers: adminHeaders(token) },
+  );

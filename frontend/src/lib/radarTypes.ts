@@ -240,3 +240,61 @@ export interface RadarDiagnostics {
   metrics: Record<string, unknown>;
   events: Record<string, number>;
 }
+
+// ── 管理接口：运行时配置 ──────────────────────────────────────────────────
+
+/** 参数控件类型，由后端注册表驱动，前端不硬编码任何参数。 */
+export type AdminParamKind =
+  | "int"
+  | "float"
+  | "bool"
+  | "str"
+  | "choice"
+  | "num_list"
+  | "str_list"
+  | "json";
+
+export interface AdminConfigParam {
+  path: string;
+  kind: AdminParamKind;
+  label: string;
+  desc: string;
+  lo: number | null;
+  hi: number | null;
+  choices: Array<string | number> | null;
+  ascending: boolean;
+  unit: string;
+  restart_required: boolean;
+  /** 出厂默认值（config.yaml） */
+  default: unknown;
+  /** 已保存的生效值（默认值 + 覆盖层合并；重启前运行值可能与此不同） */
+  value: unknown;
+  /** 是否被覆盖层修改过 */
+  overridden: boolean;
+}
+
+export interface AdminConfigGroup {
+  id: string;
+  label: string;
+  desc: string;
+  params: AdminConfigParam[];
+}
+
+export interface AdminConfigResponse {
+  running: RadarHealth["version"];
+  saved_config_hash: string;
+  /** true = 已保存的配置与运行中的不同，需要重启生效 */
+  restart_pending: boolean;
+  override_count: number;
+  groups: AdminConfigGroup[];
+}
+
+export interface AdminSaveResponse {
+  saved: boolean;
+  reason?: string;
+  changed?: Record<string, { old: unknown; new: unknown }>;
+  removed?: string[];
+  saved_config_hash: string;
+  restart_pending: boolean;
+  restart_required?: boolean;
+}

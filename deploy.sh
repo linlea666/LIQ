@@ -66,6 +66,11 @@ if [ "$DO_RADAR" = true ] && [ ! -f radar/.env ]; then
   echo "缺少 radar/.env（可从 radar/.env.example 复制并填入 SMTP 凭据）"
   exit 1
 fi
+if [ "$DO_RADAR" = true ] && ! grep -q '^RADAR_ADMIN_TOKEN=..*' radar/.env 2>/dev/null; then
+  # 只提示不拦截：管理接口是可选功能，缺令牌时只是配置页不可写
+  echo "提示: radar/.env 未配置 RADAR_ADMIN_TOKEN，/radar/config 配置页将不可用"
+  echo "      生成方式: echo \"RADAR_ADMIN_TOKEN=\$(openssl rand -hex 24)\" >> radar/.env"
+fi
 
 export APP_GIT_SHA="$(git rev-parse HEAD)"
 export APP_BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"

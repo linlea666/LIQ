@@ -30,6 +30,14 @@ def main() -> None:
         access_log=False,
     )
 
+    # 配置页"保存并重启"：优雅停机已在 lifespan 里完成（写队列排空），
+    # 这里用非零码退出，compose 的 on-failure 策略会拉起新进程并
+    # 加载新的 overrides。容器健康运行 10 秒后失败计数自动归零，
+    # 不会耗尽 on-failure:5 的重启预算
+    if service.restart_requested:
+        logging.getLogger("radar.main").warning("按管理端请求重启进程（exit 3）")
+        raise SystemExit(3)
+
 
 if __name__ == "__main__":
     logging.captureWarnings(True)
