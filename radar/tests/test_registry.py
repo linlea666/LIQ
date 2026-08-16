@@ -17,9 +17,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from radar.domain.models import TokenObservation, TokenState  # noqa: E402
+from radar.domain.models import (  # noqa: E402
+    QualityReport,
+    ScoreResult,
+    TokenObservation,
+    TokenState,
+)
+from radar.domain.risk_gate import RiskDecision  # noqa: E402
+from radar.domain.states import StateDecision  # noqa: E402
 from radar.obs.events import EventBus, EventType  # noqa: E402
-from radar.registry import TokenRegistry  # noqa: E402
+from radar.registry import Evaluation, TokenRegistry  # noqa: E402
 from radar.storage import repo  # noqa: E402
 from radar.storage.db import Database  # noqa: E402
 
@@ -543,6 +550,119 @@ async def test_restore_skips_dead_tokens(env):
     fresh = TokenRegistry(db=db, events=events, config=CONFIG,
                           fingerprint=FINGERPRINT)
     assert await fresh.restore(NOW) == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S1 锚点生命周期（S2 确认制的基准数据）
+# ─────────────────────────────────────────────────────────────────────────
+
+def _state_eval(view, old: TokenState, new: TokenState) -> Evaluation:
+    """构造一次"状态机已给出结论"的评估，用于隔离测试状态变更副作用。"""
+    return Evaluation(
+        view=view,
+        quality=QualityReport(score=90.0),
+        scores=ScoreResult(opportunity=75, confidence=80, data_quality=90,
+                           rug_risk=10, distribution=5),
+        risk=RiskDecision(),
+        state=StateDecision(old_state=old, new_state=new, changed=(old != new)),
+        features_json="{}",
+        evaluated_at=NOW,
+        market_cap=view.getf("market_cap"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_s1_promotion_records_anchor_and_demotion_clears_it(env):
+    """进入 S1 记录现场锚点；跌回 S1 以下清除；转 DISTRIBUTION 保留。
+
+    锚点是 S2 确认全部行为条件（回撤、LP 抽离、dev 减仓）的基准，
+    记录/清除时机错了，确认制整体失效。
+    """
+    registry, _, _ = env
+    view = (await registry.ingest([obs("0xanchor")]))[0]
+
+    registry._apply_state_change(_state_eval(view, TokenState.S0, TokenState.S1), NOW)
+    assert view.s1_anchor is not None
+    assert view.s1_anchor["price"] == pytest.approx(0.001)
+    assert view.s1_anchor["liquidity"] == pytest.approx(40_000.0)
+    assert view.s1_anchor["holders"] == 900
+    assert view.s1_peak_price == pytest.approx(0.001)
+    assert not view.s1_inflow_dipped
+
+    # 转派发观察：锚点仍有对照价值，必须保留
+    registry._apply_state_change(
+        _state_eval(view, TokenState.S1, TokenState.DISTRIBUTION), NOW)
+    assert view.s1_anchor is not None
+
+    # 真正跌回观察级：清除，下次晋升重新记录
+    registry._apply_state_change(
+        _state_eval(view, TokenState.DISTRIBUTION, TokenState.WATCHING), NOW)
+    assert view.s1_anchor is None
+    assert view.s1_peak_price is None
+
+
+@pytest.mark.asyncio
+async def test_restore_recovers_s1_anchor_from_latest_real_alert(env):
+    """重启后 S1+ 代币必须带回锚点，否则 S2 确认永远无法通过；
+    且只认非 near-miss 警报——near-miss 不是真实的晋升现场。"""
+    registry, db, events = env
+    view = (await registry.ingest([obs("0xanchor")]))[0]
+    view.state = TokenState.S1
+    view.state_since_ms = NOW
+    view.last_observed_ms = NOW
+    scores = ScoreResult(opportunity=75, confidence=80, data_quality=90,
+                         rug_risk=10, distribution=5)
+    await repo.insert_alert(
+        db, view=view, alert_kind="S1", is_near_miss=False, created_at=NOW,
+        correlation_id="c1", snapshot_id=None, scores=scores,
+        factors_json=None, trigger_json=None, prev_scores_json=None,
+        fingerprint=FINGERPRINT,
+    )
+    # 更晚的 near-miss 记录带着另一个价格，不得被当成锚点
+    view.values["price"] = 0.005
+    await repo.insert_alert(
+        db, view=view, alert_kind="S1", is_near_miss=True, created_at=NOW + 10_000,
+        correlation_id="c2", snapshot_id=None, scores=scores,
+        factors_json=None, trigger_json=None, prev_scores_json=None,
+        fingerprint=FINGERPRINT,
+    )
+    repo.update_token_runtime(db, view)
+    await db.drain()
+
+    fresh = TokenRegistry(db=db, events=events, config=CONFIG,
+                          fingerprint=FINGERPRINT)
+    await fresh.restore(NOW + 60_000)
+    recovered = fresh.get("56", "0xanchor")
+    assert recovered is not None
+    assert recovered.s1_anchor is not None
+    assert recovered.s1_anchor["price"] == pytest.approx(0.001)
+    assert recovered.s1_anchor["at"] == NOW
+    assert recovered.s1_peak_price == pytest.approx(0.001)
+
+
+@pytest.mark.asyncio
+async def test_revived_s1_token_reloads_anchor(env):
+    """被内存淘汰后复活的 S1 币也要带回锚点（单币建档路径）。"""
+    registry, db, _ = env
+    view = (await registry.ingest([obs("0xanchor")]))[0]
+    view.state = TokenState.S1
+    view.state_since_ms = NOW
+    scores = ScoreResult(opportunity=75, confidence=80, data_quality=90,
+                         rug_risk=10, distribution=5)
+    await repo.insert_alert(
+        db, view=view, alert_kind="S1", is_near_miss=False, created_at=NOW,
+        correlation_id="c1", snapshot_id=None, scores=scores,
+        factors_json=None, trigger_json=None, prev_scores_json=None,
+        fingerprint=FINGERPRINT,
+    )
+    repo.update_token_runtime(db, view)
+    await db.drain()
+
+    registry._views.pop(("56", "0xanchor"))
+    revived = (await registry.ingest([obs("0xanchor", observed_at=NOW + 60_000)]))[0]
+    assert revived.state == TokenState.S1
+    assert revived.s1_anchor is not None
+    assert revived.s1_anchor["price"] == pytest.approx(0.001)
 
 
 @pytest.mark.asyncio

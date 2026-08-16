@@ -347,6 +347,16 @@ class TokenView:
     # values 里的 interval_high/low 是合并视图，会永久携带最后一次非空值；
     # 没有这个时间戳，追踪器无法区分"刚看到的极值"和"崩盘前留下的旧极值"
     interval_seen_at: int = 0
+
+    # ── S1 锚点与确认期追踪（S2 确认级晋升的依据）────────────────────
+    # 晋升 S1 时的现场快照 {price, market_cap, liquidity, top10_percent,
+    # dev_percent, dev_sell_percent, holders, at}。
+    # 跌回 S1 以下（DISTRIBUTION 除外）时清除；重启后从最近一条 S1 警报恢复
+    s1_anchor: dict[str, Any] | None = None
+    # 进入 S1 后见过的最高现价（只用真实价格，不用回看极值）
+    s1_peak_price: float | None = None
+    # 进入 S1 后净流入是否出现过 ≤0（"净流入二次转正"确认的前半段）
+    s1_inflow_dipped: bool = False
     # 数据质量是否处于降级状态。只在状态翻转时发事件，避免每轮重复告警
     quality_degraded: bool = False
     # 审计缓存时间，避免重复消耗配额

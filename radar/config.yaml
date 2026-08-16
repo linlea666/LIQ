@@ -61,8 +61,10 @@ scheduler:
     watching:  { max_rpm: 4,  interval_sec: 900 }
     reject:    { max_rpm: 3,  interval_sec: 2400 }
 
-  # 警报触发后该币临时进入最高频采样，服务延迟入场收益与纸面成交
-  burst_window_sec: 480
+  # 警报触发后该币临时进入最高频采样，服务延迟入场收益与纸面成交。
+  # V2 延长到覆盖 S2 确认期（min_age_from_s1_sec=1200 + 余量）：
+  # 确认期内的回撤/结构判断依赖高频观测
+  burst_window_sec: 1800
   # 冷启动/重启时列表涌入的存量币入库限速，避免瞬时打爆预算与写队列
   onboarding_max_per_min: 90
 
@@ -201,7 +203,9 @@ features:
 # 五维评分权重（Opportunity 满分 100）
 # ─────────────────────────────────────────────────────────────────────────────
 scoring:
-  strategy_version: "v1.0.0"
+  # v2.0.0：S1 观察池 + S2 确认制 + RugRisk 行为项。
+  # KPI 按版本分组，新旧警报自动分开统计
+  strategy_version: "v2.0.0"
   feature_version: "f1.0.0"
   opportunity_weights:
     holder_momentum: 20
@@ -238,6 +242,9 @@ state_machine:
       min_data_quality: 60
       min_liquidity_usd: 12000.0
       min_confidence: 50
+    # 【V2 起弃用】S2 不再由机会分晋升（85 分在当前评分模型下数学上
+    # 不可达，实测 24,621 条快照最大 75.26），改走下方 s2_confirmation
+    # 确认制。键位保留仅为配置向后兼容；S2 的维持/退出闸门继承 s1 规则
     s2:
       enter_opportunity: 85
       exit_opportunity: 75
@@ -245,6 +252,22 @@ state_machine:
       min_data_quality: 70
       min_confidence: 65
       min_smart_money_count: 3
+  # S2 确认制（V2）：S1 是观察池，S2 是确认级推送。
+  # 晋升不看机会分，看四个可证伪的问题：活得够久吗？扛住回撤了吗？
+  # 结构还在改善吗？有二次确认吗？外加行为硬否决（即时转派发观察）
+  s2_confirmation:
+    enabled: true
+    # 进入 S1 后至少存活该时长才可确认（榜单币第一波拉升通常几分钟内结束，
+    # 能活过 20 分钟且不破位的才谈得上"确认"）
+    min_age_from_s1_sec: 1200
+    # 确认期最高价回撤超过该百分比视为破位，不予确认
+    max_drawdown_from_peak_pct: 40.0
+    # 现价不得低于 S1 锚点价的该比例
+    min_price_vs_anchor_ratio: 0.7
+    # 硬否决：LP 较锚点抽离超过该百分比 → 即时转 DISTRIBUTION
+    hard_veto_lp_drop_pct: 20.0
+    # 硬否决：聪明钱离场率达到该值 → 即时转 DISTRIBUTION
+    hard_veto_exit_rate: 60.0
   distribution:
     enter_score: 60
     exit_score: 45
@@ -293,7 +316,9 @@ email:
   # 摘要自身的最小间隔。摘要不走 max_per_hour（它就是限速的溢出通道），
   # 因此必须自己节流，否则狂热行情下摘要会把每小时上限彻底架空
   digest_interval_sec: 900
-  send_s1: true
+  # V2：S1 重定位为观察池，默认不发邮件（进入 S1 只落库 + 开启高频采样）；
+  # 用户收到的第一封邮件是 S2 确认级推送。要恢复 V1 行为把它改回 true
+  send_s1: false
   send_s2: true
   send_distribution: true
   daily_kpi_hour_local: 9

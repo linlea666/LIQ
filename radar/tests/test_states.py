@@ -27,9 +27,18 @@ CONFIG = {
         "s1": {"enter_opportunity": 72, "exit_opportunity": 62,
                "max_rug_risk": 45, "min_data_quality": 60,
                "min_liquidity_usd": 12000.0, "min_confidence": 50},
+        # V2 起弃用：S2 走确认制，此块不再参与晋升判定
         "s2": {"enter_opportunity": 85, "exit_opportunity": 75,
                "max_rug_risk": 35, "min_data_quality": 70,
                "min_confidence": 65, "min_smart_money_count": 3},
+    },
+    "s2_confirmation": {
+        "enabled": True,
+        "min_age_from_s1_sec": 1200,
+        "max_drawdown_from_peak_pct": 40.0,
+        "min_price_vs_anchor_ratio": 0.7,
+        "hard_veto_lp_drop_pct": 20.0,
+        "hard_veto_exit_rate": 60.0,
     },
     "distribution": {"enter_score": 60, "exit_score": 45},
     "dormant_after_stale_sec": 21600,
@@ -78,11 +87,15 @@ def sm() -> StateMachine:
 # ─────────────────────────────────────────────────────────────────────────
 
 def test_promotes_through_levels(sm: StateMachine):
+    """V2：机会分晋升到 S1 为止，S2 只能走确认制（85 分数学上不可达，
+    V1 的 S2 是死档位）。"""
     view = make_view()
     view.state = TokenState.WATCHING
     assert sm.evaluate(view, scores(60), clean_risk(), NOW).new_state == TokenState.S0
     assert sm.evaluate(view, scores(75), clean_risk(), NOW).new_state == TokenState.S1
-    assert sm.evaluate(view, scores(90), clean_risk(), NOW).new_state == TokenState.S2
+    view.state = TokenState.S1
+    decision = sm.evaluate(view, scores(90), clean_risk(), NOW)
+    assert decision.new_state == TokenState.S1, "再高的机会分也不能跳过 S2 确认期"
 
 
 def test_promotion_ignores_min_dwell(sm: StateMachine):
@@ -91,18 +104,8 @@ def test_promotion_ignores_min_dwell(sm: StateMachine):
     view.state = TokenState.S0
     view.state_since_ms = NOW - 1000        # 刚刚才进入 S0
     decision = sm.evaluate(view, scores(90), clean_risk(), NOW)
-    assert decision.new_state == TokenState.S2
+    assert decision.new_state == TokenState.S1
     assert decision.changed
-
-
-def test_low_data_quality_blocks_s2_despite_high_opportunity(sm: StateMachine):
-    """数据质量是硬闸门，不能被高机会分覆盖。"""
-    view = make_view()
-    view.state = TokenState.S1
-    decision = sm.evaluate(view, scores(95, data_quality=50), clean_risk(), NOW)
-    assert decision.new_state != TokenState.S2
-    failing = {r.name for r in decision.failing(TokenState.S2)}
-    assert "data_quality" in failing
 
 
 def test_missing_liquidity_blocks_s1(sm: StateMachine):
@@ -123,6 +126,116 @@ def test_unknown_audit_blocks_s1(sm: StateMachine):
     decision = sm.evaluate(view, scores(80), risk, NOW)
     assert decision.new_state != TokenState.S1
     assert "audit_known" in {r.name for r in decision.failing(TokenState.S1)}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S2 确认制（V2）
+# ─────────────────────────────────────────────────────────────────────────
+
+def confirmable_s1_view() -> TokenView:
+    """构造一个满足全部 S2 确认条件的 S1 观察池成员。
+
+    各测试从这个"全通过"基线出发，各自破坏一个条件来验证单点否决。
+    """
+    view = TokenView(chain_id="56", contract_address="0xtest", token_id=1)
+    view.values.update({
+        "liquidity": 50000.0, "smart_money_count": 5,
+        "price": 0.0012, "market_cap": 100000.0,
+        "top10_percent": 28.0, "dev_percent": 5.0,
+    })
+    view.last_observed_ms = NOW
+    view.state = TokenState.S1
+    view.state_since_ms = NOW - 1_500_000       # 25 分钟前进入 S1（>20 分钟门槛）
+    view.s1_anchor = {
+        "price": 0.001, "liquidity": 50000.0, "top10_percent": 30.0,
+        "dev_percent": 5.0, "dev_sell_percent": 0.0, "holders": 800,
+        "at": NOW - 1_500_000,
+    }
+    view.s1_peak_price = 0.0015                  # 确认期创过新高（> 锚点价 ×1.02）
+    # 持有人连增：20 分钟前 800 → 6 分钟前 900 → 现在 1000
+    for ts, holders in ((NOW - 1_200_000, 800), (NOW - 360_000, 900)):
+        view.values["holders"] = holders
+        view.push_history(ts)
+    view.values["holders"] = 1000
+    return view
+
+
+def test_s2_confirmed_by_time_and_behavior_not_score(sm: StateMachine):
+    """确认期全部达标即晋升 S2，即使机会分只有 65（低于 S1 进入线 72）。
+
+    这正是 V2 的核心：确认期里动量分自然衰减，能扛住回撤、结构还在
+    改善的币才值得确认级推送，而不是分数最高的那一刻。
+    """
+    view = confirmable_s1_view()
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state == TokenState.S2
+    assert "确认期通过" in decision.reason
+
+
+def test_s2_needs_min_age_from_s1(sm: StateMachine):
+    """进入 S1 才 5 分钟不许确认——榜单币第一波拉升几分钟内就结束。"""
+    view = confirmable_s1_view()
+    view.state_since_ms = NOW - 300_000
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state != TokenState.S2
+    assert "s2_min_age" in {r.name for r in decision.failing(TokenState.S2)}
+
+
+def test_s2_rejected_on_deep_drawdown(sm: StateMachine):
+    """确认期最高价回撤 60% 视为破位，不予确认。"""
+    view = confirmable_s1_view()
+    view.s1_peak_price = 0.003                   # 现价 0.0012 → 回撤 60%
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state != TokenState.S2
+    assert "s2_drawdown" in {r.name for r in decision.failing(TokenState.S2)}
+
+
+def test_s2_requires_holder_growth(sm: StateMachine):
+    """持有人不再增长的币结构上已停滞，不予确认。"""
+    view = confirmable_s1_view()
+    view.values["holders"] = 790                 # 低于 15 分钟前的 800
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state != TokenState.S2
+    assert "s2_holders_grow" in {r.name for r in decision.failing(TokenState.S2)}
+
+
+def test_s2_data_quality_gate_survives_v2(sm: StateMachine):
+    """S1 级硬闸门（数据质量等）在确认制下仍然生效，
+    不能因为行为条件全过就带着不可信数据晋升。"""
+    view = confirmable_s1_view()
+    decision = sm.evaluate(view, scores(65, data_quality=50), clean_risk(), NOW)
+    assert decision.new_state != TokenState.S2
+    assert "data_quality" in {r.name for r in decision.failing(TokenState.S2)}
+
+
+def test_lp_pull_hard_veto_moves_to_distribution(sm: StateMachine):
+    """LP 较锚点抽离 40% → 不等确认期走完，即时转派发观察。
+
+    V1 实盘 7/7 买在顶部的直接死因：RugRisk 只看静态筹码结构，
+    对拔池这类行为完全失明。"""
+    view = confirmable_s1_view()
+    view.values["liquidity"] = 30000.0           # 锚点 50000 → -40%
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state == TokenState.DISTRIBUTION
+    assert "拔池" in decision.reason
+
+
+def test_smart_money_exodus_hard_veto(sm: StateMachine):
+    view = confirmable_s1_view()
+    view.values["exit_rate"] = 70.0              # ≥ 60 即否决
+    decision = sm.evaluate(view, scores(65), clean_risk(), NOW)
+    assert decision.new_state == TokenState.DISTRIBUTION
+    assert "离场率" in decision.reason
+
+
+def test_confirmation_disabled_restores_v1_behavior():
+    """关掉确认制后必须完整回退 V1：机会分直升 S2。"""
+    config = {**CONFIG, "s2_confirmation": {"enabled": False}}
+    sm = StateMachine(config, near_miss_margin=5.0)
+    view = make_view()
+    view.state = TokenState.S1
+    decision = sm.evaluate(view, scores(90), clean_risk(), NOW)
+    assert decision.new_state == TokenState.S2
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -276,10 +276,35 @@ def _build_params() -> tuple[Param, ...]:
     for state, fields in trans_fields.items():
         for fkey, flabel, lo, hi in fields:
             kind = "int" if fkey == "min_smart_money_count" else "float"
+            if state == "s2":
+                desc = ("【V2 起弃用】S2 改走确认制（见 S2 确认参数），"
+                        "此键保留仅为向后兼容，不再参与晋升判定")
+            elif fkey.startswith(("enter", "exit")):
+                desc = "进入阈值必须高于退出阈值（滞回防抖）"
+            else:
+                desc = ""
             add(_p(f"state_machine.transitions.{state}.{fkey}", kind,
                    f"{state.upper()}·{flabel}", "strategy", lo=lo, hi=hi,
-                   desc="进入阈值必须高于退出阈值（滞回防抖）"
-                   if fkey.startswith(("enter", "exit")) else ""))
+                   desc=desc))
+    add(_p("state_machine.s2_confirmation.enabled", "bool",
+           "S2 确认制开关", "strategy",
+           desc="开启后 S1 为观察池、S2 由时间+行为确认晋升；"
+                "关闭则回退 V1 的机会分晋升"))
+    add(_p("state_machine.s2_confirmation.min_age_from_s1_sec", "int",
+           "S2 确认·最短存活", "strategy", lo=60, hi=86400, unit="秒",
+           desc="进入 S1 后至少存活该时长才可确认晋升 S2"))
+    add(_p("state_machine.s2_confirmation.max_drawdown_from_peak_pct", "float",
+           "S2 确认·回撤上限", "strategy", lo=5, hi=95, unit="%",
+           desc="确认期最高价回撤超过该值视为破位，不予确认"))
+    add(_p("state_machine.s2_confirmation.min_price_vs_anchor_ratio", "float",
+           "S2 确认·锚点价比例下限", "strategy", lo=0.1, hi=1.5,
+           desc="现价不得低于 S1 锚点价的该比例"))
+    add(_p("state_machine.s2_confirmation.hard_veto_lp_drop_pct", "float",
+           "S2 硬否决·LP 抽离", "strategy", lo=5, hi=90, unit="%",
+           desc="流动性较 S1 锚点下降超过该值即时转入派发观察"))
+    add(_p("state_machine.s2_confirmation.hard_veto_exit_rate", "float",
+           "S2 硬否决·聪明钱离场率", "strategy", lo=10, hi=100, unit="%",
+           desc="聪明钱离场率达到该值即时转入派发观察"))
     add(_p("state_machine.distribution.enter_score", "float",
            "派发·进入分", "strategy", lo=0, hi=100))
     add(_p("state_machine.distribution.exit_score", "float",
@@ -332,7 +357,9 @@ def _build_params() -> tuple[Param, ...]:
     add(_p("email.digest_interval_sec", "int", "摘要最小间隔", "alerts",
            lo=60, hi=86400, unit="秒",
            desc="摘要是限速的溢出通道，必须自己节流，否则会架空每小时上限"))
-    add(_p("email.send_s1", "bool", "发送 S1 警报邮件", "alerts"))
+    add(_p("email.send_s1", "bool", "发送 S1 警报邮件", "alerts",
+           desc="V2 默认关闭：S1 是观察池，只落库并开启高频采样；"
+                "确认级通知由 S2 发出"))
     add(_p("email.send_s2", "bool", "发送 S2 警报邮件", "alerts"))
     add(_p("email.send_distribution", "bool", "发送派发警报邮件", "alerts"))
     add(_p("email.daily_kpi_hour_local", "int", "每日 KPI 邮件时刻", "alerts",

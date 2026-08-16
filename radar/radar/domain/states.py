@@ -107,6 +107,21 @@ class StateMachine:
         dist = config.get("distribution", {}) or {}
         self._dist_enter = float(dist.get("enter_score", 60))
         self._dist_exit = float(dist.get("exit_score", 45))
+
+        # S2 确认制（V2）：S2 不再由机会分晋升（旧阈值 85 在当前评分模型下
+        # 数学上不可达，实测 24,621 条快照最大 75.26——S2 是死档位），
+        # 改为对 S1 观察池做"时间 + 行为"确认。
+        s2c = config.get("s2_confirmation", {}) or {}
+        self._s2c_enabled = bool(s2c.get("enabled", True))
+        self._s2c_min_age_ms = int(float(s2c.get("min_age_from_s1_sec", 1200)) * 1000)
+        self._s2c_max_drawdown_pct = float(s2c.get("max_drawdown_from_peak_pct", 40.0))
+        self._s2c_min_price_ratio = float(s2c.get("min_price_vs_anchor_ratio", 0.7))
+        self._s2c_lp_drop_veto_pct = float(s2c.get("hard_veto_lp_drop_pct", 20.0))
+        self._s2c_exit_rate_veto = float(s2c.get("hard_veto_exit_rate", 60.0))
+        if self._s2c_enabled:
+            # S2 的维持/退出闸门继承 S1 规则：确认制下 S2 没有独立的机会分
+            # 进入门槛，退出仍需要滞回带，用 S1 的（旧 transitions.s2.* 弃用）
+            self._rules[TokenState.S2] = dict(self._rules[TokenState.S1])
         self._dormant_after_ms = int(config.get("dormant_after_stale_sec", 21600)) * 1000
         self._dead_min_liquidity = float(config.get("dead_min_liquidity_usd", 500.0))
         # 价格崩塌判死：拔池后接口常报残余流动性（实盘见过 $12,817），
@@ -157,9 +172,39 @@ class StateMachine:
             decision.reason = f"派发分 {scores.distribution:.0f} 超过 {self._dist_enter:.0f}"
             return decision
 
+        # ── S1/S2 确认期：行为追踪、硬否决、确认晋升 ──────────────────
+        if self._s2c_enabled and old.rank >= TokenState.S1.rank:
+            self._update_s1_tracking(view)
+            veto = self._s1_hard_veto(view)
+            if veto:
+                decision.new_state = TokenState.DISTRIBUTION
+                decision.changed = True
+                decision.reason = veto
+                return decision
+
+        if self._s2c_enabled and old == TokenState.S1:
+            confirm_reqs = self._s2_confirmation_check(view, scores, risk, now_ms)
+            # 无论通过与否都记录：落库的 requirements 是前端"为什么还没
+            # 晋升 S2"解释与 Near-Miss 反事实研究的唯一数据源
+            decision.requirements[TokenState.S2.value] = confirm_reqs
+            if all(r.passed for r in confirm_reqs):
+                decision.new_state = TokenState.S2
+                decision.changed = True
+                held_min = (now_ms - view.state_since_ms) / 60_000
+                decision.reason = (
+                    f"S1 确认期通过：存活 {held_min:.0f} 分钟，"
+                    "回撤/结构/二次确认全部达标"
+                )
+                return decision
+
         # ── 逐级检查晋升条件（从高到低）─────────────────────────────
+        # 确认制下 S2 只能从 S1 池确认晋升，不参与机会分晋升
+        candidates = (
+            (TokenState.S1, TokenState.S0) if self._s2c_enabled
+            else (TokenState.S2, TokenState.S1, TokenState.S0)
+        )
         target = TokenState.WATCHING
-        for candidate in (TokenState.S2, TokenState.S1, TokenState.S0):
+        for candidate in candidates:
             requirements = self._check(candidate, view, scores, risk)
             decision.requirements[candidate.value] = requirements
             if all(r.passed for r in requirements):
@@ -311,6 +356,158 @@ class StateMachine:
                 gap=0.0 if not risk.audit_unknown else 1.0,
             ))
         return requirements
+
+    # ═════════════════════════════════════════════════════════════════════
+    # S2 确认制（V2）
+    # ═════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _update_s1_tracking(view: TokenView) -> None:
+        """S1/S2 期间的行为追踪：确认期最高价与净流入回落标记。
+
+        只用真实现价更新峰值（不用回看极值——那是 Outcome 污染的教训）。
+        """
+        price = view.getf("price")
+        if price is not None and price > 0:
+            if view.s1_peak_price is None or price > view.s1_peak_price:
+                view.s1_peak_price = price
+        net_inflow = view.getf("net_inflow")
+        if net_inflow is not None and net_inflow <= 0:
+            view.s1_inflow_dipped = True
+
+    def _s1_hard_veto(self, view: TokenView) -> str | None:
+        """确认期硬否决：出现出货行为即时转 DISTRIBUTION，不等确认期走完。
+
+        这些是 V1 实盘 7/7 买在顶部的直接死因——RugRisk 只看静态筹码
+        结构（7 条 S1 的 rug 分仅 0-7），对拔池/抛售这类**行为**完全失明。
+        """
+        anchor = view.s1_anchor or {}
+
+        liquidity = view.getf("liquidity")
+        anchor_liq = anchor.get("liquidity")
+        if (liquidity is not None and anchor_liq
+                and liquidity < anchor_liq * (1.0 - self._s2c_lp_drop_veto_pct / 100.0)):
+            drop = (1.0 - liquidity / anchor_liq) * 100.0
+            return f"LP 较 S1 锚点抽离 {drop:.0f}%，疑似拔池，转入派发观察"
+
+        exit_rate = view.getf("exit_rate")
+        if exit_rate is not None and exit_rate >= self._s2c_exit_rate_veto:
+            return f"聪明钱离场率飙升至 {exit_rate:.0f}%，转入派发观察"
+
+        dev_sell = view.getf("dev_sell_percent")
+        anchor_dev_sell = anchor.get("dev_sell_percent")
+        if dev_sell is not None:
+            if anchor_dev_sell is not None and dev_sell - anchor_dev_sell >= 20.0:
+                return (f"开发者较 S1 锚点新增卖出 "
+                        f"{dev_sell - anchor_dev_sell:.0f}%，转入派发观察")
+            if anchor_dev_sell is None and dev_sell >= 50.0:
+                return f"开发者已卖出 {dev_sell:.0f}%，转入派发观察"
+        return None
+
+    def _s2_confirmation_check(self, view: TokenView, scores: ScoreResult,
+                               risk: RiskDecision, now_ms: int) -> list[Requirement]:
+        """S1 → S2 的确认条件。全部通过才晋升。
+
+        设计原则：不再依赖不可达的机会分，改问四个可证伪的问题——
+        活得够久吗？扛住回撤了吗？结构还在改善吗？有二次确认吗？
+        """
+        anchor = view.s1_anchor or {}
+        price = view.getf("price")
+        anchor_price = anchor.get("price")
+        peak = view.s1_peak_price
+
+        requirements: list[Requirement] = []
+
+        # 1) 最短存活：进入 S1 后至少存活 N 分钟（用本次 S1 停留时间计）
+        held_sec = (now_ms - view.state_since_ms) / 1000.0 if view.state_since_ms else None
+        requirements.append(_req(
+            "s2_min_age", "确认期时长", held_sec,
+            self._s2c_min_age_ms / 1000.0, "min", is_score=False,
+        ))
+
+        # 2) 抗回撤：确认期最高价回撤 < N%，且现价不低于锚点价的一定比例
+        drawdown = None
+        if price is not None and price > 0 and peak and peak > 0:
+            drawdown = (1.0 - price / peak) * 100.0
+        requirements.append(_req(
+            "s2_drawdown", "峰值回撤", drawdown,
+            self._s2c_max_drawdown_pct, "max", is_score=False,
+        ))
+        price_ratio = None
+        if price is not None and price > 0 and anchor_price:
+            price_ratio = price / anchor_price
+        requirements.append(_req(
+            "s2_price_vs_anchor", "现价/锚点价", price_ratio,
+            self._s2c_min_price_ratio, "min", is_score=False,
+        ))
+
+        # 3) 结构持续：持有人连增、流动性未降、Top10 未升、dev 未减仓。
+        #    锚点缺某字段（重启恢复的锚点只有价格/市值/流动性/持有人）时
+        #    跳过该项对比；当前值缺失则保守判不通过
+        requirements.append(self._structure_holders(view, now_ms))
+        liquidity = view.getf("liquidity")
+        anchor_liq = anchor.get("liquidity")
+        if anchor_liq:
+            ok = liquidity is not None and liquidity >= anchor_liq * 0.95
+            requirements.append(Requirement(
+                name="s2_liquidity_hold", label="流动性未降", passed=ok,
+                actual=liquidity, threshold=round(anchor_liq * 0.95, 2),
+                gap=0.0 if ok else float("inf"), is_score=False,
+            ))
+        top10 = view.getf("top10_percent")
+        anchor_top10 = anchor.get("top10_percent")
+        if anchor_top10 is not None:
+            ok = top10 is not None and top10 <= anchor_top10 + 2.0
+            requirements.append(Requirement(
+                name="s2_top10_hold", label="Top10 未升", passed=ok,
+                actual=top10, threshold=round(anchor_top10 + 2.0, 2),
+                gap=0.0 if ok else float("inf"), is_score=False,
+            ))
+        dev = view.getf("dev_percent")
+        anchor_dev = anchor.get("dev_percent")
+        if anchor_dev is not None:
+            ok = dev is not None and dev >= anchor_dev - 2.0
+            requirements.append(Requirement(
+                name="s2_dev_hold", label="dev 未减仓", passed=ok,
+                actual=dev, threshold=round(anchor_dev - 2.0, 2),
+                gap=0.0 if ok else float("inf"), is_score=False,
+            ))
+
+        # 4) 二次确认：S1 后价格创过新高，或净流入回落后二次转正
+        new_high = bool(anchor_price and peak and peak > anchor_price * 1.02)
+        net_inflow = view.getf("net_inflow")
+        inflow_reconfirm = bool(
+            view.s1_inflow_dipped and net_inflow is not None and net_inflow > 0
+        )
+        confirmed = new_high or inflow_reconfirm
+        requirements.append(Requirement(
+            name="s2_reconfirm", label="二次确认（新高或净流入转正）",
+            passed=confirmed, actual=None, threshold=None,
+            gap=0.0 if confirmed else float("inf"), is_score=False,
+        ))
+
+        # 5) 沿用 S1 级硬闸门（去掉机会分——确认期里动量分自然衰减，
+        #    要求它维持在 72 会把所有健康盘整全部挡在门外）
+        for requirement in self._check(TokenState.S2, view, scores, risk):
+            if requirement.name != "opportunity":
+                requirements.append(requirement)
+        return requirements
+
+    def _structure_holders(self, view: TokenView, now_ms: int) -> Requirement:
+        """持有人两个观察窗口连增：15 分钟净增 > 0 且 5 分钟未减。"""
+        holders = view.geti("holders")
+        h5 = view.history_at_or_before(now_ms - 300_000)
+        h15 = view.history_at_or_before(now_ms - 900_000)
+        h5_val = h5.holders if h5 else None
+        h15_val = h15.holders if h15 else None
+        ok = (holders is not None and h5_val is not None and h15_val is not None
+              and holders > h15_val and holders >= h5_val)
+        return Requirement(
+            name="s2_holders_grow", label="持有人连增",
+            passed=ok, actual=holders,
+            threshold=float(h15_val) if h15_val is not None else None,
+            gap=0.0 if ok else float("inf"), is_score=False,
+        )
 
     def _in_hysteresis_band(self, state: TokenState, view: TokenView,
                             scores: ScoreResult, risk: RiskDecision) -> bool:

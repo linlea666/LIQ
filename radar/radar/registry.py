@@ -223,6 +223,9 @@ class TokenRegistry:
                 view.audit_checked_at = obs.observed_at
             row = await repo.upsert_token(self._db, view, source=obs.endpoint)
             revived = _restore_persisted_state(view, row)
+            if view.state.rank >= TokenState.S1.rank:
+                # 复活为 S1+ 的币必须带回锚点，否则 S2 确认永远无法通过
+                await self._load_s1_anchors([view])
             self._views[key] = view
             if revived:
                 self.stats.revived += 1
@@ -456,6 +459,28 @@ class TokenRegistry:
         # 否则将来回到该状态时会带着陈旧计数，一次抖动就直接降级
         view.exit_streak.clear()
 
+        # S1 锚点生命周期：进入 S1 记录现场，跌回 S1 以下（DISTRIBUTION
+        # 除外——派发观察期间锚点仍有对照价值）时清除。
+        # S2 确认的全部行为条件（回撤、LP 抽离、dev 减仓）都以它为基准
+        if new == TokenState.S1 and old.rank < TokenState.S1.rank:
+            price = view.getf("price")
+            view.s1_anchor = {
+                "price": price,
+                "market_cap": ev.market_cap or view.getf("market_cap"),
+                "liquidity": view.getf("liquidity"),
+                "top10_percent": view.getf("top10_percent"),
+                "dev_percent": view.getf("dev_percent"),
+                "dev_sell_percent": view.getf("dev_sell_percent"),
+                "holders": view.geti("holders"),
+                "at": now_ms,
+            }
+            view.s1_peak_price = price
+            view.s1_inflow_dipped = False
+        elif new.rank < TokenState.S1.rank and new != TokenState.DISTRIBUTION:
+            view.s1_anchor = None
+            view.s1_peak_price = None
+            view.s1_inflow_dipped = False
+
         # 状态变更必须立刻补写数据库：_persist 在状态机结论应用之前执行，
         # 它写入的是变更前的状态。若不补写，"终局评估"（如 S1→DEAD 之后
         # 再无任何观测）会让 token_master 永远停在旧状态，
@@ -628,6 +653,7 @@ class TokenRegistry:
             restored += 1
 
         await self._restore_history(now_ms)
+        await self._load_s1_anchors(list(self._views.values()))
         self.stats.revived = restored
         self._events.emit(
             EventType.REGISTRY_RESTORED,
@@ -636,6 +662,51 @@ class TokenRegistry:
             payload={"state_counts": self.state_counts()},
         )
         return restored
+
+    async def _load_s1_anchors(self, views: list[TokenView]) -> None:
+        """从最近一条非 near-miss S1 警报恢复 S1 锚点。
+
+        警报行只有价格/市值/流动性/持有人（无 top10/dev），
+        缺的字段在 S2 确认里会自动跳过对比——诚实的少判，
+        优先于用错误的基准判。
+        """
+        targets = {
+            v.token_id: v for v in views
+            if (v.token_id is not None and v.s1_anchor is None
+                and v.state.rank >= TokenState.S1.rank)
+        }
+        if not targets:
+            return
+        placeholders = ",".join("?" * len(targets))
+        try:
+            rows = await self._db.fetch_all(
+                "SELECT a.token_id, a.price, a.market_cap, a.liquidity, "
+                "a.holders, a.created_at FROM alerts a "
+                "JOIN (SELECT token_id, MAX(created_at) AS mc FROM alerts "
+                f"      WHERE alert_kind='S1' AND is_near_miss=0 "
+                f"      AND token_id IN ({placeholders}) GROUP BY token_id) m "
+                "ON m.token_id = a.token_id AND m.mc = a.created_at "
+                "WHERE a.alert_kind='S1' AND a.is_near_miss=0",
+                tuple(targets.keys()),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("恢复 S1 锚点失败，S2 确认将等待下次晋升: %s", exc)
+            return
+        for row in rows:
+            view = targets.get(row["token_id"])
+            if view is None:
+                continue
+            view.s1_anchor = {
+                "price": row["price"],
+                "market_cap": row["market_cap"],
+                "liquidity": row["liquidity"],
+                "top10_percent": None,
+                "dev_percent": None,
+                "dev_sell_percent": None,
+                "holders": row["holders"],
+                "at": int(row["created_at"]),
+            }
+            view.s1_peak_price = row["price"]
 
     async def _restore_history(self, now_ms: int) -> None:
         """为已恢复的代币补回近期历史点。
