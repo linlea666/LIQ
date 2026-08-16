@@ -33,7 +33,7 @@ export default function RadarLayout({ children }: { children: React.ReactNode })
   const degraded = !error && health?.status === "degraded";
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="radar-page min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">

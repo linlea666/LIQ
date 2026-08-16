@@ -20,7 +20,8 @@ body:has(.scalp-page),
 body:has(.smc-page),
 body:has(.brain-page),
 body:has(.trend-page),
-body:has(.bottom-model-page) {
+body:has(.bottom-model-page),
+body:has(.radar-page) {
   overflow: auto;
 }
 
