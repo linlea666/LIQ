@@ -9,6 +9,7 @@ import RangeSignalView from "./RangeSignalView";
 import KeyLevelView from "./KeyLevelView";
 import MarketActionView from "./MarketActionView";
 import OrderbookPressureView from "./OrderbookPressureView";
+import OrderflowView from "./OrderflowView";
 
 // Tab 顺序遵循决策链：结构 → 箱体（空间）→ 动作分析（AI 结构化判断）→ 关键位（点位）→ 挂单压力（订单流）
 // 动作分析 (Market Action Analyzer · MAA) 替换原「动能/衰竭」模块，基于 14 维真实
@@ -24,6 +25,7 @@ const PRO_TABS = [
   { id: "market_action", label: "动作分析 ⚡" },
   { id: "key_level", label: "关键位" },
   { id: "orderbook_pressure", label: "挂单压力 🧱" },
+  { id: "orderflow", label: "资金流 💧" },
 ] as const;
 
 const BEGINNER_TABS = [
@@ -69,6 +71,7 @@ export default function TabContainer() {
         {validTab === "market_action" && <MarketActionView />}
         {validTab === "key_level" && <KeyLevelView />}
         {validTab === "orderbook_pressure" && <OrderbookPressureView />}
+        {validTab === "orderflow" && <OrderflowView />}
       </div>
     </div>
   );

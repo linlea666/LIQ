@@ -608,6 +608,7 @@ class Engine:
             asyncio.create_task(self._cache_persist_loop()),
             asyncio.create_task(self._source_observe_loop()),
             asyncio.create_task(self._binance_ticker_ws_loop()),
+            asyncio.create_task(self._orderflow_stats_loop()),
         ]
 
         # 全局层 —— stagger 0.3s 间隔，关键数据优先，4s 内全部启动
@@ -1112,6 +1113,36 @@ class Engine:
                 self._cg.save_cache_to_disk()
             except Exception:
                 logger.error("Cache persist failed", exc_info=True)
+
+    async def _orderflow_stats_loop(self):
+        """P2：每 5 分钟把内存态订单流数据聚合进 SQLite 小时/日桶。
+
+        零 Coinglass 配额：只读 state.cvd_* / *large_orders_history。
+        SQLite 写入量极小（币×市场×小时级 upsert），推到 thread pool 执行。
+        """
+        try:
+            from processors.orderflow_stats import get_orderflow_aggregator
+            agg = get_orderflow_aggregator(
+                hourly_keep_days=self._settings.retention.orderflow_hourly_days,
+                daily_keep_days=self._settings.retention.orderflow_daily_days,
+            )
+        except Exception:
+            logger.error("[orderflow_stats] init failed, loop disabled", exc_info=True)
+            return
+        loop = asyncio.get_running_loop()
+        while self._running:
+            await asyncio.sleep(300)
+            for ccy in self._settings.supported_coins:
+                state = self._states.get(ccy)
+                if state is None:
+                    continue
+                try:
+                    await loop.run_in_executor(None, agg.flush_coin, state)
+                except Exception:
+                    logger.debug(
+                        "[orderflow_stats] flush dispatch failed | coin=%s",
+                        ccy, exc_info=True,
+                    )
 
     async def _binance_ticker_ws_loop(self):
         """Binance ticker 实时流：仅负责价格更新，不影响 Coinglass 轮询链路。"""

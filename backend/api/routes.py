@@ -74,6 +74,47 @@ async def get_liquidation_map(coin: str, cycle: str = Query("1d")):
     return liq.model_dump()
 
 
+@router.get("/orderflow/{coin}/hourly")
+async def get_orderflow_hourly(
+    coin: str,
+    market: Optional[str] = Query(None, description="spot | futures，缺省返回两者"),
+    hours: int = Query(72, ge=1, le=2160, description="回看小时数"),
+):
+    """订单流小时桶：taker 买卖 USD、净额、大额挂单被动成交、whale 主动成交。
+
+    数据来自本地聚合（P2 orderflow_stats），零 Coinglass 配额；
+    coverage_pct < 1 表示该小时数据有断档。
+    """
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+    if market is not None and market not in ("spot", "futures"):
+        raise HTTPException(400, "market must be 'spot' or 'futures'")
+    from processors.orderflow_stats import get_orderflow_store
+    now = int(time.time())
+    rows = get_orderflow_store().query_hourly(
+        coin, market=market, start_ts=now - hours * 3600, limit=hours * 2 + 4,
+    )
+    return {"coin": coin, "market": market, "hours": hours, "rows": rows}
+
+
+@router.get("/orderflow/{coin}/daily")
+async def get_orderflow_daily(
+    coin: str,
+    market: Optional[str] = Query(None, description="spot | futures，缺省返回两者"),
+    days: int = Query(90, ge=1, le=400, description="回看天数"),
+):
+    """订单流日桶（UTC+8 日界），字段同小时桶 + hours_covered。"""
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+    if market is not None and market not in ("spot", "futures"):
+        raise HTTPException(400, "market must be 'spot' or 'futures'")
+    from processors.orderflow_stats import get_orderflow_store
+    rows = get_orderflow_store().query_daily(coin, market=market, limit=days * 2 + 4)
+    return {"coin": coin, "market": market, "days": days, "rows": rows}
+
+
 @router.get("/liquidation-heatmap/{coin}")
 async def get_liquidation_heatmap(coin: str, range_: str = Query("24h", alias="range")):
     """获取清算热力图（aggregated-heatmap/model1）。
