@@ -290,6 +290,12 @@ def _build_params() -> tuple[Param, ...]:
     add(_p("state_machine.dead_min_liquidity_usd", "float", "死亡流动性线",
            "strategy", lo=0, hi=100_000, unit="USD",
            desc="流动性低于该值判定 DEAD；DEAD 仅限硬性死亡"))
+    add(_p("state_machine.dead_price_collapse_pct", "float", "死亡崩塌跌幅",
+           "strategy", lo=50, hi=99.9, unit="%",
+           desc="价格较近期高点跌幅超过该值且连续确认后判定 DEAD"))
+    add(_p("state_machine.dead_confirm_cycles", "int", "死亡确认周期数",
+           "strategy", lo=1, hi=10,
+           desc="价格崩塌需连续 N 次评估确认才判死，防单次坏数据误杀"))
 
     # ── 警报与邮件 ─────────────────────────────────────────────────────
     add(_p("alerts.near_miss_margin", "float", "Near-Miss 边距", "alerts",

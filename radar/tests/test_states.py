@@ -223,6 +223,55 @@ def test_drained_liquidity_is_dead(sm: StateMachine):
     assert decision.new_state == TokenState.DEAD
 
 
+def test_price_collapse_marks_dead_after_confirmation(sm: StateMachine):
+    """拔池后接口仍报残余流动性（实盘 $12,817），必须靠价格崩塌抓死币。"""
+    view = make_view()
+    view.state = TokenState.S1
+    view.values["price"] = 0.00002          # 较历史高点 0.001 跌 98%
+
+    first = sm.evaluate(view, scores(70), clean_risk(), NOW)
+    assert first.new_state == TokenState.S1, "首次满足不判死，防单次坏数据误杀"
+
+    second = sm.evaluate(view, scores(70), clean_risk(), NOW + 60_000)
+    assert second.new_state == TokenState.DEAD
+    assert "崩塌" in second.reason
+
+
+def test_single_bad_price_does_not_kill(sm: StateMachine):
+    """一次接口错价后恢复正常，确认计数必须清零。"""
+    view = make_view()
+    view.state = TokenState.S1
+    view.values["price"] = 0.00002
+    sm.evaluate(view, scores(70), clean_risk(), NOW)      # 计数 1
+
+    view.values["price"] = 0.001                           # 价格恢复
+    sm.evaluate(view, scores(70), clean_risk(), NOW + 60_000)
+
+    view.values["price"] = 0.00002                         # 再次异常，应重新从 1 数起
+    decision = sm.evaluate(view, scores(70), clean_risk(), NOW + 120_000)
+    assert decision.new_state == TokenState.S1
+
+
+def test_dead_by_collapse_stays_dead_and_can_revive(sm: StateMachine):
+    """进入 DEAD 后条件仍成立必须维持，不得与 WATCHING 来回抖动；
+    但价格真正恢复后要能复活。"""
+    view = make_view()
+    view.state = TokenState.S1
+    view.values["price"] = 0.00002
+    sm.evaluate(view, scores(70), clean_risk(), NOW)
+    assert sm.evaluate(view, scores(70), clean_risk(),
+                       NOW + 60_000).new_state == TokenState.DEAD
+
+    view.state = TokenState.DEAD
+    view.exit_streak.clear()                # 模拟 registry 在状态变更后清零
+    holding = sm.evaluate(view, scores(70), clean_risk(), NOW + 120_000)
+    assert not holding.changed, "条件仍成立时 DEAD 不应复活"
+
+    view.values["price"] = 0.001
+    revived = sm.evaluate(view, scores(70), clean_risk(), NOW + 180_000)
+    assert revived.new_state == TokenState.WATCHING
+
+
 def test_stale_token_becomes_dormant_and_can_revive(sm: StateMachine):
     view = make_view()
     view.state = TokenState.S0

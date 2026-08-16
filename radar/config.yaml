@@ -251,6 +251,11 @@ state_machine:
   # 沉寂进 DORMANT（可复活）；DEAD 仅限硬性死亡
   dormant_after_stale_sec: 21600
   dead_min_liquidity_usd: 500.0
+  # 价格较近期高点（内存历史窗口，约 2 小时）崩塌该百分比视为死亡。
+  # 拔池后接口常报残余流动性，只靠流动性线抓不到最常见的死法
+  dead_price_collapse_pct: 90.0
+  # 崩塌需连续 N 次评估确认才判死，防单次坏数据误杀（DEAD 本身可复活）
+  dead_confirm_cycles: 2
 
 # 警报与邮件
 alerts:

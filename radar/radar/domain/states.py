@@ -109,6 +109,10 @@ class StateMachine:
         self._dist_exit = float(dist.get("exit_score", 45))
         self._dormant_after_ms = int(config.get("dormant_after_stale_sec", 21600)) * 1000
         self._dead_min_liquidity = float(config.get("dead_min_liquidity_usd", 500.0))
+        # 价格崩塌判死：拔池后接口常报残余流动性（实盘见过 $12,817），
+        # 只靠流动性线永远抓不到最常见的死法（价格瞬间 -99.9%）
+        self._dead_collapse_pct = float(config.get("dead_price_collapse_pct", 90.0))
+        self._dead_confirm = max(1, int(config.get("dead_confirm_cycles", 2)))
         self._near_miss_margin = near_miss_margin
 
     # ═════════════════════════════════════════════════════════════════════
@@ -217,11 +221,58 @@ class StateMachine:
             # 流动性被抽干是硬性死亡，不是"暂时不活跃"
             return TokenState.DEAD, f"流动性仅 ${liquidity:,.0f}，视为已死亡"
 
+        collapse = self._price_collapse(view)
+        if collapse is not None:
+            return collapse
+
         if view.last_observed_ms and now_ms - view.last_observed_ms > self._dormant_after_ms:
             hours = (now_ms - view.last_observed_ms) / 3_600_000
             return TokenState.DORMANT, f"已 {hours:.1f} 小时未再出现在任何榜单"
 
         return None
+
+    # 确认计数在 exit_streak 字典里的专用键。状态变更时会随整个字典清零，
+    # 这正是想要的语义：进入新状态后重新开始计数
+    _DEAD_STREAK_KEY = "__dead_price_collapse"
+
+    def _price_collapse(self, view: TokenView) -> tuple[TokenState, str] | None:
+        """价格较历史窗口内高点崩塌 ≥N% 且连续多次评估确认 → DEAD。
+
+        单次坏数据（接口偶发返回错价）不该判死一枚活币，
+        因此复用退出确认的思路：需连续 dead_confirm_cycles 次评估都满足。
+        DEAD 本身可复活（崩塌条件消失即回 WATCHING），误判成本有限，
+        但确认计数仍能挡住绝大多数数据抖动。
+        """
+        price = view.getf("price")
+        if price is None or price <= 0:
+            view.exit_streak.pop(self._DEAD_STREAK_KEY, None)
+            return None
+
+        peak = None
+        for point in view.history:
+            if point.price is not None and (peak is None or point.price > peak):
+                peak = point.price
+        for point in view.history_coarse:
+            if point.price is not None and (peak is None or point.price > peak):
+                peak = point.price
+
+        threshold = 1.0 - self._dead_collapse_pct / 100.0
+        if peak is None or peak <= 0 or price > peak * threshold:
+            view.exit_streak.pop(self._DEAD_STREAK_KEY, None)
+            return None
+
+        streak = view.exit_streak.get(self._DEAD_STREAK_KEY, 0) + 1
+        view.exit_streak[self._DEAD_STREAK_KEY] = streak
+        # 确认计数只约束"进入"DEAD。已是 DEAD 的币条件仍成立时必须直接维持：
+        # 进入 DEAD 时 exit_streak 被清零，若维持也要重新数满 N 次，
+        # 币会在 DEAD 与 WATCHING 之间来回抖动
+        if streak < self._dead_confirm and view.state != TokenState.DEAD:
+            return None
+
+        drop_pct = (1.0 - price / peak) * 100.0
+        return TokenState.DEAD, (
+            f"价格较近期高点崩塌 {drop_pct:.1f}%（连续 {streak} 次确认），视为已死亡"
+        )
 
     def _check(self, target: TokenState, view: TokenView,
                scores: ScoreResult, risk: RiskDecision) -> list[Requirement]:
