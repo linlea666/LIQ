@@ -822,6 +822,57 @@ class KpiReporter:
                                 **payload})
         return results
 
+    async def summarize(self, *, window_days: int = 7,
+                        at_ms: int | None = None) -> dict[str, Any]:
+        """近 N 天推送质量汇总（纯查询，不写库）。
+
+        与 build() 的区别是口径：build 是"截至今天的 30 天滚动"按日落库，
+        这里回答的是"最近一周发出的推送表现如何"——周报邮件和前端
+        质量看板都用这个口径。聚合逻辑复用 _kpi_payload，
+        保证与 kpi_daily 的指标定义完全一致。
+        """
+        now = at_ms or now_ms()
+        since = now - window_days * 86_400_000
+        rows = await self._db.fetch_all(
+            "SELECT a.alert_kind, a.strategy_version, o.signal_at, o.peak_multiple, "
+            "o.mae_pct, o.horizons_json, o.liq_adjusted_multiple, o.outcome_label "
+            "FROM outcomes o JOIN alerts a ON a.alert_id = o.alert_id "
+            "WHERE a.is_near_miss = 0 AND o.signal_at >= ? AND o.signal_at < ?",
+            (since, now),
+        )
+
+        groups: list[dict[str, Any]] = []
+        for horizon_hours in self._horizons_hours:
+            label = _horizon_label(horizon_hours)
+            horizon_ms = int(horizon_hours * 3_600_000)
+            buckets: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+            for row in rows:
+                if now - int(row["signal_at"]) < horizon_ms:
+                    continue
+                key = (str(row["alert_kind"]),
+                       str(row["strategy_version"] or "unknown"))
+                buckets.setdefault(key, []).append(row)
+            for (kind, version), items in sorted(buckets.items()):
+                labels: dict[str, int] = {}
+                for item in items:
+                    if item["outcome_label"]:
+                        name = str(item["outcome_label"])
+                        labels[name] = labels.get(name, 0) + 1
+                groups.append({
+                    "alert_kind": kind, "strategy_version": version,
+                    "horizon": label, "matured_count": len(items),
+                    "labels": labels, **_kpi_payload(items, label),
+                })
+
+        return {
+            "window_days": window_days,
+            "since": since,
+            "until": now,
+            # 已发出总数含未成熟样本：看板必须能区分"没发"和"还没到期"
+            "total_alerts": len(rows),
+            "groups": groups,
+        }
+
 
 def _kpi_payload(items: Sequence[Mapping[str, Any]], label: str) -> dict[str, Any]:
     peaks = [float(r["peak_multiple"]) for r in items

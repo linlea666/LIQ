@@ -228,6 +228,31 @@ export interface RadarKpi {
   payload: Record<string, number> | null;
 }
 
+/** 近 N 天推送质量汇总（/research/kpi/summary，周报同款口径）。 */
+export interface RadarKpiSummaryGroup {
+  alert_kind: string;
+  strategy_version: string;
+  horizon: string;
+  matured_count: number;
+  labels: Record<string, number>;
+  hit_2x_ratio: number | null;
+  hit_5x_ratio: number | null;
+  hit_10x_ratio: number | null;
+  median_peak_multiple: number | null;
+  median_liq_adjusted: number | null;
+  median_mae_pct: number | null;
+  rug_ratio: number | null;
+}
+
+export interface RadarKpiSummary {
+  window_days: number;
+  since: number;
+  until: number;
+  /** 含未成熟样本——看板必须能区分"没发"和"还没到期"。 */
+  total_alerts: number;
+  groups: RadarKpiSummaryGroup[];
+}
+
 export interface RadarDiagnostics {
   health: RadarHealth;
   scheduler: Record<string, unknown>;

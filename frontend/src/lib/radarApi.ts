@@ -16,6 +16,7 @@ import type {
   RadarEvent,
   RadarHealth,
   RadarKpi,
+  RadarKpiSummary,
   RadarOutcome,
   RadarRejection,
   RadarTokenDetail,
@@ -122,6 +123,9 @@ export const listNearMiss = (query: { since_hours?: number; limit?: number } = {
 
 export const listKpi = (query: { days?: number; horizon?: string } = {}) =>
   request<{ total: number; items: RadarKpi[] }>(`/research/kpi${qs(query)}`);
+
+export const getKpiSummary = (days = 7) =>
+  request<RadarKpiSummary>(`/research/kpi/summary${qs({ days })}`);
 
 export const rebuildKpi = () =>
   request<{ groups: number }>("/research/kpi/rebuild", { method: "POST" });

@@ -362,6 +362,10 @@ def _build_params() -> tuple[Param, ...]:
                 "确认级通知由 S2 发出"))
     add(_p("email.send_s2", "bool", "发送 S2 警报邮件", "alerts"))
     add(_p("email.send_distribution", "bool", "发送派发警报邮件", "alerts"))
+    add(_p("email.send_weekly_report", "bool", "发送通知质量周报", "alerts",
+           desc="每周汇总近 7 天推送的实际表现（RUG 率、命中率、中位峰值）"))
+    add(_p("email.weekly_report_hour_local", "int", "周报发送时刻", "alerts",
+           lo=0, hi=23, unit="点（本地时区，每周一）"))
     add(_p("email.daily_kpi_hour_local", "int", "每日 KPI 邮件时刻", "alerts",
            lo=0, hi=23, unit="点（本地时区）"))
     add(_p("email.outbox_max_retries", "int", "发信重试次数", "alerts", lo=0, hi=20))

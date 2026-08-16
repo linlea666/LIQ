@@ -321,6 +321,11 @@ email:
   send_s1: false
   send_s2: true
   send_distribution: true
+  # 通知质量周报：每周一 weekly_report_hour_local 点后汇总近 7 天推送的
+  # 实际表现（RUG 率、2x 命中率、中位峰值/MAE）。通知质量是 V2 的核心
+  # KPI，只推送不复盘，阈值永远不知道该往哪调
+  send_weekly_report: true
+  weekly_report_hour_local: 9
   daily_kpi_hour_local: 9
   outbox_max_retries: 5
   outbox_retry_backoff_sec: 120

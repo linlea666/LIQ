@@ -763,3 +763,38 @@ async def test_kpi_excludes_near_miss_records(env):
 
     reporter = KpiReporter(db=db, config=TRACKER_CONFIG, fingerprint=FINGERPRINT)
     assert await reporter.build(NOW) == []
+
+
+@pytest.mark.asyncio
+async def test_kpi_summarize_reports_window_quality(env):
+    """周报/看板口径：total 含未成熟样本，分组只统计已到期的。
+
+    区分"没发"和"还没到期"是看板最重要的诚实性要求——
+    把未成熟样本埋掉会让刚上线的策略版本看起来一条推送都没有。
+    """
+    tracker, db = env
+    # 已成熟（5 小时前，冲到 3x）+ 未成熟（10 分钟前）
+    matured = make_view(price=0.001, token_id=1, contract="0xm")
+    alert_id = await seed_alert(db, matured, created_at=NOW - 5 * HOUR)
+    tracker.track(alert_id=alert_id, alert_kind="S1", view=matured,
+                  at_ms=NOW - 5 * HOUR)
+    tracker.on_observation(move(matured, price=0.003), NOW - 5 * HOUR + 60_000)
+
+    fresh = make_view(price=0.001, token_id=2, contract="0xf")
+    fresh_id = await seed_alert(db, fresh, created_at=NOW - 600_000)
+    tracker.track(alert_id=fresh_id, alert_kind="S1", view=fresh,
+                  at_ms=NOW - 600_000)
+    await db.drain()
+
+    reporter = KpiReporter(db=db, config=TRACKER_CONFIG, fingerprint=FINGERPRINT)
+    summary = await reporter.summarize(window_days=7, at_ms=NOW)
+
+    assert summary["total_alerts"] == 2, "总数必须含未成熟样本"
+    by_horizon = {g["horizon"]: g for g in summary["groups"]}
+    assert by_horizon["1h"]["matured_count"] == 1
+    assert by_horizon["1h"]["hit_2x_ratio"] == 1.0
+    assert "24h" not in by_horizon, "24h 窗口无成熟样本不应产出分组"
+
+    # 不写库：summarize 是纯查询，重复调用不能污染 kpi_daily
+    rows = await db.fetch_all("SELECT * FROM kpi_daily")
+    assert rows == []

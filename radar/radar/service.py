@@ -239,7 +239,7 @@ class RadarService:
     # ═════════════════════════════════════════════════════════════════════
 
     async def _maintenance_loop(self) -> None:
-        """低频维护：限流自适应、爆发窗口清理、摘要邮件、内存水位。"""
+        """低频维护：限流自适应、爆发窗口清理、摘要邮件、周报、内存水位。"""
         cleanup_interval = float(self.settings.storage.get("cleanup_interval_sec", 3600))
         last_cleanup = time.monotonic()
 
@@ -251,6 +251,7 @@ class RadarService:
                 self.scheduler.evaluate_adaptive()
                 self.scheduler.prune_burst()
                 await self.alerts.flush_digest()
+                await self._maybe_send_weekly_report()
                 self._report_memory()
                 if time.monotonic() - last_cleanup >= cleanup_interval:
                     last_cleanup = time.monotonic()
@@ -259,6 +260,44 @@ class RadarService:
                 raise
             except Exception:
                 logger.exception("维护循环异常")
+
+    async def _maybe_send_weekly_report(self) -> None:
+        """通知质量周报：每周一次汇总近 7 天推送的实际表现。
+
+        通知质量是 V2 的核心 KPI，必须闭环回到收件人——
+        只有推送没有复盘，阈值永远不知道该往哪调。
+        outbox 的幂等键（weekly:ISO周）保证进程重启也不会重发。
+        """
+        email_cfg = self.settings.raw.get("email", {}) or {}
+        if not bool(email_cfg.get("send_weekly_report", True)):
+            return
+        if not (self.settings.email.enabled and self.settings.email.usable):
+            return
+
+        key = weekly_report_key(
+            now_ms(),
+            tz_offset_hours=self.settings.tz_offset_hours,
+            send_hour=int(email_cfg.get("weekly_report_hour_local", 9)),
+        )
+        if key is None or key == getattr(self, "_last_weekly_key", None):
+            return
+        self._last_weekly_key = key
+
+        summary = await self.kpi.summarize(window_days=7)
+        subject, html = self.renderer.render_weekly_report(
+            summary, generated_at=now_ms()
+        )
+        await repo.enqueue_email(
+            self.db,
+            idempotency_key=f"weekly:{key}",
+            kind="WEEKLY_REPORT",
+            subject=subject,
+            html=html,
+            token_id=None,
+            alert_id=None,
+            created_at=now_ms(),
+        )
+        logger.info("通知质量周报已入队（%s）", key)
 
     def _report_memory(self) -> None:
         rss_mb = _rss_mb()
@@ -378,6 +417,25 @@ class RadarService:
             "metrics": metrics.snapshot(),
             "events": bus.counts(),
         }
+
+
+def weekly_report_key(at_ms: int, *, tz_offset_hours: int,
+                      send_hour: int) -> str | None:
+    """周报的发送键：本地时间每周一 send_hour 点之后返回该 ISO 周的键。
+
+    独立成纯函数以便测试。返回 None 表示当前不在发送窗口
+    （周一 send_hour 之前，或不是周一——周一错过则顺延到当周任意
+    时刻首次满足条件时补发，避免"重启恰好跨过周一早上"漏掉一期）。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    local = datetime.fromtimestamp(
+        at_ms / 1000, timezone(timedelta(hours=tz_offset_hours))
+    )
+    iso_year, iso_week, iso_weekday = local.isocalendar()
+    if iso_weekday == 1 and local.hour < send_hour:
+        return None
+    return f"{iso_year}-W{iso_week:02d}"
 
 
 def _rss_mb() -> float | None:

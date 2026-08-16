@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .alerts import KIND_DISTRIBUTION, KIND_S1, KIND_S2, AlertRecord
 from .registry import Evaluation
@@ -281,6 +281,93 @@ class EmailRenderer:
 {self._footer(records[-1].created_at if records else 0)}
 """
         return subject, _wrap(body)
+
+    # ── 通知质量周报 ────────────────────────────────────────────────────
+    def render_weekly_report(self, summary: Mapping[str, Any], *,
+                             generated_at: int) -> tuple[str, str]:
+        """通知质量是核心 KPI，周报回答一个问题：上周的推送值得信吗。
+
+        按 策略版本 × 警报类型 × 观察窗口 分组展示 RUG 率与命中率；
+        样本量必须醒目——3 个样本的"0% RUG"毫无意义。
+        """
+        window_days = int(summary.get("window_days", 7))
+        total = int(summary.get("total_alerts", 0))
+        groups = list(summary.get("groups", []))
+
+        # 主题里放 24h 窗口的整体 RUG 率——收件人扫一眼就能判断要不要点开
+        rug_24h = [g for g in groups if g.get("horizon") == "24h"]
+        matured = sum(int(g.get("matured_count", 0)) for g in rug_24h)
+        rugs = sum(
+            round(float(g.get("rug_ratio") or 0.0) * int(g.get("matured_count", 0)))
+            for g in rug_24h
+        )
+        headline = (f"RUG率 {rugs}/{matured}" if matured else "样本尚未成熟")
+        subject = f"[雷达·周报] 近{window_days}天推送 {total} 条 · {headline}"
+
+        if not groups:
+            body_rows = ('<div style="color:#64748b;font-size:13px;margin-top:12px;">'
+                         "窗口内没有已成熟的推送样本。</div>")
+        else:
+            header = """<tr style="background:#f8fafc;">
+              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">类型</th>
+              <th style="padding:6px 8px;text-align:left;font-size:11px;color:#64748b;">策略</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">窗口</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">样本</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">RUG率</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">2x率</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">中位峰值</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:#64748b;">中位MAE</th>
+            </tr>"""
+            body_rows = (
+                '<table style="width:100%;border-collapse:collapse;margin-top:12px;'
+                f'font-size:13px;">{header}'
+                + "".join(self._weekly_row(g) for g in groups)
+                + "</table>"
+            )
+
+        body = f"""
+<div style="padding:12px 16px;background:#f8fafc;border-left:4px solid #0f766e;">
+  <div style="font-size:18px;font-weight:700;color:#0f172a;">通知质量周报</div>
+  <div style="font-size:12px;color:#64748b;margin-top:4px;">
+    近 {window_days} 天共发出 {total} 条推送（含未成熟样本）。
+    各观察窗口只统计已到期样本，避免右删失偏差。
+  </div>
+</div>
+{body_rows}
+{self._footer(generated_at)}
+"""
+        return subject, _wrap(body)
+
+    @staticmethod
+    def _weekly_row(group: Mapping[str, Any]) -> str:
+        def pct(value: Any) -> str:
+            return "—" if value is None else f"{float(value) * 100:.0f}%"
+
+        def num(value: Any, suffix: str = "") -> str:
+            return "—" if value is None else f"{float(value):.2f}{suffix}"
+
+        rug_ratio = group.get("rug_ratio")
+        rug_color = "#dc2626" if (rug_ratio or 0) >= 0.5 else "#0f172a"
+        kind = str(group.get("alert_kind", "—"))
+        return f"""<tr>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
+            <span style="color:{_KIND_COLOR.get(kind, '#334155')};font-weight:600;">
+              {_e(_KIND_LABEL.get(kind, kind))}</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#64748b;">
+            {_e(group.get('strategy_version', '—'))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;">
+            {_e(group.get('horizon', '—'))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600;">
+            {int(group.get('matured_count', 0))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:{rug_color};font-weight:600;">
+            {pct(rug_ratio)}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;">
+            {pct(group.get('hit_2x_ratio'))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;">
+            {num(group.get('median_peak_multiple'), 'x')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;">
+            {num(group.get('median_mae_pct'), '%')}</td>
+        </tr>"""
 
     def _footer(self, at_ms: int) -> str:
         fp = self._fingerprint

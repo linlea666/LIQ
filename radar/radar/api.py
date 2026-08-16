@@ -626,6 +626,17 @@ async def list_kpi(
     return {"total": len(items), "items": items}
 
 
+@router.get("/research/kpi/summary")
+async def kpi_summary(days: int = Query(7, ge=1, le=90)) -> dict[str, Any]:
+    """近 N 天推送质量汇总（周报同款口径）。
+
+    与 /research/kpi 的区别：那边是按日落库的 30 天滚动统计，
+    这里是"最近发出的推送表现如何"的实时聚合，供推送质量看板使用。
+    """
+    service = get_service()
+    return await service.kpi.summarize(window_days=days)
+
+
 @router.post("/research/kpi/rebuild")
 async def rebuild_kpi() -> dict[str, Any]:
     service = get_service()

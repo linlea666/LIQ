@@ -15,8 +15,8 @@
 
 import { useCallback, useState } from "react";
 
-import { getAlertDetail, listAlerts, reviewAlert } from "@/lib/radarApi";
-import type { RadarAlert } from "@/lib/radarTypes";
+import { getAlertDetail, getKpiSummary, listAlerts, reviewAlert } from "@/lib/radarApi";
+import type { RadarAlert, RadarKpiSummaryGroup } from "@/lib/radarTypes";
 
 import {
   Card,
@@ -127,6 +127,8 @@ export default function AlertsPage() {
 
       {error && <ErrorBanner error={error} onRetry={refresh} />}
 
+      <QualitySummaryCard />
+
       <div className="grid gap-3 xl:grid-cols-[1fr_420px]">
         <Card title={`警报列表（${items.length}）`}>
           {items.length === 0 ? (
@@ -171,6 +173,112 @@ export default function AlertsPage() {
         <AlertDetailPanel alertId={selected} />
       </div>
     </div>
+  );
+}
+
+/**
+ * 推送质量看板：通知质量是核心 KPI，必须与警报列表放在同一页。
+ *
+ * 按 类型 × 策略版本 × 观察窗口 展示 RUG 率与命中率——
+ * 策略版本分列是刻意的：V2 上线后新旧警报的表现要能直接对比，
+ * 否则"改了之后有没有变好"永远只能靠印象回答。
+ */
+function QualitySummaryCard() {
+  const [days, setDays] = useState(7);
+  const { data, error } = usePoll(() => getKpiSummary(days), 60_000, [days]);
+
+  const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(0)}%`);
+  const num2 = (v: number | null, suffix = "") =>
+    v == null ? "—" : `${v.toFixed(2)}${suffix}`;
+
+  return (
+    <Card
+      title="推送质量"
+      extra={
+        <div className="flex items-center gap-2 text-[10px]">
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-slate-300"
+          >
+            <option value={7}>近 7 天</option>
+            <option value={14}>近 14 天</option>
+            <option value={30}>近 30 天</option>
+          </select>
+          {data && (
+            <span className="text-slate-500" title="含尚未成熟的样本">
+              共发出 {data.total_alerts} 条
+            </span>
+          )}
+        </div>
+      }
+    >
+      {error ? (
+        <ErrorBanner error={error} />
+      ) : !data ? (
+        <Empty text="加载中…" />
+      ) : data.groups.length === 0 ? (
+        <Empty text="窗口内没有已成熟的推送样本" />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-b border-slate-800 text-left text-[10px] text-slate-500">
+                <th className="px-2 py-1.5">类型</th>
+                <th className="px-2 py-1.5">策略</th>
+                <th className="px-2 py-1.5 text-right">窗口</th>
+                <th
+                  className="px-2 py-1.5 text-right"
+                  title="只统计已到期样本，避免右删失偏差"
+                >
+                  样本
+                </th>
+                <th className="px-2 py-1.5 text-right">RUG率</th>
+                <th className="px-2 py-1.5 text-right">2x率</th>
+                <th className="px-2 py-1.5 text-right">5x率</th>
+                <th className="px-2 py-1.5 text-right" title="中位数，均值会被单个巨幅样本带偏">
+                  中位峰值
+                </th>
+                <th className="px-2 py-1.5 text-right">中位MAE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.groups.map((group: RadarKpiSummaryGroup, index: number) => (
+                <tr key={index} className="border-b border-slate-900">
+                  <td className="px-2 py-1.5 font-medium text-slate-300">
+                    {group.alert_kind}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">{group.strategy_version}</td>
+                  <td className="px-2 py-1.5 text-right text-slate-400">{group.horizon}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-300">
+                    {group.matured_count}
+                  </td>
+                  <td
+                    className={`px-2 py-1.5 text-right tabular-nums font-medium ${
+                      (group.rug_ratio ?? 0) >= 0.5 ? "text-red-400" : "text-slate-300"
+                    }`}
+                  >
+                    {pct(group.rug_ratio)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-emerald-300">
+                    {pct(group.hit_2x_ratio)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-emerald-400">
+                    {pct(group.hit_5x_ratio)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">
+                    {num2(group.median_peak_multiple, "x")}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                    {num2(group.median_mae_pct, "%")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 
