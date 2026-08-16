@@ -41,7 +41,7 @@ export default function EventTimeline({ events, hoverZoneId, onHoverZone }: Prop
   if (sorted.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-[10px] text-slate-600">
-        近期暂无墙事件
+        近期暂无墙/大单事件
       </div>
     );
   }

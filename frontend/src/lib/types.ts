@@ -1337,6 +1337,8 @@ export interface WallEvent {
   explain: string;
   /** W1-T4：同物理墙跨帧稳定 ID，关联 zone（前端可据此 group/highlight） */
   wall_zone_id?: string;
+  /** P4：撤单时价格距墙百分比（近距无成交即撤 → 钓鱼单嫌疑），仅 wall_removed 类 */
+  price_distance_at_removal?: number | null;
 }
 
 export interface WallZone {
@@ -1401,6 +1403,12 @@ export interface WallZone {
   strength_score: number;
   strength_tier: "S" | "A" | "B" | "C";
   explain_chips: string[];
+  /** P4：15min 窗口内同价区"消失→重现"次数（≥2 反复撤挂 → 钓鱼单嫌疑） */
+  reappeared_count?: number;
+  /** P4：近 7 天该价位带出现率 0-1（高 → 常驻墙，支撑/阻力更可信；null=画像未就绪） */
+  history_presence_7d?: number | null;
+  /** P4：历史事件中被吃单兑现占比 0-1（高 → 过去真挡住过；null=无历史事件） */
+  history_consumed_ratio?: number | null;
 }
 
 export interface OrderbookPressureSnapshot {

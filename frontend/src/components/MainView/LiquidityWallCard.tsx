@@ -350,6 +350,18 @@ function EventRow({ event, coin }: { event: WallEvent; coin: string }) {
           🔥 吃 {formatCnUsd(event.executed_usd_value)}
         </span>
       )}
+      {/* P4：近距撤单直观化 — 价格逼近却分文未成交就撤，钓鱼单嫌疑 */}
+      {event.price_distance_at_removal != null &&
+        (event.event_type === "wall_removed" || event.event_type === "wall_consumed_and_removed") && (
+        <span
+          className={`shrink-0 text-[10px] font-mono ${
+            Math.abs(event.price_distance_at_removal) < 1 ? "text-orange-300" : "text-slate-500"
+          }`}
+          title="撤单时价格距墙的百分比。距离很近（<1%）却无成交即撤 → 钓鱼单嫌疑更高"
+        >
+          距墙 {Math.abs(event.price_distance_at_removal).toFixed(2)}% 即撤
+        </span>
+      )}
       <span className="text-[10px] text-slate-500 truncate" title={event.explain}>
         {event.explain}
       </span>
@@ -695,6 +707,31 @@ function ZoneRow({
         {zone.wall_removal_risk >= 0.6 && (
           <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300" title={`撤单风险评分 ${zone.wall_removal_risk.toFixed(2)}（0–1 评分，不等于"假单"也不是统计概率）`}>
             ⚠ 撤单风险
+          </span>
+        )}
+        {/* P4：近 7 天画像徽章（只读展示，不参与评分；画像缓存未就绪时无值不显示） */}
+        {(zone.history_presence_7d ?? 0) >= 0.4 && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-300"
+            title={
+              `🏛 常驻墙：近 7 天该价位带 ${Math.round((zone.history_presence_7d ?? 0) * 100)}% 的小时里都有墙。` +
+              `长期驻扎的墙通常不是一时兴起的钓鱼单，作为支撑/阻力参考更可信。`
+            }
+          >
+            🏛 常驻墙 {Math.round((zone.history_presence_7d ?? 0) * 100)}%
+          </span>
+        )}
+        {zone.history_presence_7d != null &&
+          zone.history_consumed_ratio != null &&
+          zone.history_consumed_ratio >= 0.6 && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] bg-teal-500/20 text-teal-300"
+            title={
+              `历史兑现率：过去 7 天该价位带的墙事件中 ${Math.round(zone.history_consumed_ratio * 100)}% ` +
+              `是"被市价单真实吃掉"（而不是撤单跑路）。兑现率高说明这个价位过去真的挡住/接住过价格。`
+            }
+          >
+            ✅ 历史兑现 {Math.round(zone.history_consumed_ratio * 100)}%
           </span>
         )}
         {zone.explain_chips.map((c, i) => (
