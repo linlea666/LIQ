@@ -321,6 +321,30 @@ class Scorer:
             # 新钱包占比极高通常意味着女巫/机器人堆量
             risk_score += (_scale(new_wallet, 40.0, 90.0) or 0.0) * 7.0
 
+        # ── 行为项（V2）────────────────────────────────────────────────
+        # 上面全是静态存量指标，对"正在发生的 rug"完全失明：
+        # 实盘 7 条 S1 推送全部 RUG，当时 rug 分仅 0-7——筹码结构看着健康，
+        # 但 LP 正在被抽、dev 正在卖。行为项只在异常时加分，
+        # 干净币分数不变，不影响既有阈值
+        liq_growth = fs.get("liq_growth_15m")
+        if liq_growth is not None and liq_growth < -0.05:
+            risk_score += (_scale(-liq_growth, 0.05, 0.4) or 0.0) * 22.0
+            flags["lp_outflow_15m"] = round(liq_growth, 4)
+
+        dev_sell = fs.get("dev_sell_percent")
+        if dev_sell is not None and dev_sell >= 30.0:
+            risk_score += (_scale(dev_sell, 30.0, 100.0) or 0.0) * 12.0
+            flags["dev_selling"] = round(dev_sell, 2)
+
+        # 拉价同时抽池：价格上涨掩护流动性撤离，是拔池前最典型的形态。
+        # 权重设计目标：LP 深度流出 + dev 抛售 + 背离三项齐发时必须越过
+        # S1 的 max_rug_risk=45 闸门；单一信号不足一票否决（S2 确认制兜底）
+        price_growth = fs.get("price_growth_15m")
+        if (price_growth is not None and price_growth > 0.2
+                and liq_growth is not None and liq_growth < -0.02):
+            risk_score += 15.0
+            flags["price_liq_divergence"] = True
+
         audit_level = view.geti("audit_risk_level")
         if audit_level is not None:
             risk_score += (_scale(float(audit_level), 0.0, 3.0) or 0.0) * 10.0
