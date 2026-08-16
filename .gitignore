@@ -63,5 +63,6 @@ radar/logs/
 # 数据库备份（含全部历史警报与结局，体积可观且不应进仓）
 radar/backups/
 radar/.venv/
+radar/.venv-test/
 # SMTP 凭据（顶部的 .env 规则已覆盖，此处显式标注以免被误提交）
 radar/.env

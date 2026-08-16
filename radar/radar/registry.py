@@ -41,7 +41,7 @@ from .domain.scoring import Scorer
 from .domain.states import StateDecision, StateMachine
 from .obs.events import EventBus, EventType, Severity
 from .storage import repo
-from .storage.db import Database, json_dump
+from .storage.db import PRIORITY_CRITICAL, Database, json_dump
 
 logger = logging.getLogger("radar.registry")
 
@@ -455,6 +455,14 @@ class TokenRegistry:
         # 换状态后旧状态的退出确认计数必须清零，
         # 否则将来回到该状态时会带着陈旧计数，一次抖动就直接降级
         view.exit_streak.clear()
+
+        # 状态变更必须立刻补写数据库：_persist 在状态机结论应用之前执行，
+        # 它写入的是变更前的状态。若不补写，"终局评估"（如 S1→DEAD 之后
+        # 再无任何观测）会让 token_master 永远停在旧状态，
+        # 重启恢复时把已死亡的币复活成 S1。
+        # 用 CRITICAL 优先级：这次写入不可再生，队列紧张时也不允许丢弃。
+        if view.token_id is not None:
+            repo.update_token_runtime(self._db, view, priority=PRIORITY_CRITICAL)
 
         if new.rank > old.rank:
             self.stats.promotions += 1

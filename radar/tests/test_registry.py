@@ -296,6 +296,33 @@ async def test_honeypot_blocks_and_emits_event(env):
 
 
 @pytest.mark.asyncio
+async def test_state_change_is_persisted_immediately(env):
+    """状态变更必须在同一次评估内落库为新状态。
+
+    历史 bug：update_token_runtime 在状态机结论应用之前执行，
+    数据库永远存"变更前"的状态。对终局评估（如 S1→DEAD 后再无观测）
+    这意味着 token_master 永远停在 S1，重启恢复时把死币复活。
+    """
+    registry, db, _ = env
+    view = (await registry.ingest([obs("0xzombie")]))[0]
+    view.state = TokenState.S1
+    view.state_since_ms = NOW - 600_000
+
+    # 流动性被抽干 → 本次评估应转 DEAD，且 DB 立刻是 DEAD
+    await registry.ingest([obs("0xzombie", liquidity=10.0,
+                               observed_at=NOW + 60_000)])
+    ev = await registry.evaluate(view, NOW + 60_000)
+    assert ev.state.new_state == TokenState.DEAD
+    assert view.state == TokenState.DEAD
+
+    await db.drain()
+    row = await db.fetch_one(
+        "SELECT state FROM token_master WHERE contract_address=?", ("0xzombie",)
+    )
+    assert row["state"] == "DEAD", "终局状态未落库——重启后死币会被复活"
+
+
+@pytest.mark.asyncio
 async def test_rejections_are_not_rewritten_every_cycle(env):
     """同一枚币每轮重复写拒绝记录，几小时就能把表灌满。"""
     registry, db, _ = env

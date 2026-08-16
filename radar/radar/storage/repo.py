@@ -128,8 +128,14 @@ async def upsert_token(db: Database, view: TokenView, *,
     return found
 
 
-def update_token_runtime(db: Database, view: TokenView) -> None:
-    """更新可变的运行时字段。不触碰 first_seen_*。"""
+def update_token_runtime(db: Database, view: TokenView, *,
+                         priority: int = PRIORITY_DROPPABLE) -> None:
+    """更新可变的运行时字段。不触碰 first_seen_*。
+
+    priority 默认可丢弃（高频路径的常规刷新）；状态变更后的补写必须传
+    PRIORITY_CRITICAL——那一次写入承载着"这枚币已经死亡/晋升"的事实，
+    丢掉它会让 token_master 永远停在旧状态，重启恢复时把死币复活。
+    """
     db.submit(
         "UPDATE token_master SET symbol=COALESCE(?,symbol), name=COALESCE(?,name), "
         "decimals=COALESCE(?,decimals), launch_time_ms=COALESCE(?,launch_time_ms), "
@@ -151,7 +157,7 @@ def update_token_runtime(db: Database, view: TokenView) -> None:
             "important" if view.is_reject_sample or view.state.rank >= 3 else "normal",
             view.token_id,
         ),
-        priority=PRIORITY_DROPPABLE,
+        priority=priority,
         label="token_update",
     )
 
