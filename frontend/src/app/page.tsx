@@ -227,6 +227,12 @@ function ToolsMenu() {
         icon: "🏔️",
         desc: "六因子双层评分 · 证据包一键复制",
       },
+      {
+        href: "/radar",
+        label: "潜力币雷达",
+        icon: "📡",
+        desc: "BSC/SOL 早期发现 · 独立服务",
+      },
     ],
     [coin, urgentCount, activeCount],
   );
