@@ -307,6 +307,12 @@ def _build_params() -> tuple[Param, ...]:
         add(_p(f"alerts.cooldown_sec.{kind_key}", "int",
                f"{klabel} 警报冷却", "alerts", lo=60, hi=86400, unit="秒",
                desc="同一代币同类警报的最小间隔"))
+    add(_p("alerts.distribution_gate.min_market_cap_usd", "float",
+           "派发邮件·市值门槛", "alerts", lo=0, hi=10_000_000, unit="USD",
+           desc="低于该市值不发派发邮件（警报照常落库）；已崩盘的币不值得通知"))
+    add(_p("alerts.distribution_gate.min_liquidity_usd", "float",
+           "派发邮件·流动性门槛", "alerts", lo=0, hi=1_000_000, unit="USD",
+           desc="低于该流动性不发派发邮件；另要求此前发过 S1/S2 警报"))
     add(_p("alerts.anomaly.warmup_hours", "float", "异常检测冷启动期", "alerts",
            lo=1, hi=720, unit="小时", desc="累计运行不足该时长时只记录不告警"))
     add(_p("alerts.anomaly.baseline_window_hours", "float", "异常检测基线窗口",

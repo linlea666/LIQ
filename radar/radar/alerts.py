@@ -171,6 +171,14 @@ class AlertManager:
         self._near_miss_cooldown_ms = int(
             alerts_cfg.get("near_miss_cooldown_sec", 600)
         ) * 1000
+        # DISTRIBUTION 发信门槛：警报照常落库（研究价值保留），
+        # 但邮件只在"用户可能已持有这枚币"的场景发——
+        # 即它此前真的发过 S1/S2 通知、且现在还值得操作（市值/流动性达标）。
+        # 实盘教训：无门槛时 4/4 的派发邮件都发给了已崩盘成尘埃的币
+        # （NTDA 拔池 4 分钟后才发，市值 $39M→$1,382），零可操作价值
+        gate_cfg = alerts_cfg.get("distribution_gate", {}) or {}
+        self._dist_gate_min_mc = float(gate_cfg.get("min_market_cap_usd", 100_000.0))
+        self._dist_gate_min_liq = float(gate_cfg.get("min_liquidity_usd", 10_000.0))
         self._anomaly = AnomalyDetector(alerts_cfg.get("anomaly", {}) or {})
 
         email_cfg = config.get("email", {}) or {}
@@ -398,6 +406,9 @@ class AlertManager:
             return
         if record.kind not in _MAILABLE:
             return
+        if (record.kind == KIND_DISTRIBUTION
+                and not await self._distribution_mailable(ev)):
+            return
 
         if not self._rate_limiter.allow():
             self.stats.suppressed_rate_limit += 1
@@ -424,6 +435,39 @@ class AlertManager:
             created_at=record.created_at,
             idem_source=f"alert:{record.alert_id}",
         )
+
+    async def _distribution_mailable(self, ev: Evaluation) -> bool:
+        """派发邮件门槛。不通过时只抑制邮件，警报与追踪照常。"""
+        view = ev.view
+        reason = None
+        market_cap = ev.market_cap
+        liquidity = view.getf("liquidity")
+        if market_cap is None or market_cap < self._dist_gate_min_mc:
+            reason = (f"市值 {market_cap and f'${market_cap:,.0f}' or '未知'} "
+                      f"低于门槛 ${self._dist_gate_min_mc:,.0f}")
+        elif liquidity is None or liquidity < self._dist_gate_min_liq:
+            reason = (f"流动性 {liquidity and f'${liquidity:,.0f}' or '未知'} "
+                      f"低于门槛 ${self._dist_gate_min_liq:,.0f}")
+        else:
+            # 只有真的给用户发过 S1/S2 通知的币，"正在被出货"才是可操作信息
+            row = await self._db.fetch_one(
+                "SELECT 1 FROM alerts WHERE token_id=? AND is_near_miss=0 "
+                "AND alert_kind IN (?, ?) LIMIT 1",
+                (view.token_id, KIND_S1, KIND_S2),
+            )
+            if row is None:
+                reason = "此前从未发出过 S1/S2 警报"
+
+        if reason is None:
+            return True
+        bus.emit_token(
+            EventType.ALERT_SUPPRESSED,
+            token=view,
+            module="alerts",
+            summary=f"DISTRIBUTION 邮件被门槛抑制：{reason}",
+            payload={"gate": "distribution_gate", "reason": reason},
+        )
+        return False
 
     async def flush_digest(self) -> bool:
         """把攒下的警报合并成一封摘要邮件。由后台任务定期调用。"""

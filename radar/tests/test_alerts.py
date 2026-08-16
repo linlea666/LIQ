@@ -304,6 +304,58 @@ async def test_distribution_alert_kind(env):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# DISTRIBUTION 发信门槛
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_distribution_mail_requires_prior_s1(env):
+    """从未发过 S1/S2 的币谈不上"你可能持有"，派发邮件没有可操作价值。
+
+    警报本身必须照常落库——研究价值保留，只抑制邮件。
+    """
+    manager, db, _ = env
+    record = await manager.handle(
+        make_evaluation(old=TokenState.S0, new=TokenState.DISTRIBUTION)
+    )
+    assert record is not None
+    await db.drain()
+    assert len(await db.fetch_all("SELECT * FROM alerts")) == 1
+    assert await db.fetch_all("SELECT * FROM email_outbox") == []
+
+
+@pytest.mark.asyncio
+async def test_distribution_mail_sent_when_prior_s1_and_healthy(env):
+    manager, db, _ = env
+    view = make_view()
+    await manager.handle(make_evaluation(view=view))     # 先有一条真实 S1
+    record = await manager.handle(make_evaluation(
+        view=view, old=TokenState.S0, new=TokenState.DISTRIBUTION,
+        at=NOW + 60_000,
+    ))
+    assert record is not None
+    await db.drain()
+    outbox = await db.fetch_all("SELECT kind FROM email_outbox ORDER BY id")
+    assert [r["kind"] for r in outbox] == ["alert_s1", "alert_distribution"]
+
+
+@pytest.mark.asyncio
+async def test_distribution_mail_blocked_for_dust_token(env):
+    """实盘事故：NTDA 拔池 4 分钟后才发派发邮件，市值 $39M→$1,382。"""
+    manager, db, _ = env
+    view = make_view()
+    await manager.handle(make_evaluation(view=view))     # 先有一条真实 S1
+
+    ev = make_evaluation(view=view, old=TokenState.S0,
+                         new=TokenState.DISTRIBUTION, at=NOW + 60_000)
+    ev.market_cap = 1_382.0                              # 已崩盘成尘埃
+    record = await manager.handle(ev)
+    assert record is not None, "警报照常落库"
+    await db.drain()
+    outbox = await db.fetch_all("SELECT kind FROM email_outbox")
+    assert [r["kind"] for r in outbox] == ["alert_s1"], "尘埃币不应发派发邮件"
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Near-Miss
 # ─────────────────────────────────────────────────────────────────────────
 
