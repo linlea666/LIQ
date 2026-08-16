@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import httpx2
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -143,8 +143,8 @@ async def client(tmp_path):
 
     app = FastAPI()
     app.include_router(api.router)
-    transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport,
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport,
                                   base_url="http://radar") as http:
         try:
             yield http, service, db
