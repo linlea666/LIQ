@@ -241,7 +241,10 @@ class RadarService:
     async def _maintenance_loop(self) -> None:
         """低频维护：限流自适应、爆发窗口清理、摘要邮件、周报、内存水位。"""
         cleanup_interval = float(self.settings.storage.get("cleanup_interval_sec", 3600))
+        drift_cfg = self.settings.observability.get("drift", {}) or {}
+        drift_interval = float(drift_cfg.get("check_interval_sec", 900))
         last_cleanup = time.monotonic()
+        last_drift = time.monotonic()
 
         while self._running:
             await asyncio.sleep(30)
@@ -253,6 +256,9 @@ class RadarService:
                 await self.alerts.flush_digest()
                 await self._maybe_send_weekly_report()
                 self._report_memory()
+                if time.monotonic() - last_drift >= drift_interval:
+                    last_drift = time.monotonic()
+                    self._check_feature_drift(drift_cfg)
                 if time.monotonic() - last_cleanup >= cleanup_interval:
                     last_cleanup = time.monotonic()
                     await self._cleanup()
@@ -260,6 +266,29 @@ class RadarService:
                 raise
             except Exception:
                 logger.exception("维护循环异常")
+
+    def _check_feature_drift(self, drift_cfg: dict[str, Any]) -> None:
+        """核心字段分布检查：NULL 率或恒定值占比越界即告警。
+
+        评分器对缺失字段的处理是静默降级（该因子不参与打分），
+        所以接口改版不会产生任何报错——只会让所有分数悄悄变钝。
+        这里是唯一能把这种无声失效变成显式告警的地方。
+        """
+        drifted = metrics.check_drift(
+            min_samples=int(drift_cfg.get("min_samples", 50)),
+            max_null_ratio=float(drift_cfg.get("max_null_ratio", 0.6)),
+            max_constant_ratio=float(drift_cfg.get("max_constant_ratio", 0.9)),
+        )
+        if not drifted:
+            return
+        names = ", ".join(d["name"] for d in drifted)
+        # 窗口在每次检查后重置，持续异常最多每 check_interval_sec 发一条
+        bus.emit(
+            EventType.DATA_DRIFT,
+            module="service",
+            summary=f"特征分布异常：{names}（NULL 率或恒定值占比越界）",
+            payload={"features": drifted},
+        )
 
     async def _maybe_send_weekly_report(self) -> None:
         """通知质量周报：每周一次汇总近 7 天推送的实际表现。
@@ -338,21 +367,20 @@ class RadarService:
             removed["raw_archive"] = int(expired["n"])
 
         # 抽稀：只动"非决策现场"的快照。keep_forever 标记的是
-        # 警报当时那一帧，删掉它等于让那条警报永远无法复盘
-        downsample_after = int(
-            float(storage.get("downsample_after_hours", 48)) * 3_600_000
-        )
-        interval_sec = int(storage.get("downsample_interval_sec", 300))
-        cutoff = now - downsample_after
-        self.db.submit(
-            "DELETE FROM snapshots WHERE keep_forever = 0 AND observed_at < ? "
-            "AND snapshot_id NOT IN ("
-            "  SELECT MIN(snapshot_id) FROM snapshots "
-            "  WHERE keep_forever = 0 AND observed_at < ? "
-            "  GROUP BY token_id, observed_at / ?"
-            ")",
-            (cutoff, cutoff, interval_sec * 1000),
+        # 警报当时那一帧，删掉它等于让那条警报永远无法复盘。
+        # 两级抽稀：48h 后 5 分钟粒度（近期复盘还需要细节），
+        # 168h 后进一步到 1 小时粒度（一周后只需要形态轮廓）
+        self._downsample_snapshots(
+            cutoff=now - int(float(storage.get("downsample_after_hours", 48))
+                             * 3_600_000),
+            interval_sec=int(storage.get("downsample_interval_sec", 300)),
             label="cleanup_downsample",
+        )
+        self._downsample_snapshots(
+            cutoff=now - int(float(storage.get("downsample_2_after_hours", 168))
+                             * 3_600_000),
+            interval_sec=int(storage.get("downsample_2_interval_sec", 3600)),
+            label="cleanup_downsample_2",
         )
 
         retention_days = int(
@@ -371,6 +399,49 @@ class RadarService:
             summary="分级留存清理完成",
             payload=removed or {"note": "无过期归档"},
         )
+        self._check_db_watermark()
+
+    def _downsample_snapshots(self, *, cutoff: int, interval_sec: int,
+                              label: str) -> None:
+        """按时间粒度抽稀 cutoff 之前的快照，每个粒度桶保留最早一帧。"""
+        self.db.submit(
+            "DELETE FROM snapshots WHERE keep_forever = 0 AND observed_at < ? "
+            "AND snapshot_id NOT IN ("
+            "  SELECT MIN(snapshot_id) FROM snapshots "
+            "  WHERE keep_forever = 0 AND observed_at < ? "
+            "  GROUP BY token_id, observed_at / ?"
+            ")",
+            (cutoff, cutoff, interval_sec * 1000),
+            label=label,
+        )
+
+    def _check_db_watermark(self) -> None:
+        """数据库体积水位检查。只告警不自动删：留存策略已经在
+        清理任务里按设计执行，越过水位说明设计假设本身失效
+        （数据增速超预期），该调整的是配置或磁盘，不是让程序自作主张。"""
+        max_db_gb = float(self.settings.storage.get("max_db_gb", 0) or 0)
+        if max_db_gb <= 0:
+            return
+        db_path = self.settings.data_dir / "radar.db"
+        try:
+            total = sum(
+                p.stat().st_size
+                for p in (db_path, db_path.with_suffix(".db-wal"))
+                if p.exists()
+            )
+        except OSError:
+            return
+        total_gb = total / 1e9
+        if total_gb > max_db_gb:
+            bus.emit(
+                EventType.STORAGE_WATERMARK,
+                module="service",
+                summary=(
+                    f"数据库体积 {total_gb:.2f}GB 超过水位 {max_db_gb:.1f}GB，"
+                    "请检查留存配置或扩容磁盘"
+                ),
+                payload={"db_gb": round(total_gb, 3), "max_db_gb": max_db_gb},
+            )
 
     # ═════════════════════════════════════════════════════════════════════
     # 诊断

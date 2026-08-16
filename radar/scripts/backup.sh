@@ -21,7 +21,9 @@ set -euo pipefail
 RADAR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DB_PATH="${RADAR_DIR}/data/radar.db"
 BACKUP_DIR="${1:-${RADAR_DIR}/backups}"
-KEEP_DAYS=30
+# 保留天数可在 crontab 里用环境变量覆盖，不读 config.yaml：
+# 备份脚本必须在服务进程挂掉时也能独立工作，不能依赖它的配置栈
+KEEP_DAYS="${RADAR_BACKUP_KEEP_DAYS:-30}"
 
 if [ "${1:-}" = "--verify-only" ]; then
   BACKUP_DIR="${RADAR_DIR}/backups"

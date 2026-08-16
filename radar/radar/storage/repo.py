@@ -601,6 +601,11 @@ def mark_email_failed(db: Database, outbox_id: int, *, error: str,
 def insert_market_regime(
     db: Database,
     *,
+    # 【预留，当前无调用方】市况分层（S2 确认阈值随大盘冷热调整）需要
+    # 一个独立的大盘数据采集器（全链新币数/总成交/总净流入），采集器
+    # 尚未实现。表结构与本函数先行落位，接线时无需迁移历史库。
+    # 若 V2.x 决定不做市况分层，应连同 schema 的 market_regime 表
+    # 与 /market-regime API 一起移除
     recorded_at: int,
     chain_id: str,
     new_token_count: int | None,

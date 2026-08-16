@@ -223,6 +223,26 @@ class Metrics:
             self.features[name] = dist
         dist.observe(value)
 
+    def check_drift(self, *, min_samples: int, max_null_ratio: float,
+                    max_constant_ratio: float) -> list[dict[str, Any]]:
+        """检出分布异常的特征并重置其观察窗口。
+
+        NULL 率飙升 → 上游字段消失/解析失败；取值高度恒定 → 字段
+        失去区分度（典型如解析错误让所有行都落到同一个默认值）。
+        异常与正常的特征都重置窗口：不重置的话同一批旧样本会在
+        每个检查周期反复触发同一条告警。
+        """
+        drifted: list[dict[str, Any]] = []
+        for dist in self.features.values():
+            if dist.total_count < min_samples:
+                continue
+            snapshot = dist.snapshot()
+            if (dist.null_ratio > max_null_ratio
+                    or dist.constant_ratio > max_constant_ratio):
+                drifted.append(snapshot)
+            dist.reset_window()
+        return drifted
+
     # ── 汇总 ────────────────────────────────────────────────────────────
     def snapshot(self) -> dict[str, Any]:
         rss = process_rss_mb()

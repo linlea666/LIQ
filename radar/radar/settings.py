@@ -23,6 +23,8 @@ from typing import Any
 import yaml
 
 from . import config_schema
+from .domain.features import FEATURE_VERSION
+from .sources.parsers import PARSER_VERSION
 
 logger = logging.getLogger("radar.settings")
 
@@ -85,7 +87,6 @@ class EmailConfig:
     send_s1: bool
     send_s2: bool
     send_distribution: bool
-    daily_kpi_hour_local: int
     outbox_max_retries: int
     outbox_retry_backoff_sec: int
 
@@ -258,7 +259,6 @@ def _build(raw: dict[str, Any]) -> Settings:
         send_s1=bool(email_raw.get("send_s1", True)),
         send_s2=bool(email_raw.get("send_s2", True)),
         send_distribution=bool(email_raw.get("send_distribution", True)),
-        daily_kpi_hour_local=int(email_raw.get("daily_kpi_hour_local", 9)),
         outbox_max_retries=int(email_raw.get("outbox_max_retries", 5)),
         outbox_retry_backoff_sec=int(email_raw.get("outbox_retry_backoff_sec", 120)),
     )
@@ -270,7 +270,11 @@ def _build(raw: dict[str, Any]) -> Settings:
         code_commit=os.getenv("APP_GIT_SHA", "unknown")[:12],
         build_time=os.getenv("APP_BUILD_TIME", "unknown"),
         strategy_version=str(scoring.get("strategy_version", "v0")),
-        feature_version=str(scoring.get("feature_version", "f0")),
+        # 特征/解析版本是代码属性而非配置：特征公式或字段映射改在代码里，
+        # 版本号必须跟着代码走。此前 feature_version 读 config、
+        # parser_version 用本文件的独立副本，两处都出现过"代码改了
+        # 版本没跟上"的失真——指纹失真会让 KPI 把新旧逻辑混在一组统计
+        feature_version=FEATURE_VERSION,
         parser_version=PARSER_VERSION,
         service_root=_SERVICE_ROOT,
         data_dir=data_dir,
@@ -279,10 +283,6 @@ def _build(raw: dict[str, Any]) -> Settings:
         email=email,
     )
 
-
-# 解析层版本：币安接口字段映射发生任何变更时必须手动递增，
-# 使历史快照能追溯到"当时用哪套解析规则"。
-PARSER_VERSION = "p1.0.0"
 
 _instance: Settings | None = None
 

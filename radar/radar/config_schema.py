@@ -366,8 +366,6 @@ def _build_params() -> tuple[Param, ...]:
            desc="每周汇总近 7 天推送的实际表现（RUG 率、命中率、中位峰值）"))
     add(_p("email.weekly_report_hour_local", "int", "周报发送时刻", "alerts",
            lo=0, hi=23, unit="点（本地时区，每周一）"))
-    add(_p("email.daily_kpi_hour_local", "int", "每日 KPI 邮件时刻", "alerts",
-           lo=0, hi=23, unit="点（本地时区）"))
     add(_p("email.outbox_max_retries", "int", "发信重试次数", "alerts", lo=0, hi=20))
     add(_p("email.outbox_retry_backoff_sec", "int", "发信重试退避", "alerts",
            lo=10, hi=3600, unit="秒"))

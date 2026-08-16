@@ -204,9 +204,10 @@ features:
 # ─────────────────────────────────────────────────────────────────────────────
 scoring:
   # v2.0.0：S1 观察池 + S2 确认制 + RugRisk 行为项。
-  # KPI 按版本分组，新旧警报自动分开统计
+  # KPI 按版本分组，新旧警报自动分开统计。
+  # feature/parser 版本不在配置里：它们是代码属性，
+  # 单一来源分别是 domain/features.py 和 sources/parsers.py
   strategy_version: "v2.0.0"
-  feature_version: "f1.0.0"
   opportunity_weights:
     holder_momentum: 20
     capital_flow: 20
@@ -326,7 +327,6 @@ email:
   # KPI，只推送不复盘，阈值永远不知道该往哪调
   send_weekly_report: true
   weekly_report_hour_local: 9
-  daily_kpi_hour_local: 9
   outbox_max_retries: 5
   outbox_retry_backoff_sec: 120
 
@@ -356,10 +356,10 @@ storage:
   write_batch_size: 200
   write_flush_interval_sec: 2.0
   busy_timeout_ms: 8000
-  # 独立水位线（GB）
+  # 数据库体积水位（GB，db+wal）：超过只告警（STORAGE_WATERMARK），
+  # 不自动删数据。原始归档在主库内由行级 expires_at 管理；
+  # 日志体积由 observability.log_file_* 的轮转配置封顶，均无需独立水位
   max_db_gb: 5.0
-  max_raw_archive_gb: 3.0
-  max_logs_gb: 1.0
   # 降采样：超过 downsample_after_hours 的快照按间隔抽稀
   downsample_after_hours: 48
   downsample_interval_sec: 300
@@ -369,8 +369,9 @@ storage:
   raw_list_retention_hours: 72
   raw_detail_retention_days: 400
   cleanup_interval_sec: 3600
-  backup_hour_local: 4
-  backup_keep: 14
+  # 备份由宿主机 cron 调用 scripts/backup.sh 完成：调度时刻改 crontab，
+  # 保留天数用环境变量 RADAR_BACKUP_KEEP_DAYS 覆盖（脚本默认 30）。
+  # 进程配置管不到 cron，在这里放备份参数只会造成"改了没生效"的错觉
   # 被拒代币的分层采样比例（用于反事实研究）
   reject_sample_ratio: 0.08
 

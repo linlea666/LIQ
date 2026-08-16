@@ -414,11 +414,15 @@ async def test_missing_market_cap_falls_back_to_computed(env):
 
 @pytest.mark.asyncio
 async def test_eviction_respects_limit(env):
-    registry, _, _ = env
+    registry, _, events = env
     for i in range(10):
         await registry.ingest([obs(f"0x{i:03d}")])
     assert len(registry) <= CONFIG["registry"]["max_tokens_in_memory"]
     assert registry.stats.evicted > 0
+    # 常规淘汰是设计内行为，走低重要度事件；
+    # MEMORY_WARNING 只留给"内存真的有问题"的场合，混用会淹没真告警
+    assert events.counts().get(EventType.VIEW_EVICTED.value, 0) >= 1
+    assert events.counts().get(EventType.MEMORY_WARNING.value, 0) == 0
 
 
 @pytest.mark.asyncio
@@ -480,13 +484,21 @@ async def test_returning_token_keeps_reject_sample_flag(env):
 
 @pytest.mark.asyncio
 async def test_eviction_warns_when_everything_is_protected(env):
+    """全部受保护时必须发 MEMORY_WARNING，而不是静默让内存继续涨。
+
+    直接调 _evict 而不是靠 ingest 触发：ingest 新建的触发币本身
+    未受保护，会走常规淘汰路径，永远到不了"无可淘汰"分支——
+    拆分事件类型前这个测试恰好因为两条路径共用 MEMORY_WARNING 而误通过。
+    """
     registry, _, events = env
     for i in range(8):
         view = (await registry.ingest([obs(f"0xp{i:03d}")]))[0]
         view.state = TokenState.S1
-    await registry.ingest([obs("0xtrigger")])
-    # 触发淘汰但无可淘汰对象时必须告警，而不是静默让内存继续涨
+    evicted_during_ingest = events.counts().get(EventType.VIEW_EVICTED.value, 0)
+    assert registry._evict() == 0
     assert events.counts().get(EventType.MEMORY_WARNING.value, 0) >= 1
+    assert (events.counts().get(EventType.VIEW_EVICTED.value, 0)
+            == evicted_during_ingest)
 
 
 # ─────────────────────────────────────────────────────────────────────────

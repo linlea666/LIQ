@@ -150,12 +150,18 @@ class EventType(str, Enum):
     BACKUP_COMPLETED = "BACKUP_COMPLETED"
     BACKUP_FAILED = "BACKUP_FAILED"
     RETENTION_CLEANUP = "RETENTION_CLEANUP"
+    # 数据库文件体积越过配置水位。只告警不自动删数据：
+    # 该删什么必须由人决定，自动清理删错一次就是不可逆的
+    STORAGE_WATERMARK = "STORAGE_WATERMARK"
 
     # ── System ─────────────────────────────────────────────────────────
     SERVICE_STARTED = "SERVICE_STARTED"
     SERVICE_STOPPED = "SERVICE_STOPPED"
     CONFIG_LOADED = "CONFIG_LOADED"
     MEMORY_WARNING = "MEMORY_WARNING"
+    # 常规内存淘汰与 MEMORY_WARNING 分开：淘汰是设计内的日常行为，
+    # 混在告警信道里会把真正的"内存接近上限"淹没掉
+    VIEW_EVICTED = "VIEW_EVICTED"
 
     # ── Scheduler ──────────────────────────────────────────────────────
     POLL_INTERVAL_CHANGED = "POLL_INTERVAL_CHANGED"
@@ -240,11 +246,13 @@ _SPEC: dict[EventType, tuple[Category, Severity, Importance]] = {
     EventType.BACKUP_COMPLETED: (Category.STORAGE, Severity.INFO, Importance.SYSTEM),
     EventType.BACKUP_FAILED: (Category.STORAGE, Severity.ERROR, Importance.SYSTEM),
     EventType.RETENTION_CLEANUP: (Category.STORAGE, Severity.INFO, Importance.SYSTEM),
+    EventType.STORAGE_WATERMARK: (Category.STORAGE, Severity.WARNING, Importance.SYSTEM),
 
     EventType.SERVICE_STARTED: (Category.SYSTEM, Severity.NOTICE, Importance.SYSTEM),
     EventType.SERVICE_STOPPED: (Category.SYSTEM, Severity.NOTICE, Importance.SYSTEM),
     EventType.CONFIG_LOADED: (Category.SYSTEM, Severity.INFO, Importance.SYSTEM),
     EventType.MEMORY_WARNING: (Category.SYSTEM, Severity.WARNING, Importance.SYSTEM),
+    EventType.VIEW_EVICTED: (Category.SYSTEM, Severity.INFO, Importance.LOW),
 
     EventType.POLL_INTERVAL_CHANGED: (Category.SCHEDULER, Severity.DEBUG, Importance.LOW),
     EventType.BUDGET_SATURATED: (Category.SCHEDULER, Severity.WARNING, Importance.SYSTEM),

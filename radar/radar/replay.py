@@ -33,6 +33,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from .alerts import AlertManager
+from .domain.features import FEATURE_VERSION
 from .domain.models import TokenObservation
 from .notify import EmailRenderer
 from .obs.events import EventBus
@@ -420,7 +421,8 @@ async def _run_cli(args: argparse.Namespace) -> int:
     scoring = config.get("scoring", {}) or {}
     fingerprint = {
         "strategy_version": str(scoring.get("strategy_version", "replay")),
-        "feature_version": str(scoring.get("feature_version", "replay")),
+        # 特征版本与生产同源（代码常量），回放结果才能和线上按版本对齐
+        "feature_version": FEATURE_VERSION,
         "parser_version": "replay",
         "config_hash": config_hash,
         "code_commit": "replay",

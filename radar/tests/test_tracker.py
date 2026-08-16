@@ -39,7 +39,6 @@ FINGERPRINT = {
 
 TRACKER_CONFIG: dict[str, Any] = {
     "service": {"tz_offset_hours": 8},
-    "email": {"daily_kpi_hour_local": 9},
     "tracker": {
         "milestones_usd": [100_000, 1_000_000, 10_000_000],
         "milestone_hysteresis_pct": 3.0,

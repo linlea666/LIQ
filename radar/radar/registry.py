@@ -40,6 +40,7 @@ from .domain.risk_gate import GATE_EXECUTION, RISK_PARSER_VERSION, RiskDecision,
 from .domain.scoring import Scorer
 from .domain.states import StateDecision, StateMachine
 from .obs.events import EventBus, EventType, Severity
+from .obs.metrics import metrics
 from .storage import repo
 from .storage.db import PRIORITY_CRITICAL, Database, json_dump
 
@@ -50,6 +51,14 @@ _PROTECTED_STATES = frozenset({
     TokenState.S0, TokenState.S1, TokenState.S2,
     TokenState.MOMENTUM, TokenState.DISTRIBUTION,
 })
+
+# 漂移监测采样的核心原始字段：这些字段的 NULL 率飙升几乎总意味着
+# 上游接口改版或解析器损坏——评分会静默降级而不是报错，
+# 只有分布监测能把这种"无声失效"暴露出来
+_DRIFT_FIELDS = (
+    "price", "market_cap", "liquidity", "holders",
+    "top10_percent", "net_inflow", "smart_money_count",
+)
 
 
 @dataclass(slots=True)
@@ -268,6 +277,8 @@ class TokenRegistry:
         """
         quality = self._quality.evaluate(view, now_ms)
         features = self._features.compute(view, now_ms)
+        for name in _DRIFT_FIELDS:
+            metrics.observe_feature(name, view.getf(name))
         risk = self._risk.evaluate(view, now_ms)
         scores = self._scorer.score(view, features, quality, risk)
 
@@ -584,7 +595,7 @@ class TokenRegistry:
 
         self.stats.evicted += removed
         self._events.emit(
-            EventType.MEMORY_WARNING,
+            EventType.VIEW_EVICTED,
             module="registry",
             severity=Severity.INFO,
             summary=f"淘汰 {removed} 个低价值代币视图，剩余 {len(self._views)}",
