@@ -129,7 +129,7 @@ def _mk_series(start_hour_ts: int, n_bars: int, buy: float = 10.0, sell: float =
 def _mk_state(coin="BTC", cvd_spot=None, cvd_contract=None,
               large=None, spot_large=None):
     return SimpleNamespace(
-        ccy=coin,
+        coin=coin,   # 与 engine.CoinState 真实属性名一致（曾因 mock 用 ccy 掩盖生产 bug）
         cvd_spot=cvd_spot,
         cvd_contract=cvd_contract,
         large_orders_history=large or [],

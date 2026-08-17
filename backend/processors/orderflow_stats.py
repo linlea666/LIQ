@@ -45,7 +45,9 @@ class OrderflowStatsAggregator:
 
     def flush_coin(self, state: Any) -> None:
         """聚合单个币的当前内存态（调用方保证 state 非空）。"""
-        coin = (getattr(state, "ccy", "") or "").upper()
+        # CoinState 的币种属性是 .coin（engine.CoinState.__init__），不是 .ccy——
+        # 该字段名错误曾导致生产上 taker 聚合静默空转（fail-open return）
+        coin = (getattr(state, "coin", "") or "").upper()
         if not coin:
             return
         try:
