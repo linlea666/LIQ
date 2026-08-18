@@ -153,13 +153,31 @@ def _has_recent_remove_or_weaken(events: list[WallEvent]) -> bool:
     return False
 
 
+def _risk_direction(setup: TradeSetupCandidate) -> str:
+    """setup 的实际风险方向（用于硬止损 / regime 判定）。
+
+    fake_break_reclaim_* 的 direction 固定为 neutral（UI 语义 =「等待」），
+    但其 hard_stop 与 regime 风险方向由 setup_type 决定；若不推导，
+    neutral setup 会绕过硬止损与 regime 取消判定（P0 修复）。
+    """
+    if setup.direction in ("long", "short"):
+        return setup.direction
+    st = str(setup.setup_type or "")
+    if st.endswith("_long"):
+        return "long"
+    if st.endswith("_short"):
+        return "short"
+    return "neutral"
+
+
 def _regime_blocks(setup: TradeSetupCandidate, ctx: Optional[BrainContextChips]) -> bool:
     if ctx is None:
         return False
     r = (ctx.regime or "").lower()
-    if setup.direction == "long" and r in ("trend_down", "down_trend", "bearish_trend"):
+    direction = _risk_direction(setup)
+    if direction == "long" and r in ("trend_down", "down_trend", "bearish_trend"):
         return True
-    if setup.direction == "short" and r in ("trend_up", "up_trend", "bullish_trend"):
+    if direction == "short" and r in ("trend_up", "up_trend", "bullish_trend"):
         return True
     return False
 
@@ -185,11 +203,12 @@ def advance_setup_state(
     last = float(tick.last_price)
     rp = setup.risk_plan
 
-    # 1. 硬止损被穿
-    if setup.direction == "long" and last <= rp.hard_stop:
+    # 1. 硬止损被穿（fake_break 的 neutral 由 setup_type 推导风险方向）
+    risk_dir = _risk_direction(setup)
+    if risk_dir == "long" and last <= rp.hard_stop:
         return _new_state(prev=prev, dst="invalidated",
                            reason="价格跌破硬止损", ts=now)
-    if setup.direction == "short" and last >= rp.hard_stop:
+    if risk_dir == "short" and last >= rp.hard_stop:
         return _new_state(prev=prev, dst="invalidated",
                            reason="价格突破硬止损", ts=now)
 

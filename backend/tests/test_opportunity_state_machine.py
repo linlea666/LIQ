@@ -157,3 +157,59 @@ def test_cooldown_freezes():
     tick = StateTickContext(last_price=99_100.0, now_sec=now, wall_events=[])
     new = advance_setup_state(s, tick)
     assert new.name == "cooldown"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# P0 修复：fake_break 的 neutral 方向必须按 setup_type 推导风险方向
+# ─────────────────────────────────────────────────────────────────────
+def _make_fake_break_long_setup(*, state_name="waiting_for_trigger") -> TradeSetupCandidate:
+    s = _make_long_setup(state_name=state_name)
+    s.setup_type = "fake_break_reclaim_long"
+    s.direction = "neutral"
+    return s
+
+
+def _make_fake_break_short_setup(*, state_name="waiting_for_trigger") -> TradeSetupCandidate:
+    s = _make_short_setup()
+    s.setup_type = "fake_break_reclaim_short"
+    s.direction = "neutral"
+    s.state = SetupState(name=state_name, since_ts=int(time.time()))
+    return s
+
+
+def test_fake_break_long_hard_stop_invalidates():
+    """neutral 方向的 fake_break_reclaim_long 穿硬止损必须 invalidated。"""
+    s = _make_fake_break_long_setup(state_name="triggered")
+    tick = StateTickContext(last_price=98_600.0, now_sec=int(time.time()),
+                            wall_events=[])
+    new = advance_setup_state(s, tick)
+    assert new.name == "invalidated"
+
+
+def test_fake_break_short_hard_stop_invalidates():
+    s = _make_fake_break_short_setup(state_name="triggered")
+    tick = StateTickContext(last_price=99_600.0, now_sec=int(time.time()),
+                            wall_events=[])
+    new = advance_setup_state(s, tick)
+    assert new.name == "invalidated"
+
+
+def test_fake_break_long_regime_flip_cancels():
+    """neutral fake_break_reclaim_long 在 trend_down 下必须 cancelled。"""
+    s = _make_fake_break_long_setup(state_name="waiting_for_trigger")
+    tick = StateTickContext(
+        last_price=99_300.0, now_sec=int(time.time()),
+        wall_events=[],
+        ctx=BrainContextChips(regime="trend_down"),
+    )
+    new = advance_setup_state(s, tick)
+    assert new.name == "cancelled"
+
+
+def test_fake_break_long_not_invalidated_above_hard_stop():
+    """价格未穿硬止损时保持原状态推进逻辑。"""
+    s = _make_fake_break_long_setup(state_name="waiting_for_trigger")
+    tick = StateTickContext(last_price=99_100.0, now_sec=int(time.time()),
+                            wall_events=[])
+    new = advance_setup_state(s, tick)
+    assert new.name == "triggered"
