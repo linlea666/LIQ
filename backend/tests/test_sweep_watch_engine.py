@@ -321,6 +321,26 @@ class TestCVDScoring:
         assert _cvd_alignment_score("below", None) == 0.5
         assert _cvd_against_score("below", None) == 0.5
 
+    def test_below_declining_cvd_high_alignment(self):
+        """生产端 _calc_trend 输出 declining（非 falling），必须命中强跌。"""
+        ctx = _ctx(cvd_fut="declining", cvd_spot="declining")
+        assert _cvd_alignment_score("below", ctx) == 1.0
+
+    def test_above_declining_cvd_low_alignment(self):
+        ctx = _ctx(cvd_fut="declining", cvd_spot="declining")
+        assert _cvd_alignment_score("above", ctx) == 0.0
+
+    def test_flat_cvd_neutral(self):
+        ctx = _ctx(cvd_fut="flat", cvd_spot="flat")
+        assert _cvd_alignment_score("below", ctx) == 0.5
+
+    def test_mixed_enum_aliases(self):
+        """历史别名（up/down/bearish）也应经 normalize_trend 归一化。"""
+        ctx = _ctx(cvd_fut="down", cvd_spot="bearish")
+        assert _cvd_alignment_score("below", ctx) == 1.0
+        ctx2 = _ctx(cvd_fut="up", cvd_spot="bullish")
+        assert _cvd_alignment_score("below", ctx2) == 0.0
+
 
 # ─────────────────────────────────────────────────────────────────────
 # 4. 3 派生分公式

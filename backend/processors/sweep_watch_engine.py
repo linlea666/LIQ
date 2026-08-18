@@ -41,6 +41,7 @@ from models.trading_brain import (
     BrainEvent,
     BrainPriceZone,
 )
+from processors.cvd import normalize_trend
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -97,7 +98,19 @@ class _TraceRecorder:
 # CVD 对齐打分（below 侧 = 关心是否还在跌；above 侧 = 关心是否还在涨）
 # ─────────────────────────────────────────────────────────────────────
 def _trend_score_falling(trend: str) -> float:
-    """trend 描述跌势的强度 [0-1]：1 = 强跌；0 = 强涨。"""
+    """trend 描述跌势的强度 [0-1]：1 = 强跌；0 = 强涨。
+
+    枚举值（rising/declining/flat 及历史别名）统一走 normalize_trend，
+    避免枚举断裂（生产端输出 declining，此前本地只认 falling 导致
+    CVD 项恒为 0.5）；仅对中文描述串保留关键词兜底。
+    """
+    normalized = normalize_trend(trend)
+    if normalized == "up":
+        return 0.0
+    if normalized == "down":
+        return 1.0
+    if normalized == "flat":
+        return 0.5
     t = (trend or "").lower()
     if any(k in t for k in ("rising", "上涨", "净买", "buy")):
         return 0.0
