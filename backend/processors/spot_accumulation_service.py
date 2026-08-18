@@ -44,7 +44,17 @@ logger = logging.getLogger(__name__)
 
 
 class SpotAccumulationService:
-    def __init__(self, data_dir: str, state_getter: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        data_dir: str,
+        state_getter: Callable[[], Any],
+        bottom_model_getter: Optional[Callable[[], Optional[dict]]] = None,
+    ) -> None:
+        """bottom_model_getter：只读返回底部模型最新日线快照 dict 的回调。
+
+        单向依赖（底部模型绝不消费抄底输出，不构成循环）；未接线 / 读取
+        失败 / 快照过期时 fail-open 回退到抄底自身的判定，行为与接线前一致。
+        """
         self.store = SpotAccumulationStore(data_dir)
         self.recovery_errors: list[str] = []
         try:
@@ -90,6 +100,7 @@ class SpotAccumulationService:
             self.store.save_state(self.runtime)
         self.long_term = self.store.load_long_term_facts()
         self._state_getter = state_getter
+        self._bottom_model_getter = bottom_model_getter
         self._latest_snapshot: Optional[SpotAccumulationSnapshot] = None
         self._last_compact_archive_bucket = -1
         self._last_rollup_check_day = ""
@@ -745,6 +756,27 @@ class SpotAccumulationService:
         weekly_reclaim_confirmed = self._weekly_reclaim_confirmed(
             state, self.config.weekly_reclaim_weeks,
         )
+        # 底部模型联动（单向只读）：
+        # 1) capitulation 档软证据：quadrant ∈ {panic_flush, basing} 且
+        #    Stress ≥ 阈值 → 只进 evidence 文案；关键位承接确认仍是硬条件。
+        # 2) bottom_confirmed 档替代确认：quadrant = confirmed_recovery
+        #    可替代周线收回确认（二选一满足）。
+        bm = self._bottom_model_context(now)
+        if bm is not None:
+            if (
+                bm["quadrant"] in {"panic_flush", "basing"}
+                and bm["stress"] is not None
+                and bm["stress"] >= self._BM_CAPITULATION_MIN_STRESS
+            ):
+                facts.evidence.append(
+                    f"底部模型共振：{bm['quadrant']} 象限 · Stress {bm['stress']:.0f}"
+                    "（软证据，不替代关键位承接确认）"
+                )
+            if bm["quadrant"] == "confirmed_recovery" and not weekly_reclaim_confirmed:
+                weekly_reclaim_confirmed = True
+                facts.evidence.append(
+                    "底部模型 confirmed_recovery 象限：作为周线收回的替代确认路径"
+                )
         market_signature_before = self._runtime_market_signature()
         self._revalidate_opportunities(
             facts,
@@ -815,6 +847,16 @@ class SpotAccumulationService:
             logger.warning("spot support view degraded", exc_info=True)
             support_map, price_zones = [], []
             view_warnings.append(f"承接地图降级: {type(exc).__name__}: {exc}")
+        # 交易大脑 → 抄底（既有承接地图的小扩展）：把最强锚定区的
+        # support_trust 汇入 A 层 evidence 文案。仅文案展示，不进任何均值/
+        # 评分（先观察一个周期再决定是否入分）。
+        anchor_rows = [row for row in support_map if row.anchor_eligible]
+        if anchor_rows:
+            best = max(anchor_rows, key=lambda row: row.support_trust)
+            facts.evidence.append(
+                f"交易大脑高信任承接区 {best.price_low:.0f}-{best.price_high:.0f}"
+                f"（support_trust {best.support_trust:.2f}，观察期仅供参考不入分）"
+            )
         try:
             conditional_ladder = build_conditional_ladder(
                 state,
@@ -1772,6 +1814,44 @@ class SpotAccumulationService:
             }:
                 return True
         return False
+
+    # ── 底部模型联动（单向只读，fail-open）─────────────────────────────
+    _BM_MAX_AGE_SEC = 48 * 3600
+    """底部模型日更 + 抄底 60s 评估的节奏差异容忍：一个日更周期 + 缓冲。"""
+
+    _BM_CAPITULATION_MIN_STRESS = 60.0
+    """capitulation 档软证据的 Stress 下限（与象限 basing 的 stress 门槛同阶）。"""
+
+    def _bottom_model_context(self, now: int) -> Optional[dict[str, Any]]:
+        """只读消费底部模型最新日线快照。
+
+        返回 {"quadrant": str, "stress": Optional[float]}；以下情况一律视为
+        缺席返回 None（fail-open 到接线前行为）：未接线、读取异常、
+        quality_status 非 OK、as_of 缺失或超过 48h。
+        """
+        if self._bottom_model_getter is None:
+            return None
+        try:
+            snap = self._bottom_model_getter()
+        except Exception:  # noqa: BLE001 - 联动缺席不得影响抄底主流程
+            logger.warning("bottom model snapshot read failed", exc_info=True)
+            return None
+        if not isinstance(snap, dict) or snap.get("quality_status") != "OK":
+            return None
+        as_of = str(snap.get("as_of") or "")
+        try:
+            from datetime import datetime, timezone
+            as_of_ts = datetime.strptime(
+                as_of[:19], "%Y-%m-%dT%H:%M:%S",
+            ).replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            return None
+        if now - as_of_ts > self._BM_MAX_AGE_SEC:
+            return None
+        quadrant = str((snap.get("quadrant") or {}).get("key") or "")
+        stress_raw = (snap.get("stress") or {}).get("score")
+        stress = float(stress_raw) if isinstance(stress_raw, (int, float)) else None
+        return {"quadrant": quadrant, "stress": stress}
 
     @staticmethod
     def _capitulation_confirmed(state: Any) -> bool:

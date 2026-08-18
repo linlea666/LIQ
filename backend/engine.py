@@ -411,6 +411,8 @@ class Engine:
         self.spot_accumulation_service = SpotAccumulationService(
             data_dir=self._data_dir,
             state_getter=lambda: self._states.get("BTC"),
+            # 底部模型 → 抄底单向只读联动；底部模型不消费抄底任何输出
+            bottom_model_getter=lambda: self.bottom_model_service.latest(),
         )
         self._spot_accumulation_push_signature = ""
         self._spot_email_dedup = AlertDedup(cooldown_seconds=900)

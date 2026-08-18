@@ -102,6 +102,94 @@ def _service(tmp_path) -> SpotAccumulationService:
     return service
 
 
+def _bm_snapshot(now: int, *, quadrant="basing", stress=66.5, quality="OK",
+                 age_sec=3600) -> dict:
+    from datetime import datetime, timezone
+    as_of = datetime.fromtimestamp(now - age_sec, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+    )
+    return {
+        "quality_status": quality,
+        "as_of": as_of,
+        "quadrant": {"key": quadrant, "label": "测试"},
+        "stress": {"score": stress},
+    }
+
+
+def test_bottom_model_context_fail_open_rules(tmp_path):
+    """底部模型联动缺席条件：未接线 / 异常 / 非 OK / 超 48h 全部 fail-open。"""
+    now = int(time.time())
+    state = _state(now)
+    plain = SpotAccumulationService(str(tmp_path / "plain"), lambda: state)
+    assert plain._bottom_model_context(now) is None
+
+    def raising():
+        raise RuntimeError("boom")
+
+    cases = [
+        (lambda: _bm_snapshot(now), {"quadrant": "basing", "stress": 66.5}),
+        (lambda: _bm_snapshot(now, age_sec=49 * 3600), None),   # 超 48h
+        (lambda: _bm_snapshot(now, quality="INVALID_DATA"), None),
+        (lambda: {"quadrant": {"key": "basing"}}, None),        # 无 as_of
+        (raising, None),
+        (lambda: None, None),
+    ]
+    for i, (getter, expected) in enumerate(cases):
+        svc = SpotAccumulationService(
+            str(tmp_path / f"c{i}"), lambda: state, bottom_model_getter=getter,
+        )
+        assert svc._bottom_model_context(now) == expected, f"case {i}"
+
+
+def test_bottom_model_soft_evidence_for_capitulation(tmp_path):
+    """quadrant ∈ {panic_flush, basing} 且 Stress ≥ 60 → 软证据进 evidence；
+    低 Stress 或缺席时不注入。"""
+    service = _service(tmp_path)
+    service._bottom_model_getter = lambda: _bm_snapshot(
+        int(time.time()), quadrant="basing", stress=66.5,
+    )
+    snap = service.evaluate()
+    assert snap is not None
+    assert any("底部模型共振" in e for e in snap.facts.evidence)
+
+    weak = _service(tmp_path / "weak")
+    weak._bottom_model_getter = lambda: _bm_snapshot(
+        int(time.time()), quadrant="basing", stress=40.0,
+    )
+    snap2 = weak.evaluate()
+    assert snap2 is not None
+    assert not any("底部模型共振" in e for e in snap2.facts.evidence)
+
+
+def test_bottom_model_confirmed_recovery_is_alternative_reclaim_path(tmp_path, monkeypatch):
+    """confirmed_recovery 象限可替代周线收回确认（二选一），并留下证据文案。"""
+    monkeypatch.setattr(
+        SpotAccumulationService, "_weekly_reclaim_confirmed",
+        staticmethod(lambda state, required_weeks=2: False),
+    )
+    service = _service(tmp_path)
+    service._bottom_model_getter = lambda: _bm_snapshot(
+        int(time.time()), quadrant="confirmed_recovery", stress=70.0,
+    )
+    snap = service.evaluate()
+    assert snap is not None
+    assert any("替代确认路径" in e for e in snap.facts.evidence)
+    bottom_confirmed = [o for o in snap.opportunities if o.stage == "bottom_confirmed"]
+    assert bottom_confirmed
+    for item in bottom_confirmed:
+        assert all("周线结构尚未确认收回" not in b for b in item.blocked_by)
+
+    # 对照组：无底部模型联动时该档保持被周线条件阻塞
+    control = _service(tmp_path / "control")
+    snap2 = control.evaluate()
+    assert snap2 is not None
+    control_bc = [o for o in snap2.opportunities if o.stage == "bottom_confirmed"]
+    assert control_bc
+    assert any(
+        "周线结构尚未确认收回" in b for o in control_bc for b in o.blocked_by
+    )
+
+
 def test_service_builds_isolated_snapshot_and_persists_ath(tmp_path):
     service = _service(tmp_path)
     snapshot = service.evaluate()
