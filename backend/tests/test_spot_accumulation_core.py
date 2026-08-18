@@ -17,6 +17,7 @@ from processors.spot_accumulation import (
     build_opportunities,
     build_swing_opportunity,
     build_tail_opportunities,
+    compute_valuation_bands,
     score_facts,
 )
 from storage.spot_accumulation_store import SpotAccumulationStore
@@ -89,12 +90,13 @@ def test_budget_and_every_tranche_scale_from_configured_capital():
     assert cfg.core_budget_usdt == 19_500
     assert cfg.swing_budget_usdt == 6_000
     assert cfg.tail_budget_usdt == 4_500
+    # 2026-08 深档倾斜：capitulation 加重到 20%，bottom_confirmed 降为 15% 兜底
     assert cfg.core_stage_allocations() == {
         "insurance": 1_500,
         "value_1": 3_000,
         "deep_value": 4_500,
-        "capitulation": 4_500,
-        "bottom_confirmed": 6_000,
+        "capitulation": 6_000,
+        "bottom_confirmed": 4_500,
     }
     assert cfg.tail_tranche_usdt == 1_500
     assert cfg.max_swing_loss_usdt == 300
@@ -230,6 +232,112 @@ def test_core_and_tail_opportunities_use_configured_capital():
         tranche_usdt=cfg.tail_tranche_usdt,
     )
     assert tail[0].allocation_usdt == 1_500
+
+
+def test_old_default_stage_ratios_migrate_to_deep_tilt():
+    """持久化配置若仍是旧默认比例（未自定义）→ 一次性迁移到深档倾斜；
+    自定义比例保持不动。"""
+    old_default = {
+        "insurance": 0.05, "value_1": 0.09999999999999999, "deep_value": 0.15,
+        "capitulation": 0.15, "bottom_confirmed": 0.19999999999999998,
+    }
+    migrated = SpotAccumulationConfig(core_stage_ratios=dict(old_default))
+    assert migrated.core_stage_ratios["capitulation"] == 0.20
+    assert migrated.core_stage_ratios["bottom_confirmed"] == 0.15
+
+    custom = {
+        "insurance": 0.05, "value_1": 0.08, "deep_value": 0.12,
+        "capitulation": 0.10, "bottom_confirmed": 0.15,
+    }
+    kept = SpotAccumulationConfig(
+        core_ratio=0.50, swing_ratio=0.30, tail_ratio=0.20,
+        core_stage_ratios=dict(custom),
+    )
+    assert kept.core_stage_ratios == custom
+
+
+def test_valuation_bands_geometry_and_fail_open():
+    """带价换算与缺席 fail-open：deep/capitulation 硬带，浅档软带。"""
+    cfg = SpotAccumulationConfig()
+    levels = {
+        "sth_realized_price": 67_000.0,
+        "lth_realized_price": 50_000.0,
+        "ma_200w": 64_000.0,
+        "mvrv_raw": 1.25,   # 已实现价格 = 65000/1.25 = 52000
+    }
+    bands = compute_valuation_bands(65_000.0, levels, cfg)
+    assert bands["insurance"].mode == "soft"
+    assert bands["insurance"].in_band is True          # 65000 < 67000
+    assert bands["value_1"].in_band is True            # ≤ 64000*1.05=67200
+    # deep_value：max(52000×1.0, 50000×1.05=52500)=52500 → 65000 带外
+    assert bands["deep_value"].mode == "hard"
+    assert bands["deep_value"].band_price == 52_500.0
+    assert bands["deep_value"].in_band is False
+    # capitulation：50000×0.85=42500 → 带外
+    assert bands["capitulation"].band_price == 42_500.0
+    assert bands["capitulation"].in_band is False
+    assert bands["bottom_confirmed"].mode == "none"
+
+    absent = compute_valuation_bands(65_000.0, None, cfg)
+    assert all(band.in_band is None for band in absent.values()
+               if band.stage != "bottom_confirmed")
+
+
+def test_hard_band_blocks_deep_stages_and_soft_band_halves_shallow():
+    """价格纪律：证据满分但价格在山腰时，深档被硬带阻止、浅档折减额度。"""
+    facts = _facts(price=65_000)
+    facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)
+    cfg = SpotAccumulationConfig()
+    bands = compute_valuation_bands(65_000.0, {
+        "sth_realized_price": 60_000.0,   # 65000 > 60000 → insurance 带外（软）
+        "lth_realized_price": 50_000.0,
+        "ma_200w": 55_000.0,
+        "mvrv_raw": 1.3,                  # realized=50000 → value_1 带 57750 → 带外
+    }, cfg)
+    opportunities = build_opportunities(
+        facts,
+        SpotAccumulationRuntimeState(),
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=True,
+        weekly_reclaim_confirmed=False,
+        valuation_bands=bands,
+    )
+    # 深档带外 → 被硬阻止，批次最深只到 value_1；deep/capitulation 不进批次
+    stages = [item.stage for item in opportunities]
+    assert stages == ["insurance", "value_1"]
+    # 浅档带外 → 折减额度（默认减半）并标注
+    by_stage = {item.stage: item for item in opportunities}
+    insurance = by_stage["insurance"]
+    assert insurance.allocation_usdt == 500.0    # 1000 × 0.5
+    assert any("额度折减" in reason for reason in insurance.reasons)
+    assert by_stage["value_1"].allocation_usdt == 1_000.0  # 2000 × 0.5
+
+
+def test_in_band_deep_stage_triggers_batch():
+    """价格进入 capitulation 估值带时，硬带放行、批次正常触发。"""
+    facts = _facts(price=42_000)
+    facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)
+    cfg = SpotAccumulationConfig()
+    bands = compute_valuation_bands(42_000.0, {
+        "sth_realized_price": 67_000.0,
+        "lth_realized_price": 50_000.0,
+        "ma_200w": 64_000.0,
+        "mvrv_raw": 0.84,
+    }, cfg)
+    assert bands["capitulation"].in_band is True  # 42000 ≤ 42500
+    opportunities = build_opportunities(
+        facts,
+        SpotAccumulationRuntimeState(),
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=True,
+        weekly_reclaim_confirmed=False,
+        valuation_bands=bands,
+    )
+    assert any(item.batch_id for item in opportunities)
+    stages = [item.stage for item in opportunities]
+    assert "capitulation" in stages
 
 
 def test_new_downside_batch_needs_lower_price_gap():

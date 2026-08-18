@@ -42,7 +42,8 @@ def test_fixed_ladder_buys_more_as_drawdown_deepens():
     result = run_backtest(points)[0].strategies["fixed_drawdown"]
     amounts = [trade.amount_usdt for trade in result.trades]
     assert sum(amounts) == 13_000
-    assert amounts[-1] == 4_000
+    # 深档倾斜后 capitulation（倒数第二档）最重，bottom_confirmed 降为兜底
+    assert amounts == [1_000, 2_000, 3_000, 4_000, 3_000]
 
 
 def test_backtest_scales_core_ladder_from_configured_total_capital():
@@ -56,7 +57,7 @@ def test_backtest_scales_core_ladder_from_configured_total_capital():
     result = run_backtest(points, total_capital_usdt=30_000)[0].strategies["fixed_drawdown"]
     amounts = [trade.amount_usdt for trade in result.trades]
     assert sum(amounts) == 19_500
-    assert amounts == [1_500, 3_000, 4_500, 4_500, 6_000]
+    assert amounts == [1_500, 3_000, 4_500, 6_000, 4_500]
 
 
 def test_backtest_reads_non_default_bucket_and_stage_ratios_from_config():

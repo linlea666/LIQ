@@ -27,6 +27,7 @@ from processors.spot_accumulation import (
     build_opportunities,
     build_swing_opportunity,
     build_tail_opportunities,
+    compute_valuation_bands,
     score_facts,
 )
 from processors.spot_accumulation_view import (
@@ -777,6 +778,11 @@ class SpotAccumulationService:
                 facts.evidence.append(
                     "底部模型 confirmed_recovery 象限：作为周线收回的替代确认路径"
                 )
+        # 估值带定价：链上成本参考位来自底部模型（缺席时各档 in_band=None，
+        # fail-open 不做限制）。浅档带外折减额度，深档带外阻止 eligible。
+        valuation_bands = compute_valuation_bands(
+            price, bm["levels"] if bm else None, self.config,
+        )
         market_signature_before = self._runtime_market_signature()
         self._revalidate_opportunities(
             facts,
@@ -796,6 +802,7 @@ class SpotAccumulationService:
             weekly_reclaim_confirmed=weekly_reclaim_confirmed,
             stage_allocations=self.config.core_stage_allocations(),
             config=self.config,
+            valuation_bands=valuation_bands,
         )
         opportunities.extend(build_tail_opportunities(
             facts,
@@ -1828,9 +1835,12 @@ class SpotAccumulationService:
     def _bottom_model_context(self, now: int) -> Optional[dict[str, Any]]:
         """只读消费底部模型最新日线快照。
 
-        返回 {"quadrant": str, "stress": Optional[float]}；以下情况一律视为
-        缺席返回 None（fail-open 到接线前行为）：未接线、读取异常、
-        quality_status 非 OK、as_of 缺失或超过 48h。
+        返回 {"quadrant": str, "stress": Optional[float],
+              "levels": {"sth_realized_price", "lth_realized_price",
+                         "ma_200w", "mvrv_raw"}（值可为 None）}；
+        以下情况一律视为缺席返回 None（fail-open 到接线前行为）：
+        未接线、读取异常、quality_status 非 OK、as_of 缺失或超过 48h。
+        levels 来自快照 price_context（估值带定价用的链上成本参考位）。
         """
         if self._bottom_model_getter is None:
             return None
@@ -1854,7 +1864,19 @@ class SpotAccumulationService:
         quadrant = str((snap.get("quadrant") or {}).get("key") or "")
         stress_raw = (snap.get("stress") or {}).get("score")
         stress = float(stress_raw) if isinstance(stress_raw, (int, float)) else None
-        return {"quadrant": quadrant, "stress": stress}
+        pc = snap.get("price_context") or {}
+
+        def _pos_float(key: str) -> Optional[float]:
+            raw = pc.get(key)
+            return float(raw) if isinstance(raw, (int, float)) and raw > 0 else None
+
+        levels = {
+            "sth_realized_price": _pos_float("sth_realized_price"),
+            "lth_realized_price": _pos_float("lth_realized_price"),
+            "ma_200w": _pos_float("ma_200w"),
+            "mvrv_raw": _pos_float("mvrv_raw"),
+        }
+        return {"quadrant": quadrant, "stress": stress, "levels": levels}
 
     @staticmethod
     def _capitulation_confirmed(state: Any) -> bool:

@@ -145,6 +145,94 @@ CORE_RULES = (
 )
 
 
+@dataclass(frozen=True)
+class StageBand:
+    """单档估值带判定结果。
+
+    mode: soft = 带外仅折减额度；hard = 带外阻止 eligible；none = 无带。
+    in_band: None 表示参考位数据缺席（fail-open，不做任何限制）。
+    band_price: 进带上限价（价格 ≤ band_price 即在带内），展示与推演用。
+    """
+    stage: str
+    mode: str
+    band_price: Optional[float] = None
+    in_band: Optional[bool] = None
+    note: str = ""
+
+
+def compute_valuation_bands(
+    price: float,
+    levels: Optional[dict[str, Optional[float]]],
+    config: SpotAccumulationConfig,
+) -> dict[str, StageBand]:
+    """按底部模型链上成本参考位计算五档估值带。
+
+    levels 键：sth_realized_price / lth_realized_price / ma_200w / mvrv_raw
+    （来自底部模型快照 price_context，单向只读）。缺席的参考位对应档
+    in_band=None，调用方不得据此阻止（保守修改：fail-open 回退接线前行为）。
+
+    价格纪律语义：证据（V/M/A）说"值得买"，估值带说"这个价格配不配这一档"。
+    浅档软性（带外折减），深档硬性（不到估值带绝不建议买入），
+    bottom_confirmed 保持事件驱动兜底防踏空。
+    """
+    lv = levels or {}
+    sth = lv.get("sth_realized_price")
+    lth = lv.get("lth_realized_price")
+    ma200w = lv.get("ma_200w")
+    mvrv = lv.get("mvrv_raw")
+    # 聚合已实现价格 ≈ 价格 / MVRV（市值/已实现市值 的价格投影）
+    realized = price / mvrv if mvrv and mvrv > 1e-9 else None
+
+    bands: dict[str, StageBand] = {}
+
+    if sth:
+        band = sth * config.band_insurance_sth_mult
+        bands["insurance"] = StageBand(
+            "insurance", "soft", round(band, 2), price < band,
+            f"STH成本带 ≤{band:.0f}",
+        )
+    else:
+        bands["insurance"] = StageBand("insurance", "soft", note="STH-RP 数据缺席")
+
+    v1_refs = [x for x in (ma200w, realized) if x]
+    if v1_refs:
+        band = max(v1_refs) * config.band_value1_mult
+        bands["value_1"] = StageBand(
+            "value_1", "soft", round(band, 2), price <= band,
+            f"200周均线/已实现价格带 ≤{band:.0f}",
+        )
+    else:
+        bands["value_1"] = StageBand("value_1", "soft", note="估值参考位数据缺席")
+
+    deep_refs: list[float] = []
+    if realized:
+        deep_refs.append(realized * config.band_deep_value_mvrv_max)
+    if lth:
+        deep_refs.append(lth * config.band_deep_value_lth_mult)
+    if deep_refs:
+        band = max(deep_refs)  # 两个条件二选一满足即可 → 取较宽者
+        bands["deep_value"] = StageBand(
+            "deep_value", "hard", round(band, 2), price <= band,
+            f"MVRV≤{config.band_deep_value_mvrv_max:g} 或 LTH成本带 ≤{band:.0f}",
+        )
+    else:
+        bands["deep_value"] = StageBand("deep_value", "hard", note="估值参考位数据缺席")
+
+    if lth:
+        band = lth * config.band_capitulation_lth_mult
+        bands["capitulation"] = StageBand(
+            "capitulation", "hard", round(band, 2), price <= band,
+            f"LTH成本折价带 ≤{band:.0f}（历史大底 0.59-0.77×LTH-RP）",
+        )
+    else:
+        bands["capitulation"] = StageBand("capitulation", "hard", note="LTH-RP 数据缺席")
+
+    bands["bottom_confirmed"] = StageBand(
+        "bottom_confirmed", "none", note="事件驱动（周线收回/底部模型确认），无价格带",
+    )
+    return bands
+
+
 def build_opportunities(
     facts: SpotAccumulationFacts,
     runtime: SpotAccumulationRuntimeState,
@@ -156,12 +244,31 @@ def build_opportunities(
     weekly_reclaim_confirmed: bool = False,
     stage_allocations: Optional[dict[str, float]] = None,
     config: Optional[SpotAccumulationConfig] = None,
+    valuation_bands: Optional[dict[str, StageBand]] = None,
 ) -> list[SpotOpportunity]:
-    """按最深满足档位创建累计批次；批次内仅开放第一个未完成子档。"""
+    """按最深满足档位创建累计批次；批次内仅开放第一个未完成子档。
+
+    valuation_bands：估值带判定（compute_valuation_bands 产出）。
+    硬带档位带外时进 blocked（参与最深档判定），软带档位带外时折减额度；
+    未传入 / in_band=None 时行为与接线前一致（fail-open）。
+    """
     now = int(time.time())
     scores = facts.scores
     config = config or SpotAccumulationConfig()
     allocations = stage_allocations or config.core_stage_allocations()
+    bands = valuation_bands or {}
+
+    def _band_blocker(stage: str) -> Optional[str]:
+        band = bands.get(stage)
+        if band and band.mode == "hard" and band.in_band is False:
+            return f"价格未达估值带（{band.note}）"
+        return None
+
+    def _soft_out_of_band(stage: str) -> Optional[StageBand]:
+        band = bands.get(stage)
+        if band and band.mode == "soft" and band.in_band is False:
+            return band
+        return None
     core_stages = [rule.stage for rule in CORE_RULES]
     unresolved_batch = any(
         item.stage in core_stages and item.batch_id
@@ -200,6 +307,9 @@ def build_opportunities(
             blocked.append("尚未完成出清后承接确认")
         if rule.stage == "bottom_confirmed" and not weekly_reclaim_confirmed:
             blocked.append("周线结构尚未确认收回")
+        band_blocker = _band_blocker(rule.stage)
+        if band_blocker:
+            blocked.append(band_blocker)
         if rule.stage in {"value_1", "deep_value", "capitulation"} and runtime.last_filled_price:
             gap = abs(facts.price - runtime.last_filled_price) / runtime.last_filled_price * 100
             required = max(config.min_price_gap_ratio * 100, config.atr_gap_multiplier * daily_atr_pct)
@@ -215,6 +325,14 @@ def build_opportunities(
             remaining = max(0.0, float(allocations[rule.stage]) - filled_by_stage[rule.stage])
             if remaining <= 0.01 or rule.stage in skipped:
                 continue
+            reasons = list(facts.evidence)
+            soft_band = _soft_out_of_band(rule.stage)
+            if soft_band:
+                remaining = round(remaining * config.band_soft_allocation_factor, 2)
+                reasons.append(
+                    f"估值带外，额度折减至 {config.band_soft_allocation_factor:.0%}"
+                    f"（{soft_band.note}）"
+                )
             tolerance = max(0.01, daily_atr_pct / 100.0 * 0.35)
             oid = hashlib.sha1(
                 f"BTC|observe|{config.policy_version}|{rule.stage}".encode()
@@ -229,7 +347,7 @@ def build_opportunities(
                 price_zone_high=round(facts.price * (1 + tolerance), 2),
                 trigger_price=facts.price,
                 scores=scores,
-                reasons=list(facts.evidence),
+                reasons=reasons,
                 blocked_by=blockers_by_stage[rule.stage],
                 created_at=now,
                 updated_at=now,
@@ -253,6 +371,14 @@ def build_opportunities(
     output = []
     for index, stage in enumerate(pending, 1):
         amount = max(0.0, float(allocations[stage]) - filled_by_stage[stage])
+        reasons = list(facts.evidence)
+        soft_band = _soft_out_of_band(stage)
+        if soft_band:
+            amount = round(amount * config.band_soft_allocation_factor, 2)
+            reasons.append(
+                f"估值带外，额度折减至 {config.band_soft_allocation_factor:.0%}"
+                f"（{soft_band.note}）"
+            )
         spendable = max(0.0, available_cash.get("core", 0.0) - reserved.get("core", 0.0))
         blocked = [] if index == 1 else ["等待同批次前序子档完成或跳过"]
         if index == 1 and spendable + 0.01 < amount:
@@ -262,6 +388,12 @@ def build_opportunities(
         # 用户可通过"跳过"放行后续档位。
         if index == 1 and stage == "capitulation" and not capitulation_confirmed:
             blocked.append("尚未完成出清后承接确认")
+        # 硬估值带同为档位语义前提：批次补齐时（正常情况下深档带更低，
+        # 前序档带自动满足）也做一次防御性校验，避免非单调配置绕过。
+        if index == 1:
+            band_blocker = _band_blocker(stage)
+            if band_blocker:
+                blocked.append(band_blocker)
         status = "eligible" if not blocked else "observing"
         tolerance = max(0.01, daily_atr_pct / 100.0 * 0.35)
         low = facts.price * (1.0 - tolerance)
@@ -279,7 +411,7 @@ def build_opportunities(
             price_zone_high=round(high, 2),
             trigger_price=facts.price,
             scores=scores,
-            reasons=list(facts.evidence),
+            reasons=reasons,
             blocked_by=blocked,
             created_at=now,
             updated_at=now,

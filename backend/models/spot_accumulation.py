@@ -41,9 +41,12 @@ class SpotAccumulationConfig(BaseModel):
         "insurance": 0.05,
         "value_1": 0.10,
         "deep_value": 0.15,
-        "capitulation": 0.15,
-        "bottom_confirmed": 0.20,
+        "capitulation": 0.20,
+        "bottom_confirmed": 0.15,
     })
+    """五档比例向深档倾斜（2026-08 调整）：capitulation 0.15→0.20、
+    bottom_confirmed 0.20→0.15。目标=在最便宜的恐慌区买到最多 BTC，
+    右侧确认仓降为兜底。持久化配置若仍为旧默认值会被一次性迁移。"""
     core_thresholds: dict[str, dict[str, float]] = Field(default_factory=lambda: {
         "insurance": {"v": 55.0, "m": 40.0, "a": 65.0},
         "value_1": {"v": 65.0, "m": 45.0, "a": 60.0},
@@ -64,6 +67,20 @@ class SpotAccumulationConfig(BaseModel):
     min_swing_rr: float = 2.0
     min_swing_acceptance: float = Field(default=70.0, ge=0.0, le=100.0)
     """波段仓 A 层（承接）最低分；原为硬编码 70，提为配置项（默认不变）。"""
+
+    # ── 估值带定价（链上成本参考位来自底部模型快照，缺席时 fail-open）──
+    band_soft_allocation_factor: float = Field(default=0.5, gt=0.0, le=1.0)
+    """软性档位（insurance/value_1）带外时的额度折减系数。"""
+    band_insurance_sth_mult: float = Field(default=1.0, gt=0.0)
+    """insurance 带：价格 < STH-RP × mult（跌破短持成本才算便宜）。"""
+    band_value1_mult: float = Field(default=1.05, gt=0.0)
+    """value_1 带：价格 ≤ max(200周均线, 已实现价格) × mult。"""
+    band_deep_value_mvrv_max: float = Field(default=1.0, gt=0.0)
+    """deep_value 带（硬）：MVRV ≤ 此值即在带内（等价于价格 ≤ 已实现价格）。"""
+    band_deep_value_lth_mult: float = Field(default=1.05, gt=0.0)
+    """deep_value 带（硬）的替代条件：价格 ≤ LTH-RP × mult。"""
+    band_capitulation_lth_mult: float = Field(default=0.85, gt=0.0)
+    """capitulation 带（硬）：价格 ≤ LTH-RP × mult（历史大底 0.59-0.77）。"""
     cycle_ath_override: Optional[float] = None
     email_notifications: bool = False
     ai_explanation_enabled: bool = True
@@ -101,12 +118,26 @@ class SpotAccumulationConfig(BaseModel):
                 "insurance": insurance,
                 "value_1": remaining * (10 / 60),
                 "deep_value": remaining * (15 / 60),
-                "capitulation": remaining * (15 / 60),
-                "bottom_confirmed": remaining * (20 / 60),
+                "capitulation": remaining * (20 / 60),
+                "bottom_confirmed": remaining * (15 / 60),
             }
         else:
             ratios = migrated.get("core_stage_ratios")
             if isinstance(ratios, dict) and "insurance" in ratios:
+                # 一次性迁移：持久化比例若仍是 2026-08 之前的旧默认值
+                # （用户未自定义），替换为深档倾斜的新默认；自定义比例不动。
+                old_default = {
+                    "insurance": 0.05, "value_1": 0.10, "deep_value": 0.15,
+                    "capitulation": 0.15, "bottom_confirmed": 0.20,
+                }
+                if set(ratios) == set(old_default) and all(
+                    abs(float(ratios[k]) - v) < 1e-6 for k, v in old_default.items()
+                ):
+                    migrated["core_stage_ratios"] = {
+                        "insurance": 0.05, "value_1": 0.10, "deep_value": 0.15,
+                        "capitulation": 0.20, "bottom_confirmed": 0.15,
+                    }
+                    ratios = migrated["core_stage_ratios"]
                 migrated["insurance_ratio"] = ratios["insurance"]
         return migrated
 

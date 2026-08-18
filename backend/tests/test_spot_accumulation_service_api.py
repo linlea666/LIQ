@@ -103,17 +103,20 @@ def _service(tmp_path) -> SpotAccumulationService:
 
 
 def _bm_snapshot(now: int, *, quadrant="basing", stress=66.5, quality="OK",
-                 age_sec=3600) -> dict:
+                 age_sec=3600, price_context: dict | None = None) -> dict:
     from datetime import datetime, timezone
     as_of = datetime.fromtimestamp(now - age_sec, tz=timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%S.%fZ",
     )
-    return {
+    snap = {
         "quality_status": quality,
         "as_of": as_of,
         "quadrant": {"key": quadrant, "label": "测试"},
         "stress": {"score": stress},
     }
+    if price_context is not None:
+        snap["price_context"] = price_context
+    return snap
 
 
 def test_bottom_model_context_fail_open_rules(tmp_path):
@@ -126,8 +129,13 @@ def test_bottom_model_context_fail_open_rules(tmp_path):
     def raising():
         raise RuntimeError("boom")
 
+    empty_levels = {
+        "sth_realized_price": None, "lth_realized_price": None,
+        "ma_200w": None, "mvrv_raw": None,
+    }
     cases = [
-        (lambda: _bm_snapshot(now), {"quadrant": "basing", "stress": 66.5}),
+        (lambda: _bm_snapshot(now),
+         {"quadrant": "basing", "stress": 66.5, "levels": empty_levels}),
         (lambda: _bm_snapshot(now, age_sec=49 * 3600), None),   # 超 48h
         (lambda: _bm_snapshot(now, quality="INVALID_DATA"), None),
         (lambda: {"quadrant": {"key": "basing"}}, None),        # 无 as_of
@@ -139,6 +147,30 @@ def test_bottom_model_context_fail_open_rules(tmp_path):
             str(tmp_path / f"c{i}"), lambda: state, bottom_model_getter=getter,
         )
         assert svc._bottom_model_context(now) == expected, f"case {i}"
+
+
+def test_bottom_model_context_extracts_price_levels(tmp_path):
+    """price_context 中的链上成本参考位透传；非法值（<=0/缺失）置 None。"""
+    now = int(time.time())
+    state = _state(now)
+    svc = SpotAccumulationService(
+        str(tmp_path), lambda: state,
+        bottom_model_getter=lambda: _bm_snapshot(now, price_context={
+            "sth_realized_price": 67000.0,
+            "lth_realized_price": 49900.0,
+            "ma_200w": 63980.0,
+            "mvrv_raw": 1.23,
+            "price": -1,  # 不在提取名单，且非法值不应影响
+        }),
+    )
+    ctx = svc._bottom_model_context(now)
+    assert ctx is not None
+    assert ctx["levels"] == {
+        "sth_realized_price": 67000.0,
+        "lth_realized_price": 49900.0,
+        "ma_200w": 63980.0,
+        "mvrv_raw": 1.23,
+    }
 
 
 def test_bottom_model_soft_evidence_for_capitulation(tmp_path):

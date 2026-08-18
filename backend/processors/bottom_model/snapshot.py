@@ -269,6 +269,8 @@ def _price_context(data: dict[str, Rows]) -> dict[str, Any]:
         "ma_200w": _last("ma_200w"),
         "sth_realized_price": _last("sth_realized_price"),
         "lth_realized_price": _last("lth_realized_price"),
+        # 原始 MVRV 比率：抄底估值带用（价格/MVRV ≈ 聚合已实现价格）
+        "mvrv_raw": _last("mvrv_raw"),
     }
 
 
