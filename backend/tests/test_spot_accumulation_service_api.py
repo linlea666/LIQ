@@ -149,6 +149,38 @@ def test_bottom_model_context_fail_open_rules(tmp_path):
         assert svc._bottom_model_context(now) == expected, f"case {i}"
 
 
+def test_terminal_opportunities_capped_per_stage_in_view():
+    """视图层已终结机会每档只保留最近 5 条；活跃机会不受影响。"""
+    from models.spot_accumulation import EvidenceScore, SpotOpportunity
+
+    now = int(time.time())
+
+    def _opp(i: int, status: str, stage: str = "insurance") -> SpotOpportunity:
+        return SpotOpportunity(
+            opportunity_id=f"o{i}", stage=stage, bucket="core",
+            allocation_usdt=100, status=status,
+            price_zone_low=1, price_zone_high=2, trigger_price=1.5,
+            scores=EvidenceScore(valuation=50, capital_flow=50, acceptance=50),
+            created_at=now - i, updated_at=now - i,
+        )
+
+    items = [_opp(i, "invalidated") for i in range(12)]
+    items += [_opp(100 + i, "invalidated", stage="value_1") for i in range(3)]
+    items.append(_opp(200, "eligible"))
+    capped = SpotAccumulationService._cap_terminal_opportunities(items)
+    insurance_terminal = [
+        item for item in capped
+        if item.stage == "insurance" and item.status == "invalidated"
+    ]
+    assert len(insurance_terminal) == 5
+    # 保留的是最近更新的 5 条
+    assert {item.opportunity_id for item in insurance_terminal} == {
+        "o0", "o1", "o2", "o3", "o4",
+    }
+    assert sum(1 for item in capped if item.stage == "value_1") == 3
+    assert any(item.status == "eligible" for item in capped)
+
+
 def test_bottom_model_context_extracts_price_levels(tmp_path):
     """price_context 中的链上成本参考位透传；非法值（<=0/缺失）置 None。"""
     now = int(time.time())

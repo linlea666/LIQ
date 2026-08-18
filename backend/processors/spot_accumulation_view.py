@@ -11,6 +11,7 @@ from models.spot_accumulation import (
     SpotAccumulationFacts,
     SpotConditionalLadderItem,
     SpotDecisionSummary,
+    SpotLadderProjection,
     SpotOpportunity,
     SpotPortfolio,
     SpotSupportMapItem,
@@ -134,7 +135,13 @@ def build_support_map(
             wall_fresh=orderbook_fresh,
             source_timestamp=orderbook_ts,
             is_fresh=orderbook_fresh,
-            anchor_eligible=bool(orderbook_fresh and trust >= 0.70 and role == "spot_defense"),
+            # contested 一并纳入锚区资格：行本身源自现货 bid 墙，contested
+            # 只是同价位另有合约兴趣，对抄底承接判断仍有效（此前仅
+            # spot_defense 导致 trust=1.0 的百万级现货买墙被整体排除）。
+            anchor_eligible=bool(
+                orderbook_fresh and trust >= 0.70
+                and role in ("spot_defense", "contested")
+            ),
             evidence=evidence,
         ))
 
@@ -289,8 +296,10 @@ def build_conditional_ladder(
     *,
     capitulation_confirmed: bool = False,
     weekly_reclaim_confirmed: bool = False,
+    valuation_bands: Optional[dict[str, Any]] = None,
 ) -> list[SpotConditionalLadderItem]:
     anchors = _planning_anchors(state, facts, zones)
+    bands = valuation_bands or {}
     allocations = config.core_stage_allocations()
     projected_btc = portfolio.total_btc
     projected_cost = portfolio.total_cost_basis_usdt
@@ -360,6 +369,14 @@ def build_conditional_ladder(
             low = high = None
             source = label = ""
             trust = None
+        band = bands.get(stage)
+        band_price = getattr(band, "band_price", None) if band else None
+        # 无结构锚 / 事件档无机会时，用估值带价兜底作参考价——
+        # 让 deep_value/capitulation 也有可规划的价格（此前恒为空）。
+        if low is None and band_price:
+            low = high = band_price
+            source = "valuation_band"
+            label = getattr(band, "note", "") or "估值带参考价"
         mid = (low + high) / 2 if low is not None and high is not None else None
         planned = min(remaining, max(0.0, projected_core_cash))
         shortfall = max(0.0, remaining - planned)
@@ -414,8 +431,66 @@ def build_conditional_ladder(
             projected_cash_remaining=round(projected_total_cash, 2),
             projected_core_cash_remaining=round(projected_core_cash, 2),
             projected_total_cash_remaining=round(projected_total_cash, 2),
+            valuation_band_price=band_price,
+            valuation_band_mode=getattr(band, "mode", "none") if band else "none",
+            valuation_band_in=getattr(band, "in_band", None) if band else None,
+            valuation_band_note=getattr(band, "note", "") if band else "",
         ))
     return rows
+
+
+def build_ladder_projection(
+    ladder: list[SpotConditionalLadderItem],
+    portfolio: SpotPortfolio,
+    price: float,
+) -> Optional[SpotLadderProjection]:
+    """阶梯推演汇总（纯展示层，复用阶梯逐行已算好的累计投影）。
+
+    口径 = 已成交持仓 + 剩余阶梯按各档参考价全部成交；对照基线 =
+    同额资金现在按现价一次性买入，量化价格纪律带来的 BTC 数量差。
+    """
+    if not ladder or price <= 0:
+        return None
+    planned_spend = sum(
+        row.planned_usdt for row in ladder if row.estimated_btc
+    )
+    no_price = [
+        row.stage for row in ladder
+        if row.remaining_usdt > 0.01 and row.reference_price_mid is None
+    ]
+    last = ladder[-1]
+    baseline_btc = portfolio.total_btc + planned_spend / price
+    baseline_cost = portfolio.total_cost_basis_usdt + planned_spend
+    baseline_avg = baseline_cost / baseline_btc if baseline_btc > 0 else None
+    projected_btc = last.projected_total_btc
+    advantage = (
+        (projected_btc - baseline_btc) / baseline_btc * 100.0
+        if projected_btc is not None and baseline_btc > 0 else None
+    )
+    notes = [
+        "条件推演：各档需价格到达参考价才成交，不到带/锚的资金保留为现金",
+    ]
+    if no_price:
+        notes.append(
+            "以下档位参考价数据缺席，暂无法推演："
+            + "、".join(STAGE_LABELS.get(s, s) for s in no_price)
+        )
+    return SpotLadderProjection(
+        current_btc=portfolio.total_btc,
+        current_average_cost=(
+            portfolio.total_cost_basis_usdt / portfolio.total_btc
+            if portfolio.total_btc > 0 else None
+        ),
+        planned_spend_usdt=round(planned_spend, 2),
+        projected_total_btc=projected_btc,
+        projected_average_cost=last.projected_average_cost,
+        baseline_price=price,
+        baseline_total_btc=baseline_btc if baseline_btc > 0 else None,
+        baseline_average_cost=baseline_avg,
+        btc_advantage_pct=round(advantage, 2) if advantage is not None else None,
+        stages_without_price=no_price,
+        notes=notes,
+    )
 
 
 def build_decision_summary(

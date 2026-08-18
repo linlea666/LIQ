@@ -340,6 +340,36 @@ def test_in_band_deep_stage_triggers_batch():
     assert "capitulation" in stages
 
 
+def test_price_zone_snaps_to_support_anchor_below_price():
+    """批次触发时建议买入区吸附现价下方最强承接锚区；锚区不在下方则回退±ATR。"""
+    facts = _facts(price=50_000)
+    facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)
+    snapped = build_opportunities(
+        facts,
+        SpotAccumulationRuntimeState(),
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=True,
+        weekly_reclaim_confirmed=True,
+        support_anchor=(48_800.0, 49_400.0),
+    )
+    first = snapped[0]
+    assert first.price_zone_low == 48_800.0
+    assert first.price_zone_high == 49_400.0
+    assert any("吸附承接锚区" in reason for reason in first.reasons)
+
+    fallback = build_opportunities(
+        facts,
+        SpotAccumulationRuntimeState(),
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=True,
+        weekly_reclaim_confirmed=True,
+        support_anchor=(49_900.0, 50_100.0),  # 跨越现价 → 不吸附
+    )
+    assert fallback[0].price_zone_high > 50_000.0  # 回退现价±ATR
+
+
 def test_new_downside_batch_needs_lower_price_gap():
     facts = _facts()
     facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)

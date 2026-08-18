@@ -245,12 +245,17 @@ def build_opportunities(
     stage_allocations: Optional[dict[str, float]] = None,
     config: Optional[SpotAccumulationConfig] = None,
     valuation_bands: Optional[dict[str, StageBand]] = None,
+    support_anchor: Optional[tuple[float, float]] = None,
 ) -> list[SpotOpportunity]:
     """按最深满足档位创建累计批次；批次内仅开放第一个未完成子档。
 
     valuation_bands：估值带判定（compute_valuation_bands 产出）。
     硬带档位带外时进 blocked（参与最深档判定），软带档位带外时折减额度；
     未传入 / in_band=None 时行为与接线前一致（fail-open）。
+
+    support_anchor：现价下方最强承接锚区 (low, high)（来自承接地图
+    anchor_eligible 最强行）。批次触发时建议买入区吸附到该锚区，
+    替代"现价±ATR"的机械区间；锚区缺失或不在现价下方时回退现行为。
     """
     now = int(time.time())
     scores = facts.scores
@@ -396,8 +401,19 @@ def build_opportunities(
                 blocked.append(band_blocker)
         status = "eligible" if not blocked else "observing"
         tolerance = max(0.01, daily_atr_pct / 100.0 * 0.35)
-        low = facts.price * (1.0 - tolerance)
-        high = facts.price * (1.0 + tolerance)
+        # 建议买入区：优先吸附现价下方最强承接锚区（真实买墙/结构位），
+        # 而非机械的现价±ATR；锚区必须完整位于现价下方才吸附。
+        if (
+            support_anchor is not None
+            and 0 < support_anchor[0] <= support_anchor[1] < facts.price
+        ):
+            low, high = support_anchor
+            reasons.append(
+                f"买入区吸附承接锚区 {low:.0f}-{high:.0f}（现价下方最强现货买墙）"
+            )
+        else:
+            low = facts.price * (1.0 - tolerance)
+            high = facts.price * (1.0 + tolerance)
         oid_raw = f"BTC|p{config.policy_version}|{batch_id}|{stage}|{creation}"
         oid = hashlib.sha1(oid_raw.encode()).hexdigest()[:16]
         output.append(SpotOpportunity(

@@ -143,6 +143,10 @@ type ConditionalLadderItem = {
   projected_cash_remaining: number;
   projected_core_cash_remaining?: number;
   projected_total_cash_remaining?: number;
+  valuation_band_price?: number | null;
+  valuation_band_mode?: "soft" | "hard" | "none";
+  valuation_band_in?: boolean | null;
+  valuation_band_note?: string;
 };
 type SupportMapItem = {
   support_id: string;
@@ -205,8 +209,22 @@ type Snapshot = {
   ai_explanation?: string | null;
   decision_summary?: DecisionSummary | null;
   conditional_ladder?: ConditionalLadderItem[];
+  ladder_projection?: LadderProjection | null;
   spot_support_map?: SupportMapItem[];
   view_warnings?: string[];
+};
+type LadderProjection = {
+  current_btc: number;
+  current_average_cost?: number | null;
+  planned_spend_usdt: number;
+  projected_total_btc?: number | null;
+  projected_average_cost?: number | null;
+  baseline_price: number;
+  baseline_total_btc?: number | null;
+  baseline_average_cost?: number | null;
+  btc_advantage_pct?: number | null;
+  stages_without_price: string[];
+  notes: string[];
 };
 type Health = {
   status: string;
@@ -490,6 +508,7 @@ function NoviceDashboard({ snapshot, onAccept, onSkip, onFill }: {
 }) {
   const decision = snapshot.decision_summary;
   const ladder = snapshot.conditional_ladder || [];
+  const projection = snapshot.ladder_projection || null;
   const opportunityById = new Map(snapshot.opportunities.map((item) => [item.opportunity_id, item]));
   const decisionOpportunity = decision?.opportunity_id
     ? opportunityById.get(decision.opportunity_id)
@@ -556,7 +575,7 @@ function NoviceDashboard({ snapshot, onAccept, onSkip, onFill }: {
           <tbody>{ladder.map((row) => {
             const opportunity = row.opportunity_id ? opportunityById.get(row.opportunity_id) : undefined;
             return <tr key={row.stage} className="border-t border-slate-800 align-top">
-              <td className="p-3"><div className="font-medium">{STAGE_LABEL[row.stage] || row.stage}</div><div className="mt-1 text-xs text-slate-600">目标 {money(row.target_usdt)} U · 待完成 {money(row.remaining_usdt)} U</div><div className="mt-1 text-xs text-slate-600">{row.pricing_mode === "event_driven" ? "事件触发定价" : "价格阶梯"}</div></td>
+              <td className="p-3"><div className="font-medium">{STAGE_LABEL[row.stage] || row.stage}</div><div className="mt-1 text-xs text-slate-600">目标 {money(row.target_usdt)} U · 待完成 {money(row.remaining_usdt)} U</div><div className="mt-1 text-xs text-slate-600">{row.pricing_mode === "event_driven" ? "事件触发定价" : "价格阶梯"}</div>{row.valuation_band_price != null && row.valuation_band_mode !== "none" && <div className={`mt-1 text-xs ${row.valuation_band_in ? "text-emerald-400" : row.valuation_band_mode === "hard" ? "text-rose-400" : "text-amber-400"}`}>估值带 ≤${money(row.valuation_band_price)}{row.valuation_band_in ? " · 带内" : row.valuation_band_mode === "hard" ? " · 带外禁买" : " · 带外减额"}</div>}{row.valuation_band_in == null && row.valuation_band_mode !== "none" && !!row.valuation_band_note && <div className="mt-1 text-xs text-slate-600">估值带未启用：{row.valuation_band_note}</div>}</td>
               <td className="py-3"><div>{row.historical_average_price ? `$${money(row.historical_average_price)}` : "尚无成交"}</div><div className="mt-1 text-xs text-slate-600">{money(row.filled_usdt)} U · {(row.historical_quantity_btc || 0).toFixed(8)} BTC</div></td>
               <td className="py-3"><div className={row.is_actionable ? "font-semibold text-emerald-300" : "text-slate-200"}>{row.reference_price_mid ? `$${money(row.reference_price_low || row.reference_price_mid)} – $${money(row.reference_price_high || row.reference_price_mid)}` : row.pricing_mode === "event_driven" ? "等待事件触发" : "等待结构位"}</div><div className="mt-1 max-w-[220px] text-xs text-slate-500">{row.anchor_label || row.invalidation_reasons[0]}</div><div className="mt-1 text-xs text-slate-600">{row.anchor_source || "—"}</div></td>
               <td className="py-3"><div className="font-semibold">{money(row.planned_usdt ?? row.remaining_usdt)} U</div>{(row.cash_shortfall_usdt || 0) > 0 && <div className="mt-1 text-xs text-rose-400">缺口 {money(row.cash_shortfall_usdt || 0)} U</div>}</td>
@@ -570,6 +589,19 @@ function NoviceDashboard({ snapshot, onAccept, onSkip, onFill }: {
         </table>
       </div>
       {ladder.length === 0 && <div className="py-8 text-center text-sm text-slate-500">服务端尚未生成条件阶梯，请等待下一轮快照。</div>}
+      {projection && <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-200">阶梯推演：若剩余阶梯全部按参考价成交</h3>
+          {projection.btc_advantage_pct != null && <span className={`rounded px-2 py-0.5 text-xs ${projection.btc_advantage_pct >= 0 ? "bg-emerald-950 text-emerald-300" : "bg-rose-950 text-rose-300"}`}>vs 现价全买 {projection.btc_advantage_pct >= 0 ? "+" : ""}{projection.btc_advantage_pct.toFixed(2)}% BTC</span>}
+        </div>
+        <div className="mt-3 grid gap-3 text-sm md:grid-cols-4">
+          <div><div className="text-xs text-slate-500">计划投入（可推演档位）</div><div className="mt-1 font-semibold">{money(projection.planned_spend_usdt)} U</div></div>
+          <div><div className="text-xs text-slate-500">预计最终持有</div><div className="mt-1 font-semibold">{projection.projected_total_btc != null ? `${projection.projected_total_btc.toFixed(8)} BTC` : "—"}</div></div>
+          <div><div className="text-xs text-slate-500">预计摊平成本</div><div className="mt-1 font-semibold">{projection.projected_average_cost ? `$${money(projection.projected_average_cost)}` : "—"}</div></div>
+          <div><div className="text-xs text-slate-500">对照：现在按 ${money(projection.baseline_price)} 全买</div><div className="mt-1 text-slate-300">{projection.baseline_total_btc != null ? `${projection.baseline_total_btc.toFixed(8)} BTC` : "—"}{projection.baseline_average_cost ? ` · 均价 $${money(projection.baseline_average_cost)}` : ""}</div></div>
+        </div>
+        {projection.notes.map((note, index) => <div key={index} className="mt-2 text-xs text-slate-500">{note}</div>)}
+      </div>}
     </section>
 
     <SupportRanking items={snapshot.spot_support_map || []} />

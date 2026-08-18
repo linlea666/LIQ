@@ -33,6 +33,7 @@ from processors.spot_accumulation import (
 from processors.spot_accumulation_view import (
     build_conditional_ladder,
     build_decision_summary,
+    build_ladder_projection,
     build_support_map,
 )
 from storage.spot_accumulation_store import (
@@ -792,6 +793,32 @@ class SpotAccumulationService:
             weekly_reclaim_confirmed=weekly_reclaim_confirmed,
         )
         reserved = self._reserved_by_bucket()
+        view_warnings = [absorption_warning] if absorption_warning else []
+        try:
+            support_map, price_zones = build_support_map(
+                state, facts, now=now, absorption=spot_absorption,
+            )
+        except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
+            logger.warning("spot support view degraded", exc_info=True)
+            support_map, price_zones = [], []
+            view_warnings.append(f"承接地图降级: {type(exc).__name__}: {exc}")
+        # 交易大脑 → 抄底（既有承接地图的小扩展）：把最强锚定区的
+        # support_trust 汇入 A 层 evidence 文案。仅文案展示，不进任何均值/
+        # 评分（先观察一个周期再决定是否入分）。
+        # 注：承接地图提前到机会生成之前构建，使锚区证据能进入机会 reasons，
+        # 且最强锚区可作为触发档位建议买入区的吸附目标。
+        support_anchor: Optional[tuple[float, float]] = None
+        anchor_rows = [row for row in support_map if row.anchor_eligible]
+        if anchor_rows:
+            best = max(
+                anchor_rows,
+                key=lambda row: (row.support_trust, row.spot_wall_usd),
+            )
+            facts.evidence.append(
+                f"交易大脑高信任承接区 {best.price_low:.0f}-{best.price_high:.0f}"
+                f"（support_trust {best.support_trust:.2f}，观察期仅供参考不入分）"
+            )
+            support_anchor = (best.price_low, best.price_high)
         opportunities = build_opportunities(
             facts,
             self.runtime,
@@ -803,6 +830,7 @@ class SpotAccumulationService:
             stage_allocations=self.config.core_stage_allocations(),
             config=self.config,
             valuation_bands=valuation_bands,
+            support_anchor=support_anchor,
         )
         opportunities.extend(build_tail_opportunities(
             facts,
@@ -836,34 +864,15 @@ class SpotAccumulationService:
         )
         if self._runtime_market_signature() != market_signature_before:
             self._journal_runtime("market", "市场条件驱动机会状态变化")
-        current = sorted(
+        current = self._cap_terminal_opportunities(sorted(
             self.runtime.opportunities.values(),
             key=lambda item: (item.status != "eligible", item.created_at, item.stage),
-        )
+        ))
         eligible = [item for item in current if item.status == "eligible"]
         next_action = (
             f"可评估 {eligible[0].stage}，上限 {eligible[0].allocation_usdt:.0f} U"
             if eligible else "等待估值、资金和现货承接共同确认"
         )
-        view_warnings = [absorption_warning] if absorption_warning else []
-        try:
-            support_map, price_zones = build_support_map(
-                state, facts, now=now, absorption=spot_absorption,
-            )
-        except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
-            logger.warning("spot support view degraded", exc_info=True)
-            support_map, price_zones = [], []
-            view_warnings.append(f"承接地图降级: {type(exc).__name__}: {exc}")
-        # 交易大脑 → 抄底（既有承接地图的小扩展）：把最强锚定区的
-        # support_trust 汇入 A 层 evidence 文案。仅文案展示，不进任何均值/
-        # 评分（先观察一个周期再决定是否入分）。
-        anchor_rows = [row for row in support_map if row.anchor_eligible]
-        if anchor_rows:
-            best = max(anchor_rows, key=lambda row: row.support_trust)
-            facts.evidence.append(
-                f"交易大脑高信任承接区 {best.price_low:.0f}-{best.price_high:.0f}"
-                f"（support_trust {best.support_trust:.2f}，观察期仅供参考不入分）"
-            )
         try:
             conditional_ladder = build_conditional_ladder(
                 state,
@@ -875,11 +884,20 @@ class SpotAccumulationService:
                 execution_summary,
                 capitulation_confirmed=capitulation_confirmed,
                 weekly_reclaim_confirmed=weekly_reclaim_confirmed,
+                valuation_bands=valuation_bands,
             )
         except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
             logger.warning("spot ladder view degraded", exc_info=True)
             conditional_ladder = []
             view_warnings.append(f"条件阶梯降级: {type(exc).__name__}: {exc}")
+        try:
+            ladder_projection = build_ladder_projection(
+                conditional_ladder, portfolio, price,
+            )
+        except Exception as exc:  # noqa: BLE001 - 可选视图必须fail-soft
+            logger.warning("spot ladder projection degraded", exc_info=True)
+            ladder_projection = None
+            view_warnings.append(f"阶梯推演降级: {type(exc).__name__}: {exc}")
         try:
             decision_summary = build_decision_summary(
                 facts,
@@ -902,6 +920,7 @@ class SpotAccumulationService:
             ai_explanation=self._ai_explanation,
             decision_summary=decision_summary,
             conditional_ladder=conditional_ladder,
+            ladder_projection=ladder_projection,
             spot_support_map=support_map,
             view_warnings=view_warnings,
         )
@@ -1824,6 +1843,31 @@ class SpotAccumulationService:
             }:
                 return True
         return False
+
+    _TERMINAL_VIEW_KEEP_PER_STAGE = 5
+    """快照视图中已终结机会（invalidated/expired/skipped/filled）每档保留条数。
+    仅裁剪视图/API payload（历史曾累积数百条 invalidated 致快照 166KB）；
+    runtime 账本与机会日志不受影响，历史仍可从 journal/archive 追溯。"""
+
+    @classmethod
+    def _cap_terminal_opportunities(
+        cls, items: list[SpotOpportunity],
+    ) -> list[SpotOpportunity]:
+        terminal = {"skipped", "expired", "invalidated", "filled"}
+        kept_ids: set[str] = set()
+        by_stage: dict[str, int] = {}
+        for item in sorted(
+            (item for item in items if item.status in terminal),
+            key=lambda item: -item.updated_at,
+        ):
+            if by_stage.get(item.stage, 0) >= cls._TERMINAL_VIEW_KEEP_PER_STAGE:
+                continue
+            by_stage[item.stage] = by_stage.get(item.stage, 0) + 1
+            kept_ids.add(item.opportunity_id)
+        return [
+            item for item in items
+            if item.status not in terminal or item.opportunity_id in kept_ids
+        ]
 
     # ── 底部模型联动（单向只读，fail-open）─────────────────────────────
     _BM_MAX_AGE_SEC = 48 * 3600

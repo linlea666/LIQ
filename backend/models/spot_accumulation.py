@@ -447,6 +447,36 @@ class SpotConditionalLadderItem(BaseModel):
     projected_cash_remaining: float = Field(ge=0.0)
     projected_core_cash_remaining: float = Field(default=0.0, ge=0.0)
     projected_total_cash_remaining: float = Field(default=0.0, ge=0.0)
+    valuation_band_price: Optional[float] = Field(default=None, gt=0.0)
+    """估值带进带上限价（价格 ≤ 此值即在带内）；数据缺席时为 None。"""
+    valuation_band_mode: Literal["soft", "hard", "none"] = "none"
+    valuation_band_in: Optional[bool] = None
+    """当前价格是否在带内；None = 参考位数据缺席（fail-open 未启用门槛）。"""
+    valuation_band_note: str = ""
+
+
+class SpotLadderProjection(BaseModel):
+    """阶梯推演汇总：若剩余阶梯全部按参考价成交的资金部署地图。
+
+    诚实语义：这是"价格到达各档参考价才成交"的条件推演，不是收益承诺；
+    不到带/锚的资金保留为现金。已成交持仓与均价计入起点（已成交+剩余口径）。
+    """
+
+    current_btc: float = Field(default=0.0, ge=0.0)
+    current_average_cost: Optional[float] = Field(default=None, gt=0.0)
+    planned_spend_usdt: float = Field(default=0.0, ge=0.0)
+    """有参考价可推演的剩余档位计划投入合计。"""
+    projected_total_btc: Optional[float] = Field(default=None, ge=0.0)
+    projected_average_cost: Optional[float] = Field(default=None, gt=0.0)
+    baseline_price: float = Field(gt=0.0)
+    """对照基线：现在按现价一次性买入同额资金。"""
+    baseline_total_btc: Optional[float] = Field(default=None, ge=0.0)
+    baseline_average_cost: Optional[float] = Field(default=None, gt=0.0)
+    btc_advantage_pct: Optional[float] = None
+    """阶梯 vs 现价全买的 BTC 数量优势（%）；正值 = 价格纪律买得更多。"""
+    stages_without_price: list[str] = Field(default_factory=list)
+    """无参考价（估值带/锚区数据缺席）暂无法推演的档位。"""
+    notes: list[str] = Field(default_factory=list)
 
 
 class SpotSupportMapItem(BaseModel):
@@ -505,5 +535,6 @@ class SpotAccumulationSnapshot(BaseModel):
     ai_explanation: Optional[str] = None
     decision_summary: Optional[SpotDecisionSummary] = None
     conditional_ladder: list[SpotConditionalLadderItem] = Field(default_factory=list)
+    ladder_projection: Optional[SpotLadderProjection] = None
     spot_support_map: list[SpotSupportMapItem] = Field(default_factory=list)
     view_warnings: list[str] = Field(default_factory=list)

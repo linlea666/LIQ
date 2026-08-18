@@ -218,6 +218,75 @@ def test_actionable_price_only_comes_from_eligible_opportunity():
     assert summary.amount_usdt == 1_000
 
 
+def test_ladder_uses_valuation_band_as_reference_fallback():
+    """无结构锚 / 事件档时用估值带价兜底作参考价，并透出带字段。"""
+    from processors.spot_accumulation import compute_valuation_bands
+
+    now = int(time.time())
+    facts = _facts(now)
+    state = _state(now, with_wall=False, with_footprint=False)
+    bands = compute_valuation_bands(facts.price, {
+        "sth_realized_price": 103_000.0,
+        "lth_realized_price": 80_000.0,
+        "ma_200w": 95_000.0,
+        "mvrv_raw": 1.25,
+    }, SpotAccumulationConfig())
+    _, zones = build_support_map(state, facts, now=now)
+    rows = build_conditional_ladder(
+        state, SpotAccumulationConfig(), facts, _portfolio(), [], zones,
+        SpotLedgerExecutionSummary(),
+        valuation_bands=bands,
+    )
+    by_stage = {row.stage: row for row in rows}
+    deep = by_stage["deep_value"]
+    assert deep.valuation_band_mode == "hard"
+    assert deep.valuation_band_price == bands["deep_value"].band_price
+    # 事件驱动档此前恒无参考价 → 现在用估值带价兜底
+    cap = by_stage["capitulation"]
+    assert cap.anchor_source == "valuation_band"
+    assert cap.valuation_band_price == 68_000.0  # 80000 × 0.85
+    assert cap.reference_price_mid == 68_000.0
+    assert by_stage["bottom_confirmed"].valuation_band_mode == "none"
+
+
+def test_ladder_projection_summarizes_btc_and_average_cost():
+    """阶梯推演：预计总 BTC / 摊平成本 + 现价全买对照基线 + 缺价档位标注。"""
+    from processors.spot_accumulation import compute_valuation_bands
+    from processors.spot_accumulation_view import build_ladder_projection
+
+    now = int(time.time())
+    facts = _facts(now)  # price=100_000
+    state = _state(now)
+    bands = compute_valuation_bands(facts.price, {
+        "sth_realized_price": 103_000.0,
+        "lth_realized_price": 80_000.0,
+        "ma_200w": 95_000.0,
+        "mvrv_raw": 1.25,
+    }, SpotAccumulationConfig())
+    _, zones = build_support_map(state, facts, now=now, absorption=_absorption(state, now))
+    portfolio = _portfolio()
+    ladder = build_conditional_ladder(
+        state, SpotAccumulationConfig(), facts, portfolio, [], zones,
+        SpotLedgerExecutionSummary(),
+        valuation_bands=bands,
+    )
+    projection = build_ladder_projection(ladder, portfolio, facts.price)
+    assert projection is not None
+    assert projection.baseline_price == facts.price
+    assert projection.planned_spend_usdt > 0
+    assert projection.projected_total_btc is not None
+    assert projection.projected_average_cost is not None
+    # 阶梯参考价均低于现价 → 同额资金买到更多 BTC，摊平成本低于现价
+    assert projection.baseline_total_btc is not None
+    assert projection.projected_total_btc > 0
+    assert projection.projected_average_cost < facts.price
+    if projection.btc_advantage_pct is not None:
+        assert projection.btc_advantage_pct >= 0
+    assert any("条件推演" in note for note in projection.notes)
+
+    assert build_ladder_projection([], portfolio, facts.price) is None
+
+
 def test_stale_or_missing_sources_do_not_create_reference_prices():
     now = int(time.time())
     facts = _facts(now)
