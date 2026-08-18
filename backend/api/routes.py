@@ -143,6 +143,101 @@ async def get_orderflow_whales(
     }
 
 
+@router.get("/orderflow/{coin}/whale-summary")
+async def get_orderflow_whale_summary(
+    coin: str,
+    market: Optional[str] = Query(None, description="spot | futures，缺省合并两市场"),
+):
+    """鲸鱼多周期滚动汇总（1h/2h/4h/24h）+ 重启安全的近 24h 桶级均价。
+
+    - windows：来自内存 whale deque 的精确滚动窗口（买/卖金额、笔数、
+      VWAP、价格区间）。进程重启后从零累积，covered=false 表示
+      data_age_sec 尚不足该窗口时长（数值只是下限，不伪造）。
+    - h24_bucket：来自 SQLite 小时桶 whale usd/qty 累计列（跨重启保留），
+      供"现价 vs 鲸鱼平均买入价"这类参考锚点使用。
+    """
+    coin = coin.upper()
+    if coin not in get_settings().supported_coins:
+        raise HTTPException(400, f"Unsupported coin: {coin}")
+    if market is not None and market not in ("spot", "futures"):
+        raise HTTPException(400, "market must be 'spot' or 'futures'")
+
+    from sources.binance_trades_ws import get_trades_ws
+    ws = get_trades_ws()
+    now = time.time()
+    data_age = ws.data_age_sec() if ws is not None else 0.0
+
+    windows: list[dict] = []
+    if ws is not None:
+        whales = ws.recent_whales(coin, within_sec=24 * 3600)
+        if market:
+            whales = [w for w in whales if w.get("market") == market]
+        for hours_win in (1, 2, 4, 24):
+            cutoff = now - hours_win * 3600
+            buy_usd = sell_usd = buy_qty = sell_qty = 0.0
+            buy_n = sell_n = 0
+            p_min = p_max = 0.0
+            for w in whales:
+                if w["ts"] < cutoff:
+                    continue
+                px = float(w.get("price", 0) or 0)
+                if px > 0:
+                    p_max = max(p_max, px)
+                    p_min = px if p_min <= 0 else min(p_min, px)
+                if w.get("side") == "buy":
+                    buy_usd += float(w.get("usd", 0) or 0)
+                    buy_qty += float(w.get("qty", 0) or 0)
+                    buy_n += 1
+                else:
+                    sell_usd += float(w.get("usd", 0) or 0)
+                    sell_qty += float(w.get("qty", 0) or 0)
+                    sell_n += 1
+            windows.append({
+                "hours": hours_win,
+                "buy_usd": buy_usd,
+                "sell_usd": sell_usd,
+                "net_usd": buy_usd - sell_usd,
+                "buy_count": buy_n,
+                "sell_count": sell_n,
+                "buy_vwap": buy_usd / buy_qty if buy_qty > 0 else 0.0,
+                "sell_vwap": sell_usd / sell_qty if sell_qty > 0 else 0.0,
+                "price_min": p_min,
+                "price_max": p_max,
+                "covered": data_age >= hours_win * 3600,
+            })
+
+    # 重启安全的近 24h 桶级汇总（whale qty 列为 P4 新增，旧桶为 0 → vwap=0）
+    from processors.orderflow_stats import get_orderflow_store
+    h_rows = get_orderflow_store().query_hourly(
+        coin, market=market, start_ts=int(now) - 24 * 3600, limit=60,
+    )
+    b_usd = sum(float(r.get("whale_buy_usd", 0) or 0) for r in h_rows)
+    s_usd = sum(float(r.get("whale_sell_usd", 0) or 0) for r in h_rows)
+    b_qty = sum(float(r.get("whale_buy_qty", 0) or 0) for r in h_rows)
+    s_qty = sum(float(r.get("whale_sell_qty", 0) or 0) for r in h_rows)
+    lows = [float(r.get("price_low", 0) or 0) for r in h_rows]
+    lows = [v for v in lows if v > 0]
+    highs = [float(r.get("price_high", 0) or 0) for r in h_rows]
+    h24_bucket = {
+        "buy_usd": b_usd,
+        "sell_usd": s_usd,
+        "net_usd": b_usd - s_usd,
+        "buy_vwap": b_usd / b_qty if b_qty > 0 else 0.0,
+        "sell_vwap": s_usd / s_qty if s_qty > 0 else 0.0,
+        "price_low": min(lows) if lows else 0.0,
+        "price_high": max(highs) if highs else 0.0,
+    }
+
+    return {
+        "coin": coin,
+        "market": market,
+        "available": ws is not None,
+        "data_age_sec": round(data_age, 1),
+        "windows": windows,
+        "h24_bucket": h24_bucket,
+    }
+
+
 @router.get("/liquidation-heatmap/{coin}")
 async def get_liquidation_heatmap(coin: str, range_: str = Query("24h", alias="range")):
     """获取清算热力图（aggregated-heatmap/model1）。

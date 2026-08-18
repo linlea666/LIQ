@@ -80,7 +80,12 @@ class TestStore:
         )
         store.upsert_taker_hour("BTC", "spot", day_start, 100.0, 40.0, 12)
         store.upsert_taker_hour("BTC", "spot", day_start + 3600, 50.0, 80.0, 12)
-        store.add_whale_trades("BTC", "spot", day_start, buy_usd=7e6)
+        store.add_whale_trades("BTC", "spot", day_start, buy_usd=7e6, buy_qty=110.0)
+        # P4：价格列跨小时聚合——high 取 MAX、low 取非零 MIN、close 取最新小时
+        store.merge_price_stats("BTC", "spot", day_start,
+                                high=63_500, low=62_800, close=63_100)
+        store.merge_price_stats("BTC", "spot", day_start + 3600,
+                                high=63_400, low=63_000, close=63_300)
         store.rollup_daily("BTC", "spot", day)
         rows = store.query_daily("BTC", market="spot")
         assert len(rows) == 1
@@ -89,8 +94,118 @@ class TestStore:
         assert d["taker_sell_usd"] == 120.0
         assert d["net_usd"] == 30.0
         assert d["whale_buy_usd"] == 7e6
+        assert d["whale_buy_qty"] == pytest.approx(110.0)
+        assert d["price_high"] == pytest.approx(63_500)
+        assert d["price_low"] == pytest.approx(62_800)
+        assert d["price_close"] == pytest.approx(63_300), "close = 最新小时的收盘"
         assert d["hours_covered"] == 2
         assert d["coverage_pct"] == round(2 / 24, 4)
+
+    def test_whale_qty_accumulates(self, store):
+        """P4：qty 与 usd 同步累加，VWAP = usd/qty。"""
+        hour = 1700000000 - 1700000000 % 3600
+        store.add_whale_trades("BTC", "spot", hour, buy_usd=630_000, buy_qty=10.0)
+        store.add_whale_trades("BTC", "spot", hour,
+                               buy_usd=1_280_000, buy_qty=20.0,
+                               sell_usd=500_000, sell_qty=8.0)
+        row = store.query_hourly("BTC", market="spot")[0]
+        assert row["whale_buy_usd"] == pytest.approx(1_910_000)
+        assert row["whale_buy_qty"] == pytest.approx(30.0)
+        assert row["whale_sell_qty"] == pytest.approx(8.0)
+        # VWAP 派生验证
+        assert row["whale_buy_usd"] / row["whale_buy_qty"] == pytest.approx(63_666.67, rel=1e-4)
+
+    def test_merge_price_stats(self, store):
+        """P4：high 取 MAX、low 取非零 MIN、close 覆盖；0 视为无数据。"""
+        hour = 1700000000 - 1700000000 % 3600
+        store.merge_price_stats("BTC", "spot", hour, high=63_100, low=62_900, close=63_000)
+        store.merge_price_stats("BTC", "spot", hour, high=63_500, low=63_200, close=63_400)
+        row = store.query_hourly("BTC", market="spot")[0]
+        assert row["price_high"] == pytest.approx(63_500)
+        assert row["price_low"] == pytest.approx(62_900)
+        assert row["price_close"] == pytest.approx(63_400)
+        # close=0（无数据）不得回退已有 close；low=0 不得覆盖非零 low
+        store.merge_price_stats("BTC", "spot", hour, high=63_600, low=0, close=0)
+        row = store.query_hourly("BTC", market="spot")[0]
+        assert row["price_high"] == pytest.approx(63_600)
+        assert row["price_low"] == pytest.approx(62_900)
+        assert row["price_close"] == pytest.approx(63_400)
+
+    def test_merge_price_stats_all_zero_noop(self, store):
+        store.merge_price_stats("BTC", "spot", 1700000000 - 1700000000 % 3600)
+        assert store.query_hourly("BTC") == []
+
+    def test_taker_upsert_preserves_price_columns(self, store):
+        """整桶重算 taker 不得清掉 P4 价格/qty 列。"""
+        hour = 1700000000 - 1700000000 % 3600
+        store.merge_price_stats("BTC", "spot", hour, high=63_100, low=62_900, close=63_000)
+        store.add_whale_trades("BTC", "spot", hour, buy_usd=630_000, buy_qty=10.0)
+        store.upsert_taker_hour("BTC", "spot", hour, 100.0, 60.0, 12)
+        row = store.query_hourly("BTC", market="spot")[0]
+        assert row["price_high"] == pytest.approx(63_100)
+        assert row["whale_buy_qty"] == pytest.approx(10.0)
+        assert row["taker_buy_usd"] == 100.0
+
+    def test_migration_adds_columns_to_legacy_db(self, tmp_path):
+        """生产库是 P4 之前的旧 schema：init 时 ALTER TABLE 补列且不丢数据。"""
+        import sqlite3 as _sq
+
+        db_path = str(tmp_path / "orderflow.sqlite3")
+        legacy = _sq.connect(db_path)
+        legacy.executescript("""
+            CREATE TABLE hourly_flows (
+                coin TEXT NOT NULL, market TEXT NOT NULL, hour_ts INTEGER NOT NULL,
+                taker_buy_usd REAL NOT NULL DEFAULT 0,
+                taker_sell_usd REAL NOT NULL DEFAULT 0,
+                net_usd REAL NOT NULL DEFAULT 0,
+                large_executed_bid_usd REAL NOT NULL DEFAULT 0,
+                large_executed_ask_usd REAL NOT NULL DEFAULT 0,
+                whale_buy_usd REAL NOT NULL DEFAULT 0,
+                whale_sell_usd REAL NOT NULL DEFAULT 0,
+                samples INTEGER NOT NULL DEFAULT 0,
+                coverage_pct REAL NOT NULL DEFAULT 0,
+                updated_ts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (coin, market, hour_ts)
+            );
+            CREATE TABLE daily_flows (
+                coin TEXT NOT NULL, market TEXT NOT NULL, day_key TEXT NOT NULL,
+                taker_buy_usd REAL NOT NULL DEFAULT 0,
+                taker_sell_usd REAL NOT NULL DEFAULT 0,
+                net_usd REAL NOT NULL DEFAULT 0,
+                large_executed_bid_usd REAL NOT NULL DEFAULT 0,
+                large_executed_ask_usd REAL NOT NULL DEFAULT 0,
+                whale_buy_usd REAL NOT NULL DEFAULT 0,
+                whale_sell_usd REAL NOT NULL DEFAULT 0,
+                hours_covered INTEGER NOT NULL DEFAULT 0,
+                coverage_pct REAL NOT NULL DEFAULT 0,
+                updated_ts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (coin, market, day_key)
+            );
+        """)
+        recent_hour = int(time.time()) - int(time.time()) % 3600
+        legacy.execute(
+            "INSERT INTO hourly_flows (coin, market, hour_ts, taker_buy_usd,"
+            " taker_sell_usd, net_usd, samples, coverage_pct, updated_ts)"
+            " VALUES ('BTC', 'spot', ?, 100, 60, 40, 12, 1.0, 0)",
+            (recent_hour,),
+        )
+        legacy.commit()
+        legacy.close()
+
+        s = OrderflowStore(data_dir=str(tmp_path))
+        rows = s.query_hourly("BTC", market="spot")
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["taker_buy_usd"] == 100.0, "旧数据不丢"
+        for col in ("whale_buy_qty", "whale_sell_qty",
+                    "price_high", "price_low", "price_close"):
+            assert r[col] == 0, f"新列 {col} 默认 0"
+        # 新列可正常写入；重复 init 幂等
+        s.merge_price_stats("BTC", "spot", recent_hour, high=1.0, low=1.0, close=1.0)
+        s.close()
+        s2 = OrderflowStore(data_dir=str(tmp_path))
+        assert s2.query_hourly("BTC")[0]["price_high"] == pytest.approx(1.0)
+        s2.close()
 
     def test_cleanup_removes_expired(self, tmp_path):
         s = OrderflowStore(data_dir=str(tmp_path), hourly_keep_days=7, daily_keep_days=30)

@@ -16,9 +16,12 @@
        whale_threshold_usd / whale_threshold_{btc,eth,sol} 死配置）：
          whale = 单笔聚合成交 usd ≥ whale_threshold_usd
                  或 数量 ≥ whale_threshold_{coin}（按币种数量阈值）
-    3. whale 累计值每 60s 冲入 orderflow 小时桶（whale_buy_usd/whale_sell_usd）
+    3. whale 累计值（usd+qty）与全量成交价统计（high/low/close）每 60s
+       冲入 orderflow 小时桶（whale_*_usd/qty · price_high/low/close）
     4. 近 24h whale 明细入有界 deque；单笔 ≥ big_trade_usd（默认 5M）的
-       事件供交易大脑事件流拉取（大脑只读，best-effort）
+       事件供交易大脑事件流拉取（大脑只读，best-effort）；
+       deque 同时支撑 /orderflow/{coin}/whale-summary 多周期滚动汇总
+    5. 合约 REST 首轮历史重放只喂 deque 不入桶（防重启后 whale/price 双计）
 
 复用决策：扩展复用 sources/binance_futures.py 的 WS 健壮性模式
     （aiohttp heartbeat=30 + 45s 应用级读超时防 TCP 半开 + 指数退避重连）；
@@ -78,8 +81,12 @@ class BinanceTradesWS(DataSource):
         self._big_trade_usd = float(big_trade_usd)
 
         self._running = False
-        # (coin, market, hour_ts) → [buy_usd, sell_usd]，_flush_loop 定期清空
+        self._started_ts = time.time()
+        # (coin, market, hour_ts) → [buy_usd, sell_usd, buy_qty, sell_qty]，
+        # _flush_loop 定期清空（P4 追加 qty，供 VWAP=usd/qty）
         self._pending: dict[tuple[str, str, int], list[float]] = {}
+        # (coin, market, hour_ts) → [high, low, close, close_ts]（P4 全量成交价统计）
+        self._pending_price: dict[tuple[str, str, int], list[float]] = {}
         # coin → deque[{ts, market, side, price, qty, usd}]（近 24h whale 明细）
         self._recent_whales: dict[str, deque] = {
             c: deque(maxlen=2000) for c in self._coin_symbols
@@ -139,10 +146,15 @@ class BinanceTradesWS(DataSource):
         cutoff = time.time() - within_sec
         return [e for e in dq if e["ts"] >= cutoff]
 
+    def data_age_sec(self) -> float:
+        """deque/统计自进程启动累积的时长（whale-summary 端点诚实标注用）。"""
+        return max(0.0, time.time() - self._started_ts)
+
     def stats(self) -> dict:
         return {
             "running": self._running,
             "futures_mode": "rest_poll",   # fstream WS 推送不可用（见模块 docstring）
+            "data_age_sec": round(self.data_age_sec(), 1),
             "msg_count": dict(self._msg_count),
             "whale_count": dict(self._whale_count),
             "last_msg_age_sec": {
@@ -223,12 +235,29 @@ class BinanceTradesWS(DataSource):
     def _process_trade(
         self, market: str, coin: str, *,
         price: float, qty: float, is_maker_buy: bool, trade_ts: int,
+        record_bucket: bool = True,
     ) -> None:
-        """单笔聚合成交的阈值判定与累计（WS 与 REST 轮询共用）。"""
+        """单笔聚合成交的阈值判定与累计（WS 与 REST 轮询共用）。
+
+        record_bucket=False：只喂 deque/big_events，不入 _pending/_pending_price。
+        用于合约 REST 首轮历史重放——这些成交在进程重启前已冲入小时桶，
+        再累计会造成 whale/price 列双计（宁可少记 1-3 分钟，不伪造）。
+        """
         if price <= 0 or qty <= 0 or trade_ts <= 0:
             return
         self._msg_count[market] += 1
         self._last_msg_ts[market] = time.time()
+
+        hour_ts = trade_ts - trade_ts % 3600
+        if record_bucket:
+            # P4：全量成交价统计（在鲸鱼阈值过滤之前，覆盖所有观测到的成交）
+            st = self._pending_price.setdefault(
+                (coin, market, hour_ts), [0.0, 0.0, 0.0, 0.0],
+            )
+            st[0] = max(st[0], price)
+            st[1] = price if st[1] <= 0 else min(st[1], price)
+            if trade_ts >= st[3]:
+                st[2], st[3] = price, float(trade_ts)
 
         usd = price * qty
         qty_thr = self._whale_qty.get(coin, float("inf"))
@@ -239,12 +268,16 @@ class BinanceTradesWS(DataSource):
         side = "sell" if is_maker_buy else "buy"
         self._whale_count[market] += 1
 
-        hour_ts = trade_ts - trade_ts % 3600
-        bucket = self._pending.setdefault((coin, market, hour_ts), [0.0, 0.0])
-        if side == "buy":
-            bucket[0] += usd
-        else:
-            bucket[1] += usd
+        if record_bucket:
+            bucket = self._pending.setdefault(
+                (coin, market, hour_ts), [0.0, 0.0, 0.0, 0.0],
+            )
+            if side == "buy":
+                bucket[0] += usd
+                bucket[2] += qty
+            else:
+                bucket[1] += usd
+                bucket[3] += qty
 
         self._recent_whales[coin].append({
             "ts": trade_ts, "market": market, "side": side,
@@ -286,6 +319,9 @@ class BinanceTradesWS(DataSource):
         self, coin: str, symbol: str, last_id: dict[str, int],
     ) -> None:
         session = await self.get_session()
+        # 首轮（无 fromId）返回的是重启前的历史成交，可能已在重启前冲入小时桶，
+        # 只喂 deque/big_events 回填明细，不入 _pending（防 whale/price 列双计）
+        first_poll = symbol not in last_id
         for _ in range(_REST_MAX_PAGES):
             params: dict[str, Any] = {"symbol": symbol, "limit": _REST_PAGE_LIMIT}
             if symbol in last_id:
@@ -309,6 +345,7 @@ class BinanceTradesWS(DataSource):
                         qty=float(r.get("q", 0) or 0),
                         is_maker_buy=bool(r.get("m")),
                         trade_ts=int(r.get("T", 0) or 0) // 1000,
+                        record_bucket=not first_poll,
                     )
                 except (ValueError, TypeError):
                     continue
@@ -324,29 +361,51 @@ class BinanceTradesWS(DataSource):
             await self._flush_pending()
 
     async def _flush_pending(self) -> None:
-        """冲桶：失败时把未落盘的累计合并回 _pending，等下轮重试（不丢数据）。"""
+        """冲桶：失败时把未落盘的累计合并回 pending，等下轮重试（不丢数据）。"""
         pending, self._pending = self._pending, {}
-        if not pending:
+        pending_price, self._pending_price = self._pending_price, {}
+        if not pending and not pending_price:
             return
         loop = asyncio.get_running_loop()
         try:
             from processors.orderflow_stats import get_orderflow_store
             store = get_orderflow_store()
             while pending:
-                key, (buy, sell) = next(iter(pending.items()))
+                key, (buy, sell, buy_qty, sell_qty) = next(iter(pending.items()))
                 coin, market, hour_ts = key
                 await loop.run_in_executor(
-                    None, store.add_whale_trades, coin, market, hour_ts, buy, sell,
+                    None, store.add_whale_trades, coin, market, hour_ts,
+                    buy, sell, buy_qty, sell_qty,
                 )
                 pending.pop(key)
+            while pending_price:
+                key, (high, low, close, _cts) = next(iter(pending_price.items()))
+                coin, market, hour_ts = key
+                await loop.run_in_executor(
+                    None, store.merge_price_stats, coin, market, hour_ts,
+                    high, low, close,
+                )
+                pending_price.pop(key)
         except Exception:
-            logger.warning("[trades_ws] flush to store failed | pending_kept=%d",
-                           len(pending), exc_info=True)
-            # 未写入的桶合并回去（flush 期间可能有新增，累加而非覆盖）
-            for key, (buy, sell) in pending.items():
-                bucket = self._pending.setdefault(key, [0.0, 0.0])
+            logger.warning(
+                "[trades_ws] flush to store failed | pending_kept=%d price_kept=%d",
+                len(pending), len(pending_price), exc_info=True,
+            )
+            # 未写入的桶合并回去（flush 期间可能有新增，累加/取极值而非覆盖）
+            for key, (buy, sell, buy_qty, sell_qty) in pending.items():
+                bucket = self._pending.setdefault(key, [0.0, 0.0, 0.0, 0.0])
                 bucket[0] += buy
                 bucket[1] += sell
+                bucket[2] += buy_qty
+                bucket[3] += sell_qty
+            for key, (high, low, close, cts) in pending_price.items():
+                st = self._pending_price.setdefault(key, [0.0, 0.0, 0.0, 0.0])
+                st[0] = max(st[0], high)
+                if low > 0:
+                    st[1] = low if st[1] <= 0 else min(st[1], low)
+                # close 取时间更新的一侧（flush 期间新增的成交更晚）
+                if close > 0 and cts >= st[3]:
+                    st[2], st[3] = close, cts
 
 
 # ── process 单例 ──────────────────────────────────────────────────────

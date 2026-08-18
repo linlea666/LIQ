@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS hourly_flows (
     large_executed_ask_usd REAL NOT NULL DEFAULT 0,   -- 大额卖单被动成交
     whale_buy_usd REAL NOT NULL DEFAULT 0,            -- P3: aggTrade 大额主动买
     whale_sell_usd REAL NOT NULL DEFAULT 0,           -- P3: aggTrade 大额主动卖
+    whale_buy_qty REAL NOT NULL DEFAULT 0,            -- P4: 鲸鱼买入数量（VWAP=usd/qty）
+    whale_sell_qty REAL NOT NULL DEFAULT 0,           -- P4: 鲸鱼卖出数量
+    price_high REAL NOT NULL DEFAULT 0,               -- P4: 桶内成交价高点（Binance 单源）
+    price_low REAL NOT NULL DEFAULT 0,                -- P4: 桶内成交价低点（0=无数据）
+    price_close REAL NOT NULL DEFAULT 0,              -- P4: 桶内最后成交价
     samples INTEGER NOT NULL DEFAULT 0,               -- 观测到的 5m bar 数
     coverage_pct REAL NOT NULL DEFAULT 0,             -- samples/12，诚实标记断档
     updated_ts INTEGER NOT NULL DEFAULT 0,
@@ -70,6 +75,11 @@ CREATE TABLE IF NOT EXISTS daily_flows (
     large_executed_ask_usd REAL NOT NULL DEFAULT 0,
     whale_buy_usd REAL NOT NULL DEFAULT 0,
     whale_sell_usd REAL NOT NULL DEFAULT 0,
+    whale_buy_qty REAL NOT NULL DEFAULT 0,
+    whale_sell_qty REAL NOT NULL DEFAULT 0,
+    price_high REAL NOT NULL DEFAULT 0,
+    price_low REAL NOT NULL DEFAULT 0,
+    price_close REAL NOT NULL DEFAULT 0,
     hours_covered INTEGER NOT NULL DEFAULT 0,         -- 有数据的小时桶数
     coverage_pct REAL NOT NULL DEFAULT 0,             -- hours_covered/24
     updated_ts INTEGER NOT NULL DEFAULT 0,
@@ -77,6 +87,15 @@ CREATE TABLE IF NOT EXISTS daily_flows (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_day ON daily_flows(day_key DESC);
 """
+
+# P4 新增列（生产库已存在旧 schema，init 时按缺列 ALTER TABLE 迁移，幂等）
+_MIGRATE_COLUMNS: list[tuple[str, str]] = [
+    ("whale_buy_qty", "REAL NOT NULL DEFAULT 0"),
+    ("whale_sell_qty", "REAL NOT NULL DEFAULT 0"),
+    ("price_high", "REAL NOT NULL DEFAULT 0"),
+    ("price_low", "REAL NOT NULL DEFAULT 0"),
+    ("price_close", "REAL NOT NULL DEFAULT 0"),
+]
 
 
 def day_key_cn(ts: int) -> str:
@@ -102,7 +121,25 @@ class OrderflowStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_SCHEMA)
+        self._migrate()
         self.cleanup()
+
+    def _migrate(self) -> None:
+        """旧库缺列时 ALTER TABLE 补齐（幂等；新库由 _SCHEMA 直接建全）。"""
+        with self._lock, self._conn:
+            for table in ("hourly_flows", "daily_flows"):
+                existing = {
+                    row["name"]
+                    for row in self._conn.execute(f"PRAGMA table_info({table})")
+                }
+                for col, decl in _MIGRATE_COLUMNS:
+                    if col not in existing:
+                        self._conn.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {col} {decl}"
+                        )
+                        logger.info(
+                            "[orderflow_store] migrated | table=%s +%s", table, col,
+                        )
 
     # ── 写入 ───────────────────────────────────────────────────────────
 
@@ -148,41 +185,84 @@ class OrderflowStore:
         """大额挂单被动成交增量累加（bid=买单被吃，ask=卖单被吃）。"""
         if bid_usd <= 0 and ask_usd <= 0:
             return
-        self._add_incremental(
-            coin, market, hour_ts,
-            "large_executed_bid_usd", float(max(0.0, bid_usd)),
-            "large_executed_ask_usd", float(max(0.0, ask_usd)),
-        )
+        self._add_incremental(coin, market, hour_ts, {
+            "large_executed_bid_usd": float(max(0.0, bid_usd)),
+            "large_executed_ask_usd": float(max(0.0, ask_usd)),
+        })
 
     def add_whale_trades(
         self, coin: str, market: str, hour_ts: int,
         buy_usd: float = 0.0, sell_usd: float = 0.0,
+        buy_qty: float = 0.0, sell_qty: float = 0.0,
     ) -> None:
-        """P3：aggTrade 大额主动成交增量累加。"""
+        """P3：aggTrade 大额主动成交增量累加（P4 追加 qty，供 VWAP=usd/qty）。"""
         if buy_usd <= 0 and sell_usd <= 0:
             return
-        self._add_incremental(
-            coin, market, hour_ts,
-            "whale_buy_usd", float(max(0.0, buy_usd)),
-            "whale_sell_usd", float(max(0.0, sell_usd)),
-        )
+        self._add_incremental(coin, market, hour_ts, {
+            "whale_buy_usd": float(max(0.0, buy_usd)),
+            "whale_sell_usd": float(max(0.0, sell_usd)),
+            "whale_buy_qty": float(max(0.0, buy_qty)),
+            "whale_sell_qty": float(max(0.0, sell_qty)),
+        })
+
+    def merge_price_stats(
+        self, coin: str, market: str, hour_ts: int,
+        high: float = 0.0, low: float = 0.0, close: float = 0.0,
+    ) -> None:
+        """P4：桶内成交价统计合并（high 取 MAX、low 取非零 MIN、close 覆盖）。
+
+        调用方（trades_ws flush）按时间顺序冲桶，同一桶后一次 flush 的 close
+        即最新成交价，直接覆盖即可（0 视为无数据，不覆盖）。
+        """
+        if high <= 0 and low <= 0 and close <= 0:
+            return
+        now = int(time.time())
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO hourly_flows (
+                    coin, market, hour_ts,
+                    price_high, price_low, price_close, updated_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(coin, market, hour_ts) DO UPDATE SET
+                    price_high = MAX(price_high, excluded.price_high),
+                    price_low = CASE
+                        WHEN price_low <= 0 THEN excluded.price_low
+                        WHEN excluded.price_low <= 0 THEN price_low
+                        ELSE MIN(price_low, excluded.price_low)
+                    END,
+                    price_close = CASE
+                        WHEN excluded.price_close > 0 THEN excluded.price_close
+                        ELSE price_close
+                    END,
+                    updated_ts = excluded.updated_ts
+                """,
+                (
+                    coin.upper(), market, int(hour_ts),
+                    float(max(0.0, high)), float(max(0.0, low)),
+                    float(max(0.0, close)), now,
+                ),
+            )
 
     def _add_incremental(
-        self, coin: str, market: str, hour_ts: int,
-        col_a: str, val_a: float, col_b: str, val_b: float,
+        self, coin: str, market: str, hour_ts: int, cols: dict[str, float],
     ) -> None:
+        """按列名字典做增量累加 upsert（列名为模块内部常量，无注入面）。"""
+        names = list(cols.keys())
+        col_sql = ", ".join(names)
+        update_sql = ", ".join(f"{c} = {c} + excluded.{c}" for c in names)
+        placeholders = ", ".join("?" for _ in names)
         now = int(time.time())
         with self._lock, self._conn:
             self._conn.execute(
                 f"""
-                INSERT INTO hourly_flows (coin, market, hour_ts, {col_a}, {col_b}, updated_ts)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO hourly_flows (coin, market, hour_ts, {col_sql}, updated_ts)
+                VALUES (?, ?, ?, {placeholders}, ?)
                 ON CONFLICT(coin, market, hour_ts) DO UPDATE SET
-                    {col_a} = {col_a} + excluded.{col_a},
-                    {col_b} = {col_b} + excluded.{col_b},
+                    {update_sql},
                     updated_ts = excluded.updated_ts
                 """,
-                (coin.upper(), market, int(hour_ts), val_a, val_b, now),
+                (coin.upper(), market, int(hour_ts), *cols.values(), now),
             )
 
     def rollup_daily(self, coin: str, market: str, day_key: str) -> None:
@@ -202,6 +282,10 @@ class OrderflowStore:
                     COALESCE(SUM(large_executed_ask_usd), 0) AS lea,
                     COALESCE(SUM(whale_buy_usd), 0) AS wb,
                     COALESCE(SUM(whale_sell_usd), 0) AS ws,
+                    COALESCE(SUM(whale_buy_qty), 0) AS wbq,
+                    COALESCE(SUM(whale_sell_qty), 0) AS wsq,
+                    COALESCE(MAX(price_high), 0) AS ph,
+                    COALESCE(MIN(CASE WHEN price_low > 0 THEN price_low END), 0) AS pl,
                     COUNT(*) AS hours
                 FROM hourly_flows
                 WHERE coin = ? AND market = ? AND hour_ts >= ? AND hour_ts < ?
@@ -210,14 +294,26 @@ class OrderflowStore:
             ).fetchone()
             if not row or int(row["hours"]) == 0:
                 return
+            close_row = self._conn.execute(
+                """
+                SELECT price_close FROM hourly_flows
+                WHERE coin = ? AND market = ? AND hour_ts >= ? AND hour_ts < ?
+                  AND price_close > 0
+                ORDER BY hour_ts DESC LIMIT 1
+                """,
+                (coin.upper(), market, day_start, day_end),
+            ).fetchone()
+            price_close = float(close_row["price_close"]) if close_row else 0.0
             self._conn.execute(
                 """
                 INSERT INTO daily_flows (
                     coin, market, day_key, taker_buy_usd, taker_sell_usd, net_usd,
                     large_executed_bid_usd, large_executed_ask_usd,
                     whale_buy_usd, whale_sell_usd,
+                    whale_buy_qty, whale_sell_qty,
+                    price_high, price_low, price_close,
                     hours_covered, coverage_pct, updated_ts
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(coin, market, day_key) DO UPDATE SET
                     taker_buy_usd = excluded.taker_buy_usd,
                     taker_sell_usd = excluded.taker_sell_usd,
@@ -226,6 +322,11 @@ class OrderflowStore:
                     large_executed_ask_usd = excluded.large_executed_ask_usd,
                     whale_buy_usd = excluded.whale_buy_usd,
                     whale_sell_usd = excluded.whale_sell_usd,
+                    whale_buy_qty = excluded.whale_buy_qty,
+                    whale_sell_qty = excluded.whale_sell_qty,
+                    price_high = excluded.price_high,
+                    price_low = excluded.price_low,
+                    price_close = excluded.price_close,
                     hours_covered = excluded.hours_covered,
                     coverage_pct = excluded.coverage_pct,
                     updated_ts = excluded.updated_ts
@@ -236,6 +337,8 @@ class OrderflowStore:
                     float(row["buy"]) - float(row["sell"]),
                     float(row["leb"]), float(row["lea"]),
                     float(row["wb"]), float(row["ws"]),
+                    float(row["wbq"]), float(row["wsq"]),
+                    float(row["ph"]), float(row["pl"]), price_close,
                     int(row["hours"]),
                     round(min(1.0, int(row["hours"]) / 24.0), 4),
                     now,

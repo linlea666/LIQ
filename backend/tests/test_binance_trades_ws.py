@@ -72,10 +72,15 @@ class TestFlushResilience:
         ws._handle_message("spot", _agg_msg("BTCUSDT", 63_000, 10, False))
 
         written = []
+        price_written = []
 
         class _FakeStore:
-            def add_whale_trades(self, coin, market, hour_ts, buy, sell):
-                written.append((coin, market, hour_ts, buy, sell))
+            def add_whale_trades(self, coin, market, hour_ts, buy, sell,
+                                 buy_qty=0.0, sell_qty=0.0):
+                written.append((coin, market, hour_ts, buy, sell, buy_qty, sell_qty))
+
+            def merge_price_stats(self, coin, market, hour_ts, high, low, close):
+                price_written.append((coin, market, hour_ts, high, low, close))
 
         import processors.orderflow_stats as ofs
         monkeypatch.setattr(ofs, "get_orderflow_store", lambda: _FakeStore())
@@ -83,7 +88,14 @@ class TestFlushResilience:
         await ws.flush_now()
         assert len(written) == 1
         assert written[0][0] == "BTC" and written[0][3] > 0
+        assert written[0][5] == pytest.approx(10.0), "P4：whale qty 一并冲桶"
         assert not ws._pending
+        # P4：价格统计一并冲桶
+        assert len(price_written) == 1
+        assert price_written[0][3] == pytest.approx(63_000)   # high
+        assert price_written[0][4] == pytest.approx(63_000)   # low
+        assert price_written[0][5] == pytest.approx(63_000)   # close
+        assert not ws._pending_price
 
 
 class _FakeResp:
@@ -134,14 +146,20 @@ class TestFuturesRestPoll:
         assert last_id["BTCUSDT"] == 101
         assert fake.calls[0].get("fromId") is None          # 首轮无 fromId
         assert ws._whale_count["futures"] == 1
-        key = next(iter(ws._pending))
-        assert key[1] == "futures" and ws._pending[key][0] > 0
+        # 首轮是重启前历史重放：只喂 deque，不入桶（防 whale/price 列双计）
+        assert ws._pending == {}
+        assert ws._pending_price == {}
+        assert len(ws.recent_whales("BTC")) == 1
 
         # 第二轮：fromId = last+1 续读；qty 9 < 10 且 $567k ≥ $500k → whale 卖
         await ws._poll_futures_symbol("BTC", "BTCUSDT", last_id)
         assert fake.calls[1]["fromId"] == 102
         assert last_id["BTCUSDT"] == 102
         assert ws._whale_count["futures"] == 2
+        # 第二轮起正常入桶
+        key = next(iter(ws._pending))
+        assert key[1] == "futures" and ws._pending[key][1] > 0   # 卖侧
+        assert ws._pending_price != {}
 
 
 class TestWhaleDetection:
@@ -177,8 +195,10 @@ class TestWhaleDetection:
         ws._handle_message("futures", _agg_msg("BTCUSDT", 63000, 10.0, False, now_ms))
         ws._handle_message("futures", _agg_msg("BTCUSDT", 63000, 12.0, True, now_ms))
         bucket = ws._pending[("BTC", "futures", hour)]
-        assert bucket[0] == pytest.approx(630_000)   # buy
-        assert bucket[1] == pytest.approx(756_000)   # sell
+        assert bucket[0] == pytest.approx(630_000)   # buy usd
+        assert bucket[1] == pytest.approx(756_000)   # sell usd
+        assert bucket[2] == pytest.approx(10.0)      # buy qty（P4 VWAP 分母）
+        assert bucket[3] == pytest.approx(12.0)      # sell qty
 
     def test_big_trade_event_recorded(self):
         ws = _mk_ws()
@@ -206,6 +226,127 @@ class TestWhaleDetection:
         assert st["msg_count"]["futures"] == 1
         assert st["whale_count"]["futures"] == 1
         assert st["whale_threshold_usd"] == 500_000.0
+
+
+class TestPriceStats:
+    """P4：全量成交价统计（阈值过滤之前累计，覆盖非鲸鱼小单）。"""
+
+    def test_small_trades_still_update_price_stats(self):
+        ws = _mk_ws()
+        now_ms = int(time.time() * 1000)
+        hour = (now_ms // 1000) - (now_ms // 1000) % 3600
+        # 三笔均低于鲸鱼阈值：不入 _pending，但价格统计要覆盖
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_100, 0.1, False, now_ms))
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 62_900, 0.1, True, now_ms + 1000))
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_050, 0.1, False, now_ms + 2000))
+        assert ws._pending == {}
+        st = ws._pending_price[("BTC", "spot", hour)]
+        assert st[0] == pytest.approx(63_100)   # high
+        assert st[1] == pytest.approx(62_900)   # low
+        assert st[2] == pytest.approx(63_050)   # close = 时间最新一笔
+
+    def test_close_follows_latest_trade_ts(self):
+        """乱序到达（REST 分页/重连）时 close 仍取 trade_ts 最大的一笔。"""
+        ws = _mk_ws()
+        now_ms = int(time.time() * 1000)
+        hour = (now_ms // 1000) - (now_ms // 1000) % 3600
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_000, 0.1, False, now_ms + 5000))
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 62_000, 0.1, False, now_ms))
+        st = ws._pending_price[("BTC", "spot", hour)]
+        assert st[2] == pytest.approx(63_000), "较早的成交不得覆盖 close"
+
+    @pytest.mark.asyncio
+    async def test_flush_failure_merges_price_back(self, monkeypatch):
+        ws = _mk_ws()
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 63_000, 0.1, False))
+
+        import processors.orderflow_stats as ofs
+
+        def _boom():
+            raise RuntimeError("store unavailable")
+        monkeypatch.setattr(ofs, "get_orderflow_store", _boom)
+
+        await ws._flush_pending()
+        assert len(ws._pending_price) == 1, "flush 失败后价格统计不丢"
+        st = next(iter(ws._pending_price.values()))
+        assert st[0] == pytest.approx(63_000)
+
+
+class TestWhaleSummaryAPI:
+    """P4：/orderflow/{coin}/whale-summary 多周期滚动汇总端点。"""
+
+    @pytest.mark.asyncio
+    async def test_summary_windows_and_bucket(self, monkeypatch, tmp_path):
+        import processors.orderflow_stats as ofs
+        agg = ofs.reset_for_test(str(tmp_path))
+        ws = _mk_ws()
+        now = int(time.time())
+        # 30 分钟前买入 whale → 进 1h/2h/4h/24h 全部窗口
+        ws._handle_message("futures", _agg_msg(
+            "BTCUSDT", 64_000, 10, False, (now - 1800) * 1000))
+        # 3 小时前卖出 whale → 只进 4h/24h 窗口
+        ws._handle_message("futures", _agg_msg(
+            "BTCUSDT", 65_000, 10, True, (now - 3 * 3600) * 1000))
+        monkeypatch.setattr(tws_mod, "_instance", ws)
+        # 桶级 24h 数据（跨重启保留的参考锚点）
+        hour = now - now % 3600
+        agg._store.add_whale_trades(
+            "BTC", "futures", hour, buy_usd=640_000, buy_qty=10.0)
+        agg._store.merge_price_stats(
+            "BTC", "futures", hour, high=64_200, low=63_800, close=64_000)
+
+        from api.routes import get_orderflow_whale_summary
+        res = await get_orderflow_whale_summary("BTC", market="futures")
+        assert res["available"] is True
+
+        w1 = next(w for w in res["windows"] if w["hours"] == 1)
+        assert w1["buy_usd"] == pytest.approx(640_000)
+        assert w1["sell_usd"] == 0
+        assert w1["buy_vwap"] == pytest.approx(64_000)
+        assert w1["buy_count"] == 1
+
+        w4 = next(w for w in res["windows"] if w["hours"] == 4)
+        assert w4["sell_usd"] == pytest.approx(650_000)
+        assert w4["net_usd"] == pytest.approx(-10_000)
+        assert w4["sell_vwap"] == pytest.approx(65_000)
+        assert w4["price_min"] == pytest.approx(64_000)
+        assert w4["price_max"] == pytest.approx(65_000)
+        # 进程刚启动，24h 窗口 covered=False（数值只是下限）
+        w24 = next(w for w in res["windows"] if w["hours"] == 24)
+        assert w24["covered"] is False
+
+        b = res["h24_bucket"]
+        assert b["buy_vwap"] == pytest.approx(64_000)
+        assert b["price_low"] == pytest.approx(63_800)
+        assert b["price_high"] == pytest.approx(64_200)
+
+    @pytest.mark.asyncio
+    async def test_summary_market_filter(self, monkeypatch, tmp_path):
+        import processors.orderflow_stats as ofs
+        ofs.reset_for_test(str(tmp_path))
+        ws = _mk_ws()
+        now_ms = int(time.time() * 1000)
+        ws._handle_message("futures", _agg_msg("BTCUSDT", 64_000, 10, False, now_ms))
+        ws._handle_message("spot", _agg_msg("BTCUSDT", 64_100, 10, False, now_ms))
+        monkeypatch.setattr(tws_mod, "_instance", ws)
+
+        from api.routes import get_orderflow_whale_summary
+        res = await get_orderflow_whale_summary("BTC", market="spot")
+        w1 = next(w for w in res["windows"] if w["hours"] == 1)
+        assert w1["buy_count"] == 1, "market 过滤只留现货"
+        assert w1["buy_vwap"] == pytest.approx(64_100)
+
+    @pytest.mark.asyncio
+    async def test_summary_without_ws_instance(self, monkeypatch, tmp_path):
+        import processors.orderflow_stats as ofs
+        ofs.reset_for_test(str(tmp_path))
+        monkeypatch.setattr(tws_mod, "_instance", None)
+        from api.routes import get_orderflow_whale_summary
+        # 直接调用 handler 时缺省值是 Query 对象，需显式传 None（合并两市场）
+        res = await get_orderflow_whale_summary("BTC", market=None)
+        assert res["available"] is False
+        assert res["windows"] == []
+        assert res["h24_bucket"]["buy_usd"] == 0
 
 
 class TestBrainEventIntegration:
