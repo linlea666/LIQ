@@ -81,7 +81,7 @@ const PHASE_META: Record<SweepPhase, {
     text: "text-orange-200",
     dot: "bg-orange-400",
     pulse: false,
-    meaning: "扫单后未收回 + CVD 同向 — 高概率级联，等下一支撑/阻力 zone",
+    meaning: "扫单后未收回 + CVD 同向 — 级联延续风险评分偏高，等下一支撑/阻力 zone",
   },
 };
 
@@ -131,15 +131,15 @@ function actionAdvice(
   if (phase === "approaching") {
     if (bias === "rebound") {
       return isBelow
-        ? "扫到大概率假摔反弹，关注 5min 速回 + 现货买墙不撤"
-        : "突破多半被压回，关注 5min 速回 + 现货卖墙不撤";
+        ? "反弹评分占优，扫到偏向假摔收回；关注 5min 速回 + 现货买墙不撤"
+        : "压回评分占优，突破偏向被压回；关注 5min 速回 + 现货卖墙不撤";
     }
     if (bias === "continuation") {
       return isBelow
-        ? "扫到大概率继续杀，不建议提前接"
-        : "突破多半延续上行，等下一档阻力";
+        ? "延续评分占优，扫到偏向继续下杀，不建议提前接"
+        : "延续评分占优，突破偏向延续上行，等下一档阻力";
     }
-    return "反弹/延续概率相当，等扫单触发再判断";
+    return "反弹/延续评分相当，等扫单触发再判断";
   }
   if (phase === "in_sweep") {
     return isBelow

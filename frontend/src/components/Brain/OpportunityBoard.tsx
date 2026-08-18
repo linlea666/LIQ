@@ -46,7 +46,8 @@ export default function OpportunityBoard({
               当前无符合「高盈亏比」门槛的观察机会
             </h4>
             <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
-              系统已开启严格门槛：T1 RR ≥ 2.0 / 信任分 ≥ 0.7 / 数据置信度 ≥ 0.75。
+              系统已开启严格门槛：T1 RR ≥ 2.0 / 信任分 ≥ 0.7（扫破收回类放宽至
+              0.65）/ 数据置信度 ≥ 0.75（扫破收回类 0.70）。
               0 项不代表「行情没机会」，而是当前结构未达到值得限价试错或扫破观察的水平。
             </p>
             <ul className="mt-2 space-y-0.5 text-[10px] leading-snug text-slate-500">

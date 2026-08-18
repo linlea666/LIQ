@@ -13,8 +13,8 @@
     waiting_for_trigger
        │ 价格落入入场区
        ▼ ────────────────────────────┐
-    triggered                          │ cancel_conditions 触发
-       │                               │ → cancelled
+    triggered                          │ 自动取消（仅限：regime 反转 /
+       │                               │ 墙被消耗+撤出组合）→ cancelled
        │ 软失效快速收回 / 墙重挂 / CVD 不背离
        ▼                               │
     confirmation_pending               │
@@ -25,6 +25,11 @@
     硬止损被穿 → invalidated            │
     一段时间未触发 + 远离 → missed       │
     invalidated/missed → cooldown      ┘
+
+注意：setup.cancel_conditions 列表是给人看的「人工参考取消条件」
+（CVD / OI / Funding 等），状态机并不逐条执行；机器只自动执行上图中
+的硬止损、regime 反转与墙事件三类判定。若未来要机器化执行该列表，
+需要为每条条件定义结构化谓词，属独立需求。
 
 实现思路
 ========

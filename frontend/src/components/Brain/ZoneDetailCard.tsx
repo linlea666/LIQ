@@ -398,7 +398,7 @@ export default function ZoneDetailCard({ zone, coin, spotBook, futBook }: Props)
           value={zone.break_through_risk}
           kind="risk"
           hint={
-            "墙体被吃穿继续延伸的概率（结合扫单吸引 + 撤墙风险 + 反向 CVD）；" +
+            "墙体被吃穿继续延伸的相对风险评分（结合扫单吸引 + 撤墙风险 + 反向 CVD，非概率）；" +
             "\n≥0.7 高（不建议提前接，等扫单反应）" +
             "\n0.4-0.7 中（缩小仓位限价试错）" +
             "\n<0.4 低（限价试错较稳）"

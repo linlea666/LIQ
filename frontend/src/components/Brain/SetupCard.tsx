@@ -159,7 +159,9 @@ export default function SetupCard({ setup, coin, onSelectZone }: Props) {
           </section>
 
           <section>
-            <h5 className="text-[9px] uppercase tracking-wider text-slate-500">取消条件</h5>
+            <h5 className="text-[9px] uppercase tracking-wider text-slate-500">
+              取消条件（人工参考 · 系统仅自动执行硬止损 / Regime 反转 / 墙撤出）
+            </h5>
             <ul className="mt-1 flex flex-wrap gap-1">
               {setup.cancel_conditions.map((c) => (
                 <li

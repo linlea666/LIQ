@@ -351,6 +351,9 @@ def _opportunity_score(
 
 
 # ── cancel conditions（每个 setup 类型一份基础模板）──────────────────
+# 注意：此列表是「人工参考取消条件」，仅供 UI 展示与人工判断；
+# 状态机（opportunity_state_machine）不逐条执行，机器只自动执行
+# 硬止损 / regime 反转 / 墙事件三类判定。
 _LONG_CANCEL_TEMPLATE = [
     "现货买墙撤出",
     "Coinbase 现货买墙消失",

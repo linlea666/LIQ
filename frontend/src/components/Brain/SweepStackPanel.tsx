@@ -43,7 +43,7 @@ const SA_HOT_LEVEL = 0.7;
 
 const BTR_WARN_LEVEL = 0.6;
 /** BTR ≥ 0.6 标 ⚠延续（接近 ZoneDetailCard "≥0.7 高 / 0.4-0.7 中" 的高警示线，
- *  这里取 0.6 提前提示"扫到大概率继续杀"，避免用户只看 SA 高就抢底）。 */
+ *  这里取 0.6 提前提示"延续风险评分偏高"，避免用户只看 SA 高就抢底）。 */
 
 // ─────────────────────────────────────────────────────────────────────
 // 配色（与 SweepWatchPanel 同语义：trust 高=绿、risk 高=红）
@@ -156,7 +156,7 @@ function ZoneRow({
           {isContinuationRisk && (
             <span
               className="shrink-0 text-[9px] text-rose-300"
-              title="BTR ≥ 0.6：扫到大概率继续杀"
+              title="BTR ≥ 0.6：打穿风险评分偏高，扫到后延续下杀风险大"
             >
               ⚠延续
             </span>
