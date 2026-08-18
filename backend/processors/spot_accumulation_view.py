@@ -373,8 +373,10 @@ def build_conditional_ladder(
         band_price = getattr(band, "band_price", None) if band else None
         # 无结构锚 / 事件档无机会时，用估值带价兜底作参考价——
         # 让 deep_value/capitulation 也有可规划的价格（此前恒为空）。
+        # 带价是进带上限：已在带内（带价高于现价）时按现价封顶，
+        # 推演不得假设以高于现价的价格成交。
         if low is None and band_price:
-            low = high = band_price
+            low = high = min(band_price, facts.price)
             source = "valuation_band"
             label = getattr(band, "note", "") or "估值带参考价"
         mid = (low + high) / 2 if low is not None and high is not None else None
