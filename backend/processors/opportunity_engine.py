@@ -60,17 +60,8 @@ from models.trading_brain import (
 # 旧签名与下游 trading_brain_builder。
 
 
-_REASON_CODES = {
-    "role_mismatch": "zone 角色不匹配（要求 spot_defense/contested）",
-    "trust_too_low": "信任分不足",
-    "distance_too_far": "距离当前价过远",
-    "data_quality_low": "data_confidence 不足",
-    "regime_blocks": "当前 regime 阻断该方向",
-    "targets_missing": "无可达目标位",
-    "rr_insufficient": "T1 RR 低于门槛",
-}
-
-
+# reason_code → 中文描述的映射由消费方维护
+# （ai/strategic_prompts.py 的 _REJECT_REASON_LABELS_CN），此处只发码。
 class OpportunityRejection(BaseModel):
     """单条拒绝理由（zone × setup_type 的早返回快照）。"""
     zone_id: str
@@ -291,7 +282,7 @@ def _invalidation_clarity(risk: float, atr: float, ref_price: float) -> float:
 # ── scores ────────────────────────────────────────────────────────────
 def _asymmetry_score(
     *, zone: BrainPriceZone, last_price: float, hard_stop: float, atr: float,
-    targets: list[SetupTarget], data_confidence: float, direction: str,
+    targets: list[SetupTarget], data_confidence: float,
 ) -> float:
     """asymmetry = rr_score × invalidation_clarity × entry_proximity ×
                    target_quality × liquidity_path × data_confidence
@@ -458,7 +449,6 @@ def _build_support_limit_probe(
     asym = _asymmetry_score(
         zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
-        direction="long",
     )
     conf_score = 0.4 if zone.dominant_role == "spot_defense" else 0.55
     opp = _opportunity_score(
@@ -584,7 +574,6 @@ def _build_resistance_limit_probe(
     asym = _asymmetry_score(
         zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
-        direction="short",
     )
     conf_score = 0.4 if zone.dominant_role == "spot_defense" else 0.55
     opp = _opportunity_score(
@@ -749,7 +738,6 @@ def _build_fake_break_reclaim(
     asym = _asymmetry_score(
         zone=zone, last_price=last_price, hard_stop=hard, atr=a,
         targets=targets, data_confidence=zone.data_confidence,
-        direction=side,
     )
     opp = _opportunity_score(
         asymmetry=asym,

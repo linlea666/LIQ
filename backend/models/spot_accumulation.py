@@ -62,6 +62,8 @@ class SpotAccumulationConfig(BaseModel):
     weekly_reclaim_weeks: int = 2
     max_swing_loss_ratio: float = 0.01
     min_swing_rr: float = 2.0
+    min_swing_acceptance: float = Field(default=70.0, ge=0.0, le=100.0)
+    """波段仓 A 层（承接）最低分；原为硬编码 70，提为配置项（默认不变）。"""
     cycle_ath_override: Optional[float] = None
     email_notifications: bool = False
     ai_explanation_enabled: bool = True
@@ -355,7 +357,6 @@ class SpotAccumulationRuntimeState(BaseModel):
     opportunities: dict[str, SpotOpportunity] = Field(default_factory=dict)
     tail_mode: Optional[Literal["extreme", "catch_up"]] = None
     last_filled_price: Optional[float] = None
-    weekly_reclaim_count: int = 0
     creation_sequence: int = 0
     updated_at: int = 0
 

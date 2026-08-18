@@ -1679,19 +1679,6 @@ class SpotAccumulationService:
             return 0
 
     @classmethod
-    def _payload_ts(cls, value: Any, fallback: int) -> int:
-        if isinstance(value, list) and value:
-            item = value[-1]
-            if isinstance(item, dict):
-                return cls._normal_ts(item.get("timestamp", item.get("time", fallback))) or fallback
-        if isinstance(value, dict):
-            time_list = value.get("time_list")
-            if isinstance(time_list, list) and time_list:
-                return cls._normal_ts(time_list[-1]) or fallback
-            return cls._normal_ts(value.get("timestamp", value.get("time", fallback))) or fallback
-        return fallback
-
-    @classmethod
     def _series_change(cls, value: Any, lookback: int, field: str) -> Optional[float]:
         if not isinstance(value, list) or len(value) < 2:
             return None
@@ -1724,13 +1711,29 @@ class SpotAccumulationService:
         return (totals[-1] - old) / old * 100 if old else None
 
     def _stablecoin_change(self, state: Any) -> Optional[float]:
+        """稳定币市值 7 天变化率（%）。
+
+        按时间窗裁剪：基期取"最新点往前 ≥7 天"的最近一个点，而非 history
+        首元素（首元素跨度随上游返回长度漂移，曾导致该字段口径非严格 7 天）。
+        7 天窗口无覆盖（历史太短）时返回 None，避免用错误跨度冒充 7d 值。
+        """
         stable = getattr(state, "stablecoin_mcap", None)
         history = getattr(stable, "history", None) or []
         if len(history) < 2:
             return None
-        first = self._float(getattr(history[0], "total_mcap", None))
-        last = self._float(getattr(history[-1], "total_mcap", None))
-        return (last - first) / first * 100 if first and last is not None else None
+        last_point = history[-1]
+        last = self._float(getattr(last_point, "total_mcap", None))
+        last_ts = self._normal_ts(getattr(last_point, "ts", 0))
+        if last is None or last_ts <= 0:
+            return None
+        cutoff = last_ts - 7 * 86_400
+        base = None
+        for point in reversed(history[:-1]):
+            point_ts = self._normal_ts(getattr(point, "ts", 0))
+            if point_ts and point_ts <= cutoff:
+                base = self._float(getattr(point, "total_mcap", None))
+                break
+        return (last - base) / base * 100 if base else None
 
     @staticmethod
     def _spot_absorption_snapshot(

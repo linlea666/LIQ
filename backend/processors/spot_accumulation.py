@@ -130,19 +130,18 @@ def _as_float(value: object) -> Optional[float]:
 
 @dataclass(frozen=True)
 class _StageRule:
+    """核心档位定义。V/M/A 门槛统一由 SpotAccumulationConfig.core_thresholds
+    提供，此处不再内嵌副本（历史上曾内嵌导致与 config 漂移误导排查）。"""
     stage: str
     bucket: str
-    min_v: float
-    min_m: float
-    min_a: float
 
 
 CORE_RULES = (
-    _StageRule("insurance", "core", 55.0, 40.0, 65.0),
-    _StageRule("value_1", "core", 65.0, 45.0, 60.0),
-    _StageRule("deep_value", "core", 75.0, 45.0, 60.0),
-    _StageRule("capitulation", "core", 80.0, 0.0, 65.0),
-    _StageRule("bottom_confirmed", "core", 60.0, 65.0, 75.0),
+    _StageRule("insurance", "core"),
+    _StageRule("value_1", "core"),
+    _StageRule("deep_value", "core"),
+    _StageRule("capitulation", "core"),
+    _StageRule("bottom_confirmed", "core"),
 )
 
 
@@ -413,8 +412,8 @@ def build_swing_opportunity(
     blocked = list(facts.hard_vetoes)
     if not facts.data_quality.can_open_new_opportunity:
         blocked.append("数据完整度或新鲜度不足")
-    if facts.scores.acceptance < 70:
-        blocked.append("A<70")
+    if facts.scores.acceptance < config.min_swing_acceptance:
+        blocked.append(f"A<{config.min_swing_acceptance:.0f}")
     if not support_price or not stop_price or not target_price:
         blocked.append("缺少结构支撑、止损或目标")
         stop_pct = rr = 0.0
@@ -428,11 +427,17 @@ def build_swing_opportunity(
             blocked.append("距离支撑超过3%")
         if rr < min_rr:
             blocked.append(f"预期盈亏比{rr:.2f}<{min_rr:.2f}")
-    allocation = min(max(0.0, available_cash - reserved_cash),
-                     max_loss_usdt / stop_pct if stop_pct > 0 else 0.0)
+    intended = max_loss_usdt / stop_pct if stop_pct > 0 else 0.0
+    spendable = max(0.0, available_cash - reserved_cash)
+    allocation = min(spendable, intended)
     if allocation <= 0:
-        blocked.append("波段预算不足")
-        allocation = 1.0
+        if intended > 0:
+            # 展示目标额度与真实缺口，而非 1U 伪额度误导用户
+            blocked.append(f"波段预算不足（需 {intended:.0f} U，缺口 {intended - spendable:.0f} U）")
+            allocation = intended
+        else:
+            blocked.append("波段预算不足")
+            allocation = 1.0  # 无法推算目标额度（缺结构位）时的占位下限
     status = "eligible" if not blocked else "observing"
     seq = sum(item.stage == "swing" and item.status == "filled"
               for item in runtime.opportunities.values()) + 1

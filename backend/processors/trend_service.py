@@ -490,6 +490,8 @@ class TrendService:
                 enabled=self._cfg.footprint_enabled,
                 available=footprint_effective,
                 availability_14d_pct=footprint_availability,
+                # 预留位：消融验证流程尚未实现，恒为 False（非 bug）。
+                # 待离线消融（footprint 开/关对状态机命中率的对照）完成后接线。
                 ablation_validated=False,
                 promotion_eligible=False,
                 quality=DataQuality(

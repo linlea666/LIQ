@@ -111,13 +111,13 @@ layer_notes: list[str]
 
 **`DominantRole` 6 值语义**（互斥）：
 
-| role | 触发条件 | UI 颜色 | 含义 |
+| role | 触发条件 | UI 颜色（源：`Brain/types.ts` ROLE_COLORS） | 含义 |
 |---|---|---|---|
 | `spot_defense` | spot 墙 ∨ Coinbase ∨ (关键位 ∧ trust ≥ 0.55)，**且** 无 futures+liq 共存 | emerald | 防守位（限价试错可观察） |
-| `contested` | 上述防守 **同时** 有 futures_wall ∨ liq_magnet | fuchsia | 争夺区（双向博弈） |
-| `futures_target` | futures_wall ∧ liq_magnet（无现货防守） | rose | 合约目标位（易扫单） |
-| `liquidation_magnet` | 仅 liq_magnet | amber | 纯磁吸目标 |
-| `key_level_only` | 仅有关键位但无墙/磁铁 | sky | 关键位单独点 |
+| `contested` | 上述防守 **同时** 有 futures_wall ∨ liq_magnet | pink | 争夺区（双向博弈） |
+| `futures_target` | futures_wall ∧ liq_magnet（无现货防守） | amber | 合约目标位（易扫单） |
+| `liquidation_magnet` | 仅 liq_magnet | violet | 纯磁吸目标 |
+| `key_level_only` | 仅有关键位但无墙/磁铁 | blue | 关键位单独点 |
 | `other` | 其他 | slate | 弱聚合 |
 
 ### 3.2 `TradeSetupCandidate`（机会雷达单元）
@@ -365,7 +365,7 @@ otherwise → 不显示（同向不报警；任一为 flat 不报警）
   <main flex-[3] min-h-[420px]>                                   // 第一排
     <PriceAxisMap   w=[260|300|320] />                            // SVG 价格轴 + zone 块
     <ZoneDetailCard flex-1 />                                     // 选中 zone 的证据链
-    <OpportunityBoard w=[320|360|400] />                          // Kanban 4 列
+    <OpportunityBoard w=[320|360|400] />                          // Kanban 3 列（等待触发/已触发/失效冷却）
   </main>
   <section flex-[2] min-h-[360px] lg:flex-row>                    // 第二排（<lg 自动堆叠）
     <SpotOrderBookPanel flex-1 />                                 // 现货订单簿（near/mid/far 三段折叠）
@@ -443,14 +443,15 @@ body:has(.brain-page) {        /* ← brain 页面注册到白名单 */
 
 ### 8.2 测试
 
-| 文件 | 用例数 | 覆盖 |
+| 文件 | 用例数（随迭代增长，以 pytest 收集为准） | 覆盖 |
 |---|---|---|
-| `backend/tests/test_trading_brain_builder.py` | 17 | 合并/角色/排行/spot_book/fut_book/暖机 |
+| `backend/tests/test_trading_brain_builder.py` | 37 | 合并/角色/排行/spot_book/fut_book/暖机/事件分层 |
 | `backend/tests/test_opportunity_engine.py` | 17 | 严筛/RR/risk_plan/cancel/dq |
-| `backend/tests/test_opportunity_state_machine.py` | 11 | 9 态转移 + 历史 + cooldown |
+| `backend/tests/test_opportunity_state_machine.py` | 15 | 9 态转移 + 历史 + cooldown + fake_break 风险方向 |
 | `backend/tests/test_extract_json_payload.py` | 5 | 控制字符/字面 \n / 非 dict 拒绝 |
 
-后端全量回归 **2253 passed**（v3 起步基线 2243 + 新增 10 条）。
+后端全量回归以当前 `pytest` 收集数为准（v3 落地时为 2253 passed；本表行号
+与用例数会随迭代漂移，不作为验收依据）。
 
 ### 8.3 前端
 
