@@ -38,7 +38,7 @@ def test_build_snapshot_end_to_end(tmp_path):
     assert snap["day"] == END.strftime("%Y-%m-%d")
     from processors.bottom_model.snapshot import ALGORITHM_VERSION
     assert snap["algorithm_version"] == ALGORITHM_VERSION
-    assert snap["algorithm_version"] == "bottom-v5"
+        assert snap["algorithm_version"] == "bottom-v5.1"
     assert snap["schema_version"] == "2.1"
     assert snap["data_policy_id"] == DATA_POLICY_ID
     assert snap["validation_status"] == "INSUFFICIENT_EVIDENCE"

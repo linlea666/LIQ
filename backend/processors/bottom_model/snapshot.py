@@ -39,7 +39,10 @@ from storage.bottom_model_store import BottomModelStore
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM_VERSION = "bottom-v5"
+# v5.1：reclaim_sth_rp 评分方向修复（跌破越深分越高）+ 新增 mvrv_raw（原始
+# MVRV 绝对锚定）与 lth_rp_discount（价格 vs LTH 持仓成本折价）两个子信号。
+# 版本号进入 replay/审计缓存键，bump 后旧口径缓存自动失效重算。
+ALGORITHM_VERSION = "bottom-v5.1"
 SCHEMA_VERSION = "2.1"
 MODEL_ID = ALGORITHM_VERSION
 DATA_POLICY_ID = "pit-final-v2"

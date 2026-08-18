@@ -38,7 +38,9 @@ METRIC_CONTRACTS: dict[str, dict[str, Any]] = {
     "btc_price_onchain": {"role": "model_input", "unit": "usd"},
     "ma_200w": {"role": "model_input", "unit": "usd"},
     "sth_realized_price": {"role": "model_input", "unit": "usd"},
-    "lth_realized_price": {"role": "display_only", "unit": "usd"},
+    # bottom-v5.1：从 display_only 提升为 model_input——structure 因子新增
+    # lth_rp_discount（价格 vs LTH 持仓成本折价，周期级底部锚）
+    "lth_realized_price": {"role": "model_input", "unit": "usd"},
     "nupl": {"role": "model_input", "unit": "ratio"},
     "sth_sopr": {"role": "model_input", "unit": "ratio"},
     "lth_sopr": {"role": "model_input", "unit": "ratio"},
@@ -58,6 +60,7 @@ METRIC_CONTRACTS: dict[str, dict[str, Any]] = {
     "exchange_balance_btc": {"role": "model_input", "unit": "btc"},
     "global_m2_yoy": {"role": "model_input", "unit": "percent"},
     "mvrv_zscore": {"role": "model_input", "unit": "zscore"},
+    "mvrv_raw": {"role": "model_input", "unit": "ratio"},
     "sth_mvrv": {"role": "model_input", "unit": "ratio"},
     "sopr": {"role": "model_input", "unit": "ratio"},
     "realized_loss": {"role": "model_input", "unit": "usd"},
@@ -533,6 +536,13 @@ def build_registry() -> list[FetchSpec]:
             key="mvrv_zscore", source="bgeometrics", cadence="daily",
             metrics=("mvrv_zscore",),
             fetch=_bg("mvrv-zscore"), parse=_bg_parse("mvrv_zscore"),
+        ),
+        FetchSpec(
+            key="mvrv_raw", source="bgeometrics", cadence="daily",
+            metrics=("mvrv_raw",),
+            fetch=_bg("mvrv"), parse=_bg_parse("mvrv_raw"),
+            note="原始 MVRV 比率（历史周期大底均 <1）；绝对锚定评分，"
+                 "不受 BG 仅 4 年窗口的分位失真影响",
         ),
         FetchSpec(
             key="sth_mvrv", source="bgeometrics", cadence="daily",

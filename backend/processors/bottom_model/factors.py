@@ -461,6 +461,23 @@ def _factor_valuation(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[s
     ratio_200w = ratio_series(d.get("btc_price_onchain", []), d.get("ma_200w", []))
     subs.append(_pct_sub("price_vs_200w", "价格/200W均线", ratio_200w, 1.0,
                          note="<1 = 跌破 200 周均线", as_of=as_of))
+    # 原始 MVRV 比率（绝对锚定，bottom-v5.1）：历史周期大底 MVRV 均 <1
+    # （2015 ≈0.85 / 2018 ≈0.70 / 2022-11 实测 0.756-0.80）。
+    # 与 mvrv_z 同源（相关性审计已声明），权重 0.5 防同簇堆分；
+    # 用绝对分档而非分位，规避 BGeometrics 仅 4 年窗口的分位失真。
+    mvrv_rows = d.get("mvrv_raw", [])
+    mvrv_now = last_value(mvrv_rows)
+    if mvrv_now is not None:
+        # ≥1.3→0 分，1.0→60 分，≤0.8→满分（线性）
+        raw_score = clamp((1.3 - mvrv_now) / 0.5 * 100.0)
+        eq, eq_note = evidence_quality(mvrv_rows, as_of, _sample_factor(mvrv_rows))
+        subs.append(_sub(
+            "mvrv_raw", "MVRV 原始比率", raw_score, 0.5, value=mvrv_now,
+            note=f"MVRV = {mvrv_now:.3f}（历史周期大底均 <1，≤0.8 满分）",
+            eq=eq, eq_note=eq_note,
+        ))
+    else:
+        subs.append(_sub("mvrv_raw", "MVRV 原始比率", None, 0.5, note="数据不足"))
     return _factor("valuation", subs)
 
 
@@ -814,6 +831,32 @@ def _factor_structure(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[s
             subs.append(_sub("reclaim_sth_rp", "价格 vs STH 成本", None, 1.0))
     else:
         subs.append(_sub("reclaim_sth_rp", "价格 vs STH 成本", None, 1.0, note="数据不足"))
+    # 价格 vs LTH 持仓成本折价（bottom-v5.1，周期级成本锚）：历史周期大底
+    # price/LTH-RP = 0.64（2011）/ 0.59（2015）/ 0.73（2018）/ 0.765（2022-11），
+    # 即价格跌至长期持有者聚合成本下方 23%-41%；局部底（2020-03 / 2022-06）
+    # 仅 0.96-1.05。与 reclaim_sth_rp 同属"价格 vs 成本线"家族但周期不同
+    # （STH 快变量 / LTH 周期锚），权重 0.75 防同族堆分。
+    lth_rp_rows = d.get("lth_realized_price", [])
+    lth_pair = align(price, lth_rp_rows)
+    if lth_pair:
+        _, lth_close, lth_rp = lth_pair[-1]
+        if lth_rp > 1e-9:
+            lth_ratio = lth_close / lth_rp
+            lth_score = clamp((1.0 - lth_ratio) / 0.25 * 100.0)  # 1.00→0 分，0.75→满分
+            eq, eq_note = evidence_quality(
+                lth_rp_rows, as_of, _sample_factor(lth_rp_rows),
+            )
+            subs.append(_sub(
+                "lth_rp_discount", "价格 vs LTH 成本折价", lth_score, 0.75,
+                value=lth_ratio,
+                note=f"价格/LTH-RP = {lth_ratio:.3f}（历史大底 0.59-0.77，跌破越深证据越强）",
+                eq=eq, eq_note=eq_note,
+            ))
+        else:
+            subs.append(_sub("lth_rp_discount", "价格 vs LTH 成本折价", None, 0.75))
+    else:
+        subs.append(_sub("lth_rp_discount", "价格 vs LTH 成本折价", None, 0.75,
+                         note="数据不足"))
     # 新低卖压背离：近 14d 创 90d 新低，但已实现亏损未随之创峰
     loss_abs: Rows = [(day, abs(v)) for day, v in d.get("realized_loss", [])]
     if len(price) >= 90 and len(loss_abs) >= 90:

@@ -217,6 +217,47 @@ def test_reclaim_sth_rp_stress_direction():
     assert deep_below > structure_sub(0.90) > at_cost
 
 
+def test_mvrv_raw_absolute_grading():
+    """原始 MVRV 绝对锚定：≥1.3→0，1.0→60，≤0.8→满分；同簇降权 0.5。"""
+    def sub_at(mvrv: float) -> dict:
+        data = {"mvrv_raw": mk([mvrv] * 400)}
+        factors = {f["key"]: f for f in compute_factors(data)}
+        return next(
+            s for s in factors["valuation"]["sub_signals"] if s["key"] == "mvrv_raw"
+        )
+
+    assert sub_at(0.78)["score"] == 100.0   # 2022-11 大底实测 0.756-0.80
+    assert sub_at(1.0)["score"] == 60.0
+    assert sub_at(1.35)["score"] == 0.0
+    assert sub_at(1.0)["weight"] == 0.5
+    missing = next(
+        s for f in compute_factors({}) if f["key"] == "valuation"
+        for s in f["sub_signals"] if s["key"] == "mvrv_raw"
+    )
+    assert missing["ok"] is False and missing["score"] is None
+
+
+def test_lth_rp_discount_grading():
+    """LTH 成本折价：1.00→0，0.875→50，≤0.75→满分（历史大底 0.59-0.77）。"""
+    def sub_at(ratio: float) -> dict:
+        price = [30000.0] * 400
+        data = {
+            "btc_price_onchain": mk(price),
+            "lth_realized_price": mk([p / ratio for p in price]),
+        }
+        factors = {f["key"]: f for f in compute_factors(data)}
+        return next(
+            s for s in factors["structure"]["sub_signals"]
+            if s["key"] == "lth_rp_discount"
+        )
+
+    assert sub_at(0.75)["score"] == 100.0
+    assert sub_at(0.875)["score"] == 50.0
+    assert sub_at(1.0)["score"] == 0.0
+    assert sub_at(1.3)["score"] == 0.0     # 牛市区间无折价证据
+    assert sub_at(1.0)["weight"] == 0.75
+
+
 def test_weekly_hl_not_double_counted_in_structure_factor():
     """周线结构只应出现在确认层，Stress 的结构因子不得再计一次。"""
     data = _bottomish_data()

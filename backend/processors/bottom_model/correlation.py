@@ -35,10 +35,12 @@ GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
         "均在表达价格相对长期持有成本/长期价值的位置，不可当作彼此独立的证据",
         (
             ("mvrv_zscore", "MVRV Z-Score"),
+            ("mvrv_raw", "MVRV 原始比率"),
             ("nupl", "NUPL"),
             ("reserve_risk", "Reserve Risk"),
             ("price_vs_200w", "价格/200W均线"),
             ("sth_mvrv", "STH-MVRV"),
+            ("price_vs_lth_rp", "价格/LTH成本"),
         ),
     ),
     (
@@ -103,6 +105,14 @@ CROSS_LAYER_OVERLAPS: tuple[dict[str, str], ...] = (
                 "价格一旦收复会同时改善两个数字",
     },
     {
+        "topic": "MVRV 家族（Z-Score / 原始比率）与成本线折价",
+        "usage": "valuation 的 mvrv_z（分位）与 mvrv_raw（绝对锚定）同源；"
+                 "structure 的 lth_rp_discount 与 reclaim_sth_rp 同属"
+                 "价格 vs 持仓成本家族（LTH 周期锚 / STH 快变量）",
+        "note": "bottom-v5.1 新增的 mvrv_raw 权重 0.5、lth_rp_discount 权重"
+                " 0.75，均已按同源关系折减，防止一份估值证据被放大计分",
+    },
+    {
         "topic": "OI 回堆风险",
         "usage": "Confirmation 的 funding_oi_regime 给低分，"
                  "同时假底过滤器的 oi_rebuild 再扣分",
@@ -141,6 +151,9 @@ def _series_map(data: dict[str, Rows]) -> dict[str, Rows]:
     derived: dict[str, Rows] = dict(data)
     derived["price_vs_200w"] = ratio_series(
         data.get("btc_price_onchain", []), data.get("ma_200w", []),
+    )
+    derived["price_vs_lth_rp"] = ratio_series(
+        data.get("btc_price_onchain", []), data.get("lth_realized_price", []),
     )
     derived["realized_loss_abs"] = [
         (day, abs(v)) for day, v in data.get("realized_loss", [])
