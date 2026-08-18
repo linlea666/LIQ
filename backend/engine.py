@@ -76,6 +76,38 @@ def _pick_max_pain_for_coin(
     return None
 
 
+def build_wall_lists(orders, last_px: float, top_n: int = 5) -> tuple[list[dict], list[dict]]:
+    """从 Coinglass 大单快照构建 WS 推送用的 (bid_walls, ask_walls)。
+
+    与 orderbook_pressure._filter_large_orders_by_range 同口径：
+    只取 holding(active) 单，且买墙必须在现价下方、卖墙在现价上方
+    （穿越中线的挂单在真实订单簿不可能 holding，属脏数据）；
+    按侧各取 Top N，而非全局 Top N 再拆（避免单侧挤占）。
+    """
+    from models.market import WallInfo
+    bid_cand, ask_cand = [], []
+    for o in orders:
+        if o.status != "active" or o.price <= 0:
+            continue
+        if o.side == "bid":
+            if last_px and o.price >= last_px:
+                continue
+            bid_cand.append(o)
+        else:
+            if last_px and o.price <= last_px:
+                continue
+            ask_cand.append(o)
+    bid_walls = [
+        WallInfo(price=o.price, size=0, size_usd=o.size_usd).model_dump()
+        for o in sorted(bid_cand, key=lambda x: x.size_usd, reverse=True)[:top_n]
+    ]
+    ask_walls = [
+        WallInfo(price=o.price, size=0, size_usd=o.size_usd).model_dump()
+        for o in sorted(ask_cand, key=lambda x: x.size_usd, reverse=True)[:top_n]
+    ]
+    return bid_walls, ask_walls
+
+
 class CoinState:
     """单个币种的完整数据状态"""
 
@@ -2133,14 +2165,8 @@ class Engine:
         if state.orderbook:
             ob_dict = state.orderbook.model_dump()
             if state.large_orders and state.large_orders.orders:
-                from models.market import WallInfo
-                bid_walls, ask_walls = [], []
-                for o in sorted(state.large_orders.orders, key=lambda x: x.size_usd, reverse=True)[:10]:
-                    wall = WallInfo(price=o.price, size=0, size_usd=o.size_usd).model_dump()
-                    if o.side == "bid":
-                        bid_walls.append(wall)
-                    else:
-                        ask_walls.append(wall)
+                last_px = float(state.ticker.last) if state.ticker and state.ticker.last else 0.0
+                bid_walls, ask_walls = build_wall_lists(state.large_orders.orders, last_px)
                 ob_dict["bid_walls"] = bid_walls
                 ob_dict["ask_walls"] = ask_walls
             payload["orderbook"] = ob_dict

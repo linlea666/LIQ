@@ -25,18 +25,20 @@ def _make_coin(ccy="BTC", symbol="BTC", pair="BTCUSDT", exchange="Binance"):
 
 class TestPollLargeOrders:
 
-    # Coinglass /large-limit-order(-history) 实测约定（curl 验证）：
-    #   order_side=1 → bid（买单 / 下方支撑）
-    #   order_side=2 → ask（卖单 / 上方阻力）
-    # 历史上代码写反了导致 bid/ask 全链路反向，已在 _parse_side 中修正。
+    # Coinglass /large-limit-order(-history) 约定（2026-08-18 生产实测定案）：
+    #   order_side=1 → ask（卖单 / 上方阻力）
+    #   order_side=2 → bid（买单 / 下方支撑）
+    # 实测方法：期货+现货共 450+ 条 holding 大单对照现价，side=1 全部在
+    # 现价上方、side=2 全部在现价下方。此前按错误"实测"翻转成 1=bid，
+    # 导致全链路 bid/ask 反向（UI 卖墙低于买墙、pressure 大单被全量误滤）。
     SAMPLE = [
-        {"price": 74500, "order_side": "2", "order_size_usd": 5000000},  # ask
-        {"price": 74800, "order_side": "1", "order_size_usd": 3000000},  # bid
+        {"price": 74500, "order_side": "2", "order_size_usd": 5000000},  # bid（下方买单）
+        {"price": 74800, "order_side": "1", "order_size_usd": 3000000},  # ask（上方卖单）
     ]
 
     @pytest.mark.asyncio
     async def test_side_mapping(self, cg, btc_state):
-        """order_side 1=bid(买), 2=ask(卖)。"""
+        """order_side 1=ask(卖), 2=bid(买)。"""
         cg.fetch_large_orders = AsyncMock(return_value=self.SAMPLE)
         # history 端点也会被 poll 调用（双轨合并），mock 成空列表避免真实请求
         cg.fetch_large_orders_history = AsyncMock(return_value=[])
@@ -49,9 +51,9 @@ class TestPollLargeOrders:
         bid = [o for o in orders if o.side == "bid"]
         ask = [o for o in orders if o.side == "ask"]
         assert len(bid) == 1
-        assert bid[0].price == 74800
+        assert bid[0].price == 74500
         assert len(ask) == 1
-        assert ask[0].price == 74500
+        assert ask[0].price == 74800
 
 
 # ──────────────────────────────────────────────

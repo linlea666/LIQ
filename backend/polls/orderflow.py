@@ -227,18 +227,23 @@ async def poll_orderbook_depth(cg: CoinglassSource, coin: CoinConfig, state: Coi
 
 
 def _parse_side(raw) -> str:
-    """Coinglass /large-limit-order(-history) 的 order_side 约定（实测）：
-        1 = bid（买单 / 下方支撑）
-        2 = ask（卖单 / 上方阻力）
-    旧代码把 "2" 当 bid，全链路 bid/ask 反向 — 已修复。
+    """Coinglass /large-limit-order(-history) 的 order_side 约定（2026-08-18 生产实测）：
+        1 = ask（卖单 / 上方阻力）
+        2 = bid（买单 / 下方支撑）
+
+    实测方法：期货 273 条 + 现货 179 条 holding 大单对照现价——
+    side=1 全部在现价上方、side=2 全部在现价下方（盘口几何唯一解）。
+    历史教训：此处已两次修反（最初 2 当 bid 是对的，后被按错误"实测"
+    翻转成 1=bid），任何再次改动必须先跑 side × (limit_price-现价)
+    分布校验，禁止凭文档或猜测翻转。
     """
     if isinstance(raw, (int, float)):
-        return "bid" if int(raw) == 1 else "ask"
+        return "ask" if int(raw) == 1 else "bid"
     s = str(raw).strip().lower()
-    if s in ("1", "bid", "buy"):
-        return "bid"
-    if s in ("2", "ask", "sell"):
+    if s in ("1", "ask", "sell"):
         return "ask"
+    if s in ("2", "bid", "buy"):
+        return "bid"
     return "ask"
 
 
