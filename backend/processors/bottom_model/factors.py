@@ -790,21 +790,24 @@ def _factor_structure(d: dict[str, Rows], as_of: Optional[str] = None) -> dict[s
     # 注：周线 LL→HL 已迁至 Confirmation 层的 structure_stage。它是"是否开始
     # 转向"的事件信号，留在 Stress 因子会同时抬高两个仪表（跨层重复计分），
     # 也违反本模块 Stress/Confirmation 严格分离的设计前提。
-    # 收复 STH Realized Price（这里看"低于成本线多少"= 压力水平，
-    # 与 Confirmation 层的"是否收复"= 事件判定，是有意的水平/事件二分）
+    # 价格 vs STH Realized Price（这里看"低于成本线多少"= 压力水平，
+    # 与 Confirmation 层的"是否收复"= 事件判定，是有意的水平/事件二分）。
+    # 方向修复（P0）：Stress 语义 = 跌破成本线越深、底部压力证据越强、分越高；
+    # 旧公式 (ratio-0.80)/0.25 是"站上成本线得满分"，与本因子 drawdown 方向相反，
+    # 且与 Confirmation 层 price_reclaim_sth 同向重复计分。
     sth_rp_rows = d.get("sth_realized_price", [])
     pair = align(price, sth_rp_rows)
     if pair:
         _, close, sth_rp = pair[-1]
         if sth_rp > 1e-9:
             ratio = close / sth_rp
-            score = clamp((ratio - 0.80) / 0.25 * 100.0)   # 0.80→0 分，1.05→满分
+            score = clamp((1.0 - ratio) / 0.25 * 100.0)   # 1.00→0 分，0.75→满分
             eq, eq_note = evidence_quality(
                 sth_rp_rows, as_of, _sample_factor(sth_rp_rows),
             )
             subs.append(_sub(
                 "reclaim_sth_rp", "价格 vs STH 成本", score, 1.0, value=ratio,
-                note=f"价格/STH-RP = {ratio:.3f}（>1 = 短期持有者回到盈利）",
+                note=f"价格/STH-RP = {ratio:.3f}（跌破越深 = 短持亏损压力越大，底部压力证据越强）",
                 eq=eq, eq_note=eq_note,
             ))
         else:

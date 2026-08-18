@@ -187,6 +187,36 @@ def test_weekly_structure_stage_grades():
     assert weekly_structure_stage({}) is None
 
 
+def test_reclaim_sth_rp_stress_direction():
+    """Stress 层语义：跌破 STH 成本线越深 → 压力证据越强 → 分越高（P0 方向修复）。
+
+    是否收复成本线属于 Confirmation 层 price_reclaim_sth 的事件判定，
+    Stress 层若同向会与其重复计分且与 drawdown 方向冲突。
+    """
+    def structure_sub(ratio: float) -> float:
+        n = 400
+        price = [30000.0] * n
+        data = {
+            "btc_price_onchain": mk(price),
+            "sth_realized_price": mk([p / ratio for p in price]),
+        }
+        factors = {f["key"]: f for f in compute_factors(data)}
+        sub = next(
+            s for s in factors["structure"]["sub_signals"]
+            if s["key"] == "reclaim_sth_rp"
+        )
+        assert sub["ok"] is True
+        return float(sub["score"])
+
+    deep_below = structure_sub(0.75)   # 深跌破成本线 25%
+    at_cost = structure_sub(1.00)      # 恰在成本线
+    above = structure_sub(1.05)        # 已收复
+    assert deep_below == 100.0
+    assert at_cost == 0.0
+    assert above == 0.0
+    assert deep_below > structure_sub(0.90) > at_cost
+
+
 def test_weekly_hl_not_double_counted_in_structure_factor():
     """周线结构只应出现在确认层，Stress 的结构因子不得再计一次。"""
     data = _bottomish_data()
