@@ -9,6 +9,22 @@ from pydantic import BaseModel, Field
 from models.trend_monitor import DataQuality
 
 
+class HyperliquidWhaleTopPosition(BaseModel):
+    """单个巨鲸头寸明细（地址为链上公开数据，产品决策明确展示）。"""
+
+    address: str
+    side: Literal["long", "short"]
+    position_size: float
+    notional_usd: float
+    entry_price: Optional[float] = None
+    liq_price: Optional[float] = None
+    leverage: float = 0
+    margin_mode: Optional[str] = None
+    unrealized_pnl: Optional[float] = None
+    distance_to_liq_pct: Optional[float] = None
+    update_time_ts: Optional[int] = None
+
+
 class HyperliquidWhalePriceBucket(BaseModel):
     price_from: float
     price_to: float
@@ -38,6 +54,8 @@ class HyperliquidWhaleAssetDistribution(BaseModel):
     invalid_liquidation_price_count: int = 0
     entry_buckets: list[HyperliquidWhalePriceBucket] = Field(default_factory=list)
     liquidation_buckets: list[HyperliquidWhalePriceBucket] = Field(default_factory=list)
+    top_longs: list[HyperliquidWhaleTopPosition] = Field(default_factory=list)
+    top_shorts: list[HyperliquidWhaleTopPosition] = Field(default_factory=list)
     quality: DataQuality = Field(default_factory=DataQuality)
     caveats: list[str] = Field(default_factory=list)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -70,7 +71,12 @@ class TrendService:
         self._aux_data: dict[str, dict[str, Any]] = {}
         self._aux_bootstrapped = False
         self._flow_histories: dict[str, ClosedFlowHistory] = {}
-        self._whale_distributions = pending_hyperliquid_whale_distributions()
+        # 落盘回载最近一次巨鲸快照：重启后立即可用（超过30分钟会按 stale 标注），
+        # 消除"重启后 pending 直到下轮辅助刷新"的空窗。
+        self._whale_snapshot_path = os.path.join(data_dir, "hl_whale_snapshot.json")
+        self._whale_distributions = (
+            self._load_whale_snapshot() or pending_hyperliquid_whale_distributions()
+        )
         self._latest = self._store.latest_snapshot()
         persisted = self._store.load_machine_context()
         if persisted and persisted.algorithm_version != self._cfg.algorithm_version:
@@ -110,6 +116,35 @@ class TrendService:
     def hyperliquid_whale_distributions(self) -> HyperliquidWhaleDistributions:
         """只返回内存聚合结果；API 读取不会触发上游请求。"""
         return refreshed_distribution_quality(self._whale_distributions)
+
+    def _load_whale_snapshot(self) -> Optional[HyperliquidWhaleDistributions]:
+        try:
+            with open(self._whale_snapshot_path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            positions = payload.get("positions")
+            fetched_at = payload.get("fetched_at_ts")
+            if not isinstance(positions, list) or not isinstance(fetched_at, int):
+                return None
+            return build_hyperliquid_whale_distributions(
+                positions, fetched_at_ts=fetched_at,
+            )
+        except FileNotFoundError:
+            return None
+        except Exception as error:  # noqa: BLE001 快照损坏时回退 pending，不影响启动
+            logger.warning("whale snapshot load failed | error=%s", error)
+            return None
+
+    def _persist_whale_snapshot(self, positions: list, fetched_at: int) -> None:
+        try:
+            tmp_path = f"{self._whale_snapshot_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"fetched_at_ts": fetched_at, "positions": positions},
+                    handle, ensure_ascii=False,
+                )
+            os.replace(tmp_path, self._whale_snapshot_path)
+        except Exception as error:  # noqa: BLE001 落盘失败只损失回载能力，不影响内存结果
+            logger.warning("whale snapshot persist failed | error=%s", error)
 
     def source_diagnostics(self) -> dict[str, Any]:
         diagnostics = self._cg.request_diagnostics()
@@ -608,6 +643,7 @@ class TrendService:
                 whale_positions,
                 fetched_at_ts=fetched_at,
             )
+            self._persist_whale_snapshot(whale_positions, fetched_at)
         if not self._cfg.footprint_enabled:
             self._aux_data.pop("footprint", None)
         for market, key in (("spot", "spot_baseline_1d"), ("futures", "fut_baseline_1d")):

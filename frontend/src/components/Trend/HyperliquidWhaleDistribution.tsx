@@ -30,6 +30,29 @@ type PriceBucket = {
   short_avg_leverage: number;
 };
 
+type TopPosition = {
+  address: string;
+  side: PositionSide;
+  position_size: number;
+  notional_usd: number;
+  entry_price?: number | null;
+  liq_price?: number | null;
+  leverage: number;
+  margin_mode?: string | null;
+  unrealized_pnl?: number | null;
+  distance_to_liq_pct?: number | null;
+  update_time_ts?: number | null;
+};
+
+type LiquidationPin = {
+  key: string;
+  rank: number;
+  side: PositionSide;
+  price: number;
+  distancePct: number;
+  label: string;
+};
+
 type AssetDistribution = {
   symbol: SymbolName;
   mark_price?: number | null;
@@ -46,6 +69,8 @@ type AssetDistribution = {
   invalid_liquidation_price_count: number;
   entry_buckets: PriceBucket[];
   liquidation_buckets: PriceBucket[];
+  top_longs?: TopPosition[];
+  top_shorts?: TopPosition[];
   quality: Quality;
   caveats: string[];
 };
@@ -76,7 +101,6 @@ type WhaleInsights = {
 };
 
 const RANGE_OPTIONS: RangePct[] = [10, 25, 50];
-const BEGINNER_INSIGHT_RANGE_PCT = 25;
 const RANGE_LABELS: Record<RangePct, string> = {
   10: "近场 ±10%",
   25: "常用 ±25%",
@@ -124,7 +148,7 @@ export function HyperliquidWhaleDistribution() {
   const liquidationCoverage = liquidationTotal > 0
     ? (asset?.valid_liquidation_price_count ?? 0) / liquidationTotal
     : 0;
-  const insights = asset?.mark_price == null ? null : deriveWhaleInsights(asset);
+  const insights = asset?.mark_price == null ? null : deriveWhaleInsights(asset, rangePct);
   const sharedMaxNotional = asset == null
     ? 1
     : maxVisibleSideNotional(
@@ -190,7 +214,7 @@ export function HyperliquidWhaleDistribution() {
             <Metric label="未提供爆仓价" value={`${asset.invalid_liquidation_price_count} 个`} tone={asset.invalid_liquidation_price_count ? "text-amber-400" : "text-slate-100"} sub="已从爆仓图排除" />
           </div>
 
-          {insights && <BeginnerSummary asset={asset} insights={insights} />}
+          {insights && <BeginnerSummary asset={asset} insights={insights} rangePct={rangePct} />}
 
           {!asset.quality.valid && (
             <div className="mt-3 rounded-lg border border-amber-800/60 bg-amber-950/25 px-3 py-2 text-xs text-amber-300">
@@ -216,14 +240,17 @@ export function HyperliquidWhaleDistribution() {
             <PriceLadder
               kind="liquidation"
               title="估算爆仓价分布"
-              note="交叉保证金价格会随全账户权益动态变化"
+              note="交叉保证金价格会随全账户权益动态变化；◆钉点为 Top 头寸清算价"
               buckets={asset.liquidation_buckets}
               markPrice={asset.mark_price}
               rangePct={rangePct}
               binSizePct={asset.bin_size_pct}
               maxNotional={sharedMaxNotional}
+              pins={buildLiquidationPins(asset)}
             />
           </div>
+
+          <TopPositionsCard asset={asset} />
 
           <div className="mt-3 flex flex-wrap justify-between gap-2 text-[10px] text-slate-500">
             <span>{qualityText(asset.quality)} · 价格分桶 {asset.bin_size_pct.toFixed(1)}% · 评分权重 {payload?.score_weight ?? 0}</span>
@@ -238,7 +265,7 @@ export function HyperliquidWhaleDistribution() {
   );
 }
 
-function BeginnerSummary({ asset, insights }: { asset: AssetDistribution; insights: WhaleInsights }) {
+function BeginnerSummary({ asset, insights, rangePct }: { asset: AssetDistribution; insights: WhaleInsights; rangePct: RangePct }) {
   const nearMax = Math.max(1, insights.upperShortNear5Usd, insights.lowerLongNear5Usd);
   const longEntryState = entryPriceState(insights.longEntry, asset.mark_price);
   const shortEntryState = entryPriceState(insights.shortEntry, asset.mark_price);
@@ -251,7 +278,7 @@ function BeginnerSummary({ asset, insights }: { asset: AssetDistribution; insigh
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-violet-100">新手先看这 4 个位置</h3>
-          <p className="mt-1 text-[10px] text-slate-500">从现价 ±25% 常用范围提取：先看成本在哪里，再看上涨和下跌分别可能触发哪一侧爆仓；这些位置不是交易指令。</p>
+          <p className="mt-1 text-[10px] text-slate-500">从现价 ±{rangePct}% 当前所选范围提取：先看成本在哪里，再看上涨和下跌分别可能触发哪一侧爆仓；这些位置不是交易指令。</p>
         </div>
         <div className="rounded bg-slate-950/70 px-2 py-1 text-xs text-violet-200">
           Hyperliquid 标记价 {asset.mark_price == null ? "—" : money(asset.mark_price)}
@@ -344,7 +371,7 @@ function InsightCard({
       <div className="text-[10px] text-slate-500">{label}</div>
       <div className="mt-1 text-sm font-semibold">{money(insight.bucket.price_from)}–{money(insight.bucket.price_to)}</div>
       <div className="mt-1 text-[10px] text-slate-400">
-        距现价 {distanceText(insight.bucket.price_mid, markPrice)} · {compactUsd(insight.notionalUsd)} · {insight.count} 个仓位
+        距现价 {distanceText(insight.bucket.price_mid, markPrice)} · {compactUsd(insight.notionalUsd)} · {insight.count} 个仓位{insight.avgLeverage > 0 ? ` · 均杠杆 ${insight.avgLeverage.toFixed(1)}x` : ""}
       </div>
       {help && <div className="mt-2 text-[10px] leading-4 text-slate-500">{help}</div>}
     </div>
@@ -369,6 +396,7 @@ function PriceLadder({
   rangePct,
   binSizePct,
   maxNotional,
+  pins,
 }: {
   kind: LadderKind;
   title: string;
@@ -378,6 +406,7 @@ function PriceLadder({
   rangePct: RangePct;
   binSizePct: number;
   maxNotional: number;
+  pins?: LiquidationPin[];
 }) {
   const [selectedKey, setSelectedKey] = useState("");
   const visible = useMemo(
@@ -443,6 +472,23 @@ function PriceLadder({
           return <g key={key} role="button" tabIndex={0} aria-label={tooltip} onClick={selectBucket} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") selectBucket(); }} className="cursor-pointer"><title>{tooltip}</title>{longWidth > 0 && <rect x={center - longWidth} y={y} width={longWidth} height={barHeight} fill="#10b981" opacity="0.82" stroke={selectedBucket === bucket ? "#d1fae5" : "none"} strokeWidth="1" />}{shortWidth > 0 && <rect x={center} y={y} width={shortWidth} height={barHeight} fill="#f43f5e" opacity="0.82" stroke={selectedBucket === bucket ? "#ffe4e6" : "none"} strokeWidth="1" />}</g>;
         })}
         <line x1={center} y1={top} x2={center} y2={bottom} stroke="#a78bfa" strokeWidth="1" opacity="0.8" />
+        {(pins ?? []).filter((pin) => Math.abs(pin.distancePct) <= rangePct).map((pin) => {
+          const y = yForDistance(pin.distancePct);
+          const x = pin.side === "long" ? center - 10 : center + 10;
+          const color = pin.side === "long" ? "#34d399" : "#fb7185";
+          return (
+            <g key={pin.key}>
+              <title>{pin.label}</title>
+              <path
+                d={`M ${x} ${y - 6} L ${x + 5} ${y} L ${x} ${y + 6} L ${x - 5} ${y} Z`}
+                fill={color}
+                stroke="#0f172a"
+                strokeWidth="1"
+              />
+              <text x={pin.side === "long" ? x - 9 : x + 9} y={y + 3.5} fill={color} fontSize="10" textAnchor={pin.side === "long" ? "end" : "start"}>#{pin.rank}</text>
+            </g>
+          );
+        })}
       </svg>
       {visible.length === 0 && <div className="-mt-52 mb-40 text-center text-xs text-slate-600">当前价格范围内没有有效仓位</div>}
       {selectedBucket && <SelectedBucketDetails bucket={selectedBucket} markPrice={markPrice} />}
@@ -463,10 +509,131 @@ function SelectedBucketDetails({ bucket, markPrice }: { bucket: PriceBucket; mar
   );
 }
 
-function deriveWhaleInsights(asset: AssetDistribution): WhaleInsights {
+const PIN_LIMIT = 5;
+const HIGH_RISK_LIQ_DISTANCE_PCT = 3;
+
+function buildLiquidationPins(asset: AssetDistribution): LiquidationPin[] {
+  const markPrice = asset.mark_price;
+  if (markPrice == null || markPrice <= 0) return [];
+  const pins: LiquidationPin[] = [];
+  for (const side of ["long", "short"] as const) {
+    const list = (side === "long" ? asset.top_longs : asset.top_shorts) ?? [];
+    list.slice(0, PIN_LIMIT).forEach((position, index) => {
+      if (position.liq_price == null || position.liq_price <= 0) return;
+      const distancePct = position.distance_to_liq_pct
+        ?? (position.liq_price / markPrice - 1) * 100;
+      pins.push({
+        key: `${side}-${position.address}-${position.liq_price}`,
+        rank: index + 1,
+        side,
+        price: position.liq_price,
+        distancePct,
+        label: `${side === "long" ? "多头" : "空头"}#${index + 1} ${shortAddress(position.address)} · 清算价 ${money(position.liq_price)}（距现价 ${distancePct >= 0 ? "+" : ""}${distancePct.toFixed(2)}%）· 仓位 ${compactUsd(position.notional_usd)} · ${position.leverage.toFixed(0)}x`,
+      });
+    });
+  }
+  return pins;
+}
+
+function shortAddress(address: string) {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
+function TopPositionsCard({ asset }: { asset: AssetDistribution }) {
+  const longs = asset.top_longs ?? [];
+  const shorts = asset.top_shorts ?? [];
+  if (!longs.length && !shorts.length) return null;
+  return (
+    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/55 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium text-slate-200">巨鲸 Top 头寸明细（按仓位价值）</div>
+          <div className="text-[10px] text-slate-600">地址为链上公开数据，点击地址可复制 · 距清算 ≤{HIGH_RISK_LIQ_DISTANCE_PCT}% 标记为高危 · 交叉保证金清算价随账户权益动态变化</div>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-4 xl:grid-cols-2">
+        <TopPositionsTable title={`多头 Top ${longs.length}`} positions={longs} symbol={asset.symbol} tone="text-emerald-400" />
+        <TopPositionsTable title={`空头 Top ${shorts.length}`} positions={shorts} symbol={asset.symbol} tone="text-rose-400" />
+      </div>
+    </div>
+  );
+}
+
+function TopPositionsTable({ title, positions, symbol, tone: toneClass }: { title: string; positions: TopPosition[]; symbol: SymbolName; tone: string }) {
+  if (!positions.length) {
+    return <div className="rounded-lg border border-slate-800 p-3 text-xs text-slate-600">该方向暂无巨鲸头寸</div>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-800">
+      <table className="w-full min-w-[560px] text-[11px]">
+        <thead className="bg-slate-950 text-slate-500">
+          <tr>
+            <th className={`p-2 text-left font-medium ${toneClass}`}>{title}</th>
+            <th className="p-2 text-right font-normal">数量</th>
+            <th className="p-2 text-right font-normal">仓位价值</th>
+            <th className="p-2 text-right font-normal">开仓价</th>
+            <th className="p-2 text-right font-normal">清算价</th>
+            <th className="p-2 text-right font-normal">距清算</th>
+            <th className="p-2 text-right font-normal">杠杆</th>
+            <th className="p-2 text-right font-normal">浮盈亏</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((position, index) => {
+            const highRisk = position.distance_to_liq_pct != null
+              && Math.abs(position.distance_to_liq_pct) <= HIGH_RISK_LIQ_DISTANCE_PCT;
+            return (
+              <tr key={`${position.address}-${index}`} className={`border-t border-slate-800 ${highRisk ? "bg-amber-950/30" : ""}`}>
+                <td className="max-w-[190px] p-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-600">#{index + 1}</span>
+                    <AddressCell address={position.address} />
+                    {highRisk && <span className="rounded bg-amber-900/70 px-1 text-[9px] text-amber-300">高危</span>}
+                  </div>
+                </td>
+                <td className="p-2 text-right text-slate-300">{position.position_size.toLocaleString(undefined, { maximumFractionDigits: 2 })} {symbol}</td>
+                <td className="p-2 text-right text-slate-200">{compactUsd(position.notional_usd)}</td>
+                <td className="p-2 text-right text-slate-300">{position.entry_price == null ? "—" : money(position.entry_price)}</td>
+                <td className={`p-2 text-right ${highRisk ? "font-semibold text-amber-300" : "text-slate-300"}`}>{position.liq_price == null ? "—" : money(position.liq_price)}</td>
+                <td className={`p-2 text-right ${highRisk ? "font-semibold text-amber-300" : "text-slate-400"}`}>{position.distance_to_liq_pct == null ? "—" : `${position.distance_to_liq_pct >= 0 ? "+" : ""}${position.distance_to_liq_pct.toFixed(2)}%`}</td>
+                <td className="p-2 text-right text-slate-300">{position.leverage > 0 ? `${position.leverage.toFixed(0)}x` : "—"}{position.margin_mode ? <span className="ml-1 text-[9px] text-slate-600">{position.margin_mode === "cross" ? "全仓" : position.margin_mode === "isolated" ? "逐仓" : position.margin_mode}</span> : null}</td>
+                <td className={`p-2 text-right ${position.unrealized_pnl == null ? "text-slate-500" : position.unrealized_pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{position.unrealized_pnl == null ? "—" : `${position.unrealized_pnl >= 0 ? "+" : "-"}${compactUsd(Math.abs(position.unrealized_pnl))}`}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AddressCell({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 剪贴板不可用（如非 HTTPS 环境）时静默忽略
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`${address}（点击复制完整地址）`}
+      className="break-all text-left font-mono text-[10px] text-blue-300 hover:text-blue-200"
+    >
+      {copied ? "已复制 ✓" : address}
+    </button>
+  );
+}
+
+function deriveWhaleInsights(asset: AssetDistribution, rangePct: RangePct): WhaleInsights {
   const markPrice = asset.mark_price ?? 0;
   const inBeginnerRange = (bucket: PriceBucket) => (
-    Math.abs(bucket.distance_from_mark_pct) <= BEGINNER_INSIGHT_RANGE_PCT
+    Math.abs(bucket.distance_from_mark_pct) <= rangePct
   );
   return {
     longEntry: strongestSideBucket(asset.entry_buckets, "long", inBeginnerRange),

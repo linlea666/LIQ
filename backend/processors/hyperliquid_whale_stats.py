@@ -12,6 +12,7 @@ from models.hyperliquid_whale import (
     HyperliquidWhaleAssetDistribution,
     HyperliquidWhaleDistributions,
     HyperliquidWhalePriceBucket,
+    HyperliquidWhaleTopPosition,
     _default_caveats,
 )
 from models.trend_monitor import DataQuality
@@ -19,6 +20,7 @@ from models.trend_monitor import DataQuality
 
 BIN_SIZE_PCT = 0.5
 STALE_AFTER_SEC = 30 * 60
+TOP_POSITION_LIMIT = 10
 _SYMBOLS = ("BTC", "ETH")
 
 
@@ -38,7 +40,7 @@ def build_hyperliquid_whale_distributions(
     fetched_at_ts: Optional[int] = None,
     now_sec: Optional[int] = None,
 ) -> HyperliquidWhaleDistributions:
-    """一次原始响应同时构建 BTC 和 ETH，且不暴露钱包地址。"""
+    """一次原始响应同时构建 BTC 和 ETH；Top-N 明细包含链上公开地址。"""
     now = int(now_sec or time.time())
     fetched_at = int(fetched_at_ts or now)
     rows = raw_positions if isinstance(raw_positions, list) else []
@@ -196,6 +198,8 @@ def _build_asset_distribution(
         invalid_liquidation_price_count=invalid_liquidation,
         entry_buckets=_materialize_buckets(entry_acc, mark_price),
         liquidation_buckets=_materialize_buckets(liquidation_acc, mark_price),
+        top_longs=_build_top_positions(valid_rows, "long", mark_price),
+        top_shorts=_build_top_positions(valid_rows, "short", mark_price),
         quality=DataQuality(
             valid=fresh,
             status="fresh" if fresh else "stale",
@@ -207,6 +211,42 @@ def _build_asset_distribution(
         ),
         caveats=_default_caveats(),
     )
+
+
+def _build_top_positions(
+    rows: list[dict[str, Any]],
+    side: str,
+    mark_price: float,
+    limit: int = TOP_POSITION_LIMIT,
+) -> list[HyperliquidWhaleTopPosition]:
+    """按名义价值取单侧前 N 名头寸明细；地址为链上公开数据。"""
+    side_rows = [
+        row for row in rows
+        if (float(row["position_size"]) > 0) == (side == "long")
+    ]
+    side_rows.sort(key=lambda row: float(row["position_value_usd"]), reverse=True)
+    result: list[HyperliquidWhaleTopPosition] = []
+    for row in side_rows[:limit]:
+        liq_price = _positive(row.get("liq_price"))
+        distance_to_liq_pct = (
+            round((liq_price / mark_price - 1.0) * 100.0, 4)
+            if liq_price is not None and mark_price > 0 else None
+        )
+        margin_mode = str(row.get("margin_mode") or "").strip() or None
+        result.append(HyperliquidWhaleTopPosition(
+            address=str(row.get("user") or ""),
+            side=side,
+            position_size=round(abs(float(row["position_size"])), 8),
+            notional_usd=round(float(row["position_value_usd"]), 2),
+            entry_price=_positive(row.get("entry_price")),
+            liq_price=liq_price,
+            leverage=_positive(row.get("leverage")) or 0.0,
+            margin_mode=margin_mode,
+            unrealized_pnl=_finite(row.get("unrealized_pnl")),
+            distance_to_liq_pct=distance_to_liq_pct,
+            update_time_ts=_timestamp_seconds(row.get("update_time")),
+        ))
+    return result
 
 
 def _add_bucket(

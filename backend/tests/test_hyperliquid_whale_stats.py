@@ -136,10 +136,10 @@ def test_missing_asset_and_dynamic_staleness_do_not_affect_other_asset():
     assert original.assets["BTC"].quality.valid is True
 
 
-def test_api_returns_memory_aggregate_without_wallet_addresses():
+def test_api_exposes_top_positions_with_public_addresses():
     payload = build_hyperliquid_whale_distributions([
         _position(
-            user="0xsecret-wallet", symbol="BTC", size=1, notional=1_000,
+            user="0xpublic-wallet", symbol="BTC", size=1, notional=1_000,
             entry=100, liquidation=80, mark=100,
         ),
     ], now_sec=NOW)
@@ -159,14 +159,107 @@ def test_api_returns_memory_aggregate_without_wallet_addresses():
     encoded = json.dumps(result)
     assert result["score_weight"] == 0
     assert set(result["assets"]) == {"BTC", "ETH"}
-    assert "0xsecret-wallet" not in encoded
-    assert "user" not in encoded
+    # 地址为链上公开数据，产品决策明确在 Top-N 明细中展示。
+    assert "0xpublic-wallet" in encoded
+    top_longs = result["assets"]["BTC"]["top_longs"]
+    assert len(top_longs) == 1
+    assert top_longs[0]["address"] == "0xpublic-wallet"
+
+
+def test_top_positions_sorted_by_notional_and_split_by_side():
+    rows = [
+        _position(
+            user="0xlong-small", symbol="BTC", size=10, notional=1_000,
+            entry=95, liquidation=60, mark=100, leverage=2,
+        ),
+        _position(
+            user="0xlong-big", symbol="BTC", size=50, notional=5_000,
+            entry=98, liquidation=90, mark=100, leverage=10,
+        ),
+        _position(
+            user="0xshort-big", symbol="BTC", size=-80, notional=8_000,
+            entry=102, liquidation=104, mark=100, leverage=40,
+        ),
+        _position(
+            user="0xshort-no-liq", symbol="BTC", size=-5, notional=500,
+            entry=110, liquidation=0, mark=100, leverage=3,
+        ),
+    ]
+    rows[2]["margin_mode"] = "cross"
+    rows[2]["unrealized_pnl"] = -160_000.5
+
+    btc = build_hyperliquid_whale_distributions(rows, now_sec=NOW).assets["BTC"]
+
+    assert [item.address for item in btc.top_longs] == ["0xlong-big", "0xlong-small"]
+    assert [item.address for item in btc.top_shorts] == [
+        "0xshort-big", "0xshort-no-liq",
+    ]
+    biggest_short = btc.top_shorts[0]
+    assert biggest_short.side == "short"
+    assert biggest_short.position_size == 80
+    assert biggest_short.notional_usd == 8_000
+    assert biggest_short.entry_price == 102
+    assert biggest_short.liq_price == 104
+    assert biggest_short.leverage == 40
+    assert biggest_short.margin_mode == "cross"
+    assert biggest_short.unrealized_pnl == -160_000.5
+    assert biggest_short.distance_to_liq_pct == pytest.approx(4.0)
+    # 清算价缺失（liq_price=0 视为无效）时距离为 None，但仍进入榜单。
+    assert btc.top_shorts[1].liq_price is None
+    assert btc.top_shorts[1].distance_to_liq_pct is None
+    long_distance = btc.top_longs[0].distance_to_liq_pct
+    assert long_distance == pytest.approx(-10.0)
+
+
+def test_top_positions_capped_at_limit():
+    rows = [
+        _position(
+            user=f"0xlong-{index}", symbol="BTC", size=1, notional=1_000 + index,
+            entry=100, liquidation=90, mark=100,
+        )
+        for index in range(12)
+    ]
+    btc = build_hyperliquid_whale_distributions(rows, now_sec=NOW).assets["BTC"]
+    assert len(btc.top_longs) == 10
+    assert btc.top_longs[0].address == "0xlong-11"
+    assert btc.top_shorts == []
 
 
 def test_pending_contract_has_both_assets():
     payload = pending_hyperliquid_whale_distributions()
     assert set(payload.assets) == {"BTC", "ETH"}
     assert all(asset.quality.status == "pending" for asset in payload.assets.values())
+
+
+def test_whale_snapshot_persist_and_reload_roundtrip(tmp_path):
+    from processors.trend_service import TrendService
+
+    service = object.__new__(TrendService)
+    service._whale_snapshot_path = str(tmp_path / "hl_whale_snapshot.json")
+    rows = [
+        _position(
+            user="0xpersisted", symbol="BTC", size=-2, notional=3_000,
+            entry=105, liquidation=110, mark=100, leverage=8,
+        ),
+    ]
+
+    TrendService._persist_whale_snapshot(service, rows, NOW)
+    loaded = TrendService._load_whale_snapshot(service)
+
+    assert loaded is not None
+    assert loaded.fetched_at_ts == NOW
+    btc = loaded.assets["BTC"]
+    assert btc.position_count == 1
+    assert btc.top_shorts[0].address == "0xpersisted"
+
+    # 快照文件损坏时回退 None，不抛异常。
+    with open(service._whale_snapshot_path, "w", encoding="utf-8") as handle:
+        handle.write("{broken json")
+    assert TrendService._load_whale_snapshot(service) is None
+
+    # 文件不存在同样回退 None。
+    service._whale_snapshot_path = str(tmp_path / "missing.json")
+    assert TrendService._load_whale_snapshot(service) is None
 
 
 def test_identical_concurrent_source_requests_share_singleflight(tmp_path):
