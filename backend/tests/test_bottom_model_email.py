@@ -35,6 +35,35 @@ def test_bottom_model_email_contains_evidence_quality_and_disclaimer():
         assert text in body
 
 
+def test_bottom_model_email_zero_score_check_not_satisfied():
+    """ok=True 仅表示可评分；0 分/低分 check 不得进入"关键满足项"。"""
+    snapshot = {
+        "day": "2026-08-12",
+        "quadrant": {"key": "basing", "label": "高压力／初步确认"},
+        "stress": {"score": 66.0},
+        "confirmation": {
+            "score": 40.0,
+            "checks": [
+                {"label": "ETF 流反转", "ok": True, "status": "SCORABLE",
+                 "score": 0.0, "note": "仍在净流出"},
+                {"label": "价格收复STH成本", "ok": True, "status": "SCORABLE",
+                 "score": 50.0, "note": "接近但未收复"},
+                {"label": "aSOPR 收复 1", "ok": True, "status": "SCORABLE",
+                 "score": 100.0, "note": "14d 均 > 1"},
+            ],
+        },
+        "factors": [],
+        "data_quality": {},
+    }
+    _, body = build_bottom_model_email(snapshot)
+    satisfied_section = body.split("关键满足项")[1].split("尚未满足或不可评分项")[0]
+    unmet_section = body.split("尚未满足或不可评分项")[1]
+    assert "aSOPR 收复 1" in satisfied_section
+    assert "ETF 流反转" not in satisfied_section
+    assert "ETF 流反转" in unmet_section
+    assert "价格收复STH成本" in unmet_section  # 50 分 = 部分/接近，不算满足
+
+
 def test_bottom_model_email_escapes_snapshot_content():
     snapshot = {
         "day": "2026-08-12<script>",

@@ -41,15 +41,35 @@ def build_bottom_model_email(
     ) or "<tr><td colspan='2' style='padding:7px 8px'>无可用因子</td></tr>"
 
     checks = (snapshot.get("confirmation") or {}).get("checks") or []
+    # ok 仅表示"可评分"（score is not None），不代表条件满足：
+    # 0 分（如 ETF 持续流出）若按 ok 归入满足项会严重误导，
+    # 需再加分数门槛（60 = 各 check 分档中"明确改善"与"接近/部分"的分界）。
+    satisfied_min_score = 60.0
+
+    def _check_score(item: dict[str, Any]) -> float | None:
+        try:
+            return float(item.get("score"))
+        except (TypeError, ValueError):
+            return None
+
+    def _is_satisfied(item: dict[str, Any]) -> bool:
+        score = _check_score(item)
+        return (
+            item.get("ok") is True
+            and item.get("status") != "UNSCORABLE"
+            and score is not None
+            and score >= satisfied_min_score
+        )
+
     satisfied = [
         f"{item.get('label') or item.get('key')}：{item.get('note') or '条件已满足'}"
         for item in checks
-        if item.get("ok") is True and item.get("status") != "UNSCORABLE"
+        if _is_satisfied(item)
     ]
     unmet = [
         f"{item.get('label') or item.get('key')}：{item.get('note') or '尚未满足'}"
         for item in checks
-        if item.get("ok") is not True or item.get("status") == "UNSCORABLE"
+        if not _is_satisfied(item)
     ]
     quality = snapshot.get("data_quality") or {}
     quality_notes: list[str] = []
