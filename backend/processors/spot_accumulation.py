@@ -258,6 +258,11 @@ def build_opportunities(
         blocked = [] if index == 1 else ["等待同批次前序子档完成或跳过"]
         if index == 1 and spendable + 0.01 < amount:
             blocked.append("对应预算不足")
+        # capitulation 的"出清后承接确认"是该档的语义前提，即使作为更深档
+        # 触发批次中的前序补齐档，也不得绕过；未确认时保持 observing，
+        # 用户可通过"跳过"放行后续档位。
+        if index == 1 and stage == "capitulation" and not capitulation_confirmed:
+            blocked.append("尚未完成出清后承接确认")
         status = "eligible" if not blocked else "observing"
         tolerance = max(0.01, daily_atr_pct / 100.0 * 0.35)
         low = facts.price * (1.0 - tolerance)

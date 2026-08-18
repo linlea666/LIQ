@@ -253,6 +253,55 @@ def test_new_downside_batch_needs_lower_price_gap():
     assert any(item.stage == "deep_value" for item in next_items)
 
 
+def test_batch_catch_up_never_bypasses_capitulation_confirmation():
+    """更深档触发批次时，capitulation 作为前序补齐档也不得绕过出清确认。"""
+    from models.spot_accumulation import SpotOpportunity
+
+    facts = _facts()
+    facts.scores = EvidenceScore(valuation=95, capital_flow=95, acceptance=95)
+    runtime = SpotAccumulationRuntimeState()
+    now = int(time.time())
+    # insurance / value_1 / deep_value 已全额成交（历史批次已解决）
+    for oid, stage, amount in (
+        ("h1", "insurance", 1_000.0),
+        ("h2", "value_1", 2_000.0),
+        ("h3", "deep_value", 3_000.0),
+    ):
+        runtime.opportunities[oid] = SpotOpportunity(
+            opportunity_id=oid, stage=stage, bucket="core",
+            allocation_usdt=amount, filled_usdt=amount, status="filled",
+            price_zone_low=49_000, price_zone_high=51_000, trigger_price=50_000,
+            scores=facts.scores, created_at=now, updated_at=now,
+            expires_at=now + 86_400, policy_version=1,
+        )
+
+    items = build_opportunities(
+        facts, runtime,
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=False,
+        weekly_reclaim_confirmed=True,
+    )
+    by_stage = {item.stage: item for item in items}
+    assert set(by_stage) == {"capitulation", "bottom_confirmed"}
+    cap = by_stage["capitulation"]
+    assert cap.status == "observing"
+    assert "尚未完成出清后承接确认" in cap.blocked_by
+    assert cap.reserved_usdt == 0.0
+    # 出清确认后，同场景应正常放行
+    runtime2 = SpotAccumulationRuntimeState()
+    runtime2.opportunities = dict(runtime.opportunities)
+    items2 = build_opportunities(
+        facts, runtime2,
+        {"core": 13_000, "swing": 4_000, "tail": 3_000},
+        {"core": 0, "swing": 0, "tail": 0},
+        capitulation_confirmed=True,
+        weekly_reclaim_confirmed=True,
+    )
+    cap2 = next(item for item in items2 if item.stage == "capitulation")
+    assert cap2.status == "eligible"
+
+
 def test_tail_mode_is_three_sequential_tranches():
     facts = _facts()
     facts.scores = EvidenceScore(valuation=95, capital_flow=70, acceptance=90)
