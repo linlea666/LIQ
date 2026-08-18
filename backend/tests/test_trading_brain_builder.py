@@ -196,6 +196,40 @@ def test_wall_events_recent_only():
     assert "新出现" in snap.events[0].message
 
 
+def test_wall_events_layer_follows_zone_source():
+    """现货主导墙（spot_only / spot+depth）的事件应标 spot 层，其余 futures。"""
+    last = 100_000.0
+    now = int(time.time())
+    spot_wall = _wall(
+        wall_zone_id="wz_spot", side="bid", source="spot_only",
+        price_mid=99_500.0, price_low=99_400.0, price_high=99_600.0,
+    )
+    fut_wall = _wall(
+        wall_zone_id="wz_fut", side="ask", source="depth_only",
+        price_mid=100_500.0, price_low=100_400.0, price_high=100_600.0,
+    )
+    op = OrderbookPressureSnapshot(
+        coin="BTC", ts_sec=now, last_price=last,
+        walls_below=[spot_wall], walls_above=[fut_wall],
+        wall_zones=[spot_wall, fut_wall],
+        wall_events=[
+            WallEvent(ts_sec=now - 60, side="bid", price_mid=99_500.0,
+                      event_type="wall_appeared", wall_zone_id="wz_spot"),
+            WallEvent(ts_sec=now - 60, side="ask", price_mid=100_500.0,
+                      event_type="wall_appeared", wall_zone_id="wz_fut"),
+            WallEvent(ts_sec=now - 60, side="ask", price_mid=100_800.0,
+                      event_type="wall_appeared", wall_zone_id="unknown_zone"),
+        ],
+    )
+    snap = build_trading_brain_snapshot(
+        coin="BTC", last_price=last, atr=400.0, kl=None, op=op, liq=None,
+    )
+    layer_by_zone = {e.zone_id: e.layer for e in snap.events if e.zone_id}
+    assert layer_by_zone["wz_spot"] == "spot"
+    assert layer_by_zone["wz_fut"] == "futures"
+    assert layer_by_zone["unknown_zone"] == "futures"  # 查不到来源时回退默认
+
+
 def test_dominant_role_spot_defense():
     """现货墙 + Coinbase + 关键位高 trust → spot_defense（防守位）。"""
     last = 100_000.0

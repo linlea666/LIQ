@@ -606,12 +606,24 @@ def _build_events(
     coin: str = "",
 ) -> list[BrainEvent]:
     out: list[BrainEvent] = []
+    # 按 wall_zone_id 反查来源墙的 source，现货主导的墙（spot_only /
+    # spot+depth）事件应标 spot 层；此前恒标 futures 导致 EventTimeline 分层错。
+    zone_source_by_id: dict[str, str] = {}
+    if op:
+        for wz in (op.wall_zones or []):
+            if wz.wall_zone_id:
+                zone_source_by_id[wz.wall_zone_id] = str(wz.source or "")
+    _SPOT_SOURCES = ("spot_only", "spot+depth")
     if op and op.wall_events:
         for ev in op.wall_events:
             ts = int(ev.ts_sec or 0)
             if ts <= 0 or now_sec - ts > 1800:
                 continue
-            layer: Any = "spot" if wall_layer == "spot" else "futures"
+            zone_source = zone_source_by_id.get(str(ev.wall_zone_id or ""), "")
+            if zone_source in _SPOT_SOURCES:
+                layer: Any = "spot"
+            else:
+                layer = "spot" if wall_layer == "spot" else "futures"
             out.append(BrainEvent(
                 ts=ts,
                 layer=layer,
