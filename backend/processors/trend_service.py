@@ -65,6 +65,8 @@ class TrendService:
             else None
         )
         self._running = False
+        # 引擎实时价读取函数（symbol -> price），用于巨鲸清算穿越判定。
+        self._live_price_provider: Optional[Callable[[str], Optional[float]]] = None
         self._task: Optional[asyncio.Task] = None
         self._outbox_task: Optional[asyncio.Task] = None
         self._aux_task: Optional[asyncio.Task] = None
@@ -113,9 +115,30 @@ class TrendService:
         result.quality.points = len(result.items)
         return result
 
+    def set_live_price_provider(
+        self, provider: Callable[[str], Optional[float]],
+    ) -> None:
+        """注入引擎实时价读取函数；仅用于巨鲸清算穿越判定，不影响趋势评价。"""
+        self._live_price_provider = provider
+
+    def _live_prices(self) -> dict[str, float]:
+        if self._live_price_provider is None:
+            return {}
+        prices: dict[str, float] = {}
+        for symbol in ("BTC", "ETH"):
+            try:
+                price = self._live_price_provider(symbol)
+            except Exception:  # noqa: BLE001 实时价失败时回退快照标记价，不阻断展示
+                continue
+            if isinstance(price, (int, float)) and math.isfinite(price) and price > 0:
+                prices[symbol] = float(price)
+        return prices
+
     def hyperliquid_whale_distributions(self) -> HyperliquidWhaleDistributions:
         """只返回内存聚合结果；API 读取不会触发上游请求。"""
-        return refreshed_distribution_quality(self._whale_distributions)
+        return refreshed_distribution_quality(
+            self._whale_distributions, live_prices=self._live_prices(),
+        )
 
     def _load_whale_snapshot(self) -> Optional[HyperliquidWhaleDistributions]:
         try:
@@ -644,6 +667,7 @@ class TrendService:
             self._whale_distributions = build_hyperliquid_whale_distributions(
                 whale_positions,
                 fetched_at_ts=fetched_at,
+                live_prices=self._live_prices(),
             )
             self._persist_whale_snapshot(whale_positions, fetched_at)
         if not self._cfg.footprint_enabled:

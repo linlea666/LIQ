@@ -23,6 +23,8 @@ class HyperliquidWhaleTopPosition(BaseModel):
     unrealized_pnl: Optional[float] = None
     distance_to_liq_pct: Optional[float] = None
     update_time_ts: Optional[int] = None
+    # 参考价已穿越清算价：可能已被清算，等待上游快照确认后移除。
+    possibly_liquidated: bool = False
 
 
 class HyperliquidWhalePriceBucket(BaseModel):
@@ -41,9 +43,16 @@ class HyperliquidWhalePriceBucket(BaseModel):
 class HyperliquidWhaleAssetDistribution(BaseModel):
     symbol: Literal["BTC", "ETH"]
     mark_price: Optional[float] = None
+    # 穿越判定使用的参考价：优先引擎实时价，缺失时回退快照中位标记价。
+    reference_price: Optional[float] = None
     as_of_ts: Optional[int] = None
     bin_size_pct: float = 0.5
     position_count: int = 0
+    # 参考价已穿越清算价的仓位（已从清算桶与多空合计中剔除，Top榜灰显保留）。
+    crossed_count: int = 0
+    crossed_notional_usd: float = 0
+    # update_time 超龄被剔除的僵尸行数量。
+    stale_row_count: int = 0
     long_count: int = 0
     short_count: int = 0
     long_notional_usd: float = 0

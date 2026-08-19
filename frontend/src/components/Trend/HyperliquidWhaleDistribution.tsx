@@ -42,6 +42,8 @@ type TopPosition = {
   unrealized_pnl?: number | null;
   distance_to_liq_pct?: number | null;
   update_time_ts?: number | null;
+  /** 参考价已穿越清算价：可能已被清算，等待上游快照确认。 */
+  possibly_liquidated?: boolean;
 };
 
 type LiquidationPin = {
@@ -520,6 +522,8 @@ function buildLiquidationPins(asset: AssetDistribution): LiquidationPin[] {
     const list = (side === "long" ? asset.top_longs : asset.top_shorts) ?? [];
     list.slice(0, PIN_LIMIT).forEach((position, index) => {
       if (position.liq_price == null || position.liq_price <= 0) return;
+      // 可能已被清算的仓位不再钉在爆仓图上，避免误导。
+      if (position.possibly_liquidated) return;
       const distancePct = position.distance_to_liq_pct
         ?? (position.liq_price / markPrice - 1) * 100;
       pins.push({
@@ -548,7 +552,7 @@ function TopPositionsCard({ asset }: { asset: AssetDistribution }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="text-sm font-medium text-slate-200">巨鲸 Top 头寸明细（按仓位价值）</div>
-          <div className="text-[10px] text-slate-600">地址为链上公开数据，点击地址可复制 · 距清算 ≤{HIGH_RISK_LIQ_DISTANCE_PCT}% 标记为高危 · 交叉保证金清算价随账户权益动态变化</div>
+          <div className="text-[10px] text-slate-600">地址为链上公开数据，点击地址可复制 · 距清算 ≤{HIGH_RISK_LIQ_DISTANCE_PCT}% 标记为高危 · 现价已穿越清算价的仓位灰显为"可能已清算" · 交叉保证金清算价随账户权益动态变化</div>
         </div>
       </div>
       <div className="mt-3 grid gap-4 xl:grid-cols-2">
@@ -580,14 +584,17 @@ function TopPositionsTable({ title, positions, symbol, tone: toneClass }: { titl
         </thead>
         <tbody>
           {positions.map((position, index) => {
-            const highRisk = position.distance_to_liq_pct != null
+            const crossed = position.possibly_liquidated === true;
+            const highRisk = !crossed
+              && position.distance_to_liq_pct != null
               && Math.abs(position.distance_to_liq_pct) <= HIGH_RISK_LIQ_DISTANCE_PCT;
             return (
-              <tr key={`${position.address}-${index}`} className={`border-t border-slate-800 ${highRisk ? "bg-amber-950/30" : ""}`}>
+              <tr key={`${position.address}-${index}`} className={`border-t border-slate-800 ${highRisk ? "bg-amber-950/30" : ""} ${crossed ? "opacity-50" : ""}`}>
                 <td className="max-w-[190px] p-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-600">#{index + 1}</span>
                     <AddressCell address={position.address} />
+                    {crossed && <span className="rounded bg-slate-800 px-1 text-[9px] text-slate-400" title="现价已穿越该仓位清算价，可能已被清算；等待上游快照确认后移除">可能已清算</span>}
                     {highRisk && <span className="rounded bg-amber-900/70 px-1 text-[9px] text-amber-300">高危</span>}
                   </div>
                 </td>

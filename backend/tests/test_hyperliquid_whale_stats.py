@@ -115,7 +115,12 @@ def test_bucket_math_invalid_prices_and_extreme_liquidation_are_independent():
     assert entry.distance_from_mark_pct == pytest.approx(0.25)
     assert entry.long_notional_usd == 4_000
     assert entry.long_avg_leverage == pytest.approx(5.0)
-    assert max(bucket.price_mid for bucket in btc.liquidation_buckets) > 1_000_000
+    # 多头清算价高于参考价（3,000,000 > 100）已属"参考价穿越"：
+    # 可能已清算或清算价失真，从清算燃料桶剔除但保留在持仓结构中。
+    assert btc.crossed_count == 1
+    assert btc.crossed_notional_usd == 3_000
+    assert btc.long_notional_usd == 4_000
+    assert all(bucket.price_mid < 1_000_000 for bucket in btc.liquidation_buckets)
 
 
 def test_missing_asset_and_dynamic_staleness_do_not_affect_other_asset():
@@ -225,6 +230,202 @@ def test_top_positions_capped_at_limit():
     assert btc.top_shorts == []
 
 
+def test_crossed_positions_removed_from_liq_buckets_but_kept_in_structure():
+    rows = [
+        # 空头清算价 95 已被参考价 100 上穿 → 可能已清算。
+        _position(
+            user="0xshort-crossed", symbol="BTC", size=-1, notional=5_000,
+            entry=98, liquidation=95, mark=100, leverage=40,
+        ),
+        # 正常空头：清算价 110 在现价上方。
+        _position(
+            user="0xshort-alive", symbol="BTC", size=-1, notional=2_000,
+            entry=102, liquidation=110, mark=100, leverage=10,
+        ),
+        # 正常多头：清算价 90 在现价下方。
+        _position(
+            user="0xlong-alive", symbol="BTC", size=1, notional=3_000,
+            entry=99, liquidation=90, mark=100, leverage=5,
+        ),
+    ]
+    btc = build_hyperliquid_whale_distributions(rows, now_sec=NOW).assets["BTC"]
+
+    assert btc.reference_price == 100
+    assert btc.crossed_count == 1
+    assert btc.crossed_notional_usd == 5_000
+    # 持仓结构保留穿越仓位（多空合计与开仓桶不受影响）。
+    assert btc.short_count == 2
+    assert btc.short_notional_usd == 7_000
+    assert btc.valid_entry_price_count == 3
+    # 清算燃料桶剔除穿越仓位：只剩 110 空头桶和 90 多头桶。
+    liq_short_total = sum(b.short_notional_usd for b in btc.liquidation_buckets)
+    liq_long_total = sum(b.long_notional_usd for b in btc.liquidation_buckets)
+    assert liq_short_total == 2_000
+    assert liq_long_total == 3_000
+    # Top榜保留穿越仓位并带标记；正常仓位不带标记。
+    flagged = {p.address: p.possibly_liquidated for p in btc.top_shorts}
+    assert flagged == {"0xshort-crossed": True, "0xshort-alive": False}
+    assert btc.top_longs[0].possibly_liquidated is False
+    assert any("参考价穿越清算价" in caveat for caveat in btc.caveats)
+
+
+def test_live_price_overrides_median_mark_for_crossing():
+    rows = [
+        # 空头清算价 104：按快照标记价 100 未穿越，按实时价 105 已穿越。
+        _position(
+            user="0xshort", symbol="BTC", size=-1, notional=4_000,
+            entry=100, liquidation=104, mark=100, leverage=25,
+        ),
+    ]
+    result = build_hyperliquid_whale_distributions(
+        rows, now_sec=NOW, live_prices={"BTC": 105.0},
+    )
+    btc = result.assets["BTC"]
+
+    assert btc.mark_price == 100  # 桶轴仍以快照标记价为基准
+    assert btc.reference_price == 105
+    assert btc.crossed_count == 1
+    assert btc.liquidation_buckets == []
+    top = btc.top_shorts[0]
+    assert top.possibly_liquidated is True
+    assert top.distance_to_liq_pct == pytest.approx((104 / 105 - 1) * 100, abs=1e-3)
+
+    # 无实时价时回退中位标记价：同样数据不算穿越。
+    fallback = build_hyperliquid_whale_distributions(rows, now_sec=NOW)
+    assert fallback.assets["BTC"].crossed_count == 0
+    assert fallback.assets["BTC"].top_shorts[0].possibly_liquidated is False
+
+
+def test_refreshed_quality_reflags_top_positions_with_live_price():
+    rows = [
+        _position(
+            user="0xshort", symbol="BTC", size=-1, notional=4_000,
+            entry=100, liquidation=104, mark=100, leverage=25,
+        ),
+    ]
+    original = build_hyperliquid_whale_distributions(rows, now_sec=NOW)
+    assert original.assets["BTC"].top_shorts[0].possibly_liquidated is False
+
+    refreshed = refreshed_distribution_quality(
+        original, now_sec=NOW + 60, live_prices={"BTC": 105.0},
+    )
+    top = refreshed.assets["BTC"].top_shorts[0]
+    assert refreshed.assets["BTC"].reference_price == 105
+    assert top.possibly_liquidated is True
+    assert top.distance_to_liq_pct == pytest.approx((104 / 105 - 1) * 100, abs=1e-3)
+    # 价格回落后标记随之解除。
+    recovered = refreshed_distribution_quality(
+        original, now_sec=NOW + 120, live_prices={"BTC": 103.0},
+    )
+    assert recovered.assets["BTC"].top_shorts[0].possibly_liquidated is False
+    # 原内存对象不被修改。
+    assert original.assets["BTC"].top_shorts[0].possibly_liquidated is False
+
+
+def test_zombie_rows_older_than_24h_are_filtered():
+    rows = [
+        _position(
+            user="0xfresh", symbol="BTC", size=1, notional=1_000,
+            entry=100, liquidation=90, mark=100, updated=NOW - 600,
+        ),
+        _position(
+            user="0xzombie", symbol="BTC", size=-1, notional=2_000,
+            entry=110, liquidation=130, mark=100, updated=NOW - 25 * 3600,
+        ),
+    ]
+    btc = build_hyperliquid_whale_distributions(rows, now_sec=NOW).assets["BTC"]
+
+    assert btc.position_count == 1
+    assert btc.stale_row_count == 1
+    assert btc.short_count == 0
+    assert all(p.address != "0xzombie" for p in (*btc.top_longs, *btc.top_shorts))
+    assert any("僵尸仓位行" in caveat for caveat in btc.caveats)
+
+
+def test_trend_service_live_prices_swallow_provider_errors():
+    from processors.trend_service import TrendService
+
+    service = object.__new__(TrendService)
+    service._live_price_provider = None
+    assert TrendService._live_prices(service) == {}
+
+    def provider(symbol: str):
+        if symbol == "BTC":
+            return 65_000.0
+        raise RuntimeError("ticker unavailable")
+
+    TrendService.set_live_price_provider(service, provider)
+    assert TrendService._live_prices(service) == {"BTC": 65_000.0}
+
+    # 非法价格（0/负数/NaN）被忽略。
+    service._live_price_provider = lambda _symbol: 0.0
+    assert TrendService._live_prices(service) == {}
+
+
+def test_whale_position_cache_ttl_exempt_from_long_cache_floor():
+    class _FakeResponse:
+        status = 200
+
+        def raise_for_status(self):
+            pass
+
+        async def json(self):
+            return {"code": "0", "data": [{"symbol": "BTC"}]}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class _FakeSession:
+        def get(self, _url, params=None, headers=None):
+            return _FakeResponse()
+
+    async def scenario():
+        source = CoinglassSource(
+            base_url="https://example.invalid",
+            api_key="test",
+            rate_per_min=10,
+            provider_limit_per_min=11,
+        )
+        source._cache = {}
+
+        async def fake_get_session():
+            return _FakeSession()
+
+        async def fake_acquire(_priority, _path):
+            return None
+
+        source.get_session = fake_get_session
+        source._limiter.acquire = fake_acquire
+        try:
+            import time as time_module
+            before = time_module.time()
+            await source._request_once(
+                "/api/hyperliquid/whale-position", cache_ttl=300,
+            )
+            await source._request_once(
+                "/api/hyperliquid/whale-alert", cache_ttl=300,
+            )
+            expiries = {}
+            for path in ("/api/hyperliquid/whale-position",
+                         "/api/hyperliquid/whale-alert"):
+                key = source._cache_key(path, None, "v4", False)
+                expire_ts, _value = source._cache[key]
+                expiries[path] = expire_ts - before
+        finally:
+            await source.close()
+        return expiries
+
+    expiries = asyncio.run(scenario())
+    position_ttl = expiries["/api/hyperliquid/whale-position"]
+    alert_ttl = expiries["/api/hyperliquid/whale-alert"]
+    # 巨鲸仓位端点豁免 900s 长缓存下限，按声明 300s 缓存；其他 hyperliquid 端点不变。
+    assert 290 <= position_ttl <= 310
+    assert 890 <= alert_ttl <= 910
+
+
 def test_pending_contract_has_both_assets():
     payload = pending_hyperliquid_whale_distributions()
     assert set(payload.assets) == {"BTC", "ETH"}
@@ -234,12 +435,16 @@ def test_pending_contract_has_both_assets():
 def test_whale_snapshot_persist_and_reload_roundtrip(tmp_path):
     from processors.trend_service import TrendService
 
+    import time as time_module
+
     service = object.__new__(TrendService)
     service._whale_snapshot_path = str(tmp_path / "hl_whale_snapshot.json")
     rows = [
+        # 回载重建用真实当前时间判断僵尸行，update_time 必须取当下。
         _position(
             user="0xpersisted", symbol="BTC", size=-2, notional=3_000,
             entry=105, liquidation=110, mark=100, leverage=8,
+            updated=int(time_module.time()),
         ),
     ]
 

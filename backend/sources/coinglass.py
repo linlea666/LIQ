@@ -230,6 +230,10 @@ class CoinglassSource(DataSource):
         "/api/option/",
         "/api/chain/",
     )
+    # 巨鲸仓位需要更快感知清算/平仓，豁免长缓存下限，按声明 TTL（300s）缓存。
+    _LONG_CACHE_EXEMPT_PATHS: frozenset[str] = frozenset({
+        "/api/hyperliquid/whale-position",
+    })
 
     def __init__(self, base_url: str, api_key: str, timeout_sec: int = 15,
                  rate_per_min: int = 10, provider_limit_per_min: int = 11,
@@ -450,7 +454,8 @@ class CoinglassSource(DataSource):
             cache_ttl = max(cache_ttl, self._MIN_CACHE_TTL)
         elif cache_ttl <= 0:
             cache_ttl = 30
-        if path.startswith(self._LONG_CACHE_PREFIXES):
+        if (path.startswith(self._LONG_CACHE_PREFIXES)
+                and path not in self._LONG_CACHE_EXEMPT_PATHS):
             cache_ttl = max(cache_ttl, 900)
 
         if cache_ttl > 0:

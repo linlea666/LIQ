@@ -396,6 +396,16 @@ class Engine:
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy, max_history=max_hist)
 
+        # 巨鲸清算穿越判定复用引擎实时 ticker（15s 更新），失败时回退快照标记价。
+        def _trend_live_price(symbol: str) -> Optional[float]:
+            state = self._states.get(symbol)
+            ticker = state.ticker if state else None
+            if ticker is None or not ticker.last:
+                return None
+            return float(ticker.last)
+
+        self.trend_service.set_live_price_provider(_trend_live_price)
+
         # MAA 的历史 deque 容量独立配置（不与 ai max_history 共用）
         maa_max = self._settings.market_action.max_history
         for state in self._states.values():

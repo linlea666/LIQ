@@ -51,6 +51,8 @@ type WhaleTopPosition = {
   liq_price?: number | null;
   leverage: number;
   distance_to_liq_pct?: number | null;
+  /** 参考价已穿越清算价：可能已被清算，等待上游快照确认。 */
+  possibly_liquidated?: boolean;
 };
 
 type WhaleAsset = {
@@ -85,15 +87,24 @@ export function LiquidityOverview() {
 
   useEffect(() => {
     let disposed = false;
+    const fetchJson = (url: string) =>
+      fetch(url, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))));
+    // 关键位优先取实时快照（history 每2小时才落盘一次），失败时回退 history。
+    const loadKeyLevels = async (): Promise<KeyLevelSnapshot | null> => {
+      try {
+        return (await fetchJson(`${API_BASE}/api/key-levels/BTC`)) as KeyLevelSnapshot;
+      } catch {
+        const payload = (await fetchJson(`${API_BASE}/api/key-levels/history/BTC?limit=1`)) as { snapshots?: KeyLevelSnapshot[] };
+        return payload.snapshots?.[0] ?? null;
+      }
+    };
     const load = async () => {
       const errors: string[] = [];
       const [mapResult, whaleResult, klResult] = await Promise.allSettled([
-        fetch(`${API_BASE}/api/liquidation/BTC?cycle=${cycle}`, { cache: "no-store" })
-          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))),
-        fetch(`${API_BASE}/api/trend/hyperliquid-whale-distributions`, { cache: "no-store" })
-          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))),
-        fetch(`${API_BASE}/api/key-levels/history/BTC?limit=1`, { cache: "no-store" })
-          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))),
+        fetchJson(`${API_BASE}/api/liquidation/BTC?cycle=${cycle}`),
+        fetchJson(`${API_BASE}/api/trend/hyperliquid-whale-distributions`),
+        loadKeyLevels(),
       ]);
       if (disposed) return;
       if (mapResult.status === "fulfilled") setLiqMap(mapResult.value as LiquidationMap);
@@ -102,10 +113,8 @@ export function LiquidityOverview() {
         const payload = whaleResult.value as WhaleDistributions;
         setWhale(payload.assets?.BTC ?? null);
       } else errors.push("巨鲸清算分布暂不可用");
-      if (klResult.status === "fulfilled") {
-        const snapshots = (klResult.value as { snapshots?: KeyLevelSnapshot[] }).snapshots;
-        setKeyLevels(snapshots?.[0] ?? null);
-      } else errors.push("关键位数据暂不可用");
+      if (klResult.status === "fulfilled") setKeyLevels(klResult.value);
+      else errors.push("关键位数据暂不可用");
       setLayerErrors(errors);
     };
     void load();
@@ -245,6 +254,8 @@ function deriveOverview(
   let riskiestWhale: OverviewDerived["riskiestWhale"] = null;
   for (const position of topPositions) {
     if (position.liq_price == null || position.liq_price <= 0) continue;
+    // 参考价已穿越清算价的仓位可能已被清算，不再作为"最近的高危巨鲸"。
+    if (position.possibly_liquidated) continue;
     const distancePct = position.distance_to_liq_pct ?? distancePctOf(position.liq_price);
     if (riskiestWhale == null || Math.abs(distancePct) < Math.abs(riskiestWhale.distancePct)) {
       riskiestWhale = {
@@ -324,6 +335,7 @@ function buildPins(whale: WhaleAsset | null, markPrice: number) {
     const list = (side === "long" ? whale.top_longs : whale.top_shorts) ?? [];
     list.slice(0, 5).forEach((position, index) => {
       if (position.liq_price == null || position.liq_price <= 0) return;
+      if (position.possibly_liquidated) return;
       const distancePct = position.distance_to_liq_pct ?? (position.liq_price / markPrice - 1) * 100;
       pins.push({
         key: `${side}-${position.address}-${position.liq_price}`,
