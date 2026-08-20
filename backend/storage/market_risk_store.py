@@ -67,6 +67,8 @@ class MarketRiskStore:
                 CREATE TABLE IF NOT EXISTS snapshots (
                     coin TEXT NOT NULL, decision_time INTEGER NOT NULL,
                     incident_id TEXT, episode_id TEXT, stage TEXT NOT NULL,
+                    valid_for_calibration INTEGER, pit_violation_count INTEGER,
+                    quality_layer TEXT,
                     payload TEXT NOT NULL,
                     PRIMARY KEY(coin,decision_time)
                 );
@@ -95,6 +97,15 @@ class MarketRiskStore:
                     reason TEXT NOT NULL, payload TEXT NOT NULL,
                     UNIQUE(source_id,coin,observed_at,reason)
                 );
+                CREATE TABLE IF NOT EXISTS context_fact_versions (
+                    source_id TEXT NOT NULL, fact_key TEXT NOT NULL,
+                    version INTEGER NOT NULL, content_hash TEXT NOT NULL,
+                    first_observed_at INTEGER NOT NULL, last_observed_at INTEGER NOT NULL,
+                    effective_time INTEGER NOT NULL, payload TEXT NOT NULL,
+                    PRIMARY KEY(source_id,fact_key,version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_fact_latest
+                    ON context_fact_versions(source_id,fact_key,version DESC);
                 CREATE TABLE IF NOT EXISTS market_risk_email_outbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     dedup_key TEXT NOT NULL UNIQUE, incident_id TEXT,
@@ -132,6 +143,21 @@ class MarketRiskStore:
             )
             self._conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_evidence_identity ON evidence_ledger(evidence_id,content_hash)"
+            )
+            snapshot_columns = {
+                str(row[1])
+                for row in self._conn.execute("PRAGMA table_info(snapshots)").fetchall()
+            }
+            for name, kind in (
+                ("valid_for_calibration", "INTEGER"),
+                ("pit_violation_count", "INTEGER"),
+                ("quality_layer", "TEXT"),
+            ):
+                if name not in snapshot_columns:
+                    self._conn.execute(f"ALTER TABLE snapshots ADD COLUMN {name} {kind}")
+            self._conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_risk_snapshots_governance
+                   ON snapshots(decision_time,valid_for_calibration,pit_violation_count)"""
             )
 
     def save_calibration(self, artifact: CalibrationArtifact) -> None:
@@ -180,6 +206,47 @@ class MarketRiskStore:
             )
             return cur.rowcount > 0
 
+    def record_context_observation(
+        self, source_id: str, fact_key: str, effective_time: int,
+        payload: dict[str, Any], observed_at: int,
+    ) -> dict[str, Any]:
+        """保存首次观测及修订版；同内容轮询只更新 last_observed_at。"""
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        content_hash = hashlib.sha256(encoded.encode()).hexdigest()[:24]
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                """SELECT version,content_hash,first_observed_at FROM context_fact_versions
+                   WHERE source_id=? AND fact_key=? ORDER BY version DESC LIMIT 1""",
+                (source_id, fact_key),
+            ).fetchone()
+            if row and row["content_hash"] == content_hash:
+                self._conn.execute(
+                    """UPDATE context_fact_versions SET last_observed_at=?
+                       WHERE source_id=? AND fact_key=? AND version=?""",
+                    (int(observed_at), source_id, fact_key, int(row["version"])),
+                )
+                return {
+                    "version": int(row["version"]),
+                    "first_observed_at": int(row["first_observed_at"]),
+                    "revised": int(row["version"]) > 1,
+                }
+            version = int(row["version"] if row else 0) + 1
+            first_observed_at = int(row["first_observed_at"] if row else observed_at)
+            self._conn.execute(
+                """INSERT INTO context_fact_versions
+                   (source_id,fact_key,version,content_hash,first_observed_at,
+                    last_observed_at,effective_time,payload)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    source_id, fact_key, version, content_hash, first_observed_at,
+                    int(observed_at), int(effective_time), encoded,
+                ),
+            )
+            return {
+                "version": version, "first_observed_at": first_observed_at,
+                "revised": version > 1,
+            }
+
     def commit_evaluation(
         self,
         snapshot: MarketIncidentSnapshot,
@@ -193,10 +260,13 @@ class MarketRiskStore:
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT OR IGNORE INTO snapshots
-                   (coin,decision_time,incident_id,episode_id,stage,payload)
-                   VALUES(?,?,?,?,?,?)""",
+                   (coin,decision_time,incident_id,episode_id,stage,
+                    valid_for_calibration,pit_violation_count,quality_layer,payload)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
                 (snapshot.coin, snapshot.decision_time, snapshot.incident_id,
-                 snapshot.episode_id, snapshot.stage, payload),
+                 snapshot.episode_id, snapshot.stage,
+                 int(snapshot.valid_for_calibration), len(snapshot.pit_violations),
+                 snapshot.quality_layer, payload),
             )
             self._conn.execute(
                 """INSERT INTO current_snapshot(coin,decision_time,payload) VALUES(?,?,?)
@@ -308,11 +378,53 @@ class MarketRiskStore:
             row = self._conn.execute(
                 "SELECT payload FROM current_snapshot WHERE coin=?", (coin.upper(),),
             ).fetchone()
-        return MarketIncidentSnapshot.model_validate_json(row["payload"]) if row else None
+        if not row:
+            return None
+        payload = json.loads(row["payload"])
+        try:
+            return MarketIncidentSnapshot.model_validate(payload)
+        except ValueError:
+            # 旧 shadow 快照保留审计价值，但未来时间绝不能继续流入实时决策。
+            decision_time = int(payload.get("decision_time") or 0)
+            violations = list(payload.get("pit_violations") or [])
+            for field in ("event_time", "observed_at", "watermark"):
+                value = int(payload.get(field) or 0)
+                if value > decision_time:
+                    violations.append(f"legacy_snapshot:{field}_after_decision")
+                    payload[f"reported_{field}"] = value
+                    payload[field] = decision_time
+            for item in payload.get("evidence", []) or []:
+                item.setdefault("raw_strength", item.get("strength", 0.0))
+                for field in ("event_time", "observed_at", "watermark", "decision_time"):
+                    value = int(item.get(field) or 0)
+                    if value > decision_time:
+                        violations.append(f"{item.get('evidence_id', 'legacy')}:{field}_after_decision")
+                        item.setdefault("values", {})[f"reported_{field}"] = value
+                        item[field] = decision_time
+                item["role"] = "informational"
+            for source_id, quality in (payload.get("source_quality") or {}).items():
+                for field in ("as_of", "observed_at", "watermark"):
+                    value = int(quality.get(field) or 0)
+                    if value > decision_time:
+                        violations.append(f"{source_id}:{field}_after_decision")
+                        quality[field] = decision_time
+                if any(source_id in violation for violation in violations):
+                    quality["decision_usable"] = False
+                    quality["validity"] = "invalid"
+                    quality.setdefault("reasons", []).append("legacy_pit_violation")
+            payload.update({
+                "quality_layer": "data_degraded",
+                "stage_frozen": True,
+                "valid_for_calibration": False,
+                "notification_eligible": False,
+                "pit_violations": list(dict.fromkeys(violations)),
+            })
+            return MarketIncidentSnapshot.model_validate(payload)
 
     def history(
         self, coin: str, from_ts: Optional[int] = None,
-        to_ts: Optional[int] = None, limit: int = 2_000,
+        to_ts: Optional[int] = None, limit: int = 2_000, *,
+        order: str = "asc", cursor: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         clauses = ["coin=?"]
         params: list[Any] = [coin.upper()]
@@ -322,10 +434,14 @@ class MarketRiskStore:
         if to_ts is not None:
             clauses.append("decision_time<=?")
             params.append(int(to_ts))
+        direction = "DESC" if str(order).lower() == "desc" else "ASC"
+        if cursor is not None:
+            clauses.append("decision_time<?" if direction == "DESC" else "decision_time>?")
+            params.append(int(cursor))
         params.append(max(1, min(int(limit), 10_000)))
         sql = (
             "SELECT payload FROM snapshots WHERE " + " AND ".join(clauses)
-            + " ORDER BY decision_time ASC LIMIT ?"
+            + f" ORDER BY decision_time {direction} LIMIT ?"
         )
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
@@ -364,12 +480,46 @@ class MarketRiskStore:
             ],
         }
 
-    def outbox_stats(self) -> dict[str, int]:
+    def outbox_stats(self) -> dict[str, Any]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT status,COUNT(*) AS n FROM market_risk_email_outbox GROUP BY status"
             ).fetchall()
-        return {str(row["status"]): int(row["n"]) for row in rows}
+            pending = self._conn.execute(
+                "SELECT MIN(created_ts) AS oldest FROM market_risk_email_outbox WHERE status='pending'"
+            ).fetchone()
+            sent = self._conn.execute(
+                """SELECT MAX(sent_ts-created_ts) AS max_delay
+                   FROM market_risk_email_outbox WHERE status='sent'"""
+            ).fetchone()
+        result: dict[str, Any] = {str(row["status"]): int(row["n"]) for row in rows}
+        oldest = int(pending["oldest"] or 0) if pending else 0
+        result["oldest_pending_age_sec"] = max(0, int(time.time()) - oldest) if oldest else 0
+        result["max_sent_delay_sec"] = int(sent["max_delay"] or 0) if sent else 0
+        return result
+
+    def readiness_stats(self, since: int) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT COUNT(*) AS total,
+                          COALESCE(SUM(CASE WHEN pit_violation_count>0 THEN 1 ELSE 0 END),0) AS pit,
+                          COALESCE(SUM(CASE WHEN valid_for_calibration=1 THEN 1 ELSE 0 END),0) AS valid,
+                          COALESCE(SUM(CASE WHEN quality_layer='normal' THEN 1 ELSE 0 END),0) AS core,
+                          COALESCE(MIN(decision_time),0) AS first_governed_at
+                   FROM snapshots
+                   WHERE decision_time>=?
+                     AND valid_for_calibration IS NOT NULL
+                     AND pit_violation_count IS NOT NULL""",
+                (int(since),),
+            ).fetchone()
+        total = int(row["total"] or 0) if row else 0
+        return {
+            "snapshot_count": total,
+            "pit_violations": int(row["pit"] or 0) if row else 0,
+            "valid_for_calibration": int(row["valid"] or 0) if row else 0,
+            "core_coverage": int(row["core"] or 0) / total if row and total else 0.0,
+            "first_governed_at": int(row["first_governed_at"] or 0) if row else 0,
+        }
 
     def due_outbox(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:

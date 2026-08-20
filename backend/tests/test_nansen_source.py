@@ -87,3 +87,28 @@ async def test_nansen_missing_key_degrades_without_request():
 
     assert row is None
     assert source.last_error == "missing_api_key"
+
+
+@pytest.mark.asyncio
+async def test_nansen_native_bitcoin_profiler_uses_bitcoin_chain(monkeypatch):
+    source = NansenSource(NansenSourceConfig(), api_key="test")
+    calls = []
+
+    async def fake_post(path, body, *, cache_ttl):
+        calls.append((path, body, cache_ttl))
+        return {"data": [{"address": "bc1-related", "chain": "bitcoin"}]}
+
+    monkeypatch.setattr(source, "_post", fake_post)
+    related = await source.fetch_bitcoin_related_wallets("bc1-owner", per_page=250)
+    transactions = await source.fetch_bitcoin_transactions(
+        "bc1-owner", from_time="2026-08-19T00:00:00Z",
+        to_time="2026-08-20T00:00:00Z", per_page=20,
+    )
+    assert related[0]["chain"] == "bitcoin"
+    assert transactions[0]["chain"] == "bitcoin"
+    assert calls[0][0] == "profiler/address/related-wallets"
+    assert calls[0][1]["chain"] == "bitcoin"
+    assert calls[0][1]["pagination"]["per_page"] == 100
+    assert calls[1][0] == "profiler/address/transactions"
+    assert calls[1][1]["chain"] == "bitcoin"
+    assert calls[1][1]["date"]["from"] == "2026-08-19T00:00:00Z"

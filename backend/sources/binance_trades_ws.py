@@ -36,6 +36,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 from typing import Any, Optional
@@ -102,8 +103,9 @@ class BinanceTradesWS(DataSource):
         self._pending: dict[tuple[str, str, int], list[float]] = {}
         # (coin, market, hour_ts) → [high, low, close, close_ts]（P4 全量成交价统计）
         self._pending_price: dict[tuple[str, str, int], list[float]] = {}
-        # 全量主动成交 1min 短窗。与 whale 桶完全分开，联合风险引擎消费此处。
+        # 全量主动成交 1s 环形桶。保留真实 Binance T，不用分钟末尾补时。
         self._flow_buckets: dict[tuple[str, str, int], list[float]] = {}
+        self._flow_lock = threading.RLock()
         # coin → deque[{ts, market, side, price, qty, usd}]（近 24h whale 明细）
         self._recent_whales: dict[str, deque] = {
             c: deque(maxlen=2000) for c in self._coin_symbols
@@ -190,20 +192,29 @@ class BinanceTradesWS(DataSource):
 
     def aggressor_flow(
         self, coin: str, market: str, within_sec: int = 300,
+        *, decision_time: Optional[int] = None,
     ) -> dict[str, Any]:
-        """返回全量主动买卖 quote 短窗；没有完整连续性时显式降级。"""
-        now = int(time.time())
-        cutoff = now - max(1, int(within_sec))
+        """严格聚合 ``[decision_time-window, decision_time]`` 内的真实成交时间。"""
+        now = int(time.time() if decision_time is None else decision_time)
+        window = max(1, int(within_sec))
+        cutoff = now - window
         buy = sell = 0.0
         first_ts: Optional[int] = None
         last_ts: Optional[int] = None
-        for (bucket_coin, bucket_market, minute_ts), values in self._flow_buckets.items():
-            if bucket_coin != coin.upper() or bucket_market != market or minute_ts < cutoff - 60:
+        with self._flow_lock:
+            snapshot = tuple(self._flow_buckets.items())
+        for (bucket_coin, bucket_market, second_ts), values in snapshot:
+            if (
+                bucket_coin != coin.upper()
+                or bucket_market != market
+                or second_ts < cutoff
+                or second_ts > now
+            ):
                 continue
             buy += values[0]
             sell += values[1]
-            first_ts = minute_ts if first_ts is None else min(first_ts, minute_ts)
-            last_ts = minute_ts if last_ts is None else max(last_ts, minute_ts)
+            first_ts = second_ts if first_ts is None else min(first_ts, second_ts)
+            last_ts = second_ts if last_ts is None else max(last_ts, second_ts)
         recent_gap = next((
             marker for marker in reversed(self._gap_markers)
             if marker.get("coin") == coin.upper()
@@ -211,12 +222,13 @@ class BinanceTradesWS(DataSource):
             and int(marker.get("observed_at", 0)) >= cutoff
         ), None)
         return {
-            "coin": coin.upper(), "market": market, "window_sec": within_sec,
+            "coin": coin.upper(), "market": market, "window_sec": window,
             "aggressor_buy_quote": buy,
             "aggressor_sell_quote": sell,
             "total_quote": buy + sell,
             "as_of": last_ts or 0,
             "first_bucket_ts": first_ts,
+            "coverage_sec": max(0, (last_ts or 0) - (first_ts or 0) + 1),
             "continuity": "gap" if recent_gap else ("continuous" if last_ts else "unknown"),
             "gap_reason": recent_gap.get("reason") if recent_gap else None,
         }
@@ -374,15 +386,15 @@ class BinanceTradesWS(DataSource):
         # m=True → 买方是 maker → taker 主动卖。必须在 whale 阈值之前累计全量流。
         side = "sell" if is_maker_buy else "buy"
         if record_bucket:
-            minute_ts = trade_ts - trade_ts % 60
-            flow = self._flow_buckets.setdefault(
-                (coin, market, minute_ts), [0.0, 0.0],
-            )
-            flow[0 if side == "buy" else 1] += usd
-            cutoff = int(time.time()) - 6 * 3600
-            if len(self._flow_buckets) > 3_000:
-                for key in [key for key in self._flow_buckets if key[2] < cutoff]:
-                    self._flow_buckets.pop(key, None)
+            with self._flow_lock:
+                flow = self._flow_buckets.setdefault(
+                    (coin, market, trade_ts), [0.0, 0.0],
+                )
+                flow[0 if side == "buy" else 1] += usd
+                cutoff = int(time.time()) - 10 * 60
+                if len(self._flow_buckets) > 20_000:
+                    for key in [key for key in self._flow_buckets if key[2] < cutoff]:
+                        self._flow_buckets.pop(key, None)
         try:
             from storage.raw_event_store import get_raw_event_store
             raw_store = get_raw_event_store()

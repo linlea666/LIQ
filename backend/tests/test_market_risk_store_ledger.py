@@ -57,3 +57,59 @@ def test_repeated_transition_email_dedup_key_enqueues_once(tmp_path) -> None:
     ).fetchone()[0]
     assert count == 1
     store.close()
+
+
+def test_context_fact_keeps_first_observation_and_appends_revision(tmp_path) -> None:
+    store = MarketRiskStore(str(tmp_path))
+    first = store.record_context_observation(
+        "etf", "2026-08-19", 100, {"net": 10}, 200,
+    )
+    same = store.record_context_observation(
+        "etf", "2026-08-19", 100, {"net": 10}, 220,
+    )
+    revised = store.record_context_observation(
+        "etf", "2026-08-19", 100, {"net": 12}, 240,
+    )
+    assert first == {"version": 1, "first_observed_at": 200, "revised": False}
+    assert same == first
+    assert revised == {"version": 2, "first_observed_at": 200, "revised": True}
+    assert store._conn.execute("SELECT COUNT(*) FROM context_fact_versions").fetchone()[0] == 2
+    store.close()
+
+
+def test_history_desc_cursor_returns_latest_page_without_changing_legacy_asc(tmp_path) -> None:
+    store = MarketRiskStore(str(tmp_path))
+    context = MarketRiskMachineContext(coin="BTC")
+    for decision_time in (110, 120, 130):
+        store.commit_evaluation(_snapshot(decision_time), context)
+    assert [item["decision_time"] for item in store.history("BTC", limit=2)] == [110, 120]
+    latest = store.history("BTC", limit=2, order="desc")
+    assert [item["decision_time"] for item in latest] == [130, 120]
+    older = store.history("BTC", limit=2, order="desc", cursor=120)
+    assert [item["decision_time"] for item in older] == [110]
+    store.close()
+
+
+def test_readiness_uses_indexed_governance_columns_and_excludes_legacy_rows(tmp_path) -> None:
+    store = MarketRiskStore(str(tmp_path))
+    context = MarketRiskMachineContext(coin="BTC")
+    store._conn.execute(
+        """INSERT INTO snapshots(coin,decision_time,stage,payload)
+           VALUES('BTC',90,'normal','{}')"""
+    )
+    store.commit_evaluation(_snapshot(110), context)
+    invalid = _snapshot(120).model_copy(update={
+        "quality_layer": "data_degraded",
+        "valid_for_calibration": False,
+        "pit_violations": ["future_source"],
+    })
+    store.commit_evaluation(invalid, context)
+    stats = store.readiness_stats(0)
+    assert stats == {
+        "snapshot_count": 2,
+        "pit_violations": 1,
+        "valid_for_calibration": 1,
+        "core_coverage": 0.5,
+        "first_governed_at": 110,
+    }
+    store.close()

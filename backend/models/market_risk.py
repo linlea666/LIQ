@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 RiskStage = Literal["normal", "watch", "warning", "critical", "cooldown", "resolved"]
 RiskDirection = Literal["up", "down", "mixed", "unknown"]
+MarketRiskMode = Literal["shadow", "production_read_only", "production_alerting"]
 QualityLayer = Literal["normal", "data_degraded"]
 EvidencePillar = Literal[
     "spot_demand",
@@ -21,7 +22,7 @@ EvidencePillar = Literal[
     "market_response",
     "context",
 ]
-EvidenceDirection = Literal["up", "down", "neutral", "unknown"]
+EvidenceDirection = Literal["up", "down", "mixed", "neutral", "unknown"]
 EvidenceRole = Literal["scoring", "informational", "context"]
 
 
@@ -50,7 +51,10 @@ class EvidenceItem(BaseModel):
     name: str
     direction: EvidenceDirection = "unknown"
     role: EvidenceRole = "scoring"
+    # strength 是兼容 UI 的 0..1 等级；raw_strength 保留真实未截断幅度，
+    # 用于同一因果根的多空竞争，避免两个极端值都被截成 1 后按插入顺序选边。
     strength: float = 0.0
+    raw_strength: float = 0.0
     confidence: float = 0.0
     event_time: int
     observed_at: int
@@ -62,6 +66,16 @@ class EvidenceItem(BaseModel):
     calibration_version: str
     values: dict[str, Any] = Field(default_factory=dict)
     explanation: str = ""
+
+    @model_validator(mode="after")
+    def _validate_point_in_time(self) -> "EvidenceItem":
+        if self.event_time > self.observed_at:
+            raise ValueError("event_time cannot be after observed_at")
+        if self.observed_at > self.decision_time:
+            raise ValueError("observed_at cannot be after decision_time")
+        if self.watermark > self.decision_time:
+            raise ValueError("watermark cannot be after decision_time")
+        return self
 
 
 class PillarSnapshot(BaseModel):
@@ -159,6 +173,70 @@ class MarketRiskMachineContext(BaseModel):
     last_qualifying_at: int = 0
     last_critical_at: int = 0
     resolved_at: int = 0
+    degraded_since: int = 0
+    last_confirmed_at: int = 0
+
+
+class MarketFactor(BaseModel):
+    """情报室的强类型事实卡；异常强度与是否参与决策明确分离。"""
+
+    factor_id: str
+    label: str
+    direction: RiskDirection = "unknown"
+    status: Literal["normal", "unusual", "extreme", "missing", "conflict"] = "normal"
+    strength_band: Literal["unavailable", "weak", "medium", "strong"] = "unavailable"
+    decision_role: Literal["scoring", "informational", "blocked"] = "informational"
+    source_ids: list[str] = Field(default_factory=list)
+    as_of: int = 0
+    decision_usable: bool = False
+    plain_summary: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+class LiveObservation(BaseModel):
+    decision_time: int
+    direction: RiskDirection = "unknown"
+    quality_layer: QualityLayer = "data_degraded"
+    spot_confirmed: bool = False
+    independent_root_count: int = 0
+    causal_roots: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ConfirmedIncident(BaseModel):
+    stage: RiskStage = "normal"
+    direction: RiskDirection = "unknown"
+    confirmed_at: int = 0
+    stage_since: int = 0
+    frozen: bool = False
+    frozen_since: int = 0
+    frozen_age_sec: int = 0
+    incident_id: Optional[str] = None
+    episode_id: Optional[str] = None
+
+
+class DecisionSupport(BaseModel):
+    stance: Literal["observe_long", "observe_short", "wait"] = "wait"
+    strength_band: Literal["unavailable", "weak", "medium", "strong"] = "unavailable"
+    summary: str = "等待证据"
+    supporting_evidence: list[str] = Field(default_factory=list)
+    opposing_evidence: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    invalidation_conditions: list[str] = Field(default_factory=list)
+    execution_eligible: Literal[False] = False
+
+
+class MarketRiskIntelligence(BaseModel):
+    product_name: str = "LIQ BTC 开仓决策情报室"
+    coin: str
+    mode: MarketRiskMode = "shadow"
+    decision_time: int
+    live_observation: LiveObservation
+    confirmed_incident: ConfirmedIncident
+    decision_support: DecisionSupport
+    factors: list[MarketFactor] = Field(default_factory=list)
+    context: dict[str, Any] = Field(default_factory=dict)
+    incident: "MarketIncidentSnapshot"
 
 
 class MarketIncidentSnapshot(BaseModel):
@@ -171,12 +249,20 @@ class MarketIncidentSnapshot(BaseModel):
     stage: RiskStage = "normal"
     quality_layer: QualityLayer = "normal"
     direction: RiskDirection = "unknown"
+    live_direction: RiskDirection = "unknown"
     incident_id: Optional[str] = None
     episode_id: Optional[str] = None
     stage_since: int = 0
+    mode: MarketRiskMode = "shadow"
     shadow_mode: bool = True
+    stage_frozen: bool = False
+    frozen_since: int = 0
+    last_confirmed_at: int = 0
+    valid_for_calibration: bool = True
+    pit_violations: list[str] = Field(default_factory=list)
     research_signals: list[str] = Field(default_factory=list)
     causal_roots: list[str] = Field(default_factory=list)
+    live_causal_roots: list[str] = Field(default_factory=list)
     independent_root_count: int = 0
     spot_confirmed: bool = False
     pillars: dict[str, PillarSnapshot] = Field(default_factory=dict)
@@ -191,6 +277,20 @@ class MarketIncidentSnapshot(BaseModel):
     calibration_admitted: bool = False
     notification_eligible: bool = False
 
+    @model_validator(mode="after")
+    def _validate_point_in_time(self) -> "MarketIncidentSnapshot":
+        future_fields = {
+            "event_time": self.event_time,
+            "observed_at": self.observed_at,
+            "watermark": self.watermark,
+        }
+        invalid = [name for name, value in future_fields.items() if value > self.decision_time]
+        if invalid:
+            raise ValueError(
+                "snapshot point-in-time violation: " + ",".join(sorted(invalid))
+            )
+        return self
+
 
 class CalibrationArtifact(BaseModel):
     calibration_version: str
@@ -201,12 +301,18 @@ class CalibrationArtifact(BaseModel):
     notes: str = ""
     thresholds: dict[str, float]
     baseline_thresholds: dict[str, float] = Field(default_factory=dict)
+    dataset_hash: str = ""
+    code_hash: str = ""
+    config_hash: str = ""
+    admission_report_hash: str = ""
+    admission_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class MarketRiskHealth(BaseModel):
     enabled: bool
     running: bool
     shadow_mode: bool
+    mode: MarketRiskMode = "shadow"
     config_version: str
     calibration_version: str = "unavailable"
     calibration_admitted: bool = False
@@ -215,7 +321,26 @@ class MarketRiskHealth(BaseModel):
     latest_by_coin: dict[str, int] = Field(default_factory=dict)
     source_quality: dict[str, dict[str, SourceQuality]] = Field(default_factory=dict)
     raw_event_store: dict[str, Any] = Field(default_factory=dict)
-    outbox: dict[str, int] = Field(default_factory=dict)
+    outbox: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketRiskReady(BaseModel):
+    ready_for_mode: MarketRiskMode = "shadow"
+    current_mode: MarketRiskMode = "shadow"
+    pit_violations_24h: int = 0
+    valid_for_calibration_24h: int = 0
+    snapshot_count_24h: int = 0
+    core_coverage_24h: float = 0.0
+    governed_shadow_age_sec: int = 0
+    rss_observation_age_sec: int = 0
+    rss_p95_gib: float = 0.0
+    rss_slope_mib_per_hour: float = 0.0
+    frozen_by_coin: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    raw_queue_dropped: int = 0
+    raw_store: dict[str, Any] = Field(default_factory=dict)
+    dependencies: dict[str, Any] = Field(default_factory=dict)
+    admission: dict[str, Any] = Field(default_factory=dict)
+    blockers: list[str] = Field(default_factory=list)
 
 
 class GroundTruthEpisode(BaseModel):

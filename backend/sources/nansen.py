@@ -225,6 +225,46 @@ class NansenSource(DataSource):
         payload = await self._post("token-screener", body, cache_ttl=14400)
         return self._items(payload)
 
+    async def fetch_bitcoin_related_wallets(
+        self, address: str, *, per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """查询原生 Bitcoin 地址关系；不接受 WBTC/EVM 地址替代。"""
+        normalized = str(address or "").strip()
+        if not normalized:
+            return []
+        payload = await self._post(
+            "profiler/address/related-wallets",
+            {
+                "address": normalized,
+                "chain": "bitcoin",
+                "pagination": {"page": 1, "per_page": max(1, min(per_page, 100))},
+                "order_by": [{"field": "order", "direction": "ASC"}],
+            },
+            cache_ttl=21_600,
+        )
+        return self._items(payload)
+
+    async def fetch_bitcoin_transactions(
+        self, address: str, *, from_time: str, to_time: str,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """查询原生 Bitcoin 地址交易，供配置后的 PIT 实体观察器消费。"""
+        normalized = str(address or "").strip()
+        if not normalized or not from_time or not to_time:
+            return []
+        payload = await self._post(
+            "profiler/address/transactions",
+            {
+                "address": normalized,
+                "chain": "bitcoin",
+                "date": {"from": from_time, "to": to_time},
+                "hide_spam_token": True,
+                "pagination": {"page": 1, "per_page": max(1, min(per_page, 100))},
+            },
+            cache_ttl=900,
+        )
+        return self._items(payload)
+
 
 def create_nansen_source() -> Optional[NansenSource]:
     settings = get_settings()

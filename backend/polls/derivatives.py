@@ -168,6 +168,7 @@ async def poll_oi(
 ) -> None:
     """获取 OI 历史；Binance contracts/base 决策，Coinglass USD 展示兜底。"""
     standardized_rows: Optional[list[dict]] = None
+    current_oi_row: Optional[dict] = None
     # 当前 Binance fapi 端点仅覆盖 USD-M linear；inverse 必须等待对应 COIN-M
     # 标准源，不能把错误产品规格伪装成可决策数据。
     if bn is not None and str(coin.contract_type).lower() == "linear":
@@ -175,6 +176,9 @@ async def poll_oi(
             standardized_rows = await bn.fetch_open_interest_history(
                 coin.symbol_cg_pair, period="5m", limit=50,
             )
+            fetch_current = getattr(bn, "fetch_open_interest", None)
+            if fetch_current is not None:
+                current_oi_row = await fetch_current(coin.symbol_cg_pair)
         except Exception:
             logger.warning("Binance standardized OI failed | coin=%s", coin.ccy, exc_info=True)
     data = await cg.fetch_oi_aggregated_history(
@@ -279,14 +283,27 @@ async def poll_oi(
         elif change_1h < -3:
             trend = "declining"
 
+        current_contracts = current.oi_contracts
+        current_observed_at = 0
+        if current_oi_row:
+            try:
+                observed_contracts = float(current_oi_row.get("openInterest", 0) or 0)
+                observed_at = normalize_epoch_seconds(current_oi_row.get("time", 0))
+                if observed_contracts > 0 and observed_at > 0:
+                    current_contracts = observed_contracts
+                    current_observed_at = observed_at
+            except (TypeError, ValueError):
+                pass
         state.oi = OIData(
             coin=coin.ccy, ts=current.ts,
             current_usd=current.oi_usd,
+            current_observed_at=current_observed_at,
+            history_as_of=current.ts,
             change_1h_pct=round(change_1h, 2),
             change_5m_pct=round(change_5m, 2),
             trend=trend,
             history=points,
-            current_contracts=current.oi_contracts,
+            current_contracts=current_contracts,
             current_base_equivalent=current.oi_base_equivalent,
             current_usd_notional=current.oi_usd_notional,
             decision_change_5m_pct=(
@@ -330,6 +347,28 @@ async def poll_oi(
                 state.oi_change_24h_pct = round(change_24h, 2)
         except (ValueError, KeyError, TypeError):
             pass
+
+
+async def poll_current_oi(
+    bn: BinanceFuturesSource | None, coin: CoinConfig, state: CoinState,
+) -> None:
+    """15 秒当前 OI 观测；闭合 5m 历史仍由 poll_oi 独立维护变化率。"""
+    if bn is None or state.oi is None or str(coin.contract_type).lower() != "linear":
+        return
+    row = await bn.fetch_open_interest(coin.symbol_cg_pair)
+    if not row:
+        return
+    try:
+        contracts = float(row.get("openInterest", 0) or 0)
+        observed_at = normalize_epoch_seconds(row.get("time", 0))
+    except (TypeError, ValueError):
+        return
+    if contracts <= 0 or observed_at <= 0:
+        return
+    state.oi = state.oi.model_copy(update={
+        "current_contracts": contracts,
+        "current_observed_at": observed_at,
+    })
 
 
 async def poll_funding_all(

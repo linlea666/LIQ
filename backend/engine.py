@@ -134,6 +134,8 @@ class CoinState:
         self.candle_ts: list[int] = []
         self.candles_1h: list = []
         self.candles_15m: list = []
+        self.candles_1m: list = []
+        self.candles_5m: list = []
         self.oi_history: deque = deque(maxlen=720)
         # PR-3 · ai_history / last_ai_ts 已下线（旧 Trader 历史）。
         # Strategic 走 strategic_history / strategic_last_ts。
@@ -142,6 +144,8 @@ class CoinState:
         self.ls_ratio_top_account: Optional[LongShortRatioData] = None
         self.ls_ratio_top_position: Optional[LongShortRatioData] = None
         self.etf_flow: Optional[ETFFlowData] = None
+        self.ibit_official: Optional[dict] = None
+        self.cftc_bitcoin_cot: Optional[dict] = None
         self.global_liq: Optional[GlobalLiquidationData] = None
         self.market_index: Optional[MarketIndexData] = None
         self.cycle_position: Optional[CyclePositionData] = None
@@ -229,6 +233,7 @@ class CoinState:
         self.coinbase_orderbook_sequence_checkpoint: Optional[int] = None
         self.coinbase_orderbook_watermark: Optional[int] = None
         self.coinbase_orderbook_gap_reason: str = ""
+        self.native_liquidity: Optional[dict] = None
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -339,6 +344,12 @@ class Engine:
             timeout_sec=self._settings.coinbase.timeout_sec,
             rate_per_min=self._settings.coinbase.rate_per_min,
         )
+        from sources.deribit_options import DeribitOptionsSource
+        self._deribit = DeribitOptionsSource()
+        from sources.cftc_cot import CFTCBitcoinCOTSource
+        self._cftc_cot = CFTCBitcoinCOTSource()
+        from sources.ishares_ibit import ISharesIBITSource
+        self._ishares_ibit = ISharesIBITSource()
         from sources.nansen import create_nansen_source
         self._nansen = create_nansen_source()
         from sources.looknode import create_looknode_source
@@ -765,6 +776,10 @@ class Engine:
                 self._poll_cfg.get("etf", 3600), 21,
             )),
             asyncio.create_task(self._poll_loop(
+                "ishares_ibit_official", self._poll_ibit_official, btc_coin,
+                self._ishares_ibit.get_poll_interval(), 22.5,
+            )),
+            asyncio.create_task(self._poll_loop(
                 "cg_whale", self._poll_whale_data, btc_coin,
                 self._poll_cfg.get("whale", 900), 24,
             )),
@@ -772,6 +787,10 @@ class Engine:
             asyncio.create_task(self._poll_loop(
                 "cg_options", self._poll_options, btc_coin,
                 self._poll_cfg.get("options", 1200), 30,
+            )),
+            asyncio.create_task(self._poll_loop(
+                "cftc_cme_bitcoin_cot", self._poll_cftc_bitcoin_cot, btc_coin,
+                self._cftc_cot.get_poll_interval(), 31.5,
             )),
             asyncio.create_task(self._poll_loop(
                 "cg_onchain", self._poll_onchain_cycle, btc_coin,
@@ -1053,6 +1072,22 @@ class Engine:
                 f"cg_candles_15m_{ccy}", self._poll_candles_15m, coin,
                 candles_15m_interval, s + 13.5,
             )),
+            asyncio.create_task(self._poll_loop(
+                f"bn_market_risk_candles_{ccy}", self._poll_market_risk_candles,
+                coin, 15, s + 14.0,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"bn_market_risk_current_oi_{ccy}", self._poll_market_risk_current_oi,
+                coin, 15, s + 14.25,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"native_market_risk_depth_{ccy}", self._poll_market_risk_native_depth,
+                coin, 15, s + 14.5,
+            )),
+            asyncio.create_task(self._poll_loop(
+                f"deribit_market_risk_options_{ccy}", self._poll_market_risk_options,
+                coin, 300, s + 14.75,
+            )),
             # ── 中频组（15-30s）：墙观测核心 ──
             asyncio.create_task(self._poll_loop(
                 f"cg_orderbook_pressure_{ccy}", self._poll_orderbook_pressure, coin,
@@ -1205,6 +1240,9 @@ class Engine:
         await self._bn.close()
         await self._bbx.close()
         await self._cb.close()
+        await self._deribit.close()
+        await self._cftc_cot.close()
+        await self._ishares_ibit.close()
         if self._nansen is not None:
             await self._nansen.close()
         if self._looknode is not None:
@@ -1600,6 +1638,31 @@ class Engine:
         bn = self._bn if self._settings.binance.use_for_klines else None
         await poll_candles_15m(self._cg, coin, self._states[coin.ccy], bn)
 
+    async def _poll_market_risk_candles(self, coin: CoinConfig):
+        if coin.ccy not in self._settings.market_risk.coins:
+            return
+        from polls.candles import poll_market_risk_candles
+        bn = self._bn if self._settings.binance.use_for_klines else None
+        await poll_market_risk_candles(coin, self._states[coin.ccy], bn)
+
+    async def _poll_market_risk_current_oi(self, coin: CoinConfig):
+        if coin.ccy not in self._settings.market_risk.coins:
+            return
+        from polls.derivatives import poll_current_oi
+        await poll_current_oi(self._bn, coin, self._states[coin.ccy])
+
+    async def _poll_market_risk_native_depth(self, coin: CoinConfig):
+        if coin.ccy not in self._settings.market_risk.coins:
+            return
+        from polls.native_liquidity import poll_native_liquidity
+        await poll_native_liquidity(self._bn, self._cb, coin, self._states[coin.ccy])
+
+    async def _poll_market_risk_options(self, coin: CoinConfig):
+        if coin.ccy != "BTC" or coin.ccy not in self._settings.market_risk.coins:
+            return
+        from polls.options_deribit import poll_deribit_options
+        await poll_deribit_options(self._deribit, self._states[coin.ccy])
+
     async def _poll_candles_1h(self, coin: CoinConfig):
         from polls.candles import poll_candles_1h
         bn = self._bn if self._settings.binance.use_for_klines else None
@@ -1737,6 +1800,20 @@ class Engine:
     async def _poll_etf_flow(self, _coin: CoinConfig):
         from polls.macro import poll_etf_flow
         await poll_etf_flow(self._cg, self._states, self._settings.supported_coins)
+
+    async def _poll_ibit_official(self, coin: CoinConfig):
+        if coin.ccy != "BTC":
+            return
+        holdings = await self._ishares_ibit.fetch_holdings()
+        if holdings:
+            self._states["BTC"].ibit_official = holdings
+
+    async def _poll_cftc_bitcoin_cot(self, coin: CoinConfig):
+        if coin.ccy != "BTC":
+            return
+        report = await self._cftc_cot.fetch_bitcoin_report()
+        if report:
+            self._states["BTC"].cftc_bitcoin_cot = report
 
     async def _poll_coinbase_premium(self, _coin: CoinConfig):
         from polls.macro import poll_coinbase_premium

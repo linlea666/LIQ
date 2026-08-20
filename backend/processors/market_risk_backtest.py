@@ -89,10 +89,13 @@ _BASELINE_FEATURES: dict[str, tuple[str, float, bool]] = {
 }
 
 _STATE_TIMERS = {
+    "critical_to_warning_sec": 300.0,
+    "warning_to_watch_sec": 300.0,
     "quiet_to_cooldown_sec": 600.0,
     "cooldown_to_resolved_sec": 1200.0,
     "resolved_to_normal_sec": 300.0,
     "episode_gap_sec": 900.0,
+    "root_direction_dominance_ratio": 2.0,
 }
 
 

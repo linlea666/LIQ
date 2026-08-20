@@ -104,6 +104,11 @@ class BinanceFuturesSource(DataSource):
             return None
         return [item for item in data if isinstance(item, dict)]
 
+    async def fetch_open_interest(self, symbol: str) -> Optional[dict]:
+        """当前 OI 观测；与最小 5m 周期的闭合历史序列分开保存。"""
+        data = await self._request("/fapi/v1/openInterest", {"symbol": symbol})
+        return data if isinstance(data, dict) else None
+
     async def stream_tickers(
         self, watched_symbols: set[str] | None = None,
     ) -> AsyncIterator[list[dict]]:

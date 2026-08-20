@@ -36,23 +36,51 @@ async def get_market_risk_health():
     return payload
 
 
+@router.get("/ready")
+async def get_market_risk_ready():
+    service = _require_service()
+    return service.ready().model_dump()
+
+
 @router.get("/{coin}/history")
 async def get_market_risk_history(
     coin: str,
     from_ts: Optional[int] = Query(None, alias="from"),
     to_ts: Optional[int] = Query(None, alias="to"),
     limit: int = Query(2_000, ge=1, le=10_000),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
+    cursor: Optional[int] = Query(None),
 ):
     service = _require_enabled_service()
     coin_u = coin.upper()
     if coin_u not in service.config.coins:
         raise HTTPException(400, f"Market risk not enabled for {coin_u}")
+    items = service.store.history(
+        coin_u, from_ts, to_ts, limit, order=order, cursor=cursor,
+    )
     return {
         "coin": coin_u,
         "from": from_ts,
         "to": to_ts,
-        "items": service.store.history(coin_u, from_ts, to_ts, limit),
+        "order": order,
+        "cursor": cursor,
+        "next_cursor": (
+            int(items[-1].get("decision_time") or 0) if len(items) == limit else None
+        ),
+        "items": items,
     }
+
+
+@router.get("/{coin}/intelligence")
+async def get_market_risk_intelligence(coin: str):
+    service = _require_enabled_service()
+    coin_u = coin.upper()
+    if coin_u not in service.config.coins:
+        raise HTTPException(400, f"Market risk not enabled for {coin_u}")
+    intelligence = service.intelligence(coin_u)
+    if intelligence is None:
+        raise HTTPException(503, f"Market risk warming for {coin_u}")
+    return intelligence.model_dump()
 
 
 @router.get("/{coin}/incidents/{incident_id}")

@@ -277,6 +277,29 @@ async def poll_candles_15m(
             logger.info("Binance K线生效 | coin=%s interval=15m bars=%d", coin.ccy, len(state.candles_15m))
 
 
+async def poll_market_risk_candles(
+    coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
+) -> None:
+    """BTC 情报室专用闭合 1m/5m 行情；不复用 15m 冒充短周期。"""
+    if not bn:
+        return
+    for interval, target, limit in (
+        ("1m", "candles_1m", 120), ("5m", "candles_5m", 120),
+    ):
+        data = await bn.fetch_klines(coin.symbol_cg_pair, interval=interval, limit=limit)
+        if not data:
+            continue
+        raw = parse_candles(data)
+        if raw:
+            setattr(state, target, [
+                CandleData(
+                    coin=coin.ccy, ts=c["ts"], o=c["o"], h=c["h"],
+                    l=c["l"], c=c["c"], vol=c["vol"],
+                )
+                for c in raw
+            ])
+
+
 async def poll_candles_1h(
     cg: CoinglassSource, coin: CoinConfig, state: CoinState, bn: BinanceFuturesSource | None = None,
 ) -> None:

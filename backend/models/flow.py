@@ -62,6 +62,8 @@ class OIData(BaseModel):
     coin: str
     ts: int
     current_usd: float
+    current_observed_at: int = 0
+    history_as_of: int = 0
     change_1h_pct: float = 0
     change_5m_pct: float = 0
     trend: str = ""

@@ -395,6 +395,7 @@ class MarketRiskConfig:
 
     enabled: bool = True
     coins: tuple[str, ...] = ("BTC",)
+    mode: str = "shadow"
     shadow_mode: bool = True
     tick_interval_sec: int = 30
     data_dir: str = "data/market_risk"
@@ -403,11 +404,15 @@ class MarketRiskConfig:
     raw_event_store_enabled: bool = True
     raw_event_queue_max: int = 20_000
     raw_event_batch_size: int = 2_000
+    raw_event_segment_sec: int = 300
+    raw_event_max_total_bytes: int = 50 * 1024 * 1024 * 1024
+    raw_event_min_free_bytes: int = 10 * 1024 * 1024 * 1024
+    raw_event_min_free_inodes: int = 200_000
     source_max_age_sec: dict[str, int] = field(default_factory=lambda: {
         "spot_demand": 180,
-        "leveraged_positioning": 180,
+        "leveraged_positioning": 360,
         "liquidation_risk": 300,
-        "liquidity_structure": 240,
+        "liquidity_structure": 360,
         "market_response": 180,
         "context": 86_400,
     })
@@ -416,6 +421,7 @@ class MarketRiskConfig:
         return {
             "enabled": self.enabled,
             "coins": list(self.coins),
+            "mode": self.mode,
             "shadow_mode": self.shadow_mode,
             "tick_interval_sec": self.tick_interval_sec,
             "data_dir": self.data_dir,
@@ -424,6 +430,10 @@ class MarketRiskConfig:
             "raw_event_store_enabled": self.raw_event_store_enabled,
             "raw_event_queue_max": self.raw_event_queue_max,
             "raw_event_batch_size": self.raw_event_batch_size,
+            "raw_event_segment_sec": self.raw_event_segment_sec,
+            "raw_event_max_total_bytes": self.raw_event_max_total_bytes,
+            "raw_event_min_free_bytes": self.raw_event_min_free_bytes,
+            "raw_event_min_free_inodes": self.raw_event_min_free_inodes,
             "source_max_age_sec": dict(self.source_max_age_sec),
         }
 
@@ -433,6 +443,7 @@ class MarketRiskConfig:
         return {
             "enabled": "MarketRiskEngine.start + market-risk API gate",
             "coins": "MarketRiskEngine loop and route scope",
+            "mode": "MarketRiskEngine mode and notification/readiness gates",
             "shadow_mode": "notification eligibility and UI",
             "tick_interval_sec": "MarketRiskEngine._run_loop",
             "data_dir": "MarketRiskStore RawEventStore OnchainEntityStore",
@@ -441,6 +452,10 @@ class MarketRiskConfig:
             "raw_event_store_enabled": "RawEventStore construction",
             "raw_event_queue_max": "RawEventStore queue hard bound",
             "raw_event_batch_size": "RawEventStore batch hard bound",
+            "raw_event_segment_sec": "RawEventStore atomic segment boundary",
+            "raw_event_max_total_bytes": "RawEventStore storage admission gate",
+            "raw_event_min_free_bytes": "RawEventStore disk free-space gate",
+            "raw_event_min_free_inodes": "RawEventStore inode free-space gate",
             "source_max_age_sec": "MarketRiskEngine SourceQuality gates",
         }
 
@@ -866,9 +881,11 @@ def _build_settings(raw: dict) -> Settings:
     if not isinstance(market_risk_raw, dict):
         raise ValueError("market_risk must be a mapping")
     market_risk_allowed = {
-        "enabled", "coins", "shadow_mode", "tick_interval_sec", "data_dir",
+        "enabled", "coins", "mode", "shadow_mode", "tick_interval_sec", "data_dir",
         "calibration_artifact", "email_enabled", "raw_event_store_enabled",
-        "raw_event_queue_max", "raw_event_batch_size", "source_max_age_sec",
+        "raw_event_queue_max", "raw_event_batch_size", "raw_event_segment_sec",
+        "raw_event_max_total_bytes", "raw_event_min_free_bytes",
+        "raw_event_min_free_inodes", "source_max_age_sec",
     }
     unknown_market_risk = sorted(set(market_risk_raw) - market_risk_allowed)
     if unknown_market_risk:
@@ -894,10 +911,22 @@ def _build_settings(raw: dict) -> Settings:
         raise ValueError(
             "unknown market_risk.source_max_age_sec keys: " + ", ".join(unknown_risk_ages)
         )
+    legacy_shadow = bool(market_risk_raw.get("shadow_mode", True))
+    risk_mode = str(
+        market_risk_raw.get(
+            "mode", "shadow" if legacy_shadow else "production_read_only",
+        )
+    )
+    if risk_mode not in {"shadow", "production_read_only", "production_alerting"}:
+        raise ValueError("market_risk.mode must be shadow, production_read_only, or production_alerting")
+    if "mode" in market_risk_raw and "shadow_mode" in market_risk_raw:
+        if legacy_shadow != (risk_mode == "shadow"):
+            raise ValueError("market_risk.mode conflicts with legacy shadow_mode")
     market_risk_cfg = MarketRiskConfig(
         enabled=bool(market_risk_raw.get("enabled", True)),
         coins=risk_coins,
-        shadow_mode=bool(market_risk_raw.get("shadow_mode", True)),
+        mode=risk_mode,
+        shadow_mode=risk_mode == "shadow",
         tick_interval_sec=max(5, int(market_risk_raw.get("tick_interval_sec", 30))),
         data_dir=str(market_risk_raw.get("data_dir", "data/market_risk") or "data/market_risk"),
         calibration_artifact=str(
@@ -913,6 +942,18 @@ def _build_settings(raw: dict) -> Settings:
         raw_event_batch_size=max(100, min(10_000, int(
             market_risk_raw.get("raw_event_batch_size", 2_000),
         ))),
+        raw_event_segment_sec=max(60, min(3600, int(
+            market_risk_raw.get("raw_event_segment_sec", 300),
+        ))),
+        raw_event_max_total_bytes=max(1024**3, int(
+            market_risk_raw.get("raw_event_max_total_bytes", 50 * 1024**3),
+        )),
+        raw_event_min_free_bytes=max(1024**3, int(
+            market_risk_raw.get("raw_event_min_free_bytes", 10 * 1024**3),
+        )),
+        raw_event_min_free_inodes=max(10_000, int(
+            market_risk_raw.get("raw_event_min_free_inodes", 200_000),
+        )),
         source_max_age_sec={
             key: max(5, int(risk_ages_raw.get(key, value)))
             for key, value in default_risk_ages.items()

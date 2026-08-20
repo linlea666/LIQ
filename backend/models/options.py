@@ -41,6 +41,7 @@ class OptionInfoData(BaseModel):
     expiry_concentration: Optional[float] = None
     known_at: int = 0
     gex_status: str = "unavailable"
+    source: str = "coinglass"
 
 
 class OptionOIHistoryPoint(BaseModel):

@@ -447,6 +447,7 @@ scalp_signal:
 market_risk:
   enabled: true
   coins: ["BTC"]
+  mode: "shadow"             # shadow | production_read_only | production_alerting
   shadow_mode: true
   tick_interval_sec: 30
   data_dir: "data/market_risk"
@@ -455,10 +456,14 @@ market_risk:
   raw_event_store_enabled: true
   raw_event_queue_max: 20000
   raw_event_batch_size: 2000
+  raw_event_segment_sec: 300  # 固定 5 分钟原子段，控制 Parquet 小文件数量
+  raw_event_max_total_bytes: 53687091200
+  raw_event_min_free_bytes: 10737418240
+  raw_event_min_free_inodes: 200000
   source_max_age_sec:
     spot_demand: 180
-    leveraged_positioning: 180
+    leveraged_positioning: 360
     liquidation_risk: 300
-    liquidity_structure: 240
+    liquidity_structure: 360
     market_response: 180
     context: 86400
