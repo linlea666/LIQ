@@ -36,18 +36,18 @@ class CFTCBitcoinCOTSource(DataSource):
         try:
             async with session.get(self.REPORT_URL) as response:
                 if response.status != 200:
-                    self._mark_failure()
+                    self._mark_failure(f"http_{response.status}", response.status)
                     return None
                 parsed = self.parse_report(await response.text())
                 if parsed is None:
-                    self._mark_failure()
+                    self._mark_failure("report_parse_failed")
                     return None
                 parsed["observed_at"] = int(time.time())
                 parsed["source"] = "cftc_official_cme_futures_only"
-                self._mark_success((time.time() - started) * 1000)
+                self._mark_success((time.time() - started) * 1000, response.status)
                 return parsed
-        except Exception:
-            self._mark_failure()
+        except Exception as exc:
+            self._mark_failure(type(exc).__name__)
             return None
 
     @classmethod

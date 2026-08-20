@@ -131,6 +131,12 @@ def test_state_machine_advances_only_one_stage_per_background_tick(tmp_path: Pat
         intelligence = engine.intelligence("BTC")
         assert intelligence is not None
         assert intelligence.decision_support.execution_eligible is False
+        counted = [
+            item for item in intelligence.decision_support.supporting_details
+            if item.counted_in_direction
+        ]
+        assert len({item.causal_root for item in counted}) == len(counted)
+        assert all(item.counting_reason == "independent_root_vote" for item in counted)
         assert intelligence.mode == "shadow"
         assert {factor.factor_id for factor in intelligence.factors} >= {
             "spot_demand", "etf", "options", "native_btc_onchain", "stablecoin",

@@ -26,6 +26,9 @@ class DataSource(ABC):
         self._error_count = 0
         self._last_success_ts = 0
         self._last_latency_ms: float = 0
+        self._last_failure_ts = 0
+        self._last_failure_reason = ""
+        self._last_http_status: Optional[int] = None
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def get_session(self) -> aiohttp.ClientSession:
@@ -47,14 +50,20 @@ class DataSource(ABC):
     def get_poll_interval(self) -> int:
         ...
 
-    def _mark_success(self, latency_ms: float = 0):
+    def _mark_success(self, latency_ms: float = 0, http_status: Optional[int] = None):
         self._error_count = 0
         self._last_success_ts = int(time.time())
         if latency_ms > 0:
             self._last_latency_ms = latency_ms
+        self._last_failure_reason = ""
+        if http_status is not None:
+            self._last_http_status = int(http_status)
 
-    def _mark_failure(self):
+    def _mark_failure(self, reason: str = "request_failed", http_status: Optional[int] = None):
         self._error_count += 1
+        self._last_failure_ts = int(time.time())
+        self._last_failure_reason = str(reason or "request_failed")
+        self._last_http_status = int(http_status) if http_status is not None else None
 
     def health(self) -> SourceHealth:
         if self._error_count == 0 and self._last_success_ts > 0:
@@ -69,6 +78,9 @@ class DataSource(ABC):
             latency_ms=self._last_latency_ms,
             last_success_ts=self._last_success_ts,
             error_count=self._error_count,
+            reason=self._last_failure_reason or None,
+            last_http_status=self._last_http_status,
+            last_failure_ts=self._last_failure_ts,
         )
 
     async def fetch_with_retry(self, coin: CoinConfig) -> Optional[Any]:
@@ -78,9 +90,7 @@ class DataSource(ABC):
             try:
                 result = await self.fetch(coin)
                 elapsed_ms = (time.time() - t0) * 1000
-                self._last_latency_ms = elapsed_ms
-                self._last_success_ts = int(time.time())
-                self._error_count = 0
+                self._mark_success(elapsed_ms)
                 logger.info(
                     "%s fetch OK | coin=%s | latency=%.0fms",
                     self.name, coin.ccy, elapsed_ms,
@@ -88,7 +98,8 @@ class DataSource(ABC):
                 return result
             except Exception as e:
                 elapsed_ms = (time.time() - t0) * 1000
-                self._error_count += 1
+                status = getattr(e, "status", None)
+                self._mark_failure(type(e).__name__, status)
                 wait = 2 ** attempt
                 logger.warning(
                     "%s fetch FAIL | coin=%s | attempt=%d/%d | latency=%.0fms | err=%s",

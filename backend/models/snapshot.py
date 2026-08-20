@@ -104,6 +104,7 @@ class SourceHealth(BaseModel):
     reason: Optional[str] = None
     last_http_status: Optional[int] = None
     auth_blocked_until: Optional[int] = None
+    last_failure_ts: int = 0
 
 
 class AISnapshot(BaseModel):

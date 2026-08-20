@@ -40,18 +40,18 @@ class ISharesIBITSource(DataSource):
                 headers={"User-Agent": "LIQ-market-risk/1.0"},
             ) as response:
                 if response.status != 200:
-                    self._mark_failure()
+                    self._mark_failure(f"http_{response.status}", response.status)
                     return None
                 parsed = self.parse_holdings(await response.text(encoding="utf-8-sig"))
                 if parsed is None:
-                    self._mark_failure()
+                    self._mark_failure("holdings_parse_failed")
                     return None
                 parsed["observed_at"] = int(time.time())
                 parsed["source"] = "ishares_ibit_official"
-                self._mark_success((time.time() - started) * 1000)
+                self._mark_success((time.time() - started) * 1000, response.status)
                 return parsed
-        except Exception:
-            self._mark_failure()
+        except Exception as exc:
+            self._mark_failure(type(exc).__name__)
             return None
 
     @staticmethod

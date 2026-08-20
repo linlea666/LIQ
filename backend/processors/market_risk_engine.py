@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import os
-import statistics
 import time
 from collections import deque
 from collections.abc import Callable
@@ -20,6 +19,7 @@ from models.liquidation import pick_primary_liq_map
 from models.market_risk import (
     CalibrationArtifact,
     ConfirmedIncident,
+    DecisionEvidenceSummary,
     DecisionSupport,
     EstimatedLiquidationDensity,
     EvidenceItem,
@@ -38,6 +38,7 @@ from models.market_risk import (
 from storage.market_risk_store import MarketRiskStore
 from storage.onchain_entity_store import OnchainEntityStore
 from storage.raw_event_store import RawEventStore, set_raw_event_store
+from processors.market_risk_anomaly import RollingPitAnomalyNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,19 @@ class _DisabledMarketRiskStore:
 
     def add_gap_marker(self, *_args: Any, **_kwargs: Any) -> bool:
         return False
+
+    def ensure_governance_epoch(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"open": False, "started_at": 0, "payload": {}}
+
+    def close_governance_epoch(self, *_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    def governance_status(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "open": False, "started_at": 0, "identity_hash": "",
+            "hard_violations": 0, "last_reset_at": 0,
+            "last_reset_reason": "", "payload": {},
+        }
 
     def outbox_stats(self) -> dict[str, Any]:
         return {}
@@ -188,8 +202,9 @@ class MarketRiskEngine:
         self._last_tick_at = 0
         self._last_prune_at = 0
         self._last_error = ""
-        self._anomaly_windows: dict[tuple[str, str], deque[float]] = {}
         self._rss_samples: deque[tuple[int, float]] = deque(maxlen=2_880)
+        self._governance_scope = "market_risk:" + ",".join(sorted(config.coins))
+        self._governance_identity = "disabled"
         self.raw_event_store: Optional[RawEventStore] = None
         if not config.enabled:
             self.store = _DisabledMarketRiskStore()
@@ -214,18 +229,96 @@ class MarketRiskEngine:
                 batch_size=config.raw_event_batch_size,
                 allowed_coins=config.coins,
                 segment_sec=config.raw_event_segment_sec,
+                max_lateness_sec=config.raw_event_max_lateness_sec,
                 max_total_bytes=config.raw_event_max_total_bytes,
                 min_free_bytes=config.raw_event_min_free_bytes,
                 min_free_inodes=config.raw_event_min_free_inodes,
+                gap_sink=self._handle_raw_gap,
+                state_loader=lambda: self.store.load_checkpoint(
+                    "raw_event_store_state_v1", "ALL",
+                ),
+                state_saver=lambda payload: self.store.save_checkpoint(
+                    "raw_event_store_state_v1", "ALL", payload,
+                ),
             )
             set_raw_event_store(self.raw_event_store)
         self.calibration = self._load_calibration(config.calibration_artifact)
         self.store.save_calibration(self.calibration)
+        self._governance_identity = self._compute_governance_identity()
+        self._anomaly_normalizer = RollingPitAnomalyNormalizer(self.store)
         self._contexts: dict[str, MarketRiskMachineContext] = {
             coin: self.store.load_machine_context(coin)
             or MarketRiskMachineContext(coin=coin)
             for coin in config.coins
         }
+
+    def _compute_governance_identity(self) -> str:
+        digest = hashlib.sha256()
+        digest.update(b"market-risk-governance-v3")
+        digest.update(self.config.version_hash.encode())
+        digest.update(self.calibration.calibration_version.encode())
+        files = (
+            __file__,
+            os.path.join(os.path.dirname(__file__), "market_risk_anomaly.py"),
+            os.path.join(os.path.dirname(__file__), "..", "storage", "raw_event_store.py"),
+            os.path.join(os.path.dirname(__file__), "..", "storage", "market_risk_store.py"),
+            os.path.join(os.path.dirname(__file__), "..", "models", "market_risk.py"),
+        )
+        for path in files:
+            with open(os.path.abspath(path), "rb") as handle:
+                digest.update(handle.read())
+        return digest.hexdigest()[:24]
+
+    def _raw_epoch_payload(self) -> dict[str, Any]:
+        raw = self.raw_event_store.health() if self.raw_event_store else {}
+        return {
+            "raw_dropped_baseline": int(raw.get("dropped", 0)),
+            "raw_late_baseline": int(raw.get("late_events", 0)),
+            "raw_writer_failure_baseline": int(raw.get("writer_failures", 0)),
+            "code_config_calibration_hash": self._governance_identity,
+        }
+
+    def _ensure_governance_epoch(self, now: int) -> dict[str, Any]:
+        return self.store.ensure_governance_epoch(
+            self._governance_scope, self._governance_identity, now,
+            self._raw_epoch_payload(),
+        )
+
+    def _handle_raw_gap(self, marker: dict[str, Any]) -> None:
+        self.store.add_gap_marker(marker)
+        reason = str(marker.get("reason") or "raw_event_integrity_gap")
+        if reason in {
+            "raw_event_pit_violation", "raw_event_queue_overflow",
+            "raw_event_late_beyond_allowance", "raw_event_writer_failure",
+            "raw_segment_dedup_read_failure", "pyarrow_unavailable",
+        }:
+            self.store.close_governance_epoch(
+                self._governance_scope, reason,
+                int(marker.get("observed_at") or time.time()), marker,
+            )
+
+    def _sync_governance(self, now: int) -> dict[str, Any]:
+        epoch = self._ensure_governance_epoch(now)
+        raw = self.raw_event_store.health() if self.raw_event_store else {}
+        baseline = dict(epoch.get("payload") or {})
+        violations = (
+            ("raw_event_queue_overflow", "dropped", "raw_dropped_baseline"),
+            ("raw_event_late_beyond_allowance", "late_events", "raw_late_baseline"),
+            ("raw_event_writer_failure", "writer_failures", "raw_writer_failure_baseline"),
+        )
+        for reason, current_key, baseline_key in violations:
+            if int(raw.get(current_key, 0)) > int(baseline.get(baseline_key, 0)):
+                self.store.close_governance_epoch(
+                    self._governance_scope, reason, now,
+                    {"current": raw.get(current_key, 0), "baseline": baseline.get(baseline_key, 0)},
+                )
+                break
+        if raw and not bool(raw.get("resource_admissible", False)):
+            self.store.close_governance_epoch(
+                self._governance_scope, "raw_event_resource_limit", now,
+                {"resource_admissible": False},
+            )
+        return self.store.governance_status(self._governance_scope, now - 14 * 86_400)
 
     @property
     def mode(self) -> str:
@@ -258,12 +351,8 @@ class MarketRiskEngine:
 
     def _runtime_readiness(self, now: int) -> tuple[bool, list[str]]:
         stats_24h = self.store.readiness_stats(now - 86_400)
-        stats_14d = self.store.readiness_stats(now - 14 * 86_400)
-        governed_all = self.store.readiness_stats(0)
-        governed_age = (
-            max(0, now - int(governed_all["first_governed_at"]))
-            if governed_all["first_governed_at"] else 0
-        )
+        governance = self._sync_governance(now)
+        governed_age = max(0, now - int(governance["started_at"])) if governance["open"] else 0
         rss_p95, rss_slope, rss_age = self._rss_metrics(now)
         raw = self.raw_event_store.health() if self.raw_event_store else {
             "enabled": False, "status": "disabled", "dropped": 0,
@@ -272,16 +361,21 @@ class MarketRiskEngine:
         blockers: list[str] = []
         if governed_age < 14 * 86_400:
             blockers.append("修复后 shadow 连续时长不足 14 天")
-        if stats_14d["pit_violations"]:
-            blockers.append("修复后 shadow PIT 违规不为 0")
-        if not stats_14d["snapshot_count"]:
+        if int(governance["hard_violations"]) > 0:
+            blockers.append("修复后 shadow 仍存在完整性硬违规")
+        if not governance["open"]:
+            blockers.append("当前没有开放的完整性质量纪元")
+        if not stats_24h["snapshot_count"]:
             blockers.append("尚无受新 PIT 门禁治理的 shadow 快照")
         if stats_24h["core_coverage"] < 0.9:
             blockers.append("24 小时核心数据覆盖率低于 90%")
         if not bool(raw.get("enabled", False)):
             blockers.append("原始事件存储未启用，无法进行全源 PIT 回放")
-        if int(raw.get("dropped", 0)) > 0:
-            blockers.append("原始事件队列存在丢弃")
+        elif not bool(raw.get("running", False)) or raw.get("format") == "unavailable":
+            blockers.append("原始事件写入器未运行或 Parquet 能力不可用")
+        baseline = dict(governance.get("payload") or {})
+        if int(raw.get("dropped", 0)) > int(baseline.get("raw_dropped_baseline", 0)):
+            blockers.append("当前质量纪元内原始事件队列存在丢弃")
         if float(raw.get("projected_files_per_day", 0)) > 2_000:
             blockers.append("Parquet 新文件预测超过 2,000/日")
         if not bool(raw.get("resource_admissible", False)):
@@ -334,6 +428,7 @@ class MarketRiskEngine:
         if self._running or not self.config.enabled:
             return
         self._running = True
+        self._ensure_governance_epoch(int(time.time()))
         if self.raw_event_store is not None:
             self.raw_event_store.start()
         self._task = asyncio.create_task(self._run_loop(), name="market_risk_engine")
@@ -422,7 +517,7 @@ class MarketRiskEngine:
             "candles_4h", "candles_daily", "footprint_contract",
             "footprint_spot", "etf_flow", "option_info", "stablecoin_mcap",
             "ibit_official", "cftc_bitcoin_cot",
-            "poll_failures",
+            "poll_failures", "dependency_failures",
         )
         values = {
             name: copy.deepcopy(getattr(state, name, None)) for name in names
@@ -616,6 +711,72 @@ class MarketRiskEngine:
         ]
         blockers.extend(snapshot.pit_violations)
         live_direction = snapshot.live_direction
+        root_scores: dict[str, dict[str, float]] = {}
+        for item in snapshot.evidence:
+            if item.role != "scoring" or item.direction not in {"up", "down"}:
+                continue
+            scores = root_scores.setdefault(item.causal_root, {"up": 0.0, "down": 0.0})
+            scores[item.direction] += item.confidence * max(item.raw_strength, 0.0)
+        detail_by_id: dict[str, DecisionEvidenceSummary] = {}
+        dominance_required = self.calibration.thresholds["root_direction_dominance_ratio"]
+        root_outcomes: dict[str, str] = {}
+        root_vote_ids: set[str] = set()
+        for root_name, scores in root_scores.items():
+            up_score, down_score = scores["up"], scores["down"]
+            if up_score > 0 and down_score > 0:
+                ratio = max(up_score, down_score) / max(min(up_score, down_score), 1e-12)
+                outcome = (
+                    "mixed" if ratio < dominance_required
+                    else "up" if up_score > down_score else "down"
+                )
+            else:
+                outcome = "up" if up_score > 0 else "down" if down_score > 0 else "unknown"
+            root_outcomes[root_name] = outcome
+            if outcome in {"up", "down"}:
+                candidates = [
+                    item for item in snapshot.evidence
+                    if item.causal_root == root_name and item.role == "scoring"
+                    and item.direction == outcome
+                ]
+                if candidates:
+                    representative = max(
+                        candidates,
+                        key=lambda item: (
+                            item.confidence * item.raw_strength,
+                            item.raw_strength, item.evidence_id,
+                        ),
+                    )
+                    root_vote_ids.add(representative.evidence_id)
+        for item in snapshot.evidence:
+            scores = root_scores.get(item.causal_root, {"up": 0.0, "down": 0.0})
+            up_score, down_score = scores["up"], scores["down"]
+            ratio = None
+            root_outcome = root_outcomes.get(item.causal_root, "unknown")
+            if up_score > 0 or down_score > 0:
+                if up_score > 0 and down_score > 0:
+                    ratio = max(up_score, down_score) / max(min(up_score, down_score), 1e-12)
+            counted = bool(
+                item.evidence_id in root_vote_ids and item.direction == live_direction
+                and item.causal_root in snapshot.live_causal_roots
+            )
+            counting_reason = (
+                "independent_root_vote" if counted
+                else "informational_only" if item.role != "scoring"
+                else "root_conflict_no_vote" if root_outcome == "mixed"
+                else "same_root_confidence_only" if item.direction == root_outcome
+                else "opposing_root_evidence"
+            )
+            detail_by_id[item.evidence_id] = DecisionEvidenceSummary(
+                evidence_id=item.evidence_id, label=item.name,
+                direction=item.direction, causal_root=item.causal_root,
+                role=item.role, source_id=item.source_id, as_of=item.event_time,
+                counted_in_direction=counted,
+                counting_reason=counting_reason,
+                root_outcome=root_outcome,
+                root_up_score=up_score, root_down_score=down_score,
+                dominance_ratio=ratio, explanation=item.explanation,
+                values=dict(item.values),
+            )
         supporting = [
             item.explanation for item in snapshot.evidence
             if item.role == "scoring" and item.direction == live_direction
@@ -623,7 +784,15 @@ class MarketRiskEngine:
         opposing_direction = "down" if live_direction == "up" else "up"
         opposing = [
             item.explanation for item in snapshot.evidence
-            if item.direction == opposing_direction
+            if item.role == "scoring" and item.direction == opposing_direction
+        ]
+        supporting_details = [
+            detail_by_id[item.evidence_id] for item in snapshot.evidence
+            if item.role == "scoring" and item.direction == live_direction
+        ]
+        opposing_details = [
+            detail_by_id[item.evidence_id] for item in snapshot.evidence
+            if item.role == "scoring" and item.direction == opposing_direction
         ]
         decision_ready = bool(
             snapshot.quality_layer == "normal"
@@ -676,6 +845,8 @@ class MarketRiskEngine:
                 stance=stance, strength_band=strength_band, summary=summary,
                 supporting_evidence=list(dict.fromkeys(supporting)),
                 opposing_evidence=list(dict.fromkeys(opposing)),
+                supporting_details=supporting_details,
+                opposing_details=opposing_details,
                 blockers=list(dict.fromkeys(blockers)),
                 invalidation_conditions=[
                     "现货主动成交反向并持续一个闭合 5 分钟窗口",
@@ -696,11 +867,8 @@ class MarketRiskEngine:
             )
         now = int(time.time())
         stats = self.store.readiness_stats(now - 86_400)
-        governed_all = self.store.readiness_stats(0)
-        governed_age = (
-            max(0, now - int(governed_all["first_governed_at"]))
-            if governed_all["first_governed_at"] else 0
-        )
+        governance = self._sync_governance(now)
+        governed_age = max(0, now - int(governance["started_at"])) if governance["open"] else 0
         rss_p95, rss_slope, rss_age = self._rss_metrics(now)
         raw = self.raw_event_store.health() if self.raw_event_store else {
             "enabled": False, "status": "disabled", "dropped": 0,
@@ -738,10 +906,19 @@ class MarketRiskEngine:
             snapshot_count_24h=stats["snapshot_count"],
             core_coverage_24h=stats["core_coverage"],
             governed_shadow_age_sec=governed_age,
+            clean_epoch_started_at=int(governance["started_at"]),
+            last_epoch_reset_at=int(governance["last_reset_at"]),
+            last_epoch_reset_reason=str(governance["last_reset_reason"]),
+            hard_violations_14d=int(governance["hard_violations"]),
+            governance_identity=str(governance["identity_hash"]),
             rss_observation_age_sec=rss_age,
             rss_p95_gib=rss_p95,
             rss_slope_mib_per_hour=rss_slope,
             frozen_by_coin=frozen, raw_queue_dropped=int(raw.get("dropped", 0)),
+            raw_dropped_in_epoch=max(
+                0, int(raw.get("dropped", 0))
+                - int(dict(governance.get("payload") or {}).get("raw_dropped_baseline", 0)),
+            ),
             raw_store=raw, dependencies=dependencies,
             admission={
                 "calibration_version": self.calibration.calibration_version,
@@ -886,40 +1063,7 @@ class MarketRiskEngine:
     def _ordinary_anomalies(
         self, coin: str, facts: dict[str, dict[str, Any]], now: int,
     ) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for metric, fact in facts.items():
-            raw = fact.get("value")
-            if raw is None:
-                continue
-            try:
-                value = float(raw)
-            except (TypeError, ValueError):
-                continue
-            window = self._anomaly_windows.setdefault((coin, metric), deque(maxlen=2_880))
-            history = list(window)
-            if len(history) >= 30:
-                median = statistics.median(history)
-                mad = statistics.median(abs(item - median) for item in history)
-                robust_z = (value - median) / max(1.4826 * mad, 1e-9)
-                percentile = sum(item <= value for item in history) / len(history)
-                tail = min(percentile, 1.0 - percentile)
-                status = (
-                    "extreme" if abs(robust_z) >= 4.0 or tail <= 0.005
-                    else "unusual" if abs(robust_z) >= 2.5 or tail <= 0.025
-                    else "normal"
-                )
-            else:
-                robust_z, percentile, status = None, None, "warming"
-            window.append(value)
-            results.append({
-                "metric": metric, "label": fact.get("label", metric),
-                "value": value, "direction": fact.get("direction", "unknown"),
-                "status": status, "robust_z": robust_z, "percentile": percentile,
-                "sample_count": len(history), "as_of": int(fact.get("as_of") or now),
-                "decision_role": "informational",
-                "note": "滚动稳健 z-score/分位数只识别普通异常，未通过 OOS 前不计分。",
-            })
-        return results
+        return self._anomaly_normalizer.evaluate(coin, facts, now)
 
     def _extract(
         self, coin: str, state: Any, now: int,
@@ -1449,6 +1593,11 @@ class MarketRiskEngine:
                 "direction": "unknown", "as_of": op_as_of,
             },
         }
+        poll_failures = copy.deepcopy(getattr(state, "poll_failures", {}) or {})
+        dependency_failures = copy.deepcopy(
+            getattr(state, "dependency_failures", {}) or {}
+        )
+        strategic_ai_failure = str(dependency_failures.get("strategic_ai") or "")
         context = {
             "market_overview": {"trend_horizons": trend_horizons},
             "native_liquidity": {
@@ -1551,10 +1700,13 @@ class MarketRiskEngine:
                 "reason": "缺少独立实体标签交叉确认，不把钱包转账解释为机构买卖",
             },
             "dependency_degradation": {
-                "market_data_poll_failures": copy.deepcopy(
-                    getattr(state, "poll_failures", {}) or {}
-                ),
+                "market_data_poll_failures": poll_failures,
                 "ai": "isolated_not_scoring",
+                "ai_detail": {
+                    "status": "degraded" if strategic_ai_failure else "available_or_idle",
+                    "reason": strategic_ai_failure or None,
+                    "decision_role": "isolated_not_scoring",
+                },
                 "note": "行情依赖失败独立展示；AI 永不进入联合风险确定性评分。",
             },
         }
@@ -1838,6 +1990,7 @@ class MarketRiskEngine:
         if coin not in self.config.coins:
             raise ValueError(f"market risk disabled for coin {coin}")
         now = int(decision_time or time.time())
+        self._ensure_governance_epoch(now)
         existing = self.store.latest(coin)
         if existing is not None and existing.decision_time == now:
             return existing
@@ -1874,6 +2027,11 @@ class MarketRiskEngine:
                 "source_id": "market_risk_context_pit_guard", "coin": coin,
                 "observed_at": now, "reason": reason,
             })
+        if pit_violations:
+            self.store.close_governance_epoch(
+                self._governance_scope, "market_risk_pit_violation", now,
+                {"coin": coin, "violations": list(dict.fromkeys(pit_violations))},
+            )
         pillars, roots = self._summarize_roots(evidence, qualities)
         desired, direction, aligned_roots, research = self._desired_stage(roots, pillars)
 
@@ -1967,6 +2125,10 @@ class MarketRiskEngine:
                     "source_id": "market_risk_pit_guard", "coin": coin,
                     "observed_at": now, "reason": violation,
                 })
+            self.store.close_governance_epoch(
+                self._governance_scope, "market_risk_submit_pit_violation", now,
+                {"coin": coin, "violations": submit_violations},
+            )
         email = None
         latest_transition = transitions[-1] if transitions else None
         if latest_transition and snapshot.notification_eligible and latest_transition.to_stage in {"warning", "critical"}:

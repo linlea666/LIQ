@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/constants";
-import type { ContextItem, EvidenceItem, MarketFactor, MarketRiskIntelligence, MarketRiskReady, RiskDirection, RiskStage, SourceQuality } from "@/lib/marketRiskTypes";
+import type { ContextItem, DecisionEvidenceSummary, EvidenceItem, MarketFactor, MarketRiskIntelligence, MarketRiskReady, RiskDirection, RiskStage, SourceQuality } from "@/lib/marketRiskTypes";
 
 const STAGE_LABEL: Record<RiskStage, string> = { normal: "正常", watch: "观察", warning: "预警", critical: "临界", cooldown: "冷却", resolved: "已结束" };
 const STANCE = {
@@ -82,8 +82,8 @@ export default function MarketRiskPage({ params }: PageProps<"/market-risk/[coin
   const trends = data?.context.market_overview?.trend_horizons ?? {};
 
   return (
-    <main className="market-risk-page min-h-screen overflow-x-clip bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
+    <main data-testid="market-risk-page" className="market-risk-page min-h-screen overflow-x-clip bg-slate-950 text-slate-100">
+      <header data-testid="market-risk-header" className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
@@ -113,9 +113,16 @@ export default function MarketRiskPage({ params }: PageProps<"/market-risk/[coin
                   <GateMetric label="修复后 Shadow" value={`${(readiness.governed_shadow_age_sec / 86400).toFixed(1)} 天`} ok={readiness.governed_shadow_age_sec >= 14 * 86400} />
                   <GateMetric label="24h PIT 违规" value={String(readiness.pit_violations_24h)} ok={readiness.pit_violations_24h === 0} />
                   <GateMetric label="核心覆盖率" value={readiness.snapshot_count_24h ? `${(readiness.core_coverage_24h * 100).toFixed(1)}%` : "暖机中"} ok={readiness.core_coverage_24h >= 0.9} />
-                  <GateMetric label="队列丢弃" value={String(readiness.raw_queue_dropped)} ok={readiness.raw_queue_dropped === 0} />
+                  <GateMetric label="本纪元队列丢弃" value={String(readiness.raw_dropped_in_epoch ?? readiness.raw_queue_dropped)} ok={(readiness.raw_dropped_in_epoch ?? readiness.raw_queue_dropped) === 0} />
                   <GateMetric label="新文件预测" value={`${Math.round(readiness.raw_store.projected_files_per_day ?? 0)}/日`} ok={(readiness.raw_store.projected_files_per_day ?? 0) <= 2000} />
                   <GateMetric label="RSS p95" value={`${readiness.rss_p95_gib.toFixed(2)} GiB / ${Math.floor(readiness.rss_observation_age_sec / 3600)}h 样本`} ok={readiness.rss_observation_age_sec >= 86400 && readiness.rss_p95_gib > 0 && readiness.rss_p95_gib <= 1.3 && readiness.rss_slope_mib_per_hour <= 2} />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-slate-500">
+                  <span>干净纪元开始：{formatTime(readiness.clean_epoch_started_at)}</span>
+                  <span>队列：{readiness.raw_store.queue_size ?? 0}/{readiness.raw_store.queue_max ?? 0}</span>
+                  <span>最老排队：{Number(readiness.raw_store.oldest_queue_age_sec ?? 0).toFixed(1)}s</span>
+                  <span>累计丢弃：{readiness.raw_queue_dropped}</span>
+                  {!!readiness.last_epoch_reset_reason && <span>最近重置：{readiness.last_epoch_reset_reason} · {formatTime(readiness.last_epoch_reset_at)}</span>}
                 </div>
                 {!!readiness.blockers.length && <div className="mt-3 text-amber-300/80">未通过：{readiness.blockers.join("；")}</div>}
               </section>
@@ -129,13 +136,14 @@ export default function MarketRiskPage({ params }: PageProps<"/market-risk/[coin
             </section>
 
             <section className="grid gap-3 lg:grid-cols-2">
-              <ReasonPanel title="为什么这样判断" items={data.decision_support.supporting_evidence} empty="当前没有足够的同向计分证据。" tone="emerald" />
-              <ReasonPanel title="反方证据" items={data.decision_support.opposing_evidence} empty="当前没有达到异常门槛的反向证据；不代表反方风险为零。" tone="rose" />
+              <EvidenceReasonPanel title="为什么这样判断" details={data.decision_support.supporting_details ?? []} fallback={data.decision_support.supporting_evidence} empty="当前没有足够的同向计分证据。" tone="emerald" />
+              <EvidenceReasonPanel title="反方证据" details={data.decision_support.opposing_details ?? []} fallback={data.decision_support.opposing_evidence} empty="当前没有达到异常门槛的反向计分证据；不代表反方风险为零。" tone="rose" />
             </section>
             <section className="grid gap-3 lg:grid-cols-2">
               <ReasonPanel title="数据是否可信" items={data.decision_support.blockers} empty="核心数据目前通过可用性与时间一致性门禁。" tone={data.decision_support.blockers.length ? "amber" : "emerald"} />
               <ReasonPanel title="这份观察何时失效" items={data.decision_support.invalidation_conditions} empty="—" tone="slate" />
             </section>
+            <DependencyHealth item={data.context.dependency_degradation} />
 
             <section className="rounded-xl border border-slate-800 bg-slate-900/45 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">市场全景 · 已收盘周期</h2><span className="text-xs text-slate-500">决策时间 {formatTime(data.decision_time)}</span></div>
@@ -190,6 +198,20 @@ function GateMetric({ label, value, ok }: { label: string; value: string; ok: bo
 function ReasonPanel({ title, items, empty, tone }: { title: string; items: string[]; empty: string; tone: "emerald" | "rose" | "amber" | "slate" }) {
   const dot = tone === "emerald" ? "bg-emerald-400" : tone === "rose" ? "bg-rose-400" : tone === "amber" ? "bg-amber-400" : "bg-slate-500";
   return <div className="rounded-xl border border-slate-800 bg-slate-900/45 p-4"><h2 className="text-sm font-semibold">{title}</h2><ul className="mt-3 space-y-2 text-xs leading-5 text-slate-400">{(items.length ? items : [empty]).map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} /><span>{item}</span></li>)}</ul></div>;
+}
+
+function EvidenceReasonPanel({ title, details, fallback, empty, tone }: { title: string; details: DecisionEvidenceSummary[]; fallback: string[]; empty: string; tone: "emerald" | "rose" }) {
+  const dot = tone === "emerald" ? "bg-emerald-400" : "bg-rose-400";
+  const countLabel = (item: DecisionEvidenceSummary) => item.counted_in_direction ? "作为独立因果根计 1 票" : item.counting_reason === "root_conflict_no_vote" ? "根内冲突，不计方向票" : item.counting_reason === "same_root_confidence_only" ? "同根置信增强，不重复计票" : "反向或信息证据，不计当前票";
+  if (!details.length) return <ReasonPanel title={title} items={fallback} empty={empty} tone={tone} />;
+  return <div className="rounded-xl border border-slate-800 bg-slate-900/45 p-4"><h2 className="text-sm font-semibold">{title}</h2><ul className="mt-3 space-y-3 text-xs leading-5 text-slate-400">{details.map((item) => <li key={item.evidence_id} className="flex min-w-0 gap-2"><span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} /><div className="min-w-0"><div className="text-slate-300">{item.label} · {directionLabel(item.direction)}</div><div>{item.explanation}</div><div className="mt-1 break-all text-[10px] text-slate-600">根 {item.causal_root} · 上行权重 {item.root_up_score.toFixed(2)} / 下行权重 {item.root_down_score.toFixed(2)}{item.dominance_ratio !== null ? ` · 优势比 ${item.dominance_ratio.toFixed(2)}` : ""} · {countLabel(item)}</div></div></li>)}</ul></div>;
+}
+
+function DependencyHealth({ item }: { item: MarketRiskIntelligence["context"]["dependency_degradation"] }) {
+  const failures = Object.entries(item?.market_data_poll_failures ?? {});
+  const aiReason = item?.ai_detail?.reason;
+  const degraded = failures.length > 0 || Boolean(aiReason);
+  return <section className="rounded-xl border border-slate-800 bg-slate-900/45 p-4 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">相邻依赖运行状态</h2><span className={degraded ? "text-amber-300" : "text-emerald-300"}>{degraded ? "存在局部降级" : "未发现局部失败"}</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><div className="rounded-lg bg-slate-950/50 p-3"><div className="text-slate-300">行情与背景源</div>{failures.length ? <ul className="mt-2 space-y-1 text-amber-300/80">{failures.map(([source, reason]) => <li key={source} className="break-all">{source}：{reason}</li>)}</ul> : <div className="mt-2 text-slate-500">当前未记录轮询失败。</div>}</div><div className="rounded-lg bg-slate-950/50 p-3"><div className="text-slate-300">AI（与评分隔离）</div><div className={`mt-2 break-all ${aiReason ? "text-amber-300/80" : "text-slate-500"}`}>{aiReason ?? "可用或尚未运行；始终不参与联合风险确定性评分。"}</div></div></div><p className="mt-2 text-slate-600">{item?.note ?? "依赖失败只影响对应数据，不得静默改变确定性评分。"}</p></section>;
 }
 
 function FactorCard({ factor }: { factor: MarketFactor }) {

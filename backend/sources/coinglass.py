@@ -504,20 +504,20 @@ class CoinglassSource(DataSource):
                 if resp.status == 429:
                     self._http_429_by_path[path] = self._http_429_by_path.get(path, 0) + 1
                     logger.warning("Coinglass 429 rate limited | path=%s", path)
-                    self._mark_failure()
+                    self._mark_failure("rate_limited", resp.status)
                     self._health_reason = "rate_limited"
                     _record_metric(ok=False)
                     self._limiter.defer(15)
                     return None
                 resp.raise_for_status()
                 data = await resp.json()
-                self._mark_success(latency)
+                self._mark_success(latency, resp.status)
                 self._health_reason = ""
                 self._auth_blocked_until = 0
 
                 code = data.get("code")
                 if code not in (None, "0", 0, "20000", 20000):
-                    self._mark_failure()
+                    self._mark_failure(f"api_code_{code}")
                     self._health_reason = f"api_code_{code}"
                     logger.warning("Coinglass API error | path=%s code=%s msg=%s",
                                    path, code, data.get("msg", ""))
@@ -528,6 +528,13 @@ class CoinglassSource(DataSource):
                     result = data
                 else:
                     result = data.get("data") if "data" in data else data
+                # 清算聚合图的来源观测时间必须随缓存值保存；缓存命中不得把旧图
+                # 重新盖成“刚刚更新”。内部字段不会发送给提供商或参与请求签名。
+                if (
+                    path == "/api/futures/liquidation/aggregated-map"
+                    and isinstance(result, dict)
+                ):
+                    result = {**result, "_source_observed_at": int(time.time())}
                 if cache_ttl > 0 and result is not None:
                     self._cache[self._cache_key(path, params, version, raw_response)] = (
                         time.time() + cache_ttl, result,
@@ -535,7 +542,7 @@ class CoinglassSource(DataSource):
                 _record_metric(ok=True)
                 return result
         except aiohttp.ClientResponseError as e:
-            self._mark_failure()
+            self._mark_failure(f"http_{e.status}", e.status)
             _record_metric(ok=False)
             self._last_http_status = e.status
             if e.status == 401:
@@ -551,7 +558,7 @@ class CoinglassSource(DataSource):
                 logger.error("Coinglass HTTP %d | path=%s | %s", e.status, path, str(e))
             return None
         except Exception:
-            self._mark_failure()
+            self._mark_failure("request_failed")
             _record_metric(ok=False)
             self._health_reason = "request_failed"
             logger.error("Coinglass request failed | path=%s", path, exc_info=True)

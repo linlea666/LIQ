@@ -103,6 +103,18 @@ class TestParseLiquidationMap:
         result = parse_liquidation_map(data, "ETH", "1d", current_price=3000)
         assert result is not None
 
+    def test_cached_source_observation_time_is_not_restamped(self):
+        payload = {**self.SAMPLE_REAL, "_source_observed_at": 1_700_000_000}
+        first = parse_liquidation_map(payload, "BTC", "1d", current_price=74000)
+        second = parse_liquidation_map(payload, "BTC", "1d", current_price=74000)
+        assert first is not None and second is not None
+        assert first.ts == second.ts == 1_700_000_000
+
+    def test_missing_source_observation_time_fails_closed(self):
+        result = parse_liquidation_map(self.SAMPLE_REAL, "BTC", "1d", current_price=74000)
+        assert result is not None
+        assert result.ts == 0
+
 
 # ──────────────────────────────────────────────
 # parse_liq_heatmap · 真实 y_axis + 三元组结构

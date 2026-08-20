@@ -97,6 +97,17 @@ class MarketRiskStore:
                     reason TEXT NOT NULL, payload TEXT NOT NULL,
                     UNIQUE(source_id,coin,observed_at,reason)
                 );
+                CREATE TABLE IF NOT EXISTS governance_epochs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL, identity_hash TEXT NOT NULL,
+                    started_at INTEGER NOT NULL, last_healthy_at INTEGER NOT NULL,
+                    ended_at INTEGER, status TEXT NOT NULL DEFAULT 'open',
+                    end_reason TEXT, payload TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_epoch_open
+                    ON governance_epochs(scope) WHERE status='open';
+                CREATE INDEX IF NOT EXISTS idx_governance_epoch_history
+                    ON governance_epochs(scope,started_at DESC);
                 CREATE TABLE IF NOT EXISTS context_fact_versions (
                     source_id TEXT NOT NULL, fact_key TEXT NOT NULL,
                     version INTEGER NOT NULL, content_hash TEXT NOT NULL,
@@ -121,7 +132,7 @@ class MarketRiskStore:
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
                 INSERT OR REPLACE INTO schema_meta(key,value)
-                    VALUES('schema_version','2');
+                    VALUES('schema_version','3');
                 """
             )
             # additive migration：同一事实在每个固定 tick 都会重新出现在快照中，
@@ -205,6 +216,104 @@ class MarketRiskStore:
                 (source_id, coin, observed_at, reason, json.dumps(marker, separators=(",", ":"))),
             )
             return cur.rowcount > 0
+
+    def ensure_governance_epoch(
+        self, scope: str, identity_hash: str, now: int,
+        payload: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """返回当前质量纪元；身份变化必须先终止旧纪元再创建新纪元。"""
+        scope = str(scope or "market_risk")
+        identity_hash = str(identity_hash)
+        timestamp = int(now)
+        encoded = json.dumps(payload or {}, separators=(",", ":"), sort_keys=True)
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM governance_epochs WHERE scope=? AND status='open'",
+                (scope,),
+            ).fetchone()
+            if row and str(row["identity_hash"]) != identity_hash:
+                self._conn.execute(
+                    """UPDATE governance_epochs SET status='closed',ended_at=?,
+                       end_reason='identity_changed' WHERE id=?""",
+                    (timestamp, int(row["id"])),
+                )
+                row = None
+            if row is None:
+                cur = self._conn.execute(
+                    """INSERT INTO governance_epochs
+                       (scope,identity_hash,started_at,last_healthy_at,status,payload)
+                       VALUES(?,?,?,?, 'open',?)""",
+                    (scope, identity_hash, timestamp, timestamp, encoded),
+                )
+                row = self._conn.execute(
+                    "SELECT * FROM governance_epochs WHERE id=?", (int(cur.lastrowid),),
+                ).fetchone()
+            else:
+                self._conn.execute(
+                    "UPDATE governance_epochs SET last_healthy_at=? WHERE id=?",
+                    (timestamp, int(row["id"])),
+                )
+                row = self._conn.execute(
+                    "SELECT * FROM governance_epochs WHERE id=?", (int(row["id"]),),
+                ).fetchone()
+        result = dict(row)
+        result["payload"] = json.loads(str(result.get("payload") or "{}"))
+        return result
+
+    def close_governance_epoch(
+        self, scope: str, reason: str, observed_at: int,
+        payload: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """持久化硬违规；重启不会恢复已关闭的连续时长。"""
+        timestamp = int(observed_at)
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT id,payload FROM governance_epochs WHERE scope=? AND status='open'",
+                (str(scope),),
+            ).fetchone()
+            if row is None:
+                return False
+            merged = json.loads(str(row["payload"] or "{}"))
+            if payload:
+                merged["violation"] = dict(payload)
+            cur = self._conn.execute(
+                """UPDATE governance_epochs SET status='closed',ended_at=?,end_reason=?,payload=?
+                   WHERE id=? AND status='open'""",
+                (
+                    timestamp, str(reason),
+                    json.dumps(merged, separators=(",", ":"), sort_keys=True),
+                    int(row["id"]),
+                ),
+            )
+            return cur.rowcount > 0
+
+    def governance_status(self, scope: str, since: int = 0) -> dict[str, Any]:
+        with self._lock:
+            current = self._conn.execute(
+                "SELECT * FROM governance_epochs WHERE scope=? AND status='open'",
+                (str(scope),),
+            ).fetchone()
+            violations = self._conn.execute(
+                """SELECT COUNT(*) AS n FROM governance_epochs
+                   WHERE scope=? AND status='closed' AND ended_at>=?
+                     AND COALESCE(end_reason,'')!='identity_changed'""",
+                (str(scope), int(since)),
+            ).fetchone()
+            last_closed = self._conn.execute(
+                """SELECT ended_at,end_reason FROM governance_epochs
+                   WHERE scope=? AND status='closed' ORDER BY ended_at DESC LIMIT 1""",
+                (str(scope),),
+            ).fetchone()
+        result: dict[str, Any] = {
+            "open": current is not None,
+            "started_at": int(current["started_at"] or 0) if current else 0,
+            "identity_hash": str(current["identity_hash"] or "") if current else "",
+            "hard_violations": int(violations["n"] or 0) if violations else 0,
+            "last_reset_at": int(last_closed["ended_at"] or 0) if last_closed else 0,
+            "last_reset_reason": str(last_closed["end_reason"] or "") if last_closed else "",
+            "payload": json.loads(str(current["payload"] or "{}")) if current else {},
+        }
+        return result
 
     def record_context_observation(
         self, source_id: str, fact_key: str, effective_time: int,

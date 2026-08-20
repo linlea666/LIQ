@@ -113,3 +113,39 @@ def test_readiness_uses_indexed_governance_columns_and_excludes_legacy_rows(tmp_
         "first_governed_at": 110,
     }
     store.close()
+
+
+def test_governance_epoch_cannot_be_revived_by_restart(tmp_path) -> None:
+    store = MarketRiskStore(str(tmp_path))
+    epoch = store.ensure_governance_epoch(
+        "market_risk:BTC", "identity-a", 100,
+        {"raw_dropped_baseline": 3},
+    )
+    assert epoch["started_at"] == 100
+    assert store.close_governance_epoch(
+        "market_risk:BTC", "raw_event_queue_overflow", 150,
+    )
+    store.close()
+
+    reopened = MarketRiskStore(str(tmp_path))
+    status = reopened.governance_status("market_risk:BTC", 0)
+    assert status["open"] is False
+    assert status["last_reset_reason"] == "raw_event_queue_overflow"
+    new_epoch = reopened.ensure_governance_epoch(
+        "market_risk:BTC", "identity-a", 200,
+        {"raw_dropped_baseline": 4},
+    )
+    assert new_epoch["started_at"] == 200
+    assert new_epoch["payload"]["raw_dropped_baseline"] == 4
+    reopened.close()
+
+
+def test_governance_identity_change_resets_continuous_age(tmp_path) -> None:
+    store = MarketRiskStore(str(tmp_path))
+    store.ensure_governance_epoch("market_risk:BTC", "identity-a", 100)
+    changed = store.ensure_governance_epoch("market_risk:BTC", "identity-b", 300)
+    assert changed["started_at"] == 300
+    status = store.governance_status("market_risk:BTC", 0)
+    assert status["last_reset_reason"] == "identity_changed"
+    assert status["hard_violations"] == 0
+    store.close()

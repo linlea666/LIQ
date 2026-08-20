@@ -159,8 +159,15 @@ def parse_liquidation_map(
             long_total_usd=sum(b.turnover_usd for b in long_bands),
         )
 
+        source_observed_at = 0
+        if isinstance(data, dict):
+            source_observed_at = int(data.get("_source_observed_at") or 0)
+            if not source_observed_at and isinstance(data.get("data"), dict):
+                source_observed_at = int(data["data"].get("update_time") or 0)
+                while source_observed_at > 10_000_000_000:
+                    source_observed_at //= 1000
         return LiquidationMap(
-            coin=coin, ts=int(time.time()), cycle=cycle,
+            coin=coin, ts=source_observed_at, cycle=cycle,
             leverage_groups=[group],
             by_exchange=by_exchange or None,
         )

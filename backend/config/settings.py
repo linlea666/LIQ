@@ -405,13 +405,15 @@ class MarketRiskConfig:
     raw_event_queue_max: int = 20_000
     raw_event_batch_size: int = 2_000
     raw_event_segment_sec: int = 300
+    raw_event_max_lateness_sec: int = 120
     raw_event_max_total_bytes: int = 50 * 1024 * 1024 * 1024
     raw_event_min_free_bytes: int = 10 * 1024 * 1024 * 1024
     raw_event_min_free_inodes: int = 200_000
     source_max_age_sec: dict[str, int] = field(default_factory=lambda: {
         "spot_demand": 180,
         "leveraged_positioning": 360,
-        "liquidation_risk": 300,
+        # Coinglass 聚合清算图最小缓存 300s；加 90s 轮询和 30s 请求预算。
+        "liquidation_risk": 420,
         "liquidity_structure": 360,
         "market_response": 180,
         "context": 86_400,
@@ -431,6 +433,7 @@ class MarketRiskConfig:
             "raw_event_queue_max": self.raw_event_queue_max,
             "raw_event_batch_size": self.raw_event_batch_size,
             "raw_event_segment_sec": self.raw_event_segment_sec,
+            "raw_event_max_lateness_sec": self.raw_event_max_lateness_sec,
             "raw_event_max_total_bytes": self.raw_event_max_total_bytes,
             "raw_event_min_free_bytes": self.raw_event_min_free_bytes,
             "raw_event_min_free_inodes": self.raw_event_min_free_inodes,
@@ -453,6 +456,7 @@ class MarketRiskConfig:
             "raw_event_queue_max": "RawEventStore queue hard bound",
             "raw_event_batch_size": "RawEventStore batch hard bound",
             "raw_event_segment_sec": "RawEventStore atomic segment boundary",
+            "raw_event_max_lateness_sec": "RawEventStore late-event calibration boundary",
             "raw_event_max_total_bytes": "RawEventStore storage admission gate",
             "raw_event_min_free_bytes": "RawEventStore disk free-space gate",
             "raw_event_min_free_inodes": "RawEventStore inode free-space gate",
@@ -884,6 +888,7 @@ def _build_settings(raw: dict) -> Settings:
         "enabled", "coins", "mode", "shadow_mode", "tick_interval_sec", "data_dir",
         "calibration_artifact", "email_enabled", "raw_event_store_enabled",
         "raw_event_queue_max", "raw_event_batch_size", "raw_event_segment_sec",
+        "raw_event_max_lateness_sec",
         "raw_event_max_total_bytes", "raw_event_min_free_bytes",
         "raw_event_min_free_inodes", "source_max_age_sec",
     }
@@ -945,6 +950,9 @@ def _build_settings(raw: dict) -> Settings:
         raw_event_segment_sec=max(60, min(3600, int(
             market_risk_raw.get("raw_event_segment_sec", 300),
         ))),
+        raw_event_max_lateness_sec=max(0, min(1800, int(
+            market_risk_raw.get("raw_event_max_lateness_sec", 120),
+        ))),
         raw_event_max_total_bytes=max(1024**3, int(
             market_risk_raw.get("raw_event_max_total_bytes", 50 * 1024**3),
         )),
@@ -955,7 +963,7 @@ def _build_settings(raw: dict) -> Settings:
             market_risk_raw.get("raw_event_min_free_inodes", 200_000),
         )),
         source_max_age_sec={
-            key: max(5, int(risk_ages_raw.get(key, value)))
+            key: max(420 if key == "liquidation_risk" else 5, int(risk_ages_raw.get(key, value)))
             for key, value in default_risk_ages.items()
         },
     )

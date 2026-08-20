@@ -41,6 +41,24 @@ export interface EvidenceItem {
   explanation: string;
 }
 
+export interface DecisionEvidenceSummary {
+  evidence_id: string;
+  label: string;
+  direction: RiskDirection | "neutral";
+  causal_root: string;
+  role: "scoring" | "informational" | "context";
+  source_id: string;
+  as_of: number;
+  counted_in_direction: boolean;
+  counting_reason: string;
+  root_outcome: RiskDirection;
+  root_up_score: number;
+  root_down_score: number;
+  dominance_ratio: number | null;
+  explanation: string;
+  values: Record<string, unknown>;
+}
+
 export interface PillarSnapshot {
   pillar: EvidencePillar;
   direction: RiskDirection | "neutral";
@@ -129,6 +147,16 @@ export interface MarketRiskContext {
   institutional_futures?: ContextItem;
   exchange_flows?: ContextItem;
   institutional_entities?: ContextItem;
+  dependency_degradation?: {
+    market_data_poll_failures?: Record<string, string>;
+    ai?: string;
+    ai_detail?: {
+      status?: string;
+      reason?: string | null;
+      decision_role?: string;
+    };
+    note?: string;
+  };
   [key: string]: unknown;
 }
 
@@ -163,6 +191,8 @@ export interface MarketRiskIntelligence {
     summary: string;
     supporting_evidence: string[];
     opposing_evidence: string[];
+    supporting_details: DecisionEvidenceSummary[];
+    opposing_details: DecisionEvidenceSummary[];
     blockers: string[];
     invalidation_conditions: string[];
     execution_eligible: false;
@@ -180,11 +210,22 @@ export interface MarketRiskReady {
   snapshot_count_24h: number;
   core_coverage_24h: number;
   governed_shadow_age_sec: number;
+  clean_epoch_started_at: number;
+  last_epoch_reset_at: number;
+  last_epoch_reset_reason: string;
+  hard_violations_14d: number;
+  governance_identity: string;
   rss_observation_age_sec: number;
   rss_p95_gib: number;
   rss_slope_mib_per_hour: number;
   raw_queue_dropped: number;
+  raw_dropped_in_epoch: number;
   raw_store: {
+    queue_size?: number;
+    queue_max?: number;
+    oldest_queue_age_sec?: number;
+    late_events?: number;
+    writer_failures?: number;
     file_count?: number;
     projected_files_per_day?: number;
     total_bytes?: number;

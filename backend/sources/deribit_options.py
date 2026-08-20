@@ -27,15 +27,15 @@ class DeribitOptionsSource(DataSource):
                 params={"currency": currency.upper(), "kind": "option"},
             ) as response:
                 if response.status != 200:
-                    self._mark_failure()
+                    self._mark_failure(f"http_{response.status}", response.status)
                     return None
                 payload = await response.json()
                 rows = payload.get("result") if isinstance(payload, dict) else None
                 if not isinstance(rows, list):
-                    self._mark_failure()
+                    self._mark_failure("invalid_result_shape")
                     return None
-                self._mark_success((time.time() - started) * 1000)
+                self._mark_success((time.time() - started) * 1000, response.status)
                 return [row for row in rows if isinstance(row, dict)]
-        except Exception:
-            self._mark_failure()
+        except Exception as exc:
+            self._mark_failure(type(exc).__name__)
             return None

@@ -260,6 +260,8 @@ class CoinState:
         self.td_sequential_count: Optional[int] = None
         self.td_sequential_direction: str = ""
         self.poll_failures: dict[str, str] = {}
+        # 非行情依赖（例如 AI）单独记录，不能污染行情质量或下一轮 AI prompt。
+        self.dependency_failures: dict[str, str] = {}
         self._log_once_keys: set[str] = set()
         # ── Market Action Analyzer (MAA) 新增字段 · v4 ──
         # poll 层写入的原始/序列数据（不破坏现有字段）
@@ -1662,6 +1664,15 @@ class Engine:
             return
         from polls.options_deribit import poll_deribit_options
         await poll_deribit_options(self._deribit, self._states[coin.ccy])
+        health = self._deribit.health()
+        if health.reason:
+            self._states[coin.ccy].poll_failures["deribit_options"] = (
+                f"{health.reason}" + (
+                    f" (HTTP {health.last_http_status})" if health.last_http_status else ""
+                )
+            )
+        else:
+            self._states[coin.ccy].poll_failures.pop("deribit_options", None)
 
     async def _poll_candles_1h(self, coin: CoinConfig):
         from polls.candles import poll_candles_1h
@@ -1807,6 +1818,14 @@ class Engine:
         holdings = await self._ishares_ibit.fetch_holdings()
         if holdings:
             self._states["BTC"].ibit_official = holdings
+            self._states["BTC"].poll_failures.pop("ishares_ibit_official", None)
+        else:
+            health = self._ishares_ibit.health()
+            self._states["BTC"].poll_failures["ishares_ibit_official"] = (
+                f"{health.reason or 'source_unavailable'}" + (
+                    f" (HTTP {health.last_http_status})" if health.last_http_status else ""
+                )
+            )
 
     async def _poll_cftc_bitcoin_cot(self, coin: CoinConfig):
         if coin.ccy != "BTC":
@@ -1814,6 +1833,14 @@ class Engine:
         report = await self._cftc_cot.fetch_bitcoin_report()
         if report:
             self._states["BTC"].cftc_bitcoin_cot = report
+            self._states["BTC"].poll_failures.pop("cftc_cme_bitcoin_cot", None)
+        else:
+            health = self._cftc_cot.health()
+            self._states["BTC"].poll_failures["cftc_cme_bitcoin_cot"] = (
+                f"{health.reason or 'source_unavailable'}" + (
+                    f" (HTTP {health.last_http_status})" if health.last_http_status else ""
+                )
+            )
 
     async def _poll_coinbase_premium(self, _coin: CoinConfig):
         from polls.macro import poll_coinbase_premium
@@ -2914,12 +2941,14 @@ class Engine:
             arbiter = self._get_strategic_arbiter()
             if arbiter is None:
                 logger.warning("Strategic arbiter unavailable | coin=%s", ccy)
+                state.dependency_failures["strategic_ai"] = "arbiter_unavailable"
                 await self._push_strategic_error(ccy, "arbiter_unavailable")
                 return
 
             snapshot = self._build_strategic_snapshot(ccy)
             if snapshot is None:
                 logger.warning("Strategic snapshot build failed | coin=%s", ccy)
+                state.dependency_failures["strategic_ai"] = "snapshot_build_failed"
                 await self._push_strategic_error(ccy, "snapshot_build_failed")
                 return
 
@@ -2931,6 +2960,7 @@ class Engine:
             state.strategic_report = report
             state.strategic_last_ts = time.time()
             state.strategic_history.append(report)
+            state.dependency_failures.pop("strategic_ai", None)
 
             logger.info(
                 "Strategic ok | coin=%s | %.1fs | decision=%s horizon=%s "
@@ -2951,6 +2981,11 @@ class Engine:
             except Exception:
                 logger.debug("Strategic persist failed | coin=%s", ccy, exc_info=True)
         except Exception as e:
+            state = self._states.get(ccy)
+            if state is not None:
+                state.dependency_failures["strategic_ai"] = (
+                    f"{type(e).__name__}: {str(e)[:160]}"
+                )
             logger.error(
                 "Strategic background task failed | coin=%s | %s: %s",
                 ccy, type(e).__name__, e, exc_info=True,

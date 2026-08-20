@@ -13,7 +13,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +27,20 @@ class RawEventStore:
         *,
         allowed_coins: tuple[str, ...] = ("BTC",),
         segment_sec: int = 300,
+        max_lateness_sec: int = 120,
         max_total_bytes: int = 50 * 1024**3,
         min_free_bytes: int = 10 * 1024**3,
         min_free_inodes: int = 200_000,
+        gap_sink: Optional[Callable[[dict[str, Any]], None]] = None,
+        state_loader: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
+        state_saver: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> None:
         self.data_dir = data_dir
         self.queue_max = max(1_000, int(queue_max))
         self.batch_size = max(100, int(batch_size))
         self.allowed_coins = {str(coin).upper() for coin in allowed_coins}
         self.segment_sec = max(60, int(segment_sec))
+        self.max_lateness_sec = max(0, int(max_lateness_sec))
         self.max_total_bytes = max(1024**3, int(max_total_bytes))
         self.min_free_bytes = max(1024**3, int(min_free_bytes))
         self.min_free_inodes = max(10_000, int(min_free_inodes))
@@ -50,8 +55,35 @@ class RawEventStore:
         self._last_flush_at = 0
         self._last_error = ""
         self._gaps: deque[dict[str, Any]] = deque(maxlen=500)
+        self._gap_queue: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        self._gap_lock = threading.Lock()
         self._started_at = int(time.time())
         self._resource_cache: tuple[int, dict[str, Any]] = (0, {})
+        self._gap_sink = gap_sink
+        self._state_saver = state_saver
+        self._last_state_save_at = 0.0
+        self._session_written = 0
+        self._session_files_written = 0
+        self._session_bytes_written = 0
+        self._session_dropped = 0
+        self._late_events = 0
+        self._writer_failures = 0
+        self._segments_committed = 0
+        self._closed_segment_rewrites = 0
+        self._oldest_queue_started = 0.0
+        self._queue_age_lock = threading.Lock()
+        if state_loader is not None:
+            try:
+                saved = state_loader() or {}
+                self._written = max(0, int(saved.get("written", 0)))
+                self._files_written = max(0, int(saved.get("files_written", 0)))
+                self._bytes_written = max(0, int(saved.get("bytes_written", 0)))
+                self._dropped = max(0, int(saved.get("dropped", 0)))
+                self._late_events = max(0, int(saved.get("late_events", 0)))
+                self._writer_failures = max(0, int(saved.get("writer_failures", 0)))
+                self._segments_committed = max(0, int(saved.get("segments_committed", 0)))
+            except Exception:  # noqa: BLE001
+                logger.exception("raw event persisted state load failed")
         self._pyarrow_available = False
         try:
             import pyarrow  # noqa: F401
@@ -66,7 +98,10 @@ class RawEventStore:
         os.makedirs(self.data_dir, exist_ok=True)
         if not self._pyarrow_available:
             self._record_gap("system", "ALL", "pyarrow_unavailable")
+            self._drain_gap_markers()
             return
+        # 只在启动和小时维护时盘点目录。写入热路径仅维护增量计数。
+        self._resource_stats(force=True)
         self._running = True
         self._thread = threading.Thread(
             target=self._worker, name="market-risk-raw-writer", daemon=True,
@@ -78,6 +113,7 @@ class RawEventStore:
         if self._thread is not None:
             self._thread.join(timeout=15)
             self._thread = None
+        self._persist_state(force=True)
 
     def append(self, event: dict[str, Any]) -> bool:
         if not self._running:
@@ -91,16 +127,21 @@ class RawEventStore:
         )
         if event_time <= 0 or decision_time <= 0 or event_time > decision_time:
             self._dropped += 1
+            self._session_dropped += 1
             self._record_gap(
                 str(event.get("market") or "unknown"), coin or "UNKNOWN",
                 "raw_event_pit_violation",
             )
             return False
         try:
+            with self._queue_age_lock:
+                if self._queue.empty():
+                    self._oldest_queue_started = time.monotonic()
             self._queue.put_nowait(dict(event))
             return True
         except queue.Full:
             self._dropped += 1
+            self._session_dropped += 1
             self._record_gap(
                 str(event.get("market") or "unknown"),
                 str(event.get("coin") or "UNKNOWN"),
@@ -114,20 +155,61 @@ class RawEventStore:
             "market": market, "coin": coin.upper(), "reason": reason,
             "observed_at": int(time.time()), "queue_size": self._queue.qsize(),
         }
-        if self._gaps and all(
-            self._gaps[-1].get(key) == marker.get(key)
-            for key in ("market", "coin", "reason")
-        ) and marker["observed_at"] - int(self._gaps[-1]["observed_at"]) < 60:
+        with self._gap_lock:
+            if self._gaps and all(
+                self._gaps[-1].get(key) == marker.get(key)
+                for key in ("market", "coin", "reason")
+            ) and marker["observed_at"] - int(self._gaps[-1]["observed_at"]) < 60:
+                return
+            self._gaps.append(marker)
+            # append/WS 热路径只做 O(1) 内存入队；SQLite 与磁盘 I/O 由 writer 承担。
+            self._gap_queue.put(marker)
+
+    def _drain_gap_markers(self) -> None:
+        persisted = False
+        while True:
+            try:
+                marker = self._gap_queue.get_nowait()
+            except queue.Empty:
+                break
+            persisted = True
+            if self._gap_sink is not None:
+                try:
+                    self._gap_sink(dict(marker))
+                except Exception:  # noqa: BLE001
+                    logger.exception("raw event gap sink failed")
+            try:
+                gap_dir = os.path.join(self.data_dir, "gap_markers")
+                os.makedirs(gap_dir, exist_ok=True)
+                day = datetime.fromtimestamp(marker["observed_at"], timezone.utc).strftime("%Y-%m-%d")
+                with open(os.path.join(gap_dir, f"{day}.jsonl"), "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(marker, separators=(",", ":")) + "\n")
+            except OSError:
+                logger.exception("raw event gap marker persist failed")
+        if persisted:
+            self._persist_state()
+
+    def _persist_state(self, *, force: bool = False) -> None:
+        if self._state_saver is None:
             return
-        self._gaps.append(marker)
+        now = time.monotonic()
+        if not force and now - self._last_state_save_at < 5.0:
+            return
+        payload = {
+            "written": self._written,
+            "files_written": self._files_written,
+            "bytes_written": self._bytes_written,
+            "dropped": self._dropped,
+            "late_events": self._late_events,
+            "writer_failures": self._writer_failures,
+            "segments_committed": self._segments_committed,
+            "updated_at": int(time.time()),
+        }
         try:
-            gap_dir = os.path.join(self.data_dir, "gap_markers")
-            os.makedirs(gap_dir, exist_ok=True)
-            day = datetime.fromtimestamp(marker["observed_at"], timezone.utc).strftime("%Y-%m-%d")
-            with open(os.path.join(gap_dir, f"{day}.jsonl"), "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(marker, separators=(",", ":")) + "\n")
-        except OSError:
-            logger.exception("raw event gap marker persist failed")
+            self._state_saver(payload)
+            self._last_state_save_at = now
+        except Exception:  # noqa: BLE001
+            logger.exception("raw event persisted state save failed")
 
     def recent_gap(self, coin: str, market: str, within_sec: int = 300) -> Optional[dict[str, Any]]:
         cutoff = int(time.time()) - max(1, int(within_sec))
@@ -141,18 +223,31 @@ class RawEventStore:
     def health(self) -> dict[str, Any]:
         resources = self._resource_stats()
         uptime = max(1, int(time.time()) - self._started_at)
-        files_per_day = round(self._files_written * 86_400 / uptime, 1) if uptime >= 300 else 0.0
-        bytes_per_day = round(self._bytes_written * 86_400 / uptime, 1) if uptime >= 300 else 0.0
+        files_per_day = round(self._session_files_written * 86_400 / uptime, 1) if uptime >= 300 else 0.0
+        bytes_per_day = round(self._session_bytes_written * 86_400 / uptime, 1) if uptime >= 300 else 0.0
+        with self._queue_age_lock:
+            queue_age = (
+                max(0.0, time.monotonic() - self._oldest_queue_started)
+                if self._oldest_queue_started and not self._queue.empty() else 0.0
+            )
         return {
             "enabled": True,
             "running": self._running,
             "format": "parquet-zstd" if self._pyarrow_available else "unavailable",
             "queue_size": self._queue.qsize(), "queue_max": self.queue_max,
             "written": self._written, "dropped": self._dropped,
+            "session_written": self._session_written,
+            "session_dropped": self._session_dropped,
+            "late_events": self._late_events,
+            "writer_failures": self._writer_failures,
+            "segments_committed": self._segments_committed,
+            "closed_segment_rewrites": self._closed_segment_rewrites,
+            "oldest_queue_age_sec": round(queue_age, 3),
             "last_flush_at": self._last_flush_at, "last_error": self._last_error,
             "last_gap_marker": self._gaps[-1] if self._gaps else None,
             "allowed_coins": sorted(self.allowed_coins),
             "segment_sec": self.segment_sec,
+            "max_lateness_sec": self.max_lateness_sec,
             "file_count": resources["file_count"],
             "total_bytes": resources["total_bytes"],
             "free_bytes": resources["free_bytes"],
@@ -174,41 +269,70 @@ class RawEventStore:
         # 以 event_time 固定切成 5 分钟原子段。一个段只写一次 raw/1s/5s，
         # 因而文件数量由时间决定，不再由队列 timeout 或行情速率决定。
         segments: dict[int, list[dict[str, Any]]] = {}
+        committed: set[tuple[str, str, int]] = set()
         while self._running or not self._queue.empty() or segments:
+            self._drain_gap_markers()
+            drained: list[dict[str, Any]] = []
+            late_rows: list[dict[str, Any]] = []
             try:
-                item = self._queue.get(timeout=0.1 if not self._running else 1.0)
-                event_time = int(item.get("event_time") or 0)
-                segment = event_time - event_time % self.segment_sec
-                segments.setdefault(segment, []).append(item)
+                drained.append(self._queue.get(timeout=0.1 if not self._running else 1.0))
             except queue.Empty:
                 pass
-            if not self._running:
-                while True:
-                    try:
-                        tail = self._queue.get_nowait()
-                    except queue.Empty:
-                        break
-                    tail_time = int(tail.get("event_time") or 0)
-                    tail_segment = tail_time - tail_time % self.segment_sec
-                    segments.setdefault(tail_segment, []).append(tail)
+            while len(drained) < self.batch_size:
+                try:
+                    drained.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+            for item in drained:
+                event_time = int(item.get("event_time") or 0)
+                segment = event_time - event_time % self.segment_sec
+                key = (
+                    str(item.get("coin") or "UNKNOWN").upper(),
+                    str(item.get("market") or "unknown"), segment,
+                )
+                arrival = int(item.get("decision_time") or item.get("observed_at") or time.time())
+                if key in committed or arrival > segment + self.segment_sec + self.max_lateness_sec:
+                    self._late_events += 1
+                    late_rows.append(item)
+                    self._record_gap(key[1], key[0], "raw_event_late_beyond_allowance")
+                    continue
+                segments.setdefault(segment, []).append(item)
+            if late_rows:
+                self._write_late_audit(late_rows, "late_after_segment_close")
+                self._persist_state()
+            if self._queue.empty():
+                with self._queue_age_lock:
+                    self._oldest_queue_started = 0.0
             now = int(time.time())
             closed = [
                 segment for segment in segments
-                if not self._running or segment + self.segment_sec + 2 <= now
+                if self._queue.empty() and (
+                    not self._running
+                    or segment + self.segment_sec + self.max_lateness_sec <= now
+                )
             ]
             for segment in sorted(closed):
                 batch = segments.pop(segment)
                 try:
-                    resources = self._resource_stats(force=True)
+                    resources = self._resource_stats()
                     if not self._resource_admissible(resources):
                         raise OSError("raw_event_resource_limit")
                     self._write_batch(batch)
                     self._written += len(batch)
+                    self._session_written += len(batch)
+                    self._segments_committed += 1
+                    committed.update({
+                        (
+                            str(row.get("coin") or "UNKNOWN").upper(),
+                            str(row.get("market") or "unknown"), segment,
+                        )
+                        for row in batch
+                    })
                     self._last_flush_at = int(time.time())
-                    if self._written % 100_000 < len(batch):
-                        self.prune()
+                    self._persist_state()
                 except Exception as exc:  # noqa: BLE001
                     self._last_error = f"{type(exc).__name__}: {exc}"
+                    self._writer_failures += 1
                     logger.exception("raw event parquet writer failed")
                     markets = {
                         (str(row.get("market") or "unknown"), str(row.get("coin") or "UNKNOWN"))
@@ -216,6 +340,31 @@ class RawEventStore:
                     }
                     for market, coin in markets:
                         self._record_gap(market, coin, "raw_event_writer_failure")
+                    self._persist_state()
+        self._drain_gap_markers()
+
+    def _write_late_audit(self, rows: list[dict[str, Any]], reason: str) -> None:
+        """迟到事实仅供审计，永不参与 canonical aggregate 或校准。"""
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            arrival = int(row.get("decision_time") or row.get("observed_at") or time.time())
+            dt = datetime.fromtimestamp(arrival, timezone.utc)
+            path = os.path.join(
+                self.data_dir, "late_audit", f"date={dt:%Y-%m-%d}",
+                f"hour={dt:%H}", "late-events.jsonl",
+            )
+            grouped.setdefault(path, []).append({
+                **row, "late_reason": reason, "valid_for_calibration": False,
+            })
+        for path, part in grouped.items():
+            try:
+                with self._storage_lock:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "a", encoding="utf-8") as handle:
+                        for row in part:
+                            handle.write(json.dumps(row, separators=(",", ":"), default=str) + "\n")
+            except OSError:
+                logger.exception("raw late-event audit persist failed")
 
     def _partition_path(self, layer: str, row: dict[str, Any]) -> str:
         ts = int(row.get("event_time") or time.time())
@@ -245,6 +394,8 @@ class RawEventStore:
                 path = os.path.join(directory, f"segment-{segment_start}-{suffix}.parquet")
                 temp_path = path + ".tmp"
                 existed = os.path.exists(path)
+                if existed:
+                    self._closed_segment_rewrites += 1
                 previous_size = os.path.getsize(path) if existed else 0
                 write_rows = list(part)
                 if existed:
@@ -289,8 +440,18 @@ class RawEventStore:
                 os.replace(temp_path, path)
                 if not existed:
                     self._files_written += 1
+                    self._session_files_written += 1
                 try:
-                    self._bytes_written += max(0, os.path.getsize(path) - previous_size)
+                    delta = max(0, os.path.getsize(path) - previous_size)
+                    self._bytes_written += delta
+                    self._session_bytes_written += delta
+                    cached_at, cached = self._resource_cache
+                    if cached:
+                        updated = dict(cached)
+                        if not existed:
+                            updated["file_count"] = int(updated.get("file_count", 0)) + 1
+                        updated["total_bytes"] = int(updated.get("total_bytes", 0)) + delta
+                        self._resource_cache = (cached_at, updated)
                 except OSError:
                     pass
 
@@ -422,8 +583,21 @@ class RawEventStore:
     def _resource_stats(self, *, force: bool = False) -> dict[str, Any]:
         now = int(time.time())
         cached_at, cached = self._resource_cache
-        if cached and not force and now - cached_at < 60:
-            return dict(cached)
+        probe = self.data_dir if os.path.exists(self.data_dir) else os.path.dirname(self.data_dir)
+        os.makedirs(probe, exist_ok=True)
+        if cached and not force:
+            if now - cached_at < 60:
+                return dict(cached)
+            # 热路径只刷新 O(1) 的文件系统余量；文件/字节总量由写入增量维护，
+            # 完整目录对账只允许 start/prune/maintenance 显式 force。
+            stat = os.statvfs(probe)
+            refreshed = {
+                **cached,
+                "free_bytes": int(stat.f_bavail * stat.f_frsize),
+                "free_inodes": int(stat.f_favail),
+            }
+            self._resource_cache = (now, refreshed)
+            return dict(refreshed)
         file_count = 0
         total_bytes = 0
         if os.path.isdir(self.data_dir):
@@ -436,8 +610,6 @@ class RawEventStore:
                         total_bytes += os.path.getsize(os.path.join(directory, name))
                     except OSError:
                         pass
-        probe = self.data_dir if os.path.exists(self.data_dir) else os.path.dirname(self.data_dir)
-        os.makedirs(probe, exist_ok=True)
         stat = os.statvfs(probe)
         result = {
             "file_count": file_count,
@@ -475,6 +647,8 @@ class RawEventStore:
                     continue
                 import shutil
                 shutil.rmtree(os.path.join(root, date_name), ignore_errors=True)
+        self._resource_stats(force=True)
+        self._persist_state(force=True)
 
     def compact_closed_hours(self, now: Optional[int] = None) -> int:
         """把已闭合小时的 1s/5s 段压成单文件；raw 保持 5m 段便于审计恢复。"""
@@ -542,7 +716,7 @@ class RawEventStore:
                     self._last_error = f"hour_compaction_failed:{layer}:{sample}"
                     logger.exception("raw event hourly compaction failed | directory=%s", directory)
         if compacted:
-            self._resource_cache = (0, {})
+            self._resource_stats(force=True)
         return compacted
 
 

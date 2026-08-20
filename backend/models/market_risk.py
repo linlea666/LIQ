@@ -215,12 +215,32 @@ class ConfirmedIncident(BaseModel):
     episode_id: Optional[str] = None
 
 
+class DecisionEvidenceSummary(BaseModel):
+    evidence_id: str
+    label: str
+    direction: EvidenceDirection = "unknown"
+    causal_root: str
+    role: EvidenceRole = "informational"
+    source_id: str
+    as_of: int = 0
+    counted_in_direction: bool = False
+    counting_reason: str = "informational_only"
+    root_outcome: RiskDirection = "unknown"
+    root_up_score: float = 0.0
+    root_down_score: float = 0.0
+    dominance_ratio: Optional[float] = None
+    explanation: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
 class DecisionSupport(BaseModel):
     stance: Literal["observe_long", "observe_short", "wait"] = "wait"
     strength_band: Literal["unavailable", "weak", "medium", "strong"] = "unavailable"
     summary: str = "等待证据"
     supporting_evidence: list[str] = Field(default_factory=list)
     opposing_evidence: list[str] = Field(default_factory=list)
+    supporting_details: list[DecisionEvidenceSummary] = Field(default_factory=list)
+    opposing_details: list[DecisionEvidenceSummary] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     invalidation_conditions: list[str] = Field(default_factory=list)
     execution_eligible: Literal[False] = False
@@ -332,11 +352,17 @@ class MarketRiskReady(BaseModel):
     snapshot_count_24h: int = 0
     core_coverage_24h: float = 0.0
     governed_shadow_age_sec: int = 0
+    clean_epoch_started_at: int = 0
+    last_epoch_reset_at: int = 0
+    last_epoch_reset_reason: str = ""
+    hard_violations_14d: int = 0
+    governance_identity: str = ""
     rss_observation_age_sec: int = 0
     rss_p95_gib: float = 0.0
     rss_slope_mib_per_hour: float = 0.0
     frozen_by_coin: dict[str, dict[str, Any]] = Field(default_factory=dict)
     raw_queue_dropped: int = 0
+    raw_dropped_in_epoch: int = 0
     raw_store: dict[str, Any] = Field(default_factory=dict)
     dependencies: dict[str, Any] = Field(default_factory=dict)
     admission: dict[str, Any] = Field(default_factory=dict)
