@@ -15,6 +15,7 @@ import pytest
 
 from sources.funding_official import (
     fetch_binance_funding, fetch_okx_funding, fetch_official_pair,
+    fetch_official_observation,
     to_okx_inst_id,
 )
 
@@ -155,3 +156,19 @@ def test_fetch_official_pair_derives_okx_instid_from_binance_symbol():
          patch("sources.funding_official.fetch_okx_funding", side_effect=_okx):
         asyncio.run(fetch_official_pair("ETHUSDT"))
     assert captured["inst_id"] == "ETH-USDT-SWAP"
+
+
+def test_rich_observation_keeps_current_settled_and_next_distinct():
+    async def _bn(session, symbol):
+        return 0.0002, -0.0001, 1_800_000_100
+
+    async def _okx(session, inst):
+        return 0.0004, -0.0003, 1_800_000_000
+
+    session = MagicMock()
+    with patch("sources.funding_official._fetch_binance_observation", side_effect=_bn), \
+         patch("sources.funding_official._fetch_okx_observation", side_effect=_okx):
+        result = asyncio.run(fetch_official_observation("BTCUSDT", session=session))
+    assert result.predicted_rate_observed == pytest.approx(0.0003)
+    assert result.last_settled_rate == pytest.approx(-0.0002)
+    assert result.next_funding_time == 1_800_000_000

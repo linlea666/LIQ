@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
@@ -35,7 +37,25 @@ logger = logging.getLogger(__name__)
 
 _BINANCE_PREMIUM_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 _OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate"
+_BINANCE_HISTORY_URL = "https://fapi.binance.com/fapi/v1/fundingRate"
 _DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=6)
+
+
+@dataclass(frozen=True)
+class OfficialFundingObservation:
+    binance_rate_observed: Optional[float]
+    okx_rate_observed: Optional[float]
+    last_settled_rate: Optional[float]
+    next_funding_time: int
+    observed_at: int
+
+    @property
+    def predicted_rate_observed(self) -> Optional[float]:
+        values = [
+            value for value in (self.binance_rate_observed, self.okx_rate_observed)
+            if value is not None
+        ]
+        return sum(values) / len(values) if values else None
 
 
 def to_okx_inst_id(symbol_pair: str) -> str:
@@ -123,3 +143,90 @@ async def fetch_official_pair(
             fetch_binance_funding(s, symbol_binance),
             fetch_okx_funding(s, inst_id),
         )
+
+
+async def _fetch_binance_observation(
+    session: aiohttp.ClientSession, symbol: str,
+) -> tuple[Optional[float], Optional[float], int]:
+    current: Optional[float] = None
+    settled: Optional[float] = None
+    next_time = 0
+    try:
+        async with session.get(
+            _BINANCE_PREMIUM_URL, params={"symbol": symbol}, timeout=_DEFAULT_TIMEOUT,
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json(content_type=None)
+            if isinstance(payload, dict):
+                raw = payload.get("lastFundingRate")
+                current = float(raw) if raw is not None else None
+                next_time = int(payload.get("nextFundingTime", 0) or 0) // 1000
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[funding-official] binance observation %s fail: %s", symbol, exc)
+    try:
+        async with session.get(
+            _BINANCE_HISTORY_URL,
+            params={"symbol": symbol, "limit": 1}, timeout=_DEFAULT_TIMEOUT,
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json(content_type=None)
+            if isinstance(payload, list) and payload:
+                raw = payload[-1].get("fundingRate")
+                settled = float(raw) if raw is not None else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[funding-official] binance settled %s fail: %s", symbol, exc)
+    return current, settled, next_time
+
+
+async def _fetch_okx_observation(
+    session: aiohttp.ClientSession, inst_id: str,
+) -> tuple[Optional[float], Optional[float], int]:
+    try:
+        async with session.get(
+            _OKX_FUNDING_URL, params={"instId": inst_id}, timeout=_DEFAULT_TIMEOUT,
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json(content_type=None)
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            row = rows[0] if isinstance(rows, list) and rows else {}
+            current_raw = row.get("fundingRate")
+            settled_raw = row.get("settFundingRate")
+            return (
+                float(current_raw) if current_raw not in (None, "") else None,
+                float(settled_raw) if settled_raw not in (None, "") else None,
+                int(row.get("nextFundingTime", 0) or 0) // 1000,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[funding-official] okx observation %s fail: %s", inst_id, exc)
+        return None, None, 0
+
+
+async def fetch_official_observation(
+    symbol_binance: str, inst_id_okx: Optional[str] = None, *,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> OfficialFundingObservation:
+    """当前观测、最近实际结算和下一结算时间三者不互相回填。"""
+    inst_id = inst_id_okx or to_okx_inst_id(symbol_binance)
+
+    async def _run(active_session: aiohttp.ClientSession) -> OfficialFundingObservation:
+        binance, okx = await asyncio.gather(
+            _fetch_binance_observation(active_session, symbol_binance),
+            _fetch_okx_observation(active_session, inst_id),
+        )
+        bn_current, bn_settled, bn_next = binance
+        okx_current, okx_settled, okx_next = okx
+        settled_values = [value for value in (bn_settled, okx_settled) if value is not None]
+        return OfficialFundingObservation(
+            binance_rate_observed=bn_current,
+            okx_rate_observed=okx_current,
+            last_settled_rate=(sum(settled_values) / len(settled_values) if settled_values else None),
+            next_funding_time=min(
+                (value for value in (bn_next, okx_next) if value > 0), default=0,
+            ),
+            observed_at=int(time.time()),
+        )
+
+    if session is not None:
+        return await _run(session)
+    async with aiohttp.ClientSession() as active_session:
+        return await _run(active_session)

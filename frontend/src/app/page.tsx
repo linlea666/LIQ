@@ -186,6 +186,12 @@ function ToolsMenu() {
         desc: "价格区统一视图 · 证据链 · 无指令",
       },
       {
+        href: `/market-risk/${coin}`,
+        label: "联合风险预警",
+        icon: "🛡️",
+        desc: "现货 + 杠杆 + 清算 + 流动性证据账本",
+      },
+      {
         href: "/roll",
         label: "滚仓",
         icon: "📊",

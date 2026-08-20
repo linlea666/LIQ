@@ -148,6 +148,7 @@ def _select_representative(
     side: SweepSide,
     zones: list[BrainPriceZone],
     trace: _TraceRecorder,
+    previous: Optional[SweepWatchSide] = None,
 ) -> Optional[BrainPriceZone]:
     """选该侧的代表 zone（桶式排序）。
 
@@ -164,6 +165,27 @@ def _select_representative(
     保留"代表 = 当前最相关的那条带"语义：远端 SA 极高的 zone 不会抢走近端
     桶 0 的代表位（避免代表区跳到 ≥ 3% 之外失去过程态意义）。
     """
+    if previous is not None and previous.sweep_phase != "waiting":
+        retained = next(
+            (z for z in zones if z.zone_id == previous.representative_zone_id), None,
+        )
+        if retained is not None:
+            trace.emit(
+                step="select_representative",
+                inputs={
+                    "side": side,
+                    "previous_zone_id": previous.representative_zone_id,
+                    "previous_phase": previous.sweep_phase,
+                },
+                output={
+                    "zone_id": retained.zone_id,
+                    "distance_pct": round(retained.distance_pct, 3),
+                },
+                rule_hit="retain_stable_zone_identity",
+                notes="过程态未结束，跨过现价后仍保留原 zone 身份",
+            )
+            return retained
+
     if side == "below":
         candidates = [z for z in zones if z.distance_pct < 0]
     else:
@@ -265,6 +287,7 @@ def _decide_phase(
     ctx: Optional[BrainContextChips],
     now_sec: int,
     trace: _TraceRecorder,
+    previous: Optional[SweepWatchSide] = None,
 ) -> SweepPhase:
     distance_abs = abs(zone.distance_pct)
     consumed, ev = _is_recent_wall_consumed(zone.wall_zone_ids, events, now_sec)
@@ -278,7 +301,12 @@ def _decide_phase(
     #   - 触发态 + CVD 中性/反向                        → in_sweep（等结构反应；不预判延续）
     #   - 非触发态 + 距离 ≤ 1.5%                        → approaching
     #   - 否则                                           → waiting
-    in_sweep_trigger = consumed or pierced
+    was_triggered = bool(
+        previous and previous.sweep_phase in {
+            "in_sweep", "swept_reclaiming", "swept_continuing",
+        }
+    )
+    in_sweep_trigger = consumed or pierced or was_triggered
     if in_sweep_trigger:
         if reclaimed:
             phase: SweepPhase = "swept_reclaiming"
@@ -308,6 +336,7 @@ def _decide_phase(
             "consumed_event_age_sec": max(0, now_sec - ev.ts) if ev else None,
             "price_pierced": pierced,
             "price_reclaimed": reclaimed,
+            "previous_phase": previous.sweep_phase if previous else None,
             "cvd_alignment_score": round(cvd_alignment, 3),
         },
         output=phase,
@@ -474,7 +503,7 @@ def _build_triggers_invalidations(
         elif phase == "swept_reclaiming":
             triggers = [
                 f"价格站稳 {band_lo}-{band_hi} 区间内 ≥ 10min",
-                "支撑信任 chip 出现 ★ 机构 / 双源 / Coinbase 共振",
+                "支撑信任 chip 出现 ★ 单笔大额 / 双源 / Coinbase 共振",
                 "现货 CVD 衰竭信号确认（不再创新低）",
             ]
             invalidations = [
@@ -526,7 +555,7 @@ def _build_triggers_invalidations(
         elif phase == "swept_reclaiming":
             triggers = [
                 f"价格站稳 {band_lo}-{band_hi} 区间内 ≥ 10min",
-                "阻力信任 chip 出现 ★ 机构 / 双源 / Coinbase 共振",
+                "阻力信任 chip 出现 ★ 单笔大额 / 双源 / Coinbase 共振",
                 "现货 CVD 衰竭信号确认（不再创新高）",
             ]
             invalidations = [
@@ -569,13 +598,16 @@ def _build_side(
     events: list[BrainEvent],
     ctx: Optional[BrainContextChips],
     now_sec: int,
+    previous: Optional[SweepWatchSide] = None,
 ) -> tuple[Optional[SweepWatchSide], list[SweepWatchTraceEntry]]:
     trace = _TraceRecorder(side=side)
-    repr_zone = _select_representative(side, zones, trace)
+    repr_zone = _select_representative(side, zones, trace, previous)
     if repr_zone is None:
         return None, trace.entries
 
-    phase = _decide_phase(side, repr_zone, last_price, events, ctx, now_sec, trace)
+    phase = _decide_phase(
+        side, repr_zone, last_price, events, ctx, now_sec, trace, previous,
+    )
     sweep_attractiveness = round(repr_zone.sweep_attractiveness, 3)
     trace.emit(
         step="sweep_attractiveness",
@@ -617,6 +649,7 @@ def build_sweep_watch(
     events: list[BrainEvent],
     ctx: Optional[BrainContextChips] = None,
     now_sec: int,
+    previous: Optional[BrainSweepWatch] = None,
 ) -> BrainSweepWatch:
     """构建双侧 SweepWatch 主聚合对象 + trace 日志。
 
@@ -624,9 +657,11 @@ def build_sweep_watch(
     """
     below_obj, below_trace = _build_side(
         "below", zones, last_price, events, ctx, now_sec,
+        previous.below if previous else None,
     )
     above_obj, above_trace = _build_side(
         "above", zones, last_price, events, ctx, now_sec,
+        previous.above if previous else None,
     )
     return BrainSweepWatch(
         coin=coin,

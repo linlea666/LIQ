@@ -4,7 +4,7 @@
  * 改动：
  *   1. 顶部新增"现货 / 合约 / 清算"三层厚度条（复用 SpotOrderBookPanel 3 色规范：
  *      Binance 绿 / Coinbase 金 / 合约蓝；清算磁铁紫色叠加角标）
- *   2. 加入 4 个独立 chip：★ 机构 / 双源 / Coinbase 共振 / 持续性
+ *   2. 加入 4 个独立 chip：★ 单笔大额 / 双源 / Coinbase 共振 / 持续性
  *      （把原本埋在 evidence 文字里的硬证据视觉化）
  *   3. ScoreBar 阈值色阶：信任类 < 0.4 红 / 0.4-0.7 黄 / ≥ 0.7 绿；
  *      风险类反向；hover tooltip 显示档位语义
@@ -31,8 +31,8 @@ interface Props {
   futBook?: BrainFutBook | null;
 }
 
-// 与 SpotOrderBookPanel 保持一致的机构级单档阈值（与后端 SR ladder 1M 档对齐）
-const INSTITUTION_SINGLE_USD_THRESHOLD = 1_000_000;
+// 与 SpotOrderBookPanel 保持一致的大额挂单阈值（不推断订单主体身份）
+const LARGE_SINGLE_USD_THRESHOLD = 1_000_000;
 
 // ─────────────────────────────────────────────────────────────────────
 // ScoreBar：阈值色阶 + tooltip
@@ -208,14 +208,14 @@ function LiquidityStackBar({ b }: { b: LiquidityBreakdown }) {
           <div
             className="h-full bg-emerald-500/80"
             style={{ width: `${binPct}%` }}
-            title={`Binance 现货 5m 累积：${formatCnUsd(b.binance_usd)}（散户聚集为主）`}
+            title={`Binance 现货 5m 聚合：${formatCnUsd(b.binance_usd)}`}
           />
         )}
         {b.coinbase_usd > 0 && (
           <div
             className="h-full bg-amber-400/85"
             style={{ width: `${cbPct}%` }}
-            title={`Coinbase 现货瞬时：${formatCnUsd(b.coinbase_usd)}（机构 footprint 通道）`}
+            title={`Coinbase 公开现货挂单瞬时快照：${formatCnUsd(b.coinbase_usd)}`}
           />
         )}
         {b.futures_usd > 0 && (
@@ -260,18 +260,18 @@ function LiquidityStackBar({ b }: { b: LiquidityBreakdown }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 4 chip 行：机构★ / 双源 / Coinbase 共振 / 持续性
+// 4 chip 行：Coinbase 单笔大额 / 双源 / Coinbase 共振 / 持续性
 // ─────────────────────────────────────────────────────────────────────
 function HardEvidenceChips({ b }: { b: LiquidityBreakdown }) {
-  const isInstitutional = b.cb_max_single_usd >= INSTITUTION_SINGLE_USD_THRESHOLD;
+  const isLargeSingle = b.cb_max_single_usd >= LARGE_SINGLE_USD_THRESHOLD;
   const chips: { key: string; label: string; cls: string; tip: string }[] = [];
 
-  if (isInstitutional) {
+  if (isLargeSingle) {
     chips.push({
       key: "inst",
-      label: `★ 机构 ${formatCnUsd(b.cb_max_single_usd)}`,
+      label: `★ 单笔大额 ${formatCnUsd(b.cb_max_single_usd)}`,
       cls: "border-amber-400 bg-amber-400/15 text-amber-300",
-      tip: `Coinbase 单档孤立大单 ≥ 100万 USD（机构 footprint 硬证据，SR +0.10 已计入支撑/阻力信任）`,
+      tip: `Coinbase 单档公开大额挂单 ≥ 100万 USD（不代表机构身份或已成交；SR 仅作为挂单证据加权）`,
     });
   }
   if (b.is_dual_source) {
@@ -287,7 +287,7 @@ function HardEvidenceChips({ b }: { b: LiquidityBreakdown }) {
       key: "cb",
       label: "Coinbase 共振",
       cls: "border-yellow-400 bg-yellow-400/10 text-yellow-300",
-      tip: "Coinbase 同价位通过 30% wall_min 门槛（机构资金独立验证维度，SR +0.10 已计入）",
+      tip: "Coinbase 同价位通过 30% wall_min 门槛（跨交易所现货挂单证据，SR 已计入）",
     });
   }
   if (b.persistence_score >= 0.7) {
@@ -309,7 +309,7 @@ function HardEvidenceChips({ b }: { b: LiquidityBreakdown }) {
   if (chips.length === 0) {
     return (
       <div className="text-[10px] text-slate-500">
-        无机构 / 双源 / Coinbase / 持续性 / 清算硬证据
+        无单笔大额 / 双源 / Coinbase / 持续性 / 清算硬证据
       </div>
     );
   }

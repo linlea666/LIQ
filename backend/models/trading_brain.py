@@ -16,6 +16,7 @@ from models.data_meta import DataMeta
 
 if TYPE_CHECKING:
     from models.sweep_watch import BrainSweepWatch  # noqa: F401
+    from models.market_risk import MarketIncidentSnapshot  # noqa: F401
 
 _logger = logging.getLogger(__name__)
 
@@ -340,25 +341,25 @@ class BrainSpotBookItem(BaseModel):
     total_usd: float
     """整段墙体当前帧 USD 厚度（含合约+现货融合）。"""
     spot_usd: float
-    """现货侧 USD 厚度 (= binance_spot_usd + coinbase_spot_usd)；越高 → 越是真买卖家。
+    """现货侧 USD 厚度 (= binance_spot_usd + coinbase_spot_usd)；只描述公开订单簿。
     保留向后兼容；新前端建议直接用 binance_spot_usd / coinbase_spot_usd 拆分展示。"""
     futures_usd: float
     """合约侧 USD 厚度 (= max(total_usd - spot_usd, 0))。"""
 
     # ── 现货双源拆分（方案 C）──
     # 时间颗粒度不同：Binance 来自 Coinglass 5m 累积、Coinbase 来自原生瞬时快照。
-    # 直接展示拆分让用户看到"机构（Coinbase）vs 散户聚集（Binance）"分布。
+    # 直接展示交易所拆分；不得据交易所名称推断订单主体身份。
     binance_spot_usd: float = 0.0
-    """Binance 现货 5m 累积厚度（spot_current_usd，代表散户聚集为主）。"""
+    """Binance 现货 5m 聚合厚度（spot_current_usd）。"""
     coinbase_spot_usd: float = 0.0
-    """Coinbase 现货瞬时厚度（机构 footprint；ETF 链路上的真机构资金）。"""
+    """Coinbase 公开现货挂单瞬时厚度；不代表机构身份或已成交。"""
     coinbase_max_single_order_usd: float = 0.0
-    """Coinbase 同价区单档最大 USD；≥ 100 万时视为机构级孤立大单（区分散户聚集）。"""
+    """Coinbase 同价区单档最大 USD；≥ 100 万只标记大额公开挂单。"""
 
     is_dual_source: bool = False
     """合约+现货同价区共振（trust 阶梯加分最强证据）。"""
     has_coinbase: bool = False
-    """Coinbase 现货独立链路共振（机构资金 footprint）。"""
+    """Coinbase 现货独立公开挂单链路共振。"""
     trust_score: float = 0.0
     """0–1 综合可信度，沿用 WallZone.trust_score。"""
     strength_tier: Literal["S", "A", "B", "C"] = "C"
@@ -495,6 +496,9 @@ class TradingBrainSnapshot(BaseModel):
     """W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志）。
     仅在 zones 已构建后调用，不修改任何既有评分；前端独立面板展示。"""
 
+    market_risk: Optional["MarketIncidentSnapshot"] = None
+    """联合风险后台快照；可选字段，旧客户端无需升级即可继续解析。"""
+
 
 # Forward ref 解析：sweep_watch 字段引用 BrainSweepWatch（避免循环 import）。
 # 若该模块加载失败则保留前向声明，但**必须**记录 warning（否则 builder 后续传非
@@ -502,6 +506,7 @@ class TradingBrainSnapshot(BaseModel):
 def _rebuild_with_sweep_watch() -> None:
     try:
         from models.sweep_watch import BrainSweepWatch  # noqa: F401
+        from models.market_risk import MarketIncidentSnapshot  # noqa: F401
         TradingBrainSnapshot.model_rebuild()
     except Exception as exc:
         _logger.warning(

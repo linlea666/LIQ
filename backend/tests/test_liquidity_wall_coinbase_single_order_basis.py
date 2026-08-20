@@ -10,7 +10,7 @@
 
   SR 加分（W4-T1 阶段 1.1 阶梯化升级）：
     - coinbase_max_single_order_usd ≥ 100k → SR +0.03 (大额订单)
-    - coinbase_max_single_order_usd ≥ 1M  → SR +0.10 (机构级，与前端 ★ 对齐)
+    - coinbase_max_single_order_usd ≥ 1M  → SR +0.10 (大额公开挂单，与前端 ★ 对齐)
     - < 100k → SR 不加分（散户级别）
     - 取最高匹配档加分一次，不叠加
 
@@ -251,6 +251,7 @@ class TestEndToEndBasisIntegration:
             spot_aggregated_ask_bids_history=[],
             coinbase_orderbook=_make_cb_frame(
                 bids=[(76095, 1.0, 1)], asks=[(76110, 1.0, 1)],
+                ts_sec=1_700_001_200,
             ),
             liq_max_pain=None,
             oi_exchange_rank=None, multi_funding=None, ls_ratio=None,

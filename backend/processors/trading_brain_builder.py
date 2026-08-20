@@ -755,7 +755,7 @@ def _wall_to_book_item(w: WallZone) -> BrainSpotBookItem:
 
     现货拆分（方案 C）：
       - binance_spot_usd = spot_current_usd（Coinglass 5m 累积，散户聚集为主）
-      - coinbase_spot_usd = coinbase_spot_usd（原生瞬时快照，机构 footprint）
+      - coinbase_spot_usd = coinbase_spot_usd（原生瞬时公开快照，不推断机构身份）
       - spot_usd = binance + coinbase（合并值，向后兼容）
     合约厚度 = max(current_usd - spot_usd, 0)
     """
@@ -1049,6 +1049,7 @@ def build_trading_brain_snapshot(
     context_sources: Optional[dict[str, DataMeta]] = None,
     max_zones: int = 24,
     prev_setup_states: Optional[dict[str, "Any"]] = None,
+    prev_sweep_watch: Optional["Any"] = None,
 ) -> TradingBrainSnapshot:
     """纯函数：由调用方从 CoinState 抽出字段后传入。
 
@@ -1074,12 +1075,15 @@ def build_trading_brain_snapshot(
 
     # 数据质量
     dq_notes: list[str] = []
-    lq = op.data_quality if op else ""
-    ready_count = sum(1 for x in (kl, op, liq) if x is not None)
+    lq = op.data_quality if op else "missing"
+    op_decision_ready = bool(op is not None and lq == "ok")
+    ready_count = int(kl is not None) + int(op_decision_ready) + int(liq is not None)
     total_count = 3
     is_partial_ready = ready_count < total_count
     if not op:
         dq_notes.append("挂单压力/流动性墙快照暂不可用")
+    elif not op_decision_ready:
+        dq_notes.append(f"挂单压力核心证据不可用于确认：{lq}")
     if not kl:
         dq_notes.append("关键位 V2 快照暂不可用")
     if not liq:
@@ -1100,6 +1104,10 @@ def build_trading_brain_snapshot(
         freshness_score = kl.data_freshness.overall_freshness_score
         stale = list(kl.data_freshness.stale_sources or [])
         missing = list(kl.data_freshness.missing_sources or [])
+    if op is not None and lq in {"stale", "missing"}:
+        stale_or_missing = stale if lq == "stale" else missing
+        if "liquidity_wall" not in stale_or_missing:
+            stale_or_missing.append("liquidity_wall")
 
     # 最近磁铁价位 — 自 crowding / sweep targets
     mag_above: Optional[float] = None
@@ -1188,6 +1196,7 @@ def build_trading_brain_snapshot(
             events=events,
             ctx=ctx,
             now_sec=now_sec,
+            previous=prev_sweep_watch,
         )
         try:
             from processors.sweep_watch_archiver import append_sweep_watch_frame

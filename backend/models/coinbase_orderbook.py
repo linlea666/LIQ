@@ -58,6 +58,10 @@ class CoinbaseOrderbookFrame(BaseModel):
     ts_sec: int                               # 拉取时刻（local now）
     api_ts_iso: str = ""                      # API 返回的 time 字段（保留方便排查时间偏差）
     sequence: Optional[int] = None            # API 返回的 sequence number
+    watermark: Optional[int] = None           # 已接受的最高 sequence；持久化用于重启防倒退
+    source_capability: str = "snapshot_only" # REST L2 快照不能证明逐增量连续性
+    validity: str = "valid"
+    validity_reasons: list[str] = Field(default_factory=list)
 
     bids: list[CoinbaseBookLevel] = Field(default_factory=list)
     asks: list[CoinbaseBookLevel] = Field(default_factory=list)

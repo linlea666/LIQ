@@ -1,0 +1,36 @@
+{
+  "calibration_version": "market-risk-bootstrap-v1",
+  "created_at": "2026-08-20T00:00:00Z",
+  "status": "research_bootstrap",
+  "admitted_for_production": false,
+  "training_window": null,
+  "notes": "Conservative bootstrap thresholds for shadow evidence collection only. Not tuned on the 2026-08-19 event and not admitted for email.",
+  "baseline_thresholds": {
+    "price_breakout_abs_pct": 0.8,
+    "volume_z": 2.0,
+    "spot_cvd_abs_z": 2.5,
+    "oi_abs_change_1h_pct": 1.5,
+    "liquidation_1h_usd": 100000000
+  },
+  "thresholds": {
+    "spot_taker_imbalance_early": 0.08,
+    "spot_taker_imbalance_extreme": 0.16,
+    "spot_min_quote_usd": 1000000,
+    "oi_change_1h_early_pct": 0.75,
+    "oi_change_1h_extreme_pct": 1.5,
+    "funding_abs_extreme": 0.0005,
+    "liquidation_1h_early_usd": 25000000,
+    "liquidation_1h_extreme_usd": 100000000,
+    "liquidation_density_early_usd": 100000000,
+    "liquidation_density_extreme_usd": 300000000,
+    "wall_attack_early": 0.55,
+    "wall_attack_extreme": 0.75,
+    "price_move_5m_feedback_pct": 0.8,
+    "warning_confidence": 0.65,
+    "critical_confidence": 0.75,
+    "quiet_to_cooldown_sec": 600,
+    "cooldown_to_resolved_sec": 1200,
+    "resolved_to_normal_sec": 300,
+    "episode_gap_sec": 900
+  }
+}

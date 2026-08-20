@@ -229,14 +229,14 @@ function SourceFilterTabs({
       id: "dual",
       label: "双源高可信",
       emoji: "💎",
-      hint: "现货 + 合约 5m 同价区共振 → 真买卖家与杠杆资金共同布局",
+      hint: "现货 + 合约 5m 同价区共振 → 两类公开流动性证据同位",
       activeCls: "bg-amber-500/30 text-amber-100 border-amber-400/40",
     },
     {
       id: "spot",
       label: "仅现货",
       emoji: "💰",
-      hint: "现货独立墙：合约同价位无显著厚度，可能是真长线买卖家",
+      hint: "现货独立墙：合约同价位无显著厚度；不能据此推断持有人身份",
       activeCls: "bg-cyan-500/30 text-cyan-100 border-cyan-400/40",
     },
     {
@@ -613,7 +613,7 @@ function ZoneRow({
             className="px-1.5 py-0.5 rounded text-[10px] bg-amber-400/30 text-amber-200 font-semibold"
             title={
               `💎 现货+合约双源高可信墙（trust ${Math.round(zone.trust_score * 100)}%）：` +
-              `两个独立订单簿都在该价位有 ≥ 阈值的厚度——真买卖家与杠杆资金共同布局，` +
+              `两个独立订单簿都在该价位有 ≥ 阈值的厚度——公开现货与合约流动性证据同位，` +
               `是当前最强单一证据。现货侧厚度 ${formatCnUsd(zone.spot_current_usd)}（峰值 ${formatCnUsd(zone.spot_max_usd_1h)}）。`
             }
           >
@@ -624,8 +624,8 @@ function ZoneRow({
             className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-200"
             title={
               `仅现货墙（trust ${Math.round(zone.trust_score * 100)}%）：` +
-              `合约 5m 热力图同价位无显著厚度，仅现货订单簿堆叠——多为真买卖家长线挂单，` +
-              `但可能出现"合约杠杆资金未跟进"的风险。`
+              `合约 5m 热力图同价位无显著厚度，仅见公开现货订单簿堆叠；` +
+              `这不能证明机构身份、长期意图或实际成交，且合约资金可能未跟进。`
             }
           >
             💰 仅现货墙
@@ -673,7 +673,7 @@ function ZoneRow({
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-300"
             title={
-              `🏦 Coinbase 现货共振：机构资金独立验证维度（与 Binance/OKX 系正交）。` +
+              `🏦 Coinbase 现货共振：跨交易所公开挂单证据（不代表机构身份或已成交）。` +
               `Coinbase 同价区累计 ${formatCnUsd(zone.coinbase_spot_usd ?? 0)}` +
               `（${zone.coinbase_num_orders ?? 0} 笔订单 ≥ 阈值）`
             }
@@ -681,17 +681,17 @@ function ZoneRow({
             🏦 Coinbase {formatCnUsd(zone.coinbase_spot_usd ?? 0)}
           </span>
         )}
-        {/* W3-T1 + W2-T4：机构单笔大单徽章 — 区分散户聚集 vs 机构布局 */}
+        {/* W3-T1 + W2-T4：Coinbase 单档大额挂单徽章；不推断主体身份 */}
         {(zone.coinbase_max_single_order_usd ?? 0) >= 100_000 && (
           <span
             className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/15 text-purple-300"
             title={
-              `💼 机构单笔大单：Coinbase 同价区单笔最大订单 ` +
+              `💼 单笔大额公开挂单：Coinbase 同价区单笔最大订单 ` +
               `${formatCnUsd(zone.coinbase_max_single_order_usd ?? 0)}（≥ 10 万 USD/笔）。` +
-              `区分"散户 N 单聚集"vs"机构孤立巨单"，是支撑/阻力可信度的硬证据`
+              `区分多笔聚集与单笔大额挂单；不代表机构身份或已成交`
             }
           >
-            💼 机构单笔 {formatCnUsd(zone.coinbase_max_single_order_usd ?? 0)}
+            💼 单笔大额 {formatCnUsd(zone.coinbase_max_single_order_usd ?? 0)}
           </span>
         )}
         {zone.confluence_with_absorption && (

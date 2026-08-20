@@ -430,6 +430,10 @@ class WallZone(BaseModel):
 
     # ── 行为评估（M2）──
     status: WallZoneStatus = "active"
+    lifecycle_state: WallZoneStatus = "active"
+    """正交生命周期；``status`` 为一个发布周期的兼容别名。"""
+    data_validity: Literal["valid", "invalid"] = "valid"
+    data_validity_reasons: list[str] = Field(default_factory=list)
     wall_consumed_confidence: float = 0.0       # GPT 加权公式（0-1）
     wall_removal_risk: float = 0.0              # 0-1（不写"假单"）
     # P4：重挂指纹 —— 同价位带（wall_zone_id 桶）内墙消失后又重现的累计次数。
@@ -508,6 +512,8 @@ class OrderbookPressureSnapshot(BaseModel):
     # ── M2 新字段：事件 + 全局拥挤度 ──
     wall_events: list[WallEvent] = Field(default_factory=list)  # 最近 100 条滚动
     crowding_global: Optional[PositionCrowdingSnapshot] = None  # 全局拥挤度（也分发到每个 zone）
+    top_sweep_targets: list[SweepTarget] = Field(default_factory=list)
+    top_sweep_targets_status: Literal["available", "unavailable"] = "unavailable"
 
     # ── W2-T4 顶层字段：USD/USDT 基差（前端 / AI 展示用）──
     # = (coinbase_last - ticker_last) / ticker_last × 100  (单位 %)

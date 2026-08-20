@@ -57,7 +57,7 @@ export default function OpportunityBoard({
               <li>· regime 与方向冲突（trend_down 屏蔽做多 / trend_up 屏蔽做空）</li>
             </ul>
             <p className="mt-2 text-[10px] leading-snug text-emerald-400/80">
-              建议：等结构形成（关注 ZoneDetailCard 的「硬证据 chip」出现 ★ 机构 / 双源 /
+              建议：等结构形成（关注 ZoneDetailCard 的「证据 chip」出现 ★ 单笔大额 / 双源 /
               Coinbase 共振时再观察）
             </p>
           </section>

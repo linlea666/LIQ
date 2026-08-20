@@ -639,6 +639,20 @@ def compute_pressure_snapshot(
         snap.history_window_minutes = wall_out.window_min
         snap.sample_count_depth_history = wall_out.history_size
         snap.usd_usdt_basis_pct = wall_out.usd_usdt_basis_pct  # W2-T4
+        target_seen: set[tuple[str, float]] = set()
+        targets = []
+        for zone in [*wall_out.walls_above, *wall_out.walls_below]:
+            target = zone.sweep_target
+            if target is None or target.magnet_price <= 0 or target.magnet_amount_usd <= 0:
+                continue
+            key = (target.direction, round(float(target.magnet_price), 8))
+            if key in target_seen:
+                continue
+            target_seen.add(key)
+            targets.append(target)
+        targets.sort(key=lambda target: abs(float(target.distance_pct)))
+        snap.top_sweep_targets = targets[:6]
+        snap.top_sweep_targets_status = "available" if targets else "unavailable"
         if wall_out.warming and snap.data_quality not in ("stale", "missing"):
             # warming 优先级 < stale/missing；高于 ok/partial（前端展示"暖机中"）
             snap.data_quality = "warming"

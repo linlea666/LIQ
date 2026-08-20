@@ -87,6 +87,9 @@ class TestPollEtfFlow:
 
         assert btc_state.etf_flow is not None
         assert len(btc_state.etf_flow.recent_days) == 3
+        assert btc_state.etf_flow.net_3d == 60_000_000
+        assert btc_state.etf_flow.trading_day == "2024-04-15"
+        assert btc_state.etf_flow.known_at == btc_state.etf_flow.published_at
 
 
 # ──────────────────────────────────────────────

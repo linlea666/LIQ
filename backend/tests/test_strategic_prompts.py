@@ -1414,8 +1414,8 @@ class TestWallBreakdownRendering:
         s7 = self._build(walls_above=[self._wall()])
         assert "厚度语义" in s7
         assert "合约" in s7 and "Binance 现货" in s7 and "Coinbase 现货" in s7
-        assert "真买卖家" in s7
-        assert "ETF 链路" in s7
+        assert "公开现货挂单/成交证据" in s7
+        assert "不能据此认定机构身份或 ETF 行为" in s7
 
     def test_pure_contract_wall_only_shows_contract(self):
         """纯合约墙（spot=0, coinbase=0）只渲染"合约 $X"。"""

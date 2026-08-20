@@ -197,6 +197,10 @@ class CoinState:
         self.large_orders_history: list[_LargeOrderLifecycle] = []
         # M2.5：现货大单（与 large_orders_history 互补——区分真支撑 vs 合约清算磁铁）
         self.spot_large_orders_history: list[_LargeOrderLifecycle] = []
+        # 大单墙生命周期跨帧身份：order id → stable zone id。ended 到达时即使
+        # 热力图重分桶，也能回到上一帧物理墙；seen 集防止重复发 consumed/pulled。
+        self.wall_order_zone_membership: dict[int, str] = {}
+        self.wall_seen_ended_order_ids: set[int] = set()
         # 由 polls/orderbook_pressure.poll_orderbook_pressure 写入（90s 间隔）
         self.orderbook_depth_snapshot: Optional[_OrderbookDepthSnapshot] = None
         # M1 滚动深度历史 —— WallZone 持续性评分基础。
@@ -217,11 +221,14 @@ class CoinState:
         # Phase B+：现货多家聚合 ±range 流动性时序（语义更强：真买卖家撤单）
         # 现货抽流动性 → active_attack_score 衰竭因子优先取此源；为空时 fallback 合约
         self.spot_aggregated_ask_bids_history: deque[_AskBidsRangeSnapshot] = deque(maxlen=12)
-        # Phase C：Coinbase 现货原生订单簿（机构资金独立验证维度，不走 Coinglass）
+        # Phase C：Coinbase 现货原生公开订单簿（不代表机构身份或已成交）
         # 由 polls/coinbase_orderbook.poll_coinbase_orderbook 写入；仅存 latest 帧
         # liquidity_wall_engine 的 _augment_zones_with_coinbase 消费此字段
         from models.coinbase_orderbook import CoinbaseOrderbookFrame as _CoinbaseOrderbookFrame
         self.coinbase_orderbook: Optional[_CoinbaseOrderbookFrame] = None
+        self.coinbase_orderbook_sequence_checkpoint: Optional[int] = None
+        self.coinbase_orderbook_watermark: Optional[int] = None
+        self.coinbase_orderbook_gap_reason: str = ""
         # 由 _recompute 末尾调用 compute_pressure_snapshot 写入
         self.orderbook_pressure_snapshot: Optional[_OrderbookPressureSnapshot] = None
         self.whale_data: Optional[WhaleData] = None
@@ -304,6 +311,8 @@ class CoinState:
         # 写回时按"当帧仍存在的 setup_id"做 GC，避免字典无限增长。
         from models.trading_brain import SetupState as _BrainSetupState
         self.brain_setup_states: dict[str, _BrainSetupState] = {}
+        self.brain_sweep_watch: Optional[Any] = None
+        self.trading_brain_snapshot: Optional[Any] = None
         # SMC · Nansen confirmation cache（仅 BTC/ETH 使用；失败只降级 SMC 数据质量）
         self.nansen_perp: Optional[dict] = None
         self.nansen_flow_intelligence: Optional[dict] = None
@@ -395,6 +404,14 @@ class Engine:
         max_hist = self._settings.ai.max_history
         for ccy in self._settings.supported_coins:
             self._states[ccy] = CoinState(ccy, max_history=max_hist)
+
+        from processors.market_risk_engine import MarketRiskEngine
+        self.market_risk_service = MarketRiskEngine(
+            config=self._settings.market_risk,
+            state_getter=lambda coin: self._states.get(coin.upper()),
+            backend_root=os.path.dirname(__file__),
+            email_config=self._settings.notifications.email,
+        )
 
         # 巨鲸清算穿越判定复用引擎实时 ticker（15s 更新），失败时回退快照标记价。
         def _trend_live_price(symbol: str) -> Optional[float]:
@@ -614,6 +631,69 @@ class Engine:
             "uptime_sec": int(time.time() - self._started_at) if self._started_at else 0,
         }
 
+    def _compute_trading_brain_snapshot(self, ccy: str):
+        """纯计算一帧 Trading Brain；调用方决定是否写回后台状态。"""
+        from processors.market_read import build_market_read_from_state
+        from processors.trading_brain_builder import build_trading_brain_snapshot
+
+        state = self._states.get(ccy)
+        if state is None or state.ticker is None or not state.ticker.last:
+            return None
+        context = build_market_read_from_state(state)
+        snapshot = build_trading_brain_snapshot(
+            coin=ccy,
+            last_price=float(state.ticker.last),
+            atr=float(state.atr or state.atr_cg or 0.0),
+            kl=state.key_level_snapshot_v2,
+            op=state.orderbook_pressure_snapshot,
+            liq=pick_primary_liq_map(state.liq_maps),
+            cvd_contract_trend=context["cvd_contract_trend"],
+            cvd_spot_trend=context["cvd_spot_trend"],
+            oi_delta_1h_pct=context["oi_delta_1h_pct"],
+            funding_interpretation=context["funding_interpretation"],
+            funding_rate_8h_pct=context["funding_rate_8h_pct"],
+            market_read=context["market_read"],
+            context_sources=context["source_meta"],
+            max_zones=24,
+            prev_setup_states=dict(state.brain_setup_states),
+            prev_sweep_watch=state.brain_sweep_watch,
+        )
+        # 兼容测试/离线工具通过 ``__new__`` 构造的最小 Engine：旧调用方没有
+        # market_risk_service 时仍应能纯计算 Trading Brain，不能让可选扩展把
+        # 整个快照装配异常吞掉。
+        risk_service = getattr(self, "market_risk_service", None)
+        engine_settings = getattr(self, "_settings", None)
+        risk_enabled = bool(
+            engine_settings is not None
+            and getattr(getattr(engine_settings, "market_risk", None), "enabled", False)
+        )
+        snapshot.market_risk = (
+            risk_service.latest(ccy)
+            if risk_enabled and risk_service is not None else None
+        )
+        return snapshot
+
+    def _refresh_trading_brain_snapshot(self, ccy: str) -> None:
+        snapshot = self._compute_trading_brain_snapshot(ccy)
+        if snapshot is None:
+            return
+        state = self._states[ccy]
+        state.brain_setup_states = {
+            item.setup_id: item.state for item in snapshot.opportunities
+        }
+        state.brain_sweep_watch = snapshot.sweep_watch
+        state.trading_brain_snapshot = snapshot
+
+    async def _trading_brain_loop(self) -> None:
+        """唯一推进 Trading Brain/Sweep 状态的固定后台 tick。"""
+        while self._running:
+            for ccy in self._settings.supported_coins:
+                try:
+                    self._refresh_trading_brain_snapshot(ccy)
+                except Exception:
+                    logger.exception("Trading Brain background tick failed | coin=%s", ccy)
+            await asyncio.sleep(30)
+
     async def start(self):
         """启动 Coinglass REST 轮询数据管线"""
         self._running = True
@@ -758,7 +838,13 @@ class Engine:
         except Exception:
             logger.warning("Bottom model service startup failed", exc_info=True)
 
+        try:
+            await self.market_risk_service.start()
+        except Exception:
+            logger.warning("Market risk service startup failed", exc_info=True)
+
         tasks: list[asyncio.Task] = []
+        tasks.append(asyncio.create_task(self._trading_brain_loop()))
         btc_coin = self._settings.get_coin("BTC")
         if self._nansen is not None:
             nsn_cfg = self._settings.nansen.poll_intervals
@@ -987,7 +1073,7 @@ class Engine:
                 f"cg_spot_agg_ask_bids_{ccy}", self._poll_spot_aggregated_ask_bids_history, coin,
                 spot_agg_ask_bids_interval, s + 19.0,
             )),
-            # Phase C：Coinbase 现货原生 orderbook（机构资金独立验证维度，不走 Coinglass）
+            # Phase C：Coinbase 公开现货 orderbook（不推断机构身份，不走 Coinglass）
             asyncio.create_task(self._poll_loop(
                 f"cb_orderbook_{ccy}", self._poll_coinbase_orderbook, coin,
                 coinbase_orderbook_interval, s + 20.0,
@@ -1073,6 +1159,10 @@ class Engine:
             await self.bottom_model_service.stop()
         except Exception:
             logger.warning("Bottom model service stop failed", exc_info=True)
+        try:
+            await self.market_risk_service.stop()
+        except Exception:
+            logger.warning("Market risk service stop failed", exc_info=True)
         for ccy, tasks in self._active_tasks.items():
             for t in tasks:
                 t.cancel()
@@ -1200,6 +1290,9 @@ class Engine:
                 coin_symbols=coin_symbols,
                 whale_threshold_usd=float(ob_cfg.get("whale_threshold_usd", 500_000)),
                 whale_threshold_qty=qty_thr,
+                checkpoint_path=os.path.join(
+                    self._data_dir, "binance_trade_checkpoints.json",
+                ),
             )
         except Exception:
             logger.error("[trades_ws] init failed, loop disabled", exc_info=True)
@@ -1405,7 +1498,9 @@ class Engine:
 
     async def _poll_oi(self, coin: CoinConfig):
         from polls.derivatives import poll_oi
-        await poll_oi(self._cg, coin, self._states[coin.ccy])
+        await poll_oi(
+            self._cg, coin, self._states[coin.ccy], self._bn, self._percentile,
+        )
 
     async def _poll_funding_all(self, _coin: CoinConfig):
         from polls.derivatives import poll_funding_all
@@ -1598,14 +1693,42 @@ class Engine:
         await poll_spot_aggregated_ask_bids_history(self._cg, coin, self._states[coin.ccy])
 
     async def _poll_coinbase_orderbook(self, coin: CoinConfig):
-        """Phase C：Coinbase 现货原生订单簿（机构资金独立验证维度）。
+        """Phase C：Coinbase 现货公开 REST 快照（snapshot-only）。
 
         走 Coinbase Exchange 公开 REST（免 auth），独立 rate limiter，不消耗
         Coinglass 配额。墙引擎 ``_augment_zones_with_coinbase`` 消费此源叠加
         ``coinbase_spot_confluence`` → trust_score +0.10 独立加分。
         """
         from polls.coinbase_orderbook import poll_coinbase_orderbook
-        await poll_coinbase_orderbook(self._cb, coin, self._states[coin.ccy])
+        state = self._states[coin.ccy]
+        if state.coinbase_orderbook_sequence_checkpoint is None:
+            checkpoint = self.market_risk_service.store.load_checkpoint(
+                "coinbase_orderbook", coin.ccy,
+            )
+            if checkpoint:
+                sequence = checkpoint.get("sequence")
+                state.coinbase_orderbook_sequence_checkpoint = (
+                    int(sequence) if sequence is not None else None
+                )
+                state.coinbase_orderbook_watermark = checkpoint.get("watermark")
+        accepted = await poll_coinbase_orderbook(self._cb, coin, state)
+        if accepted:
+            self.market_risk_service.store.save_checkpoint(
+                "coinbase_orderbook", coin.ccy,
+                {
+                    "sequence": state.coinbase_orderbook_sequence_checkpoint,
+                    "watermark": state.coinbase_orderbook_watermark,
+                    "source_capability": "snapshot_only",
+                },
+            )
+        elif state.coinbase_orderbook_gap_reason:
+            self.market_risk_service.store.add_gap_marker({
+                "source_id": "coinbase_orderbook",
+                "coin": coin.ccy,
+                "observed_at": int(time.time()),
+                "reason": state.coinbase_orderbook_gap_reason,
+                "source_capability": "snapshot_only",
+            })
 
     async def _poll_whale_data(self, _coin: CoinConfig):
         from polls.macro import poll_whale_data
@@ -2772,7 +2895,6 @@ class Engine:
         try:
             from ai.snapshot import build_ai_snapshot
             from processors.market_action.facts_collector import collect as collect_facts
-            from processors.trading_brain_builder import build_trading_brain_snapshot
         except Exception:
             logger.error("Strategic snapshot import failed", exc_info=True)
             return None
@@ -2788,49 +2910,17 @@ class Engine:
         except Exception:
             logger.debug("Strategic collect_facts failed | coin=%s", ccy, exc_info=True)
 
-        # TradingBrain Snapshot（PR-1 已集成，graceful degrade）
-        # 参数契约 (trading_brain_builder.build_trading_brain_snapshot):
-        #   kl: Optional[KeyLevelSnapshotV2]
-        #   op: Optional[OrderbookPressureSnapshot]
-        #   liq: Optional[LiquidationMap]   ← 单个，不是 dict
-        #   cvd_contract_trend / cvd_spot_trend: str
-        #   oi_delta_1h_pct: Optional[float]
-        #   funding_interpretation: str
-        # 注：state.cvd_contract/cvd_spot/oi/funding 是富对象，需要先抽出标量字段。
-        liq_for_brain = pick_primary_liq_map(state.liq_maps)
-        cvd_c_trend = (
-            state.cvd_contract.trend_1h if state.cvd_contract else ""
-        ) or ""
-        cvd_s_trend = (
-            state.cvd_spot.trend_1h if state.cvd_spot else ""
-        ) or ""
-        oi_d1h = state.oi.change_1h_pct if state.oi else None
-        fd_interp = (
-            state.funding.interpretation if state.funding else ""
-        ) or ""
-
-        trading_brain_for_ai = None
-        try:
-            trading_brain_for_ai = build_trading_brain_snapshot(
-                coin=ccy,
-                last_price=float(state.ticker.last),
-                atr=float(state.atr or state.atr_cg or 0.0),
-                kl=state.key_level_snapshot_v2,
-                op=state.orderbook_pressure_snapshot,
-                liq=liq_for_brain,
-                cvd_contract_trend=cvd_c_trend,
-                cvd_spot_trend=cvd_s_trend,
-                oi_delta_1h_pct=oi_d1h,
-                funding_interpretation=fd_interp,
-                prev_setup_states=state.brain_setup_states,
-            )
-        except Exception:
-            # 升级到 warning：这条路径曾因参数名 typo 静默失败数周，
-            # 表现为 §2 / §4 / §5 全部 None。再静默一次的代价太高。
-            logger.warning(
-                "Strategic build_trading_brain_snapshot failed | coin=%s",
-                ccy, exc_info=True,
-            )
+        # 优先只读后台物化快照。离线工具/冷启动兼容路径允许做一次纯计算，
+        # 但不把结果或 setup/sweep 状态写回 CoinState，因此不会由读取推进状态机。
+        trading_brain_for_ai = state.trading_brain_snapshot
+        if trading_brain_for_ai is None:
+            try:
+                trading_brain_for_ai = self._compute_trading_brain_snapshot(ccy)
+            except Exception:
+                logger.debug(
+                    "Strategic pure Trading Brain fallback failed | coin=%s",
+                    ccy, exc_info=True,
+                )
 
         liq_1d = pick_primary_liq_map(state.liq_maps)
         liq_7d = state.liq_maps.get("7d")

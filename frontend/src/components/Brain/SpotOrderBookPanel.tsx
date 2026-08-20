@@ -46,8 +46,8 @@ function fmtUsd(usd: number): string {
   return formatCnUsd(usd);
 }
 
-// 方案 C：单档机构大单门槛（实测 BTC 4464万 / ETH 2245万 / SOL 1113万 → 100万 适中）
-const INSTITUTION_SINGLE_USD_THRESHOLD = 1_000_000;
+// Coinbase 公共挂单只能证明该交易所出现大额现货挂单，不能证明机构身份或已成交。
+const LARGE_SINGLE_ORDER_USD_THRESHOLD = 1_000_000;
 
 function ItemRow({
   item, coin, maxUsd, onSelectZone,
@@ -62,12 +62,15 @@ function ItemRow({
   const sideTone = isAsk ? "text-rose-300" : "text-emerald-300";
   const distTone = isAsk ? "text-rose-200/80" : "text-emerald-200/80";
 
-  // 方案 C：现货双源拆分（Binance 5m 累积 vs Coinbase 瞬时机构 footprint）
+  // 方案 C：现货双源拆分（Binance 5m 累积 vs Coinbase 瞬时公开挂单）
   // 旧后端无双源拆分时回退用 spot_usd 全部归 Binance（向后兼容）
   const binanceUsd = item.binance_spot_usd ?? Math.max(0, item.spot_usd - (item.coinbase_spot_usd ?? 0));
   const coinbaseUsd = item.coinbase_spot_usd ?? 0;
   const cbMaxSingle = item.coinbase_max_single_order_usd ?? 0;
-  const isInstitutional = cbMaxSingle >= INSTITUTION_SINGLE_USD_THRESHOLD;
+  const isLargeCoinbaseOrder = cbMaxSingle >= LARGE_SINGLE_ORDER_USD_THRESHOLD;
+  const roleLabel = item.dominant_role === "institutional_footprint"
+    ? "large_public_order"
+    : item.dominant_role;
   // 厚度条 3 色比例（按 total_usd 归一）
   const safeTotal = item.total_usd > 0 ? item.total_usd : 1;
   const binPct = Math.max(0, Math.min(100, (binanceUsd / safeTotal) * 100));
@@ -83,14 +86,14 @@ function ItemRow({
   const stronger8h = max8h > 0 && max1h > 0 && max8h > max1h * 1.30;
 
   const titleText =
-    `墙区 · ${item.dominant_role}\n` +
+    `墙区 · ${roleLabel}\n` +
     `当前 ${fmtUsd(item.total_usd)}\n` +
-    `  Binance 现货 ${fmtUsd(binanceUsd)}（5m 累积，散户聚集为主）\n` +
+    `  Binance 现货 ${fmtUsd(binanceUsd)}（5m 聚合挂单）\n` +
     (coinbaseUsd > 0
-      ? `  Coinbase 现货 ${fmtUsd(coinbaseUsd)}（瞬时快照，机构 footprint）\n`
+      ? `  Coinbase 现货 ${fmtUsd(coinbaseUsd)}（公开瞬时挂单快照）\n`
       : "") +
     (cbMaxSingle > 0
-      ? `  Coinbase 单档最大 ${fmtUsd(cbMaxSingle)}${isInstitutional ? "  ★ 机构级" : ""}\n`
+      ? `  Coinbase 单档最大 ${fmtUsd(cbMaxSingle)}${isLargeCoinbaseOrder ? "  ★ 大额挂单" : ""}\n`
       : "") +
     `  合约 ${fmtUsd(item.futures_usd)}\n` +
     (max1h > 0 ? `1h 峰值 ${fmtUsd(max1h)}　持续 ${(pers1h * 100).toFixed(0)}%\n` : "") +
@@ -102,7 +105,7 @@ function ItemRow({
       className={`group flex cursor-pointer items-center gap-2 rounded border border-slate-800/70 bg-slate-900/40 px-2 py-1.5 transition hover:border-slate-600 hover:bg-slate-800/60 ${
         item.dominant_role === "institutional_footprint" ? "border-l-2 border-l-amber-400" :
         item.dominant_role === "dual_battleground" ? "border-l-2 border-l-fuchsia-400" :
-        isInstitutional ? "border-l-2 border-l-amber-400" :
+        isLargeCoinbaseOrder ? "border-l-2 border-l-amber-400" :
         ""
       }`}
       onClick={() => item.wall_zone_id && onSelectZone?.(item.wall_zone_id)}
@@ -137,16 +140,16 @@ function ItemRow({
             </span>
           )}
           {coinbaseUsd > 0 && (
-            <span className="tabular-nums text-amber-300/90" title="Coinbase 现货厚度（机构资金 footprint）">
+            <span className="tabular-nums text-amber-300/90" title="Coinbase 公开现货挂单厚度">
               CB {fmtUsd(coinbaseUsd)}
             </span>
           )}
-          {isInstitutional && (
+          {isLargeCoinbaseOrder && (
             <span
               className="rounded bg-amber-500/30 px-1 font-semibold text-amber-200"
-              title="Coinbase 单档机构级孤立大单（≥ 100 万 USD）"
+              title="Coinbase 单档大额公开挂单（≥ 100 万 USD）；不代表机构身份或已成交"
             >
-              ★ 机构 {fmtUsd(cbMaxSingle)}
+              ★ 大额挂单 {fmtUsd(cbMaxSingle)}
             </span>
           )}
           {item.is_dual_source && <span className="rounded bg-fuchsia-900/60 px-1 text-fuchsia-200">双源</span>}
@@ -278,17 +281,17 @@ export default function SpotOrderBookPanel({ spotBook, coin, onSelectZone }: Pro
           <span className="text-[10px] text-slate-500">Binance 5m / Coinbase 瞬时 / 合约</span>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-slate-400">
-          <span className="flex items-center gap-1" title="Binance 现货 5m 累积厚度（散户聚集为主）">
+          <span className="flex items-center gap-1" title="Binance 现货 5m 聚合挂单厚度">
             <span className="inline-block h-2 w-3 rounded bg-emerald-500/70" /> Binance
           </span>
-          <span className="flex items-center gap-1" title="Coinbase 现货瞬时厚度（机构 footprint）">
+          <span className="flex items-center gap-1" title="Coinbase 公开现货瞬时挂单厚度">
             <span className="inline-block h-2 w-3 rounded bg-amber-400/85" /> Coinbase
           </span>
           <span className="flex items-center gap-1" title="合约挂单">
             <span className="inline-block h-2 w-3 rounded bg-blue-500/55" /> 合约
           </span>
-          <span className="flex items-center gap-1" title="单档 ≥ 100 万 USD 机构级孤立大单">
-            <span className="font-semibold text-amber-300">★</span> 机构
+          <span className="flex items-center gap-1" title="单档 ≥ 100 万 USD 的 Coinbase 大额公开挂单">
+            <span className="font-semibold text-amber-300">★</span> 大额挂单
           </span>
         </div>
       </div>

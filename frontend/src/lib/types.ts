@@ -1,3 +1,5 @@
+import type { MarketIncidentSnapshot } from "./marketRiskTypes";
+
 export interface TickerData {
   coin: string;
   ts: number;
@@ -1259,7 +1261,7 @@ export type WallZoneSource =
  *         > magnet_strong > spoof_suspect > transient > ordinary */
 export type DominantRole =
   | "dual_battleground"          // 双向博弈热点（SR ≥ 0.6 AND SA ≥ 0.6）
-  | "institutional_footprint"    // 机构 footprint（coinbase_max_single ≥ 100k）
+  | "institutional_footprint"    // 兼容旧枚举名：Coinbase 单档大额公开挂单
   | "support_resistance_strong"  // 强支撑/阻力（SR ≥ 0.7 且 SA < 0.4）
   | "magnet_strong"              // 强清算磁铁（SA ≥ 0.6 且 SR < 0.5）
   | "spoof_suspect"              // 撤单嫌疑（trust < 0.55 且 removal_risk ≥ 0.6）
@@ -1372,12 +1374,11 @@ export interface WallZone {
   status: WallZoneStatus;
   wall_consumed_confidence: number;
   wall_removal_risk: number;
-  /** Phase C：Coinbase 现货独立验证维度（与 Binance/OKX 系正交） */
+  /** Phase C：Coinbase 公开现货挂单维度（与 Binance/OKX 系正交） */
   coinbase_spot_confluence?: boolean;
   coinbase_spot_usd?: number;
   coinbase_num_orders?: number;
-  /** W2-T4：Coinbase 单笔大单分支 — max(level.usd_value/num_orders) over zone overlap
-   *  ≥ 100k → SR +0.05（机构 footprint 硬证据） */
+  /** W2-T4：Coinbase 单笔大额公开挂单；只证明挂单，不证明机构身份或成交。 */
   coinbase_max_single_order_usd?: number;
   crowding_context: PositionCrowdingSnapshot | null;
   sweep_target: SweepTarget | null;
@@ -2547,7 +2548,7 @@ export interface BrainSpotBookItem {
   bracket: BrainSpotBookBracket;
   /** 整段墙体当前帧 USD 厚度（含合约+现货） */
   total_usd: number;
-  /** 现货侧 USD（spot_current_usd + coinbase_spot_usd），越高越是真买卖家 */
+  /** 现货侧 USD（spot_current_usd + coinbase_spot_usd），仅表示公开现货订单簿厚度 */
   spot_usd: number;
   /** 合约侧 USD = max(total - spot, 0) */
   futures_usd: number;
@@ -2564,11 +2565,11 @@ export interface BrainSpotBookItem {
   persistence_score?: number;
   /** 档位 2A：8h 持续性 0–1 */
   persistence_score_8h?: number;
-  /** 方案 C：Binance 现货 5m 累积 USD（散户聚集为主） */
+  /** 方案 C：Binance 现货 5m 聚合 USD */
   binance_spot_usd?: number;
-  /** 方案 C：Coinbase 现货瞬时 USD（机构 footprint） */
+  /** 方案 C：Coinbase 公开现货挂单瞬时 USD */
   coinbase_spot_usd?: number;
-  /** 方案 C：Coinbase 单档最大 USD；≥ 100 万视为机构级孤立大单 */
+  /** 方案 C：Coinbase 单档最大 USD；≥ 100 万只标大额挂单，不推断主体 */
   coinbase_max_single_order_usd?: number;
 }
 
@@ -2696,6 +2697,8 @@ export interface TradingBrainSnapshot {
   fut_book: BrainFutBook | null;
   /** W4-T1 阶段 4：止损扫单观察（双向 / 5 态机 / 3 派生分 / trace 日志） */
   sweep_watch: BrainSweepWatch | null;
+  /** 后台联合风险快照；旧服务或 feature flag 关闭时缺省。 */
+  market_risk?: MarketIncidentSnapshot | null;
 }
 
 export type SMCHorizon = "intraday" | "swing";

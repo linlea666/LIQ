@@ -1272,7 +1272,7 @@ def _append_zone_trust_chip(
 
     W3-T1 叠加（与互斥优先级正交）：
       - ob_coinbase_<side>：当 coinbase_spot_confluence=True 时**额外**追加，
-        机构资金独立验证维度（Binance/OKX 系之外的 Coinbase 现货共振）。
+        Coinbase 公开现货挂单佐证（Binance/OKX 系之外；不推断订单主体）。
         与上述任一互斥 chip 可同时出现，前端按"叠加证据"展示。
     """
     if zone.dual_source:
@@ -1284,7 +1284,7 @@ def _append_zone_trust_chip(
     elif zone.trust_score >= 0.65:
         sig.confirmations.append(f"ob_trusted_{side_label}")
 
-    # W3-T1：Coinbase 现货共振叠加 chip（机构资金独立验证）
+    # W3-T1：Coinbase 公开现货挂单共振叠加 chip
     if getattr(zone, "coinbase_spot_confluence", False):
         sig.confirmations.append(f"ob_coinbase_{side_label}")
 

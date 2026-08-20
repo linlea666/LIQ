@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import deque
 from typing import Any, Optional
@@ -71,6 +72,7 @@ class BinanceTradesWS(DataSource):
         whale_threshold_qty: Optional[dict[str, float]] = None,
         big_trade_usd: float = 5_000_000.0,
         timeout_sec: int = 10,
+        checkpoint_path: Optional[str] = None,
     ) -> None:
         super().__init__(name="binance_trades_ws", timeout_sec=timeout_sec, max_retries=0)
         # {ccy: "BTCUSDT"}
@@ -79,6 +81,19 @@ class BinanceTradesWS(DataSource):
         self._whale_usd = float(whale_threshold_usd)
         self._whale_qty = {k.upper(): float(v) for k, v in (whale_threshold_qty or {}).items()}
         self._big_trade_usd = float(big_trade_usd)
+        self._checkpoint_path = checkpoint_path or os.path.join(
+            os.path.dirname(__file__), "..", "data", "binance_trade_checkpoints.json",
+        )
+        self._checkpoints = self._load_checkpoints()
+        self._checkpoint_dirty = False
+        self._sequence_seen: dict[tuple[str, str], int] = {}
+        for checkpoint_key, sequence in self._checkpoints.items():
+            try:
+                market, coin = checkpoint_key.split(":", 1)
+            except ValueError:
+                continue
+            self._sequence_seen[(market, coin)] = sequence
+        self._gap_markers: deque[dict] = deque(maxlen=200)
 
         self._running = False
         self._started_ts = time.time()
@@ -87,6 +102,8 @@ class BinanceTradesWS(DataSource):
         self._pending: dict[tuple[str, str, int], list[float]] = {}
         # (coin, market, hour_ts) → [high, low, close, close_ts]（P4 全量成交价统计）
         self._pending_price: dict[tuple[str, str, int], list[float]] = {}
+        # 全量主动成交 1min 短窗。与 whale 桶完全分开，联合风险引擎消费此处。
+        self._flow_buckets: dict[tuple[str, str, int], list[float]] = {}
         # coin → deque[{ts, market, side, price, qty, usd}]（近 24h whale 明细）
         self._recent_whales: dict[str, deque] = {
             c: deque(maxlen=2000) for c in self._coin_symbols
@@ -129,6 +146,8 @@ class BinanceTradesWS(DataSource):
     async def flush_now(self) -> None:
         """立即把 pending whale 累计落盘（关停路径调用，防丢最多 60s 增量）。"""
         await self._flush_pending()
+        if not self._pending and not self._pending_price and self._checkpoint_dirty:
+            self._save_checkpoints()
 
     # ── 消费接口（whale 明细 / 大额事件 / 统计）────────────────────────
 
@@ -164,7 +183,84 @@ class BinanceTradesWS(DataSource):
             "whale_threshold_usd": self._whale_usd,
             "whale_threshold_qty": dict(self._whale_qty),
             "big_trade_usd": self._big_trade_usd,
+            "checkpoint_path": self._checkpoint_path,
+            "checkpoint_count": len(self._checkpoints),
+            "last_gap_marker": self._gap_markers[-1] if self._gap_markers else None,
         }
+
+    def aggressor_flow(
+        self, coin: str, market: str, within_sec: int = 300,
+    ) -> dict[str, Any]:
+        """返回全量主动买卖 quote 短窗；没有完整连续性时显式降级。"""
+        now = int(time.time())
+        cutoff = now - max(1, int(within_sec))
+        buy = sell = 0.0
+        first_ts: Optional[int] = None
+        last_ts: Optional[int] = None
+        for (bucket_coin, bucket_market, minute_ts), values in self._flow_buckets.items():
+            if bucket_coin != coin.upper() or bucket_market != market or minute_ts < cutoff - 60:
+                continue
+            buy += values[0]
+            sell += values[1]
+            first_ts = minute_ts if first_ts is None else min(first_ts, minute_ts)
+            last_ts = minute_ts if last_ts is None else max(last_ts, minute_ts)
+        recent_gap = next((
+            marker for marker in reversed(self._gap_markers)
+            if marker.get("coin") == coin.upper()
+            and marker.get("market") == market
+            and int(marker.get("observed_at", 0)) >= cutoff
+        ), None)
+        return {
+            "coin": coin.upper(), "market": market, "window_sec": within_sec,
+            "aggressor_buy_quote": buy,
+            "aggressor_sell_quote": sell,
+            "total_quote": buy + sell,
+            "as_of": last_ts or 0,
+            "first_bucket_ts": first_ts,
+            "continuity": "gap" if recent_gap else ("continuous" if last_ts else "unknown"),
+            "gap_reason": recent_gap.get("reason") if recent_gap else None,
+        }
+
+    def gap_markers(self, within_sec: int = 3600) -> list[dict]:
+        cutoff = int(time.time()) - max(1, within_sec)
+        return [item for item in self._gap_markers if item["observed_at"] >= cutoff]
+
+    def _load_checkpoints(self) -> dict[str, int]:
+        try:
+            with open(self._checkpoint_path, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+            return {
+                str(key): int(value) for key, value in raw.items()
+                if int(value) > 0
+            } if isinstance(raw, dict) else {}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+
+    def _save_checkpoints(self) -> bool:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self._checkpoint_path)), exist_ok=True)
+            temp_path = self._checkpoint_path + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(self._checkpoints, handle, sort_keys=True, separators=(",", ":"))
+            os.replace(temp_path, self._checkpoint_path)
+            self._checkpoint_dirty = False
+            return True
+        except OSError:
+            logger.warning("[trades_ws] checkpoint persist failed", exc_info=True)
+            return False
+
+    def _record_gap(
+        self, coin: str, market: str, reason: str,
+        expected_sequence: Optional[int] = None, observed_sequence: Optional[int] = None,
+    ) -> None:
+        marker = {
+            "coin": coin, "market": market, "reason": reason,
+            "expected_sequence": expected_sequence,
+            "observed_sequence": observed_sequence,
+            "observed_at": int(time.time()),
+        }
+        self._gap_markers.append(marker)
+        logger.warning("[trades_ws] gap marker | %s", marker)
 
     # ── 内部：WS 流 ────────────────────────────────────────────────────
 
@@ -228,6 +324,7 @@ class BinanceTradesWS(DataSource):
                 qty=float(data.get("q", 0) or 0),
                 is_maker_buy=bool(data.get("m")),
                 trade_ts=int(data.get("T", now * 1000)) // 1000,
+                source_sequence=int(data.get("a", 0) or 0),
             )
         except (ValueError, TypeError, KeyError):
             pass
@@ -236,6 +333,7 @@ class BinanceTradesWS(DataSource):
         self, market: str, coin: str, *,
         price: float, qty: float, is_maker_buy: bool, trade_ts: int,
         record_bucket: bool = True,
+        source_sequence: Optional[int] = None,
     ) -> None:
         """单笔聚合成交的阈值判定与累计（WS 与 REST 轮询共用）。
 
@@ -247,6 +345,19 @@ class BinanceTradesWS(DataSource):
             return
         self._msg_count[market] += 1
         self._last_msg_ts[market] = time.time()
+
+        sequence_key = (market, coin)
+        previous_sequence = self._sequence_seen.get(sequence_key)
+        if source_sequence and previous_sequence and source_sequence > previous_sequence + 1:
+            self._record_gap(
+                coin, market, "source_sequence_gap",
+                previous_sequence + 1, source_sequence,
+            )
+        if source_sequence:
+            self._sequence_seen[sequence_key] = max(previous_sequence or 0, source_sequence)
+            self._checkpoints[f"{market}:{coin}"] = source_sequence
+            if record_bucket:
+                self._checkpoint_dirty = True
 
         hour_ts = trade_ts - trade_ts % 3600
         if record_bucket:
@@ -260,12 +371,44 @@ class BinanceTradesWS(DataSource):
                 st[2], st[3] = price, float(trade_ts)
 
         usd = price * qty
+        # m=True → 买方是 maker → taker 主动卖。必须在 whale 阈值之前累计全量流。
+        side = "sell" if is_maker_buy else "buy"
+        if record_bucket:
+            minute_ts = trade_ts - trade_ts % 60
+            flow = self._flow_buckets.setdefault(
+                (coin, market, minute_ts), [0.0, 0.0],
+            )
+            flow[0 if side == "buy" else 1] += usd
+            cutoff = int(time.time()) - 6 * 3600
+            if len(self._flow_buckets) > 3_000:
+                for key in [key for key in self._flow_buckets if key[2] < cutoff]:
+                    self._flow_buckets.pop(key, None)
+        try:
+            from storage.raw_event_store import get_raw_event_store
+            raw_store = get_raw_event_store()
+            if raw_store is not None and record_bucket:
+                observed_at = int(time.time())
+                raw_store.append({
+                    "event_time": trade_ts,
+                    "observed_at": observed_at,
+                    "decision_time": observed_at,
+                    "watermark": trade_ts,
+                    "coin": coin,
+                    "market": market,
+                    "source_id": f"binance_{market}_aggtrade",
+                    "source_sequence": source_sequence,
+                    "price": price,
+                    "base_quantity": qty,
+                    "quote_notional": usd,
+                    "aggressor_side": side,
+                    "event_schema_version": "aggtrade-v1",
+                })
+        except Exception:
+            logger.debug("[trades_ws] raw event append failed", exc_info=True)
         qty_thr = self._whale_qty.get(coin, float("inf"))
         if usd < self._whale_usd and qty < qty_thr:
             return
 
-        # m=True → 买方是 maker → taker 主动卖
-        side = "sell" if is_maker_buy else "buy"
         self._whale_count[market] += 1
 
         if record_bucket:
@@ -301,7 +444,11 @@ class BinanceTradesWS(DataSource):
         首轮无 fromId 拿最近 1000 条（约数分钟量，trade_ts 真实所以桶归属
         与 deque 时间过滤都正确）；此后 fromId=last+1 无缝续读。
         """
-        last_id: dict[str, int] = {}
+        last_id: dict[str, int] = {
+            symbol: int(self._checkpoints[f"futures:{coin}"])
+            for coin, symbol in self._coin_symbols.items()
+            if f"futures:{coin}" in self._checkpoints
+        }
         logger.info("[trades_ws] futures REST poll started | interval=%ds",
                     _REST_POLL_INTERVAL_SEC)
         while self._running:
@@ -311,6 +458,7 @@ class BinanceTradesWS(DataSource):
                 try:
                     await self._poll_futures_symbol(coin, symbol, last_id)
                 except Exception:
+                    self._record_gap(coin, "futures", "rest_poll_exception")
                     logger.debug("[trades_ws] futures REST poll failed | %s",
                                  symbol, exc_info=True)
             await asyncio.sleep(_REST_POLL_INTERVAL_SEC)
@@ -322,6 +470,8 @@ class BinanceTradesWS(DataSource):
         # 首轮（无 fromId）返回的是重启前的历史成交，可能已在重启前冲入小时桶，
         # 只喂 deque/big_events 回填明细，不入 _pending（防 whale/price 列双计）
         first_poll = symbol not in last_id
+        if first_poll:
+            self._record_gap(coin, "futures", "startup_without_checkpoint")
         for _ in range(_REST_MAX_PAGES):
             params: dict[str, Any] = {"symbol": symbol, "limit": _REST_PAGE_LIMIT}
             if symbol in last_id:
@@ -331,12 +481,26 @@ class BinanceTradesWS(DataSource):
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status != 200:
+                    self._record_gap(
+                        coin, "futures", f"rest_http_{resp.status}",
+                        (last_id.get(symbol, 0) + 1) if symbol in last_id else None,
+                    )
                     logger.debug("[trades_ws] aggTrades HTTP %d | %s",
                                  resp.status, symbol)
                     return
                 rows = await resp.json()
             if not isinstance(rows, list) or not rows:
                 return
+            if symbol in last_id:
+                try:
+                    first_id = int(rows[0].get("a", 0) or 0)
+                    expected = last_id[symbol] + 1
+                    if first_id > expected:
+                        self._record_gap(
+                            coin, "futures", "rest_backfill_gap", expected, first_id,
+                        )
+                except (ValueError, TypeError, AttributeError):
+                    pass
             for r in rows:
                 try:
                     self._process_trade(
@@ -346,10 +510,15 @@ class BinanceTradesWS(DataSource):
                         is_maker_buy=bool(r.get("m")),
                         trade_ts=int(r.get("T", 0) or 0) // 1000,
                         record_bucket=not first_poll,
+                        source_sequence=int(r.get("a", 0) or 0),
                     )
                 except (ValueError, TypeError):
                     continue
             last_id[symbol] = int(rows[-1].get("a", 0) or 0)
+            self._checkpoints[f"futures:{coin}"] = last_id[symbol]
+            if first_poll:
+                # 首次页已明确标记为不可回放 gap，且未写入特征桶。
+                self._save_checkpoints()
             if len(rows) < _REST_PAGE_LIMIT:
                 return
 
@@ -386,6 +555,9 @@ class BinanceTradesWS(DataSource):
                     high, low, close,
                 )
                 pending_price.pop(key)
+            if self._checkpoint_dirty:
+                # 只有特征桶成功持久化后才推进 checkpoint；失败会合并回 pending。
+                self._save_checkpoints()
         except Exception:
             logger.warning(
                 "[trades_ws] flush to store failed | pending_kept=%d price_kept=%d",
@@ -418,6 +590,7 @@ def init_trades_ws(
     whale_threshold_usd: float,
     whale_threshold_qty: dict[str, float],
     big_trade_usd: float = 5_000_000.0,
+    checkpoint_path: Optional[str] = None,
 ) -> BinanceTradesWS:
     """engine 启动时调用一次。"""
     global _instance
@@ -427,6 +600,7 @@ def init_trades_ws(
             whale_threshold_usd=whale_threshold_usd,
             whale_threshold_qty=whale_threshold_qty,
             big_trade_usd=big_trade_usd,
+            checkpoint_path=checkpoint_path,
         )
     return _instance
 

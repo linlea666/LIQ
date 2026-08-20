@@ -31,7 +31,8 @@ from processors.percentile import PercentileTracker
 from sources.binance_futures import BinanceFuturesSource
 from sources.coinglass import CoinglassSource
 from sources.funding_official import (
-    fetch_official_pair as fetch_official_funding_pair,
+    OfficialFundingObservation,
+    fetch_official_observation as fetch_official_funding_pair,
     to_okx_inst_id,
 )
 from utils.time_series import (
@@ -41,6 +42,46 @@ from utils.time_series import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_oi_snapshot(
+    *, coin: str, ts: int, contracts: float, contract_type: str,
+    contract_size: Optional[float], margin_asset: str, mark_price: Optional[float],
+    usd_notional: Optional[float] = None, source: str, source_sequence: Optional[str] = None,
+) -> OISnapshot:
+    """把交易所 OI 转为统一 contracts/base/USD 三口径。
+
+    linear 的 contract_size 是每张合约对应的 base 数量；inverse 的
+    contract_size 是每张合约的 quote/USD 面值。缺 spec 或 mark 时保留展示值，
+    但 ``decision_valid=False``，不得拿 USD 机械变化代替真实仓位变化。
+    """
+    kind = str(contract_type or "unknown").lower()
+    size = float(contract_size) if contract_size is not None else 0.0
+    mark = float(mark_price) if mark_price is not None else 0.0
+    count = float(contracts)
+    base: Optional[float] = None
+    notional = float(usd_notional) if usd_notional is not None else 0.0
+    valid = count > 0 and size > 0 and kind in {"linear", "inverse"}
+    if valid and kind == "linear":
+        base = count * size
+        if notional <= 0 and mark > 0:
+            notional = base * mark
+    elif valid and kind == "inverse":
+        if mark <= 0:
+            valid = False
+        else:
+            notional = notional if notional > 0 else count * size
+            base = notional / mark
+    return OISnapshot(
+        coin=coin, ts=ts, oi=count, oi_usd=max(notional, 0.0),
+        oi_contracts=count if count > 0 else None,
+        oi_base_equivalent=base,
+        oi_usd_notional=max(notional, 0.0) or None,
+        contract_type=kind, contract_size=contract_size,
+        margin_asset=margin_asset, mark_price=mark_price,
+        decision_valid=bool(valid and base is not None and base > 0),
+        source=source, source_sequence=source_sequence,
+    )
 
 
 def log_api_fields_once(tag: str, sample: Any, logged_keys: set[str]) -> None:
@@ -106,14 +147,8 @@ async def poll_ticker_all(
                 change_pct_24h=round(chg_pct, 2),
             )
 
-            oi_usd = float(item.get("open_interest_usd", item.get("openInterest", 0)))
-            if oi_usd > 0:
-                snapshot = OISnapshot(
-                    coin=ccy, ts=int(time.time()),
-                    oi=oi_usd, oi_usd=oi_usd,
-                )
-                state.oi_history.append(snapshot)
-                percentile.push(ccy, "oi", oi_usd)
+            # ticker 不再写 OI history。OI 的单一事实源由 poll_oi 负责；否则
+            # ticker 的 USD 点会混入 contracts/base 序列，令决策口径永久失效。
             if "binance_ticker_ready" not in state._log_once_keys:
                 state._log_once_keys.add("binance_ticker_ready")
                 logger.info(
@@ -128,28 +163,76 @@ async def poll_oi(
     cg: CoinglassSource,
     coin: CoinConfig,
     state: CoinState,
+    bn: BinanceFuturesSource | None = None,
+    percentile: PercentileTracker | None = None,
 ) -> None:
-    """获取 OI 聚合历史。"""
+    """获取 OI 历史；Binance contracts/base 决策，Coinglass USD 展示兜底。"""
+    standardized_rows: Optional[list[dict]] = None
+    # 当前 Binance fapi 端点仅覆盖 USD-M linear；inverse 必须等待对应 COIN-M
+    # 标准源，不能把错误产品规格伪装成可决策数据。
+    if bn is not None and str(coin.contract_type).lower() == "linear":
+        try:
+            standardized_rows = await bn.fetch_open_interest_history(
+                coin.symbol_cg_pair, period="5m", limit=50,
+            )
+        except Exception:
+            logger.warning("Binance standardized OI failed | coin=%s", coin.ccy, exc_info=True)
     data = await cg.fetch_oi_aggregated_history(
         coin.symbol_cg, interval="5m", limit=50,
     )
-    if not data:
+    if not data and not standardized_rows:
         return
 
     incoming: list[OISnapshot] = []
-    for item in data:
-        try:
-            oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
-            ts = normalize_epoch_seconds(item.get("time", item.get("t", 0)))
-            if oi_usd > 0 and ts > 0:
-                incoming.append(OISnapshot(
-                    coin=coin.ccy, ts=ts, oi=oi_usd, oi_usd=oi_usd,
-                ))
-        except (ValueError, KeyError, TypeError):
-            continue
+    if standardized_rows:
+        for item in standardized_rows:
+            try:
+                contracts = float(item.get("sumOpenInterest", 0) or 0)
+                usd_notional = float(item.get("sumOpenInterestValue", 0) or 0)
+                ts = normalize_epoch_seconds(item.get("timestamp", 0))
+                if contracts > 0 and usd_notional > 0 and ts > 0:
+                    size = float(coin.contract_size or 0)
+                    mark_price = usd_notional / (contracts * size) if size > 0 else None
+                    incoming.append(normalize_oi_snapshot(
+                        coin=coin.ccy, ts=ts, contracts=contracts,
+                        contract_type=coin.contract_type,
+                        contract_size=coin.contract_size,
+                        margin_asset=coin.margin_asset,
+                        mark_price=mark_price, usd_notional=usd_notional,
+                        source="binance-fapi-open-interest-hist",
+                        source_sequence=str(item.get("timestamp", "")),
+                    ))
+            except (ValueError, KeyError, TypeError, ZeroDivisionError):
+                continue
+    else:
+        for item in data or []:
+            try:
+                oi_usd = float(item.get("close", item.get("openInterest", item.get("value", 0))))
+                ts = normalize_epoch_seconds(item.get("time", item.get("t", 0)))
+                if oi_usd > 0 and ts > 0:
+                    incoming.append(OISnapshot(
+                        coin=coin.ccy, ts=ts, oi=oi_usd, oi_usd=oi_usd,
+                        oi_usd_notional=oi_usd, source="coinglass",
+                        decision_valid=False,
+                    ))
+            except (ValueError, KeyError, TypeError):
+                continue
 
+    incoming_has_standardized = any(point.decision_valid for point in incoming)
+    existing_has_standardized = any(point.decision_valid for point in state.oi_history)
+    if incoming_has_standardized:
+        # 第一次切到 contracts/base 真值源时立即淘汰旧 Coinglass USD-only 点；
+        # 否则 maxlen=720 会让 invalid 点污染 all(...) 最长约 60 小时。
+        existing = [point for point in state.oi_history if point.decision_valid]
+    elif existing_has_standardized:
+        # 官方标准源短暂失败时保留上一条真值序列等待 freshness gate 变 stale，
+        # 不把 USD-only fallback 混入决策序列并伪造一次口径切换。
+        existing = list(state.oi_history)
+        incoming = []
+    else:
+        existing = list(state.oi_history)
     merged = dedupe_sorted_points(
-        [*state.oi_history, *incoming], ts_getter=lambda p: p.ts,
+        [*existing, *incoming], ts_getter=lambda p: p.ts,
     )
     max_points = state.oi_history.maxlen or 720
     state.oi_history.clear()
@@ -170,6 +253,26 @@ async def poll_oi(
         if change_5m is None or change_1h is None:
             return
 
+        decision_getter = None
+        decision_unit = "unavailable"
+        if all(point.decision_valid and point.oi_contracts is not None for point in points):
+            decision_getter = lambda point: float(point.oi_contracts or 0)
+            decision_unit = "contracts"
+        elif all(point.decision_valid and point.oi_base_equivalent is not None for point in points):
+            decision_getter = lambda point: float(point.oi_base_equivalent or 0)
+            decision_unit = "base_equivalent"
+        decision_change_5m = None
+        decision_change_1h = None
+        if decision_getter is not None:
+            decision_change_5m = percent_change_at_lookback(
+                points, lookback_sec=300, ts_getter=lambda point: point.ts,
+                value_getter=decision_getter, max_baseline_lag_sec=150,
+            )
+            decision_change_1h = percent_change_at_lookback(
+                points, lookback_sec=3600, ts_getter=lambda point: point.ts,
+                value_getter=decision_getter, max_baseline_lag_sec=150,
+            )
+
         trend = "stable"
         if change_1h > 3:
             trend = "surging"
@@ -182,7 +285,28 @@ async def poll_oi(
             change_1h_pct=round(change_1h, 2),
             change_5m_pct=round(change_5m, 2),
             trend=trend,
+            history=points,
+            current_contracts=current.oi_contracts,
+            current_base_equivalent=current.oi_base_equivalent,
+            current_usd_notional=current.oi_usd_notional,
+            decision_change_5m_pct=(
+                round(decision_change_5m, 4) if decision_change_5m is not None else None
+            ),
+            decision_change_1h_pct=(
+                round(decision_change_1h, 4) if decision_change_1h is not None else None
+            ),
+            decision_unit=decision_unit,
+            decision_valid=(
+                decision_change_5m is not None and decision_change_1h is not None
+            ),
+            source=current.source,
+            contract_type=current.contract_type,
+            contract_size=current.contract_size,
+            margin_asset=current.margin_asset,
+            mark_price=current.mark_price,
         )
+        if percentile is not None:
+            percentile.push(coin.ccy, "oi", current.oi_usd)
 
     oi_1h = await cg.fetch_oi_aggregated_history(
         coin.symbol_cg, interval="1h", limit=25,
@@ -231,7 +355,7 @@ async def poll_funding_all(
             展示 10 家反而分散注意力、增加前端噪音。
     """
     # ── 主源：并发拉官方 Binance + OKX，每币一次 ──
-    official: dict[str, tuple[Optional[float], Optional[float]]] = {}
+    official: dict[str, OfficialFundingObservation] = {}
     tasks = []
     for ccy in supported_coins:
         coin = get_coin(ccy)
@@ -247,12 +371,25 @@ async def poll_funding_all(
         res = results[idx]
         if isinstance(res, Exception):
             logger.warning("[funding-official] %s gather exception: %s", ccy, res)
-            official[ccy] = (None, None)
+            official[ccy] = OfficialFundingObservation(
+                None, None, None, 0, int(time.time()),
+            )
         else:
-            official[ccy] = res  # (bn_rate, okx_rate)
+            if isinstance(res, OfficialFundingObservation):
+                official[ccy] = res
+            else:
+                # 仅供旧测试/第三方 monkeypatch 的一个发布周期兼容；生产函数返回 rich model。
+                bn_rate, okx_rate = res
+                official[ccy] = OfficialFundingObservation(
+                    bn_rate, okx_rate, None, 0, int(time.time()),
+                )
 
     # ── Fallback 源：若任何币种官方两家同时失败，拉一次 Coinglass ──
-    need_fallback = any(bn is None and ox is None for bn, ox in official.values())
+    need_fallback = any(
+        observation.binance_rate_observed is None
+        and observation.okx_rate_observed is None
+        for observation in official.values()
+    )
     cg_by_symbol: dict[str, list[dict]] = {}
     if need_fallback:
         try:
@@ -274,7 +411,11 @@ async def poll_funding_all(
     for ccy in supported_coins:
         state = states[ccy]
         coin = get_coin(ccy)
-        bn_rate, okx_rate = official.get(ccy, (None, None))
+        observation = official.get(
+            ccy, OfficialFundingObservation(None, None, None, 0, now_ts),
+        )
+        bn_rate = observation.binance_rate_observed
+        okx_rate = observation.okx_rate_observed
 
         exchanges: list[ExchangeFundingRate] = []
         source_used = "official"
@@ -339,6 +480,12 @@ async def poll_funding_all(
             coin=ccy, ts=now_ts,
             okx_rate=okx_rate, binance_rate=bn_rate,
             avg_rate=round(avg_current, 6),
+            predicted_rate_observed=(round(avg_current, 6) if avg_rates else None),
+            last_settled_rate=observation.last_settled_rate,
+            next_funding_time=observation.next_funding_time,
+            observed_at=observation.observed_at or now_ts,
+            source=source_used,
+            observation_available=bool(avg_rates),
             interpretation=interp,
         )
         percentile.push(ccy, "funding", avg_current)

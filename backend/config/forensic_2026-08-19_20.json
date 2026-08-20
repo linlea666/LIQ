@@ -1,0 +1,19 @@
+{
+  "fixture_version": "forensic-2026-08-19-20-v1",
+  "timezone": "Asia/Shanghai",
+  "excluded_from_oos": true,
+  "excluded_range": {
+    "from": "2026-08-19T00:00:00+08:00",
+    "to": "2026-08-21T00:00:00+08:00"
+  },
+  "milestones": [
+    {"id": "derivative_watch", "local_time": "2026-08-19T20:52:00+08:00", "channel": "market_risk", "stage": "watch", "research_signal": "derivative_led_watch", "tolerance_sec": 900},
+    {"id": "spot_warning", "local_time": "2026-08-19T21:37:00+08:00", "channel": "market_risk", "stage": "warning", "spot_confirmed": true, "tolerance_sec": 900},
+    {"id": "critical", "local_time": "2026-08-19T23:07:00+08:00", "channel": "market_risk", "stage": "critical", "tolerance_sec": 900},
+    {"id": "price_peak", "local_time": "2026-08-19T23:25:00+08:00", "channel": "market", "event": "local_peak", "tolerance_sec": 900},
+    {"id": "native_trend_confirmed", "local_time": "2026-08-20T00:12:00+08:00", "channel": "native_trend", "state": "confirmed", "tolerance_sec": 900},
+    {"id": "sell_pressure", "local_time": "2026-08-20T01:32:00+08:00", "channel": "market_response", "event": "sell_pressure", "tolerance_sec": 900},
+    {"id": "native_trend_weakening", "local_time": "2026-08-20T04:02:00+08:00", "channel": "native_trend", "state": "weakening", "tolerance_sec": 900},
+    {"id": "new_episode", "local_time": "2026-08-20T16:14:00+08:00", "channel": "market_risk", "event": "new_episode", "tolerance_sec": 900}
+  ]
+}

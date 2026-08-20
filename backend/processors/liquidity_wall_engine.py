@@ -728,8 +728,9 @@ def _augment_zones_with_large_orders(
     large_orders: Sequence[LargeOrderLifecycle],
     last_price: float,
     cfg: dict,
+    previous_membership: Optional[dict[int, str]] = None,
 ) -> None:
-    """把 large_orders（仍 holding 的）匹配到 zone：
+    """把 active/ended 大单匹配到稳定 zone。
 
     - 价格落入 [price_low - tol, price_high + tol] → 加入 large_order_ids
       容差 tol = max(price * augment_match_tol_pct, augment_match_tol_usd_min)
@@ -741,9 +742,10 @@ def _augment_zones_with_large_orders(
     """
     if not zones or not large_orders:
         return
-    holding = [lo for lo in large_orders if lo.state == "holding" and lo.limit_price > 0]
-    if not holding:
+    eligible = [lo for lo in large_orders if lo.limit_price > 0]
+    if not eligible:
         return
+    previous_membership = previous_membership or {}
 
     tol_pct = cfg.get("augment_match_tol_pct",
                       ENGINE_DEFAULTS.get("augment_match_tol_pct", 0.001))   # 0.1%
@@ -756,15 +758,20 @@ def _augment_zones_with_large_orders(
         hi_bound = z.price_high + tol
         ids: list[int] = []
         exchanges: set[str] = set()
-        for lo in holding:
+        active_ids: list[int] = []
+        for lo in eligible:
             if lo.side != z.side:
                 continue
-            if lo_bound <= lo.limit_price <= hi_bound:
+            was_member = previous_membership.get(lo.id) == z.wall_zone_id
+            if was_member or lo_bound <= lo.limit_price <= hi_bound:
                 ids.append(lo.id)
+                if lo.state == "holding":
+                    active_ids.append(lo.id)
                 if lo.exchange_name:
                     exchanges.add(lo.exchange_name)
         if ids:
             z.large_order_ids = ids
+        if active_ids:
             z.source = "depth+large_order"
         # exchange_count：至少 1（当前所），若 large_orders 来自多所则取 max(1, len(set))
         z.exchange_count = max(1, len(exchanges)) if exchanges else 1
@@ -1003,7 +1010,7 @@ def _augment_zones_with_coinbase(
       [price_low, price_high] 上累加 Coinbase USD。原因：
         1. Coinbase 用 BTC-USD（法币），与项目主链 BTC-USDT 价位有 ~5bp spread；
            独立跑 zone 边界会和合约 zone 错位
-        2. Coinbase 数据是"机构资金验证"维度，定位是补充而非替代主源
+        2. Coinbase 数据是公开现货挂单佐证，定位是补充而非替代主源，不能推断身份
         3. 不消耗任何额外计算（仅一遍 O(zones × bins) 扫描）
 
     判定逻辑（决策点：用户选择 default_a_a_c）：
@@ -1016,7 +1023,10 @@ def _augment_zones_with_coinbase(
 
     侧匹配：bid zone 累加 Coinbase bids，ask zone 累加 Coinbase asks。
     """
-    if not zones or coinbase_frame is None:
+    if (
+        not zones or coinbase_frame is None
+        or getattr(coinbase_frame, "validity", "valid") != "valid"
+    ):
         return
 
     bids = list(getattr(coinbase_frame, "bids", []) or [])
@@ -1471,7 +1481,11 @@ def _build_position_crowding(
     ls = getattr(state, "ls_ratio", None)
     if ls and getattr(ls, "avg_ratio", None) is not None:
         crowding.global_account_ls_ratio = float(ls.avg_ratio)
-    top_pos = getattr(state, "top_position_ratio", None)
+    # 真实 CoinState 契约字段。旧快照/离线 fixture 的 top_position_ratio 仅在
+    # 新字段缺失时作为一个发布周期的只读兼容别名，决策链统一使用 top_pos。
+    top_pos = getattr(state, "ls_ratio_top_position", None)
+    if top_pos is None:
+        top_pos = getattr(state, "top_position_ratio", None)
     if top_pos and getattr(top_pos, "avg_ratio", None) is not None:
         crowding.top_position_ls_ratio = float(top_pos.avg_ratio)
 
@@ -2043,6 +2057,7 @@ def _detect_zone_lifecycle_events(
     last_price: float,
     cfg: dict,
     now: int,
+    seen_ended_ids: Optional[set[int]] = None,
 ) -> list[WallEvent]:
     """基于 large_orders 18 字段差分识别 6 类事件。
 
@@ -2055,6 +2070,7 @@ def _detect_zone_lifecycle_events(
     if not zones:
         return events
 
+    seen_ended_ids = seen_ended_ids or set()
     # 按 zone 收集 large_orders 子集
     for z in zones:
         # W1-T4：所有事件统一带上 zone 的 wall_zone_id（已由主流程预先赋值）
@@ -2094,9 +2110,11 @@ def _detect_zone_lifecycle_events(
         zone_lo_ids = set(z.large_order_ids)
         zone_los = [lo for lo in large_orders if lo.id in zone_lo_ids]
         ended_with_exec = [lo for lo in zone_los
-                            if lo.state == "ended" and lo.executed_usd_value > 0]
+                            if lo.state == "ended" and lo.executed_usd_value > 0
+                            and lo.id not in seen_ended_ids]
         ended_no_exec = [lo for lo in zone_los
-                          if lo.state == "ended" and lo.executed_usd_value == 0]
+                          if lo.state == "ended" and lo.executed_usd_value == 0
+                          and lo.id not in seen_ended_ids]
 
         # consumed
         if ended_with_exec:
@@ -2155,7 +2173,7 @@ def _detect_zone_lifecycle_events(
                 confidence=0.75,
                 explain=(
                     f"试盘后撤退：吃单 {total_executed/1e6:.1f}M USD + 撤单 "
-                    f"{len(ended_no_exec)} 笔（机构 footprint，比纯 spoof 更可疑）"
+                    f"{len(ended_no_exec)} 笔（大额挂单试探后撤，比纯 spoof 更可疑）"
                 ),
                 wall_zone_id=zid,
             ))
@@ -2306,11 +2324,23 @@ def build_liquidity_wall_outputs(
         walls_above.extend(spot_only_above)
         walls_below.extend(spot_only_below)
 
+    # 先分配稳定身份，再做大单关联；ended 帧才能通过上一帧 membership 回到
+    # 原物理墙，不受本帧 heatmap rebucket 影响。
+    for z in walls_above:
+        z.wall_zone_id = _build_wall_zone_id(coin, "ask", z.peak_price, atr)
+    for z in walls_below:
+        z.wall_zone_id = _build_wall_zone_id(coin, "bid", z.peak_price, atr)
+
     # large_orders augment（合约大单 → 流动性墙 / 清算磁铁基础源）
     large_orders = list(getattr(state, "large_orders_history", []) or [])
     if large_orders:
-        _augment_zones_with_large_orders(walls_above, large_orders, last_price, cfg)
-        _augment_zones_with_large_orders(walls_below, large_orders, last_price, cfg)
+        membership = getattr(state, "wall_order_zone_membership", {}) or {}
+        _augment_zones_with_large_orders(
+            walls_above, large_orders, last_price, cfg, membership,
+        )
+        _augment_zones_with_large_orders(
+            walls_below, large_orders, last_price, cfg, membership,
+        )
 
     # M2.5：spot_large_orders augment（现货大单 lifecycle → 真买家/卖家硬证据）
     spot_large_orders = list(getattr(state, "spot_large_orders_history", []) or [])
@@ -2318,14 +2348,22 @@ def build_liquidity_wall_outputs(
         _augment_zones_with_spot_large_orders(walls_above, spot_large_orders, cfg)
         _augment_zones_with_spot_large_orders(walls_below, spot_large_orders, cfg)
 
-    # Phase C：Coinbase 现货原生 orderbook augment（机构资金独立验证维度）
+    # Phase C：Coinbase 公开现货 orderbook augment。失败时 poll 保留旧帧，
+    # 因此这里必须再做 freshness gate，不能让旧挂单继续提高 trust_score。
     coinbase_frame = getattr(state, "coinbase_orderbook", None)
-    if coinbase_frame is not None:
+    coinbase_frame_fresh = bool(
+        coinbase_frame is not None
+        and getattr(coinbase_frame, "validity", "valid") == "valid"
+        and now - int(getattr(coinbase_frame, "ts_sec", 0) or 0) <= 1800
+    )
+    if coinbase_frame_fresh:
         _augment_zones_with_coinbase(walls_above, coinbase_frame, cfg)
         _augment_zones_with_coinbase(walls_below, coinbase_frame, cfg)
 
     # W2-T4：USD/USDT basis（暖机期或缺数据时为 None；正常 < 5bp）
-    usd_usdt_basis_pct = _compute_usd_usdt_basis_pct(coinbase_frame, last_price)
+    usd_usdt_basis_pct = _compute_usd_usdt_basis_pct(
+        coinbase_frame if coinbase_frame_fresh else None, last_price,
+    )
 
     # 强度等级
     _attach_strength_tier(walls_above, cfg)
@@ -2383,9 +2421,29 @@ def build_liquidity_wall_outputs(
     all_zones = walls_above + walls_below
     events: list[WallEvent] = []
     if all_zones:
+        seen_ended_ids = set(getattr(state, "wall_seen_ended_order_ids", set()) or set())
         events = _detect_zone_lifecycle_events(
             all_zones, large_orders, last_price, cfg, now,
+            seen_ended_ids,
         )
+        current_by_id = {lo.id: lo for lo in large_orders}
+        state.wall_order_zone_membership = {
+            order_id: zone.wall_zone_id
+            for zone in all_zones
+            for order_id in zone.large_order_ids
+            if order_id in current_by_id and current_by_id[order_id].state == "holding"
+        }
+        current_ended_ids = {
+            lo.id for lo in large_orders if lo.state == "ended"
+        }
+        seen_ended_ids.intersection_update(current_ended_ids)
+        seen_ended_ids.update(
+            order_id
+            for zone in all_zones
+            for order_id in zone.large_order_ids
+            if order_id in current_ended_ids
+        )
+        state.wall_seen_ended_order_ids = seen_ended_ids
 
     # ── 把上下文 + sweep + status + confidence 写到每个 zone（暖机不写 magnet/persistence 数字） ──
     for z in all_zones:
@@ -2412,6 +2470,15 @@ def build_liquidity_wall_outputs(
         z_events = [e for e in events
                      if e.side == z.side and abs(e.price_mid - z.price_mid) < 1e-6]
         z.status = _classify_zone_status(z, z_events)
+        z.lifecycle_state = z.status
+        if base_snap.data_quality in {"stale", "missing"}:
+            z.data_validity = "invalid"
+            z.data_validity_reasons = [
+                "stale" if base_snap.data_quality == "stale" else "source_gap",
+            ]
+        else:
+            z.data_validity = "valid"
+            z.data_validity_reasons = []
 
         # W2-T1：active_attack_score 提升为 zone 字段（供 SR/SA + archiver 复用）
         # 必须在 break_through_risk 之前写入

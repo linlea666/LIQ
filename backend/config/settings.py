@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -29,6 +31,9 @@ class CoinConfig:
     symbol_cg_pair: str
     exchange_primary: str
     ct_val: float = 1.0
+    contract_type: str = "linear"
+    contract_size: float = 1.0
+    margin_asset: str = "USDT"
     default: bool = False
     # Phase C：Coinbase 现货原生 API product_id（如 "BTC-USD"）
     #   - None / 缺省 → polls.coinbase_orderbook 自动派生 f"{ccy}-USD"
@@ -282,6 +287,7 @@ class EmailNotificationConfig:
     include_market_action: bool = True
     # Bottom Model 日线确认区提醒。独立于短线信号通道，但仍受 enabled 总开关控制。
     include_bottom_model: bool = True
+    include_market_risk: bool = True
     market_action_min_confidence: int = 75
     market_action_strong_confidence: int = 85
     market_action_strong_cooldown_minutes: int = 20
@@ -380,6 +386,71 @@ class TrendMonitorConfig:
 
 
 @dataclass(frozen=True)
+class MarketRiskConfig:
+    """联合风险预警系统启动配置。
+
+    阈值不放在 YAML；它们只能来自版本化 calibration artifact。这样配置项
+    不会看似可调、实际却绕过回测准入。未知键在启动时直接报错。
+    """
+
+    enabled: bool = True
+    coins: tuple[str, ...] = ("BTC",)
+    shadow_mode: bool = True
+    tick_interval_sec: int = 30
+    data_dir: str = "data/market_risk"
+    calibration_artifact: str = "config/market_risk_calibration_v1.json"
+    email_enabled: bool = False
+    raw_event_store_enabled: bool = True
+    raw_event_queue_max: int = 20_000
+    raw_event_batch_size: int = 2_000
+    source_max_age_sec: dict[str, int] = field(default_factory=lambda: {
+        "spot_demand": 180,
+        "leveraged_positioning": 180,
+        "liquidation_risk": 300,
+        "liquidity_structure": 240,
+        "market_response": 180,
+        "context": 86_400,
+    })
+
+    def effective_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "coins": list(self.coins),
+            "shadow_mode": self.shadow_mode,
+            "tick_interval_sec": self.tick_interval_sec,
+            "data_dir": self.data_dir,
+            "calibration_artifact": self.calibration_artifact,
+            "email_enabled": self.email_enabled,
+            "raw_event_store_enabled": self.raw_event_store_enabled,
+            "raw_event_queue_max": self.raw_event_queue_max,
+            "raw_event_batch_size": self.raw_event_batch_size,
+            "source_max_age_sec": dict(self.source_max_age_sec),
+        }
+
+    @staticmethod
+    def consumer_registry() -> dict[str, str]:
+        """配置消费方登记；契约测试防止新增参数沦为无效旋钮。"""
+        return {
+            "enabled": "MarketRiskEngine.start + market-risk API gate",
+            "coins": "MarketRiskEngine loop and route scope",
+            "shadow_mode": "notification eligibility and UI",
+            "tick_interval_sec": "MarketRiskEngine._run_loop",
+            "data_dir": "MarketRiskStore RawEventStore OnchainEntityStore",
+            "calibration_artifact": "MarketRiskEngine._load_calibration",
+            "email_enabled": "MarketRiskEngine outbox gate",
+            "raw_event_store_enabled": "RawEventStore construction",
+            "raw_event_queue_max": "RawEventStore queue hard bound",
+            "raw_event_batch_size": "RawEventStore batch hard bound",
+            "source_max_age_sec": "MarketRiskEngine SourceQuality gates",
+        }
+
+    @property
+    def version_hash(self) -> str:
+        payload = json.dumps(self.effective_dict(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
 class RetentionConfig:
     """数据保留策略（P0 · 统一配置入口）。
 
@@ -417,6 +488,7 @@ class Settings:
     yahoo_cme: YahooCMESourceConfig = field(default_factory=YahooCMESourceConfig)
     bottom_model: BottomModelConfig = field(default_factory=BottomModelConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    market_risk: MarketRiskConfig = field(default_factory=MarketRiskConfig)
     default_coin: str = "BTC"
 
     def get_coin(self, ccy: str) -> CoinConfig:
@@ -448,6 +520,9 @@ def _build_settings(raw: dict) -> Settings:
             symbol_cg_pair=coin_raw["symbol_cg_pair"],
             exchange_primary=coin_raw["exchange_primary"],
             ct_val=float(coin_raw.get("ct_val", 1.0)),
+            contract_type=str(coin_raw.get("contract_type", "linear") or "linear").lower(),
+            contract_size=max(1e-12, float(coin_raw.get("contract_size", 1.0))),
+            margin_asset=str(coin_raw.get("margin_asset", "USDT") or "USDT").upper(),
             default=coin_raw.get("default", False),
             symbol_coinbase=coin_raw.get("symbol_coinbase"),
         )
@@ -674,6 +749,7 @@ def _build_settings(raw: dict) -> Settings:
         # MAA 通道（默认开 · 阈值与 dataclass 默认一致）
         include_market_action=email_raw.get("include_market_action", True),
         include_bottom_model=email_raw.get("include_bottom_model", True),
+        include_market_risk=email_raw.get("include_market_risk", True),
         market_action_min_confidence=int(email_raw.get("market_action_min_confidence", 75) or 75),
         market_action_strong_confidence=int(email_raw.get("market_action_strong_confidence", 85) or 85),
         market_action_strong_cooldown_minutes=int(
@@ -786,6 +862,63 @@ def _build_settings(raw: dict) -> Settings:
         orderflow_daily_days=max(30, min(3650, int(retention_raw.get("orderflow_daily_days", 400)))),
     )
 
+    market_risk_raw = raw.get("market_risk", {}) or {}
+    if not isinstance(market_risk_raw, dict):
+        raise ValueError("market_risk must be a mapping")
+    market_risk_allowed = {
+        "enabled", "coins", "shadow_mode", "tick_interval_sec", "data_dir",
+        "calibration_artifact", "email_enabled", "raw_event_store_enabled",
+        "raw_event_queue_max", "raw_event_batch_size", "source_max_age_sec",
+    }
+    unknown_market_risk = sorted(set(market_risk_raw) - market_risk_allowed)
+    if unknown_market_risk:
+        raise ValueError(
+            "unknown market_risk config keys: " + ", ".join(unknown_market_risk)
+        )
+    risk_coins_raw = market_risk_raw.get("coins", ["BTC"])
+    if not isinstance(risk_coins_raw, (list, tuple)) or not risk_coins_raw:
+        raise ValueError("market_risk.coins must be a non-empty list")
+    risk_coins = tuple(str(value).upper() for value in risk_coins_raw)
+    unsupported_risk_coins = sorted(set(risk_coins) - set(coins))
+    if unsupported_risk_coins:
+        raise ValueError(
+            "market_risk.coins contains unsupported coins: "
+            + ", ".join(unsupported_risk_coins)
+        )
+    default_risk_ages = MarketRiskConfig().source_max_age_sec
+    risk_ages_raw = market_risk_raw.get("source_max_age_sec", {}) or {}
+    if not isinstance(risk_ages_raw, dict):
+        raise ValueError("market_risk.source_max_age_sec must be a mapping")
+    unknown_risk_ages = sorted(set(risk_ages_raw) - set(default_risk_ages))
+    if unknown_risk_ages:
+        raise ValueError(
+            "unknown market_risk.source_max_age_sec keys: " + ", ".join(unknown_risk_ages)
+        )
+    market_risk_cfg = MarketRiskConfig(
+        enabled=bool(market_risk_raw.get("enabled", True)),
+        coins=risk_coins,
+        shadow_mode=bool(market_risk_raw.get("shadow_mode", True)),
+        tick_interval_sec=max(5, int(market_risk_raw.get("tick_interval_sec", 30))),
+        data_dir=str(market_risk_raw.get("data_dir", "data/market_risk") or "data/market_risk"),
+        calibration_artifact=str(
+            market_risk_raw.get(
+                "calibration_artifact", "config/market_risk_calibration_v1.json",
+            ) or "config/market_risk_calibration_v1.json"
+        ),
+        email_enabled=bool(market_risk_raw.get("email_enabled", False)),
+        raw_event_store_enabled=bool(market_risk_raw.get("raw_event_store_enabled", True)),
+        raw_event_queue_max=max(1_000, min(200_000, int(
+            market_risk_raw.get("raw_event_queue_max", 20_000),
+        ))),
+        raw_event_batch_size=max(100, min(10_000, int(
+            market_risk_raw.get("raw_event_batch_size", 2_000),
+        ))),
+        source_max_age_sec={
+            key: max(5, int(risk_ages_raw.get(key, value)))
+            for key, value in default_risk_ages.items()
+        },
+    )
+
     return Settings(
         coins=coins,
         coinglass=coinglass,
@@ -808,6 +941,7 @@ def _build_settings(raw: dict) -> Settings:
         scalp_signal=scalp_cfg,
         trend_monitor=trend_cfg,
         retention=retention_cfg,
+        market_risk=market_risk_cfg,
         default_coin=default_coin,
     )
 

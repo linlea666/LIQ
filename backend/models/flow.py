@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class CVDPoint(BaseModel):
@@ -29,12 +29,32 @@ class CVDData(BaseModel):
 
 
 class OISnapshot(BaseModel):
-    """OI 快照"""
+    """OI 标准快照。
+
+    ``oi`` / ``oi_usd`` 是旧接口兼容字段。联合风险决策只消费
+    ``oi_contracts`` 或 ``oi_base_equivalent``；仅有 USD 时
+    ``decision_valid`` 必须为 False，避免价格机械上涨伪造加杠杆。
+    """
     coin: str
     ts: int
     oi: float
     oi_usd: float
     source: str = "coinglass"
+    oi_contracts: Optional[float] = None
+    oi_base_equivalent: Optional[float] = None
+    oi_usd_notional: Optional[float] = None
+    contract_type: str = "unknown"
+    contract_size: Optional[float] = None
+    margin_asset: str = ""
+    mark_price: Optional[float] = None
+    decision_valid: bool = False
+    source_sequence: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _sync_legacy_notional(self) -> "OISnapshot":
+        if self.oi_usd_notional is None and self.oi_usd > 0:
+            self.oi_usd_notional = self.oi_usd
+        return self
 
 
 class OIData(BaseModel):
@@ -45,11 +65,33 @@ class OIData(BaseModel):
     change_1h_pct: float = 0
     change_5m_pct: float = 0
     trend: str = ""
-    history: list[OISnapshot] = []
+    history: list[OISnapshot] = Field(default_factory=list)
+    current_contracts: Optional[float] = None
+    current_base_equivalent: Optional[float] = None
+    current_usd_notional: Optional[float] = None
+    decision_change_5m_pct: Optional[float] = None
+    decision_change_1h_pct: Optional[float] = None
+    decision_unit: str = "unavailable"
+    decision_valid: bool = False
+    source: str = "coinglass"
+    contract_type: str = "unknown"
+    contract_size: Optional[float] = None
+    margin_asset: str = ""
+    mark_price: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _sync_current_notional(self) -> "OIData":
+        if self.current_usd_notional is None and self.current_usd > 0:
+            self.current_usd_notional = self.current_usd
+        return self
 
 
 class FundingRateData(BaseModel):
-    """资金费率"""
+    """资金费率观测。
+
+    predicted、settled 与 next time 明确分开。``avg_rate`` 和
+    ``next_funding_ts`` 保留一个发布周期，作为只读兼容别名。
+    """
     coin: str
     ts: int
     okx_rate: Optional[float] = None
@@ -57,7 +99,23 @@ class FundingRateData(BaseModel):
     avg_rate: float = 0
     oi_weighted_rate: float = 0
     next_funding_ts: int = 0
+    predicted_rate_observed: Optional[float] = None
+    last_settled_rate: Optional[float] = None
+    next_funding_time: int = 0
+    observed_at: int = 0
+    source: str = ""
+    observation_available: bool = True
     interpretation: str = ""
+
+    @model_validator(mode="after")
+    def _sync_legacy_aliases(self) -> "FundingRateData":
+        if self.predicted_rate_observed is None and self.observation_available:
+            self.predicted_rate_observed = self.avg_rate
+        if not self.next_funding_time and self.next_funding_ts:
+            self.next_funding_time = self.next_funding_ts
+        elif not self.next_funding_ts and self.next_funding_time:
+            self.next_funding_ts = self.next_funding_time
+        return self
 
 
 class BasisData(BaseModel):
@@ -137,6 +195,10 @@ class ETFFlowData(BaseModel):
     recent_days: list[ETFFlowDay] = []
     net_3d: float = 0
     trend: str = ""
+    trading_day: str = ""
+    published_at: int = 0
+    known_at: int = 0
+    source: str = "coinglass"
 
 
 class GlobalLiquidationData(BaseModel):

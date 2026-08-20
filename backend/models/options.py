@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OptionMaxPainExpiry(BaseModel):
@@ -35,6 +35,12 @@ class OptionInfoData(BaseModel):
     put_call_oi_ratio: float = 0
     put_call_vol_ratio: float = 0
     iv_atm: Optional[float] = None
+    iv_skew: Optional[float] = None
+    term_structure: list[dict[str, Any]] = Field(default_factory=list)
+    strike_clusters: list[dict[str, Any]] = Field(default_factory=list)
+    expiry_concentration: Optional[float] = None
+    known_at: int = 0
+    gex_status: str = "unavailable"
 
 
 class OptionOIHistoryPoint(BaseModel):

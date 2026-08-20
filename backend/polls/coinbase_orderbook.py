@@ -2,10 +2,10 @@
 
 写入 ``state.coinbase_orderbook``（单帧 latest 快照，不存历史）。
 墙引擎 ``_augment_zones_with_coinbase`` 直接消费 latest 帧，按合约 zone 价区
-[price_low, price_high] 累加 Coinbase USD 厚度，作为"机构现货验证"维度。
+[price_low, price_high] 累加 Coinbase USD 厚度，作为公开现货挂单佐证。
 
 为何不存 deque 历史：
-    Coinbase 数据用途仅是"当前快照下机构是否在该价位有挂单"，
+    Coinbase 数据用途仅是"当前快照下该交易所是否在该价位有公开挂单"，
     属于即时验证。trust_score 仅消费 current_usd（USD/USDT 容差容忍下的瞬时厚度），
     不需要历史持续性（墙的 persistence 仍由合约 5m heatmap 历史承担）。
 
@@ -48,7 +48,7 @@ def _resolve_product_id(coin: CoinConfig) -> Optional[str]:
 
 async def poll_coinbase_orderbook(
     cb: CoinbaseNativeSource, coin: CoinConfig, state: "CoinState",
-) -> None:
+) -> bool:
     """拉取 Coinbase 现货 orderbook level=2，写入 state.coinbase_orderbook。
 
     ``cb`` 是独立的 CoinbaseNativeSource 实例（不复用 CoinglassSource），
@@ -56,17 +56,50 @@ async def poll_coinbase_orderbook(
     """
     product_id = _resolve_product_id(coin)
     if not product_id:
-        return
+        return False
 
     raw = await cb.fetch_orderbook(product_id=product_id, level=2)
     if not raw:
-        return
+        return False
 
     frame = parse_orderbook_frame(coin=coin.ccy, product_id=product_id, raw=raw)
     if frame is None:
-        return
+        state.coinbase_orderbook_gap_reason = "parse_failed"
+        return False
+
+    # REST level=2 是 snapshot-only：sequence 不要求 N+1，但绝不接受倒退帧。
+    previous_sequence = getattr(state, "coinbase_orderbook_sequence_checkpoint", None)
+    if (
+        frame.sequence is not None
+        and previous_sequence is not None
+        and frame.sequence < previous_sequence
+    ):
+        state.coinbase_orderbook_gap_reason = "sequence_regression"
+        logger.warning(
+            "Coinbase orderbook sequence regression | coin=%s previous=%s current=%s",
+            coin.ccy, previous_sequence, frame.sequence,
+        )
+        return False
+
+    valid_shape = (
+        bool(frame.bids) and bool(frame.asks)
+        and frame.bid_count == len(frame.bids)
+        and frame.ask_count == len(frame.asks)
+        and frame.bids[-1].price < frame.asks[0].price
+    )
+    if not valid_shape:
+        state.coinbase_orderbook_gap_reason = "invalid_crossed_or_incomplete_snapshot"
+        return False
+
+    frame.watermark = frame.sequence if frame.sequence is not None else previous_sequence
+    frame.validity = "valid"
+    frame.validity_reasons = []
 
     state.coinbase_orderbook = frame
+    if frame.sequence is not None:
+        state.coinbase_orderbook_sequence_checkpoint = frame.sequence
+    state.coinbase_orderbook_watermark = frame.watermark
+    state.coinbase_orderbook_gap_reason = ""
 
     log_key = f"coinbase_ob_ready_{coin.ccy}"
     if log_key not in state._log_once_keys:
@@ -78,3 +111,4 @@ async def poll_coinbase_orderbook(
             (frame.asks[0].price - frame.bids[-1].price) if (frame.bids and frame.asks) else 0.0,
             frame.api_ts_iso,
         )
+    return True

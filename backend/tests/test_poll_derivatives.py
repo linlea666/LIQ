@@ -159,6 +159,28 @@ class TestPollFundingAll:
         assert btc_state.funding.avg_rate == pytest.approx(0.000125, abs=1e-7)
 
     @pytest.mark.asyncio
+    async def test_funding_predicted_settled_and_next_time_are_distinct(
+        self, cg, btc_state, states,
+    ):
+        from sources.funding_official import OfficialFundingObservation
+
+        get_coin = MagicMock(side_effect=lambda c: _make_coin(c, c))
+        from processors.percentile import PercentileTracker
+        observation = OfficialFundingObservation(
+            0.0002, 0.0004, -0.0001, 1_800_000_000, 1_700_000_000,
+        )
+        with patch(
+            "polls.derivatives.fetch_official_funding_pair",
+            new=AsyncMock(return_value=observation),
+        ):
+            await poll_funding_all(cg, states, ["BTC"], get_coin, PercentileTracker(), set())
+
+        assert btc_state.funding.predicted_rate_observed == pytest.approx(0.0003)
+        assert btc_state.funding.last_settled_rate == -0.0001
+        assert btc_state.funding.next_funding_time == 1_800_000_000
+        assert btc_state.funding.observed_at == 1_700_000_000
+
+    @pytest.mark.asyncio
     async def test_funding_threshold_triggers_long_crowded(
         self, cg, btc_state, states,
     ):

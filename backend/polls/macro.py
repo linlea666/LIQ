@@ -16,6 +16,7 @@ from models.options import OptionInfoData, OptionMaxPainData
 from models.whale import WhaleData
 from processors.cycle import calculate_cycle_position
 from sources.coinglass import CoinglassSource
+from utils.time_series import normalize_epoch_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -38,25 +39,32 @@ async def poll_etf_flow(
 
             recent = data[-5:] if len(data) >= 5 else data
             days = []
-            net_3d = 0.0
             for item in recent:
                 try:
                     total_net = float(item.get("flow_usd",
-                                    item.get("total_netflow", item.get("totalNetflow", item.get("netflow", 0)))))
+                                    item.get("total_netflow", item.get("totalNetFlow",
+                                    item.get("totalNetflow", item.get("netflow", 0))))))
                     ts_ms = item.get("timestamp", item.get("time", 0))
-                    date_str = datetime.utcfromtimestamp(int(ts_ms) / 1000).strftime("%Y-%m-%d") if ts_ms else ""
+                    event_ts = normalize_epoch_seconds(ts_ms)
+                    date_str = datetime.utcfromtimestamp(event_ts).strftime("%Y-%m-%d") if event_ts else ""
                     days.append(ETFFlowDay(
                         date=date_str,
                         total_net=total_net,
                     ))
-                    net_3d += total_net
                 except (ValueError, KeyError):
                     continue
 
+            # 旧实现取 recent 5 天却命名 net_3d，导致展示/Context 口径错位。
+            net_3d = sum(day.total_net for day in days[-3:])
             trend = "inflow" if net_3d > 0 else "outflow" if net_3d < 0 else "mixed"
+            observed_at = int(time.time())
             etf = ETFFlowData(
-                ts=int(time.time()), asset=asset,
+                ts=observed_at, asset=asset,
                 recent_days=days, net_3d=net_3d, trend=trend,
+                trading_day=days[-1].date if days else "",
+                # 公共源没有可靠历史发布时间时，只能以本次首次观测为 known_at；
+                # 绝不把交易日时间倒填成盘中已知。
+                published_at=observed_at, known_at=observed_at,
             )
             logger.info("ETF %s parsed | days=%d net_3d=%.0f trend=%s",
                         asset, len(days), net_3d, trend)
@@ -321,10 +329,11 @@ async def poll_options(
     """获取期权数据（同时派生 MAA 所需的 PCR / magnet_price / 24h OI&Vol 变化率）。"""
     from models.options import OptionMaxPainExpiry
     for symbol in ("BTC", "ETH"):
+        expiries: list[OptionMaxPainExpiry] = []
+        total_oi = 0.0
         try:
             max_pain = await cg.fetch_option_max_pain(symbol)
             if max_pain and isinstance(max_pain, list):
-                expiries = []
                 for item in max_pain:
                     try:
                         mp = item.get("max_pain_price", item.get("maxPain", item.get("price", 0)))
@@ -374,11 +383,34 @@ async def poll_options(
                 if agg and isinstance(agg, dict):
                     state = states[symbol]
                     state.option_info = OptionInfoData(
-                        symbol=symbol, ts=int(time.time()),
+                        symbol=symbol, ts=int(time.time()), known_at=int(time.time()),
                         total_oi_usd=float(agg.get("open_interest_usd", agg.get("totalOI", 0))),
                         total_vol_24h_usd=float(agg.get("volume_usd_24h", agg.get("totalVol24h", 0))),
                         put_call_oi_ratio=float(agg.get("putCallOIRatio", 0)),
                         put_call_vol_ratio=float(agg.get("putCallVolRatio", 0)),
+                        iv_atm=(
+                            float(agg.get("iv_atm", agg.get("atmIv")))
+                            if agg.get("iv_atm", agg.get("atmIv")) is not None else None
+                        ),
+                        iv_skew=(
+                            float(agg.get("iv_skew", agg.get("skew")))
+                            if agg.get("iv_skew", agg.get("skew")) is not None else None
+                        ),
+                        term_structure=(
+                            agg.get("term_structure", agg.get("termStructure", []))
+                            if isinstance(agg.get("term_structure", agg.get("termStructure", [])), list)
+                            else []
+                        ),
+                        strike_clusters=(
+                            agg.get("strike_clusters", agg.get("strikeClusters", []))
+                            if isinstance(agg.get("strike_clusters", agg.get("strikeClusters", [])), list)
+                            else []
+                        ),
+                        expiry_concentration=(
+                            max((e.call_oi + e.put_oi) for e in expiries[:3]) / total_oi
+                            if total_oi > 0 and expiries else None
+                        ),
+                        gex_status="unavailable",
                     )
                     # ── MAA 派生：24h OI / Vol 变化率 ──
                     try:

@@ -3,7 +3,8 @@
 为何独立而不走 Coinglass：
     Coinglass 的 /api/spot/orderbook/* 端点对 Coinbase 完全 400/500（probe 验证）。
     Coinbase Exchange 公开 REST 不需要 auth、限速宽松（10/s = 600/min），直接拉是
-    最低成本路径。本源仅用于 Liquidity Wall Engine 的"机构级现货验证"维度。
+    最低成本路径。本源仅用于 Liquidity Wall Engine 的 Coinbase 公开现货验证维度，
+    不推断挂单人身份、ETF 行为或机构意图。
 
 定位：
     - 不替代 Coinglass：聚合 ask-bids、热力图、Binance lifecycle 仍走 Coinglass

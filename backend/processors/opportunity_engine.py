@@ -127,6 +127,8 @@ def _stale_or_missing(dq: Optional[BrainDataQuality]) -> bool:
         return True
     if dq.stale_sources or dq.missing_sources:
         return True
+    if dq.liquidity_wall_quality != "ok":
+        return True
     return False
 
 

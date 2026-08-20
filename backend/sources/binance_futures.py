@@ -84,6 +84,26 @@ class BinanceFuturesSource(DataSource):
         data = await self._request("/fapi/v1/premiumIndex", {"symbol": symbol})
         return data if isinstance(data, dict) else None
 
+    async def fetch_open_interest_history(
+        self, symbol: str, period: str = "5m", limit: int = 50,
+    ) -> Optional[list[dict]]:
+        """USD-M OI 历史，保留合约数量与名义价值两个正交字段。
+
+        ``sumOpenInterest`` 是合约/基础数量口径，供决策计算变化；
+        ``sumOpenInterestValue`` 仅供展示。调用方不得用后者替代前者。
+        """
+        data = await self._request(
+            "/futures/data/openInterestHist",
+            {
+                "symbol": symbol,
+                "period": period,
+                "limit": max(2, min(int(limit), 500)),
+            },
+        )
+        if not isinstance(data, list):
+            return None
+        return [item for item in data if isinstance(item, dict)]
+
     async def stream_tickers(
         self, watched_symbols: set[str] | None = None,
     ) -> AsyncIterator[list[dict]]:

@@ -5,6 +5,9 @@ coins:
     symbol_cg_pair: "BTCUSDT"
     exchange_primary: "Binance"
     ct_val: 0.01
+    contract_type: "linear"
+    contract_size: 1
+    margin_asset: "USDT"
     default: true
     # Phase C：Coinbase 现货 product_id（None/缺省→自动派生 BTC-USD；""→禁用该币）
     symbol_coinbase: "BTC-USD"
@@ -14,6 +17,9 @@ coins:
     symbol_cg_pair: "ETHUSDT"
     exchange_primary: "Binance"
     ct_val: 0.1
+    contract_type: "linear"
+    contract_size: 1
+    margin_asset: "USDT"
     symbol_coinbase: "ETH-USD"
   SOL:
     ccy: "SOL"
@@ -21,6 +27,9 @@ coins:
     symbol_cg_pair: "SOLUSDT"
     exchange_primary: "Binance"
     ct_val: 1
+    contract_type: "linear"
+    contract_size: 1
+    margin_asset: "USDT"
     symbol_coinbase: "SOL-USD"
 
 sources:
@@ -432,3 +441,24 @@ scalp_signal:
   enabled: true               # 启动 SignalEngine 后台任务
   tick_interval_sec: 30       # 主循环间隔（秒）；最小 5s（settings 强制）
   data_dir: "data/scalp_signal"  # 持久化根目录（相对 backend/ 工作目录）
+
+# LIQ BTC 联合风险预警系统。首版 BTC shadow；新闻和 AI 不进入此模块。
+# 阈值只从 calibration_artifact 加载，YAML 不允许覆盖评分阈值。
+market_risk:
+  enabled: true
+  coins: ["BTC"]
+  shadow_mode: true
+  tick_interval_sec: 30
+  data_dir: "data/market_risk"
+  calibration_artifact: "config/market_risk_calibration_v1.json"
+  email_enabled: false  # 统计准入前即使全局邮件开启也不得发送市场风险邮件
+  raw_event_store_enabled: true
+  raw_event_queue_max: 20000
+  raw_event_batch_size: 2000
+  source_max_age_sec:
+    spot_demand: 180
+    leveraged_positioning: 180
+    liquidation_risk: 300
+    liquidity_structure: 240
+    market_response: 180
+    context: 86400

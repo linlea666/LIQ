@@ -762,42 +762,23 @@ async def get_trading_brain(
     if not state or not state.ticker or not state.ticker.last or state.ticker.last <= 0:
         raise HTTPException(503, f"No ticker for {coin_u}")
 
-    from processors.trading_brain_builder import build_trading_brain_snapshot
-
-    last = float(state.ticker.last)
-    atr = float(state.atr or 0.0)
-    kl = state.key_level_snapshot_v2
-    op = state.orderbook_pressure_snapshot
-    from models.liquidation import pick_primary_liq_map
-    liq = pick_primary_liq_map(getattr(state, "liq_maps", None))
-
-    from processors.market_read import build_market_read_from_state
-
-    market_context = build_market_read_from_state(state)
-
-    # P1-A 修复：跨帧持久化 setup state，让状态机能真正抵达 confirmed/cooldown/missed
-    # （而非每次 build 都被 opportunity_engine 重置为 forming/waiting）。
-    # 字典自然按"当帧仍存在的 setup_id"做 GC——本帧聚合不出的 setup 自动清退。
-    prev_states = dict(getattr(state, "brain_setup_states", {}) or {})
-    snap = build_trading_brain_snapshot(
-        coin=coin_u,
-        last_price=last,
-        atr=atr,
-        kl=kl,
-        op=op,
-        liq=liq,
-        cvd_contract_trend=market_context["cvd_contract_trend"],
-        cvd_spot_trend=market_context["cvd_spot_trend"],
-        oi_delta_1h_pct=market_context["oi_delta_1h_pct"],
-        funding_interpretation=market_context["funding_interpretation"],
-        funding_rate_8h_pct=market_context["funding_rate_8h_pct"],
-        market_read=market_context["market_read"],
-        context_sources=market_context["source_meta"],
-        max_zones=max_zones,
-        prev_setup_states=prev_states,
-    )
-    state.brain_setup_states = {s.setup_id: s.state for s in snap.opportunities}
-    return snap.model_dump()
+    snap = getattr(state, "trading_brain_snapshot", None)
+    if snap is None:
+        raise HTTPException(503, f"Trading Brain warming for {coin_u}")
+    # 纯投影：query 参数仍真实生效，但不得重跑状态机或触发归档/邮件。
+    payload = snap.model_dump()
+    zones = list(payload.get("zones") or [])[:max_zones]
+    allowed_zone_ids = {zone.get("zone_id") for zone in zones}
+    payload["zones"] = zones
+    rankings = payload.get("rankings") or {}
+    for key, values in list(rankings.items()):
+        if isinstance(values, list):
+            rankings[key] = [value for value in values if value in allowed_zone_ids]
+    payload["opportunities"] = [
+        item for item in payload.get("opportunities", [])
+        if item.get("zone_id") in allowed_zone_ids
+    ]
+    return payload
 
 
 # PR-3 · /api/execution-plan / /api/signal-bus/stats 已下线

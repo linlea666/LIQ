@@ -658,8 +658,8 @@ def build_user_prompt(
     lines.append(
         "- **厚度语义**："
         "**合约**=杠杆挂单（可被清算/撤单）；"
-        "**Binance 现货**=真买卖家（不可杠杆爆仓 → 真支撑/阻力硬证据）；"
-        "**Coinbase 现货**=美国机构资金 footprint（ETF 链路 · 独立硬证据）。"
+        "**Binance 现货**=该交易所公开现货挂单/成交证据；"
+        "**Coinbase 现货**=该交易所公开现货挂单/成交证据（不能据此认定机构身份或 ETF 行为）。"
         "三者同价位共振 → 最高可信。"
     )
 
@@ -702,7 +702,7 @@ def build_user_prompt(
         关键：source==spot_only 时 current_usd 实际是现货厚度（已镜像到
         spot_current_usd），若仍按"合约层"输出会把同一笔现货数双计——AI 会把
         spot_only 单源墙误读为"合约+现货双源叠加"，高估其可信度。这是和
-        §7 顶部"合约=杠杆挂单 / Binance 现货=真买卖家"语义直接冲突的硬错。
+        §7 顶部“合约=杠杆挂单 / Binance 现货=公开现货证据”语义直接冲突的硬错。
         """
         contract_usd = float(getattr(w, "current_usd", 0) or 0)
         binance_spot = float(getattr(w, "spot_current_usd", 0) or 0)
